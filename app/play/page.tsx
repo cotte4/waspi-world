@@ -8,6 +8,7 @@ import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 import { CHAT } from '@/src/game/config/constants';
 import { CATALOG, type CatalogItem } from '@/src/game/config/catalog';
 import { getInventory, equipItem, hasUtilityEquipped, replaceInventory } from '@/src/game/systems/InventorySystem';
+import { loadAudioSettings, saveAudioSettings, type AudioSettings } from '@/src/game/systems/AudioSettings';
 import { supabase } from '@/src/lib/supabase';
 import { getTenksBalance, initTenks } from '@/src/game/systems/TenksSystem';
 import { mutePlayer, type PlayerState } from '@/src/lib/playerState';
@@ -59,6 +60,7 @@ const CHAT_SCENES = new Set(['WorldScene', 'StoreInterior', 'CafeInterior', 'Arc
 export default function PlayPage() {
   const initialInventory = useMemo(() => getInventory(), []);
   const initialCheckout = useMemo(() => getInitialCheckoutState(), []);
+  const initialAudioSettings = useMemo(() => loadAudioSettings(), []);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [lastSent, setLastSent] = useState(0);
@@ -91,6 +93,8 @@ export default function PlayPage() {
   const [shopStatus, setShopStatus] = useState(initialCheckout.status);
   const [isMobile, setIsMobile] = useState(false);
   const [playerActions, setPlayerActions] = useState<PlayerActionsPayload | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [audioSettings, setAudioSettings] = useState<AudioSettings>(initialAudioSettings);
   const tokenRef = useRef<string | null>(null);
   const mutedPlayersRef = useRef<string[]>(loadStoredMutedPlayers());
   const logRef = useRef<HTMLDivElement>(null);
@@ -254,6 +258,11 @@ export default function PlayPage() {
     const timer = window.setTimeout(() => setUiNotice(''), 4200);
     return () => window.clearTimeout(timer);
   }, [uiNotice]);
+
+  useEffect(() => {
+    saveAudioSettings(audioSettings);
+    eventBus.emit(EVENTS.AUDIO_SETTINGS_CHANGED, audioSettings);
+  }, [audioSettings]);
 
   const hydratePlayerState = useCallback(async (session: Session | null) => {
     if (!session?.access_token) {
@@ -765,8 +774,24 @@ export default function PlayPage() {
           SHOP
         </button>
 
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className="absolute right-2 top-28"
+          style={{
+            fontFamily: '"Press Start 2P", monospace',
+            fontSize: '8px',
+            padding: '8px 10px',
+            background: 'rgba(255,255,255,0.08)',
+            color: '#FFFFFF',
+            border: '1px solid rgba(255,255,255,0.15)',
+            cursor: 'pointer',
+          }}
+        >
+          A/V
+        </button>
+
         <div
-          className="absolute top-20 right-2"
+          className="absolute top-32 right-2"
           style={{
             width: authPanelOpen ? 228 : 132,
             background: 'rgba(0,0,0,0.78)',
@@ -1335,6 +1360,57 @@ export default function PlayPage() {
           </div>
         )}
 
+        {settingsOpen && (
+          <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }}>
+            <div
+              className="p-4"
+              style={{
+                width: isMobile ? '94%' : 360,
+                background: 'rgba(10,10,18,0.96)',
+                border: '1px solid rgba(245,200,66,0.35)',
+                boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
+              }}
+            >
+              <div className="flex items-center justify-between mb-3" style={{ fontFamily: '"Press Start 2P", monospace', color: '#F5C842', fontSize: '10px' }}>
+                <span>SETTINGS</span>
+                <button onClick={() => setSettingsOpen(false)} style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: '#999999' }}>
+                  X
+                </button>
+              </div>
+
+              <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>AUDIO</div>
+                    <div style={{ fontSize: '16px' }}>MUSIC</div>
+                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Arcade theme and future scene tracks</div>
+                  </div>
+                  <button
+                    onClick={() => setAudioSettings((current) => ({ ...current, musicEnabled: !current.musicEnabled }))}
+                    style={toggleButtonStyle(audioSettings.musicEnabled)}
+                  >
+                    {audioSettings.musicEnabled ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>AUDIO</div>
+                    <div style={{ fontSize: '16px' }}>SFX</div>
+                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Combat shots, hits, boss cues</div>
+                  </div>
+                  <button
+                    onClick={() => setAudioSettings((current) => ({ ...current, sfxEnabled: !current.sfxEnabled }))}
+                    style={toggleButtonStyle(audioSettings.sfxEnabled)}
+                  >
+                    {audioSettings.sfxEnabled ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {uiNotice && (
           <div
             className="absolute top-14 left-1/2 -translate-x-1/2 px-3 py-2"
@@ -1360,6 +1436,18 @@ export default function PlayPage() {
 
 function nextBtnBg(smoking: boolean) {
   return smoking ? '#39FF14' : 'rgba(255,255,255,0.08)';
+}
+
+function toggleButtonStyle(enabled: boolean) {
+  return {
+    fontFamily: '"Press Start 2P", monospace',
+    fontSize: '9px',
+    padding: '10px 12px',
+    border: '1px solid rgba(255,255,255,0.15)',
+    background: enabled ? '#39FF14' : 'rgba(255,255,255,0.08)',
+    color: enabled ? '#0E0E14' : '#FFFFFF',
+    cursor: 'pointer',
+  } as const;
 }
 
 function authButtonStyle(background: string, color: string, disabled: boolean, bordered = false) {

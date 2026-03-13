@@ -6,6 +6,7 @@ import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
 import { initTenks } from '../systems/TenksSystem';
 import { getEquippedColors, hasUtilityEquipped } from '../systems/InventorySystem';
+import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
 import { announceScene } from '../systems/SceneUi';
 
 interface RemotePlayer {
@@ -260,6 +261,8 @@ export class WorldScene extends Phaser.Scene {
   private arenaNotice?: Phaser.GameObjects.Text;
   private audioCtx?: AudioContext;
   private audioUnlocked = false;
+  private audioSettings: AudioSettings = loadAudioSettings();
+  private audioSettingsCleanup?: () => void;
   private worldPointerShootHandler?: (p: Phaser.Input.Pointer) => void;
   private touchPointerDownHandler?: (p: Phaser.Input.Pointer) => void;
   private touchPointerMoveHandler?: (p: Phaser.Input.Pointer) => void;
@@ -380,6 +383,14 @@ export class WorldScene extends Phaser.Scene {
     this.setupHpHud();
     this.setupCombat();
     this.refreshUtilitiesFromInventory();
+    this.audioSettingsCleanup = eventBus.on(EVENTS.AUDIO_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      const next = payload as Partial<AudioSettings>;
+      this.audioSettings = {
+        musicEnabled: next.musicEnabled ?? this.audioSettings.musicEnabled,
+        sfxEnabled: next.sfxEnabled ?? this.audioSettings.sfxEnabled,
+      };
+    });
 
     // Training arena
     this.setupTrainingZone();
@@ -839,6 +850,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private playCombatTone(freq: number, duration: number, type: OscillatorType, gainValue: number) {
+    if (!this.audioSettings.sfxEnabled) return;
     this.ensureAudioReady();
     if (!this.audioCtx || !this.audioUnlocked) return;
 
@@ -2259,6 +2271,8 @@ export class WorldScene extends Phaser.Scene {
     this.chatSystem?.destroy();
     this.bridgeCleanupFns.forEach((cleanup) => cleanup());
     this.bridgeCleanupFns = [];
+    this.audioSettingsCleanup?.();
+    this.audioSettingsCleanup = undefined;
     if (this.audioCtx && this.audioCtx.state !== 'closed') {
       void this.audioCtx.close();
     }

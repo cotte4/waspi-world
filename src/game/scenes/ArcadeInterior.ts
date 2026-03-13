@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { COLORS, WORLD } from '../config/constants';
+import { eventBus, EVENTS } from '../config/eventBus';
+import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
 import { announceScene, createBackButton } from '../systems/SceneUi';
 
 interface ArcadePenaltyReward {
@@ -36,6 +38,8 @@ export class ArcadeInterior extends Phaser.Scene {
   private glowPad?: Phaser.GameObjects.Ellipse;
   private arcadeMusic?: Phaser.Sound.BaseSound;
   private unlockMusicHandler?: () => void;
+  private audioSettings: AudioSettings = loadAudioSettings();
+  private audioSettingsCleanup?: () => void;
 
   constructor() {
     super({ key: 'ArcadeInterior' });
@@ -68,6 +72,15 @@ export class ArcadeInterior extends Phaser.Scene {
     const { width, height } = this.scale;
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
+    this.audioSettingsCleanup = eventBus.on(EVENTS.AUDIO_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      const next = payload as Partial<AudioSettings>;
+      this.audioSettings = {
+        musicEnabled: next.musicEnabled ?? this.audioSettings.musicEnabled,
+        sfxEnabled: next.sfxEnabled ?? this.audioSettings.sfxEnabled,
+      };
+      this.applyMusicSettings();
+    });
 
     const roomW = 700;
     const roomH = 400;
@@ -178,7 +191,7 @@ export class ArcadeInterior extends Phaser.Scene {
     this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
-    this.startArcadeMusic();
+    this.applyMusicSettings();
     this.cameras.main.fadeIn(220, 0, 0, 0);
   }
 
@@ -296,6 +309,7 @@ export class ArcadeInterior extends Phaser.Scene {
   }
 
   private startArcadeMusic() {
+    if (!this.audioSettings.musicEnabled) return;
     if (!this.cache.audio.exists('arcade_theme') || this.arcadeMusic) return;
 
     this.arcadeMusic = this.sound.add('arcade_theme', {
@@ -325,6 +339,14 @@ export class ArcadeInterior extends Phaser.Scene {
     fadeIn();
   }
 
+  private applyMusicSettings() {
+    if (!this.audioSettings.musicEnabled) {
+      this.stopArcadeMusic();
+      return;
+    }
+    this.startArcadeMusic();
+  }
+
   private stopArcadeMusic() {
     if (!this.arcadeMusic) return;
     const sound = this.arcadeMusic;
@@ -346,6 +368,8 @@ export class ArcadeInterior extends Phaser.Scene {
       this.sound.off(Phaser.Sound.Events.UNLOCKED, this.unlockMusicHandler);
       this.unlockMusicHandler = undefined;
     }
+    this.audioSettingsCleanup?.();
+    this.audioSettingsCleanup = undefined;
     this.stopArcadeMusic();
   }
 }

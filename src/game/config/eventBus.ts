@@ -37,6 +37,7 @@ export const EVENTS = {
   OPEN_CREATOR: 'creator:open',
   SHOP_OPEN: 'shop:open',
   SHOP_CLOSE: 'shop:close',
+  AUDIO_SETTINGS_CHANGED: 'audio:settings:changed',
   PENALTY_RESULT: 'penalty:result',
   PLAYER_ACTIONS_OPEN: 'player:actions:open',
   PLAYER_ACTION_MUTE: 'player:action:mute',
