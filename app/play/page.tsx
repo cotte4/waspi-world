@@ -87,7 +87,6 @@ export default function PlayPage() {
   const [emailInput, setEmailInput] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [authStatus, setAuthStatus] = useState('');
-  const [authPanelOpen, setAuthPanelOpen] = useState(true);
   const [uiNotice, setUiNotice] = useState('');
   const [shopOpen, setShopOpen] = useState(initialCheckout.open);
   const [shopSource, setShopSource] = useState(initialCheckout.open ? 'checkout_return' : '');
@@ -288,13 +287,11 @@ export default function PlayPage() {
     if (!session?.access_token) {
       tokenRef.current = null;
       setAuthEmail(session?.user?.email ?? null);
-      setAuthPanelOpen(true);
       return;
     }
 
     tokenRef.current = session.access_token;
     setAuthEmail(session.user.email ?? null);
-    setAuthPanelOpen(false);
 
     const res = await fetch('/api/player', {
       method: 'GET',
@@ -350,10 +347,8 @@ export default function PlayPage() {
       setAuthBusy(false);
       if (event === 'SIGNED_IN') {
         setAuthStatus('Sesion iniciada.');
-        setAuthPanelOpen(false);
       } else if (event === 'SIGNED_OUT') {
         setAuthStatus('Sesion cerrada.');
-        setAuthPanelOpen(true);
       }
     });
 
@@ -417,25 +412,6 @@ export default function PlayPage() {
     setAuthStatus(error ? error.message : 'Magic link enviado. Revisa tu mail.');
   }, [emailInput]);
 
-  const signInWithProvider = useCallback(async (provider: 'google' | 'discord') => {
-    if (!supabase) {
-      setAuthStatus('Supabase no esta configurado.');
-      return;
-    }
-
-    setAuthBusy(true);
-    setAuthStatus('');
-    const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/play` : undefined;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: { redirectTo },
-    });
-    if (error) {
-      setAuthBusy(false);
-      setAuthStatus(error.message);
-    }
-  }, []);
-
   const signOut = useCallback(async () => {
     if (!supabase) return;
     setAuthBusy(true);
@@ -448,7 +424,6 @@ export default function PlayPage() {
     tokenRef.current = null;
     setAuthEmail(null);
     setAuthStatus('Sesion cerrada.');
-    setAuthPanelOpen(true);
   }, []);
 
   const ensureStripe = useCallback(async () => {
@@ -1045,62 +1020,67 @@ export default function PlayPage() {
         <div
           className="ww-auth-card absolute top-32 right-2"
           style={{
-            width: authPanelOpen ? 228 : 132,
+            width: isAuthenticated ? 156 : 228,
             background: 'rgba(0,0,0,0.78)',
             border: '1px solid rgba(245,200,66,0.18)',
-            padding: authPanelOpen ? '8px' : '6px 8px',
+            padding: isAuthenticated ? '6px 8px' : '8px',
             boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
           }}
         >
-          <div className="flex items-center justify-between" style={{ marginBottom: authPanelOpen ? 8 : 0 }}>
-            <div
-              style={{
-                fontFamily: '"Press Start 2P", monospace',
-                fontSize: '7px',
-                color: '#F5C842',
-              }}
-            >
-              {isAuthenticated ? 'CUENTA CONECTADA' : 'LOGIN OPCIONAL'}
-            </div>
-            {isAuthenticated && (
+          {isAuthenticated ? (
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span
+                  className="inline-block"
+                  style={{
+                    width: 7,
+                    height: 7,
+                    borderRadius: '999px',
+                    background: '#39FF14',
+                    boxShadow: '0 0 10px rgba(57,255,20,0.5)',
+                    flexShrink: 0,
+                  }}
+                />
+                <div
+                  style={{
+                    fontFamily: '"Silkscreen", monospace',
+                    fontSize: '11px',
+                    color: 'rgba(255,255,255,0.82)',
+                    lineHeight: 1.1,
+                  }}
+                >
+                  Sesion OK
+                </div>
+              </div>
               <button
-                onClick={() => setAuthPanelOpen((value) => !value)}
+                onClick={() => void signOut()}
+                disabled={authBusy}
                 style={{
                   fontFamily: '"Press Start 2P", monospace',
                   fontSize: '7px',
-                  color: '#BBBBBB',
+                  color: authBusy ? 'rgba(255,255,255,0.4)' : '#BBBBBB',
                   background: 'transparent',
                   border: 'none',
-                  cursor: 'pointer',
+                  cursor: authBusy ? 'not-allowed' : 'pointer',
                   padding: 0,
                 }}
               >
-                {authPanelOpen ? 'OCULTAR' : '+'}
+                {authBusy ? '...' : 'SALIR'}
               </button>
-            )}
-          </div>
-
-          {authPanelOpen ? (
+            </div>
+          ) : (
             <>
-              {isAuthenticated ? (
-                <div>
-                  <div
-                    style={{
-                      fontFamily: '"Silkscreen", monospace',
-                      fontSize: '13px',
-                      color: '#FFFFFF',
-                      marginBottom: 8,
-                      wordBreak: 'break-word',
-                    }}
-                  >
-                    {authEmail}
-                  </div>
-                  <button onClick={() => void signOut()} disabled={authBusy} style={authButtonStyle('#F5C842', '#0E0E14', authBusy)}>
-                    {authBusy ? 'CERRANDO...' : 'CERRAR SESION'}
-                  </button>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2">
+              <div
+                style={{
+                  fontFamily: '"Press Start 2P", monospace',
+                  fontSize: '7px',
+                  color: '#F5C842',
+                  marginBottom: 8,
+                }}
+              >
+                LOGIN OPCIONAL
+              </div>
+              <div className="flex flex-col gap-2">
               <input
                 value={emailInput}
                 onChange={(e) => setEmailInput(e.target.value)}
@@ -1110,17 +1090,10 @@ export default function PlayPage() {
                 name="email"
                 style={textInputStyle}
               />
-                  <button onClick={() => void sendMagicLink()} disabled={authBusy} style={authButtonStyle('#F5C842', '#0E0E14', authBusy)}>
-                    {authBusy ? 'ENVIANDO...' : 'MAGIC LINK'}
-                  </button>
-                  <button onClick={() => void signInWithProvider('google')} disabled={authBusy} style={authButtonStyle('rgba(255,255,255,0.08)', '#FFFFFF', authBusy, true)}>
-                    ENTRAR CON GOOGLE
-                  </button>
-                  <button onClick={() => void signInWithProvider('discord')} disabled={authBusy} style={authButtonStyle('rgba(88,101,242,0.22)', '#FFFFFF', authBusy, true)}>
-                    ENTRAR CON DISCORD
-                  </button>
-                </div>
-              )}
+                <button onClick={() => void sendMagicLink()} disabled={authBusy} style={authButtonStyle('#F5C842', '#0E0E14', authBusy)}>
+                  {authBusy ? 'ENVIANDO...' : 'MAGIC LINK'}
+                </button>
+              </div>
 
               <div
                 style={{
@@ -1134,30 +1107,6 @@ export default function PlayPage() {
                 {authStatus || 'Guarda TENKS, inventario y avatar en tu cuenta.'}
               </div>
             </>
-          ) : (
-            <div className="flex items-center gap-2" style={{ marginTop: 4 }}>
-              <span
-                className="inline-block"
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: '999px',
-                  background: '#39FF14',
-                  boxShadow: '0 0 10px rgba(57,255,20,0.5)',
-                  flexShrink: 0,
-                }}
-              />
-              <div
-                style={{
-                  fontFamily: '"Silkscreen", monospace',
-                  fontSize: '11px',
-                  color: 'rgba(255,255,255,0.7)',
-                  lineHeight: 1.1,
-                }}
-              >
-                Sesion OK
-              </div>
-            </div>
           )}
         </div>
 
