@@ -25,5 +25,55 @@ export function createBackButton(scene: Phaser.Scene, onClick: () => void, label
   text.setInteractive({ useHandCursor: true });
   text.on('pointerdown', onClick);
 
+  const pulseTween = scene.tweens.add({
+    targets: [bg, text],
+    alpha: { from: 0.92, to: 1 },
+    duration: 1100,
+    ease: 'Sine.easeInOut',
+    yoyo: true,
+    repeat: -1,
+  });
+
+  scene.tweens.add({
+    targets: [bg, text],
+    y: '+=6',
+    alpha: { from: 0, to: 1 },
+    duration: 220,
+    ease: 'Sine.easeOut',
+  });
+
+  const hoverIn = () => {
+    scene.tweens.add({
+      targets: [bg, text],
+      scaleX: 1.05,
+      scaleY: 1.05,
+      duration: 120,
+      ease: 'Quad.easeOut',
+    });
+    bg.setFillStyle(0x111111, 0.92);
+    bg.setStrokeStyle(1, 0xF5C842, 0.9);
+  };
+
+  const hoverOut = () => {
+    scene.tweens.add({
+      targets: [bg, text],
+      scaleX: 1,
+      scaleY: 1,
+      duration: 150,
+      ease: 'Quad.easeOut',
+    });
+    bg.setFillStyle(0x000000, 0.72);
+    bg.setStrokeStyle(1, 0xF5C842, 0.55);
+  };
+
+  bg.on('pointerover', hoverIn);
+  bg.on('pointerout', hoverOut);
+  text.on('pointerover', hoverIn);
+  text.on('pointerout', hoverOut);
+
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+    pulseTween.remove();
+  });
+
   return { bg, text };
 }

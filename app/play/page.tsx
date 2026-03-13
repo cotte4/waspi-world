@@ -649,15 +649,126 @@ export default function PlayPage() {
   }, [chatVisible, input, lastSent]);
 
   return (
-    <div
-      className="w-screen h-screen overflow-hidden flex items-center justify-center"
+    <>
+      <style jsx global>{`
+        @keyframes wwFadeUp {
+          from { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.98); }
+          to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+        }
+        @keyframes wwModalIn {
+          from { opacity: 0; transform: translate3d(0, 22px, 0) scale(0.94); }
+          to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+        }
+        @keyframes wwToastIn {
+          from { opacity: 0; transform: translate3d(-50%, -10px, 0); }
+          to { opacity: 1; transform: translate3d(-50%, 0, 0); }
+        }
+        @keyframes wwPulseGlow {
+          0%, 100% { box-shadow: 0 0 0 rgba(57,255,20,0.1); opacity: 0.82; }
+          50% { box-shadow: 0 0 14px rgba(57,255,20,0.45); opacity: 1; }
+        }
+        @keyframes wwChatIn {
+          from { opacity: 0; transform: translate3d(-8px, 0, 0); }
+          to { opacity: 1; transform: translate3d(0, 0, 0); }
+        }
+        .ww-shell {
+          animation: wwFadeUp 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .ww-frame {
+          animation: wwFadeUp 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .ww-frame button,
+        .ww-frame input {
+          transition:
+            transform 160ms ease,
+            box-shadow 160ms ease,
+            border-color 160ms ease,
+            background-color 160ms ease,
+            opacity 160ms ease,
+            color 160ms ease;
+        }
+        .ww-frame button:hover:not(:disabled) {
+          transform: translateY(-2px);
+          box-shadow: 0 10px 22px rgba(0, 0, 0, 0.24);
+        }
+        .ww-frame button:active:not(:disabled) {
+          transform: translateY(0);
+        }
+        .ww-frame input:focus {
+          transform: translateY(-1px);
+          box-shadow: 0 0 0 1px rgba(245, 200, 66, 0.18), 0 14px 28px rgba(0, 0, 0, 0.18);
+        }
+        .ww-chip,
+        .ww-panel,
+        .ww-auth-card {
+          backdrop-filter: blur(8px);
+          animation: wwFadeUp 440ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .ww-panel {
+          transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+        }
+        .ww-panel:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 16px 30px rgba(0, 0, 0, 0.22);
+        }
+        .ww-panel-delayed,
+        .ww-auth-card {
+          animation-delay: 70ms;
+        }
+        .ww-auth-card {
+          transition: width 220ms ease, padding 220ms ease, transform 180ms ease, box-shadow 180ms ease;
+        }
+        .ww-status-dot {
+          animation: wwPulseGlow 1.4s ease-in-out infinite;
+        }
+        .ww-overlay {
+          animation: wwFadeUp 180ms ease-out both;
+          backdrop-filter: blur(9px);
+        }
+        .ww-modal {
+          animation: wwModalIn 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .ww-presence-row,
+        .ww-chat-line {
+          animation: wwChatIn 220ms ease-out both;
+        }
+        .ww-chat-shell {
+          backdrop-filter: blur(7px);
+        }
+        .ww-notice {
+          animation: wwToastIn 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .ww-shell,
+          .ww-frame,
+          .ww-chip,
+          .ww-panel,
+          .ww-auth-card,
+          .ww-overlay,
+          .ww-modal,
+          .ww-presence-row,
+          .ww-chat-line,
+          .ww-notice,
+          .ww-status-dot {
+            animation: none !important;
+          }
+          .ww-frame button,
+          .ww-frame input,
+          .ww-panel,
+          .ww-auth-card {
+            transition: none !important;
+          }
+        }
+      `}</style>
+      <div
+      className="ww-shell w-screen h-screen overflow-hidden flex items-center justify-center"
       style={{
         backgroundColor: '#02030A',
         backgroundImage: 'radial-gradient(circle at top, rgba(245,200,66,0.12), transparent 55%)',
       }}
     >
       <div
-        className="relative"
+        className="ww-frame relative"
         style={{
           width: isMobile ? '100%' : 800,
           height: isMobile ? '100%' : 600,
@@ -671,24 +782,24 @@ export default function PlayPage() {
         <PhaserGame />
 
         <div className="absolute top-2 left-2 flex items-center gap-2 pointer-events-none">
-          <div className="px-2 py-1 text-xs" style={hudBadge('#F5C842', 'rgba(245,200,66,0.4)')}>
+          <div className="ww-chip px-2 py-1 text-xs" style={hudBadge('#F5C842', 'rgba(245,200,66,0.4)')}>
             {playerInfo ? playerInfo.username : 'CARGANDO...'}
           </div>
           {connected && (
-            <div className="px-2 py-1 text-xs flex items-center gap-1" style={hudBadge('#39FF14', 'rgba(57,255,20,0.3)')}>
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400" />
+            <div className="ww-chip px-2 py-1 text-xs flex items-center gap-1" style={hudBadge('#39FF14', 'rgba(57,255,20,0.3)')}>
+              <span className="ww-status-dot inline-block w-1.5 h-1.5 rounded-full bg-green-400" />
               ONLINE
             </div>
           )}
           {tenks !== null && (
-            <div className="px-2 py-1 text-xs" style={hudBadge('#F5C842', 'rgba(245,200,66,0.4)')}>
+            <div className="ww-chip px-2 py-1 text-xs" style={hudBadge('#F5C842', 'rgba(245,200,66,0.4)')}>
               TENKS {tenks}
             </div>
           )}
         </div>
 
         <div
-          className="absolute top-12 left-2"
+          className="ww-panel ww-panel-delayed absolute top-12 left-2"
           style={{
             width: 172,
             background: 'rgba(0,0,0,0.7)',
@@ -708,8 +819,9 @@ export default function PlayPage() {
             CONECTADOS {presencePlayers.length}
           </div>
           <div style={{ display: 'grid', gap: 4 }}>
-            {presencePlayers.slice(0, 6).map((player) => (
+            {presencePlayers.slice(0, 6).map((player, index) => (
               <div
+                className="ww-presence-row"
                 key={player.playerId}
                 style={{
                   fontFamily: '"Silkscreen", monospace',
@@ -719,6 +831,7 @@ export default function PlayPage() {
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
+                  animationDelay: `${index * 45}ms`,
                 }}
               >
                 {player.playerId === playerInfo?.playerId ? 'TU ' : '• '} {player.username}
@@ -739,7 +852,7 @@ export default function PlayPage() {
         </div>
 
         <div
-          className="absolute top-2 right-2 pointer-events-none"
+          className="ww-panel absolute top-2 right-2 pointer-events-none"
           style={{
             background: 'rgba(0,0,0,0.6)',
             border: '1px solid rgba(255,255,255,0.1)',
@@ -791,7 +904,7 @@ export default function PlayPage() {
         </button>
 
         <div
-          className="absolute top-32 right-2"
+          className="ww-auth-card absolute top-32 right-2"
           style={{
             width: authPanelOpen ? 228 : 132,
             background: 'rgba(0,0,0,0.78)',
@@ -910,9 +1023,9 @@ export default function PlayPage() {
         </div>
 
         {shopOpen && (
-          <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
+          <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
             <div
-              className="p-4"
+              className="ww-modal p-4"
               style={{
                 width: isMobile ? '94%' : 560,
                 maxHeight: isMobile ? '88%' : 500,
@@ -964,6 +1077,7 @@ export default function PlayPage() {
                       return (
                         <div
                           key={item.id}
+                          className="ww-panel"
                           style={{
                             padding: '12px',
                             border: selected ? '1px solid rgba(245,200,66,0.45)' : '1px solid rgba(255,255,255,0.1)',
@@ -1032,7 +1146,7 @@ export default function PlayPage() {
                     {tenksPacks.map((pack) => (
                       <div
                         key={pack.id}
-                        className="flex items-center justify-between gap-3"
+                        className="ww-panel flex items-center justify-between gap-3"
                         style={{
                           padding: '10px 12px',
                           border: '1px solid rgba(255,255,255,0.1)',
@@ -1068,8 +1182,9 @@ export default function PlayPage() {
         )}
 
         {playerActions && (
-          <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
+          <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
             <div
+              className="ww-modal"
               style={{
                 width: 320,
                 background: 'rgba(10,10,18,0.97)',
@@ -1103,9 +1218,9 @@ export default function PlayPage() {
         )}
 
         {inventoryOpen && (
-          <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }}>
+          <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }}>
             <div
-              className="p-4"
+              className="ww-modal p-4"
               style={{
                 width: isMobile ? '94%' : 420,
                 background: 'rgba(10,10,18,0.95)',
@@ -1298,14 +1413,15 @@ export default function PlayPage() {
           <div className="absolute bottom-0 left-0 right-0">
             <div
               ref={logRef}
-              className="overflow-y-auto px-2 pt-1 pb-1"
+              className="ww-chat-shell overflow-y-auto px-2 pt-1 pb-1"
               style={{
                 maxHeight: isMobile ? '72px' : '100px',
                 background: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.65))',
               }}
             >
-              {messages.map((m) => (
+              {messages.map((m, index) => (
                 <p
+                  className="ww-chat-line"
                   key={m.id}
                   style={{
                     fontFamily: '"Silkscreen", "Courier New", monospace',
@@ -1313,6 +1429,7 @@ export default function PlayPage() {
                     lineHeight: '1.5',
                     color: 'rgba(255,255,255,0.75)',
                     textShadow: '0 1px 3px rgba(0,0,0,0.9)',
+                    animationDelay: `${Math.min(index, 6) * 25}ms`,
                   }}
                 >
                   <span style={{ color: m.isMe ? '#F5C842' : '#88AAFF' }}>{m.username}</span>
@@ -1361,9 +1478,9 @@ export default function PlayPage() {
         )}
 
         {settingsOpen && (
-          <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }}>
+          <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }}>
             <div
-              className="p-4"
+              className="ww-modal p-4"
               style={{
                 width: isMobile ? '94%' : 360,
                 background: 'rgba(10,10,18,0.96)',
@@ -1413,7 +1530,7 @@ export default function PlayPage() {
 
         {uiNotice && (
           <div
-            className="absolute top-14 left-1/2 -translate-x-1/2 px-3 py-2"
+            className="ww-notice absolute top-14 left-1/2 -translate-x-1/2 px-3 py-2"
             style={{
               background: 'rgba(0,0,0,0.82)',
               border: '1px solid rgba(57,255,20,0.35)',
@@ -1431,6 +1548,7 @@ export default function PlayPage() {
         )}
       </div>
     </div>
+    </>
   );
 }
 

@@ -120,22 +120,22 @@ const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
   pistol: {
     label: 'PISTOL',
     pellets: 1,
-    spread: 0.03,
-    speed: 620,
-    damage: 16,
-    cooldownMs: 170,
+    spread: 0.02,
+    speed: 760,
+    damage: 18,
+    cooldownMs: 120,
     color: 0xF5C842,
-    knockback: 16,
+    knockback: 18,
   },
   shotgun: {
     label: 'SHOTGUN',
-    pellets: 5,
-    spread: 0.19,
-    speed: 560,
-    damage: 10,
-    cooldownMs: 420,
+    pellets: 6,
+    spread: 0.17,
+    speed: 610,
+    damage: 11,
+    cooldownMs: 360,
     color: 0xFF8B3D,
-    knockback: 26,
+    knockback: 34,
   },
 };
 const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
@@ -358,6 +358,9 @@ export class WorldScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
     this.cameras.main.startFollow(this.playerBody, true, 0.1, 0.1);
     this.cameras.main.setZoom(1);
+    this.cameras.main.resetFX();
+    this.cameras.main.setAlpha(1);
+    this.cameras.main.fadeIn(220, 0, 0, 0);
 
     // Chat system
     this.chatSystem = new ChatSystem(this);
@@ -2157,9 +2160,12 @@ export class WorldScene extends Phaser.Scene {
     }
 
     // Gun shoot with keyboard
-    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyF) && !this.inputBlocked) {
+    if (this.gunEnabled && this.keyF.isDown && !this.inputBlocked) {
       const p = this.input.activePointer;
       this.shootAt(p.worldX, p.worldY);
+    }
+    if (this.gunEnabled && !this.isTouch && this.input.activePointer.isDown && !this.inputBlocked) {
+      this.shootAt(this.input.activePointer.worldX, this.input.activePointer.worldY);
     }
 
     // Football follow animation

@@ -12,13 +12,13 @@ export class BootScene extends Phaser.Scene {
     this.add.rectangle(width / 2, height / 2, width, height, 0x0E0E14);
 
     // Title
-    this.add.text(width / 2, height / 2 - 60, 'WASPI WORLD', {
+    const title = this.add.text(width / 2, height / 2 - 60, 'WASPI WORLD', {
       fontSize: '28px',
       fontFamily: '"Press Start 2P", "Courier New", monospace',
       color: '#F5C842',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, height / 2 - 20, 'Open World - Chat Social - Streetwear', {
+    const subtitle = this.add.text(width / 2, height / 2 - 20, 'Open World - Chat Social - Streetwear', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", "Courier New", monospace',
       color: '#888888',
@@ -34,8 +34,35 @@ export class BootScene extends Phaser.Scene {
       color: '#555555',
     }).setOrigin(0.5);
 
+    this.tweens.add({
+      targets: title,
+      scale: { from: 0.98, to: 1.02 },
+      alpha: { from: 0.9, to: 1 },
+      duration: 1500,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+    this.tweens.add({
+      targets: subtitle,
+      alpha: { from: 0.45, to: 0.85 },
+      duration: 1200,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+    this.tweens.add({
+      targets: status,
+      alpha: { from: 0.5, to: 1 },
+      duration: 700,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
     this.load.on('progress', (v: number) => {
       bar.setSize(320 * v, 14);
+      bar.setAlpha(0.72 + v * 0.28);
     });
 
     this.load.on('complete', () => {
