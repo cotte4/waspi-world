@@ -12,11 +12,18 @@ export type InventoryState = {
   };
 };
 
+export type VecindadState = {
+  ownedParcelId?: string;
+  buildStage: number;
+  materials: number;
+};
+
 export type PlayerState = {
   tenks: number;
   inventory: InventoryState;
   avatar: AvatarConfig;
   mutedPlayers?: string[];
+  vecindad: VecindadState;
 };
 
 export const DEFAULT_PLAYER_STATE: PlayerState = {
@@ -40,6 +47,11 @@ export const DEFAULT_PLAYER_STATE: PlayerState = {
     smoke: false,
   },
   mutedPlayers: [],
+  vecindad: {
+    ownedParcelId: undefined,
+    buildStage: 0,
+    materials: 0,
+  },
 };
 
 export function normalizePlayerState(input: unknown): PlayerState {
@@ -74,6 +86,20 @@ export function normalizePlayerState(input: unknown): PlayerState {
     mutedPlayers: Array.isArray(state.mutedPlayers)
       ? state.mutedPlayers.filter((v): v is string => typeof v === 'string')
       : [],
+    vecindad: {
+      ownedParcelId:
+        state.vecindad && typeof state.vecindad === 'object' && typeof state.vecindad.ownedParcelId === 'string'
+          ? state.vecindad.ownedParcelId
+          : undefined,
+      buildStage:
+        state.vecindad && typeof state.vecindad === 'object' && typeof state.vecindad.buildStage === 'number'
+          ? state.vecindad.buildStage
+          : DEFAULT_PLAYER_STATE.vecindad.buildStage,
+      materials:
+        state.vecindad && typeof state.vecindad === 'object' && typeof state.vecindad.materials === 'number'
+          ? state.vecindad.materials
+          : DEFAULT_PLAYER_STATE.vecindad.materials,
+    },
   };
 }
 

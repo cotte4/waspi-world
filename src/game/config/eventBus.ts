@@ -44,4 +44,10 @@ export const EVENTS = {
   PLAYER_ACTION_MUTE: 'player:action:mute',
   PLAYER_ACTION_REPORT: 'player:action:report',
   REMOTE_AVATAR_UPDATE: 'remote:avatar:update',
+  PARCEL_BUY_REQUEST: 'parcel:buy:request',
+  PARCEL_BUILD_REQUEST: 'parcel:build:request',
+  PARCEL_STATE_CHANGED: 'parcel:state:changed',
+  VECINDAD_SHARED_STATE_CHANGED: 'vecindad:shared:state:changed',
+  VECINDAD_UPDATE_REQUEST: 'vecindad:update:request',
+  UI_NOTICE: 'ui:notice',
 } as const;

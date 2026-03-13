@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getAuthenticatedUser, hasServiceRole, isServerSupabaseConfigured } from '@/src/lib/supabaseServer';
 import { DEFAULT_PLAYER_STATE, normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
 import { ensureCatalogSeeded, ensurePlayerRow, syncPlayerInventory } from '@/src/lib/commercePersistence';
+import { mergePlayerWithVecindad } from '@/src/lib/vecindadPersistence';
 
 const PLAYER_METADATA_KEY = 'waspiPlayer';
 
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const player = normalizePlayerState(user.user_metadata?.[PLAYER_METADATA_KEY] ?? DEFAULT_PLAYER_STATE);
+  let player = normalizePlayerState(user.user_metadata?.[PLAYER_METADATA_KEY] ?? DEFAULT_PLAYER_STATE);
 
   let syncWarning: string | null = null;
   if (hasServiceRole) {
@@ -24,6 +25,7 @@ export async function GET(request: NextRequest) {
       try {
         await ensureCatalogSeeded(admin);
         await ensurePlayerRow(admin, user, player);
+        player = await mergePlayerWithVecindad(admin, user.id, player);
       } catch (error) {
         syncWarning = error instanceof Error ? error.message : 'Player sync failed.';
         console.error('GET /api/player sync failed:', error);
@@ -55,7 +57,7 @@ export async function PUT(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => null) as { player?: Partial<PlayerState> } | null;
-  const nextPlayer = normalizePlayerState({
+  let nextPlayer = normalizePlayerState({
     ...(user.user_metadata?.[PLAYER_METADATA_KEY] ?? DEFAULT_PLAYER_STATE),
     ...(body?.player ?? {}),
   });
@@ -81,6 +83,7 @@ export async function PUT(request: NextRequest) {
     await ensureCatalogSeeded(admin);
     await ensurePlayerRow(admin, user, nextPlayer);
     await syncPlayerInventory(admin, user.id, nextPlayer);
+    nextPlayer = await mergePlayerWithVecindad(admin, user.id, nextPlayer);
   } catch (syncError) {
     syncWarning = syncError instanceof Error ? syncError.message : 'Player sync failed.';
     console.error('PUT /api/player sync failed:', syncError);

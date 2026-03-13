@@ -10,6 +10,8 @@ import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings'
 import { addXpToProgression, getLevelMilestones, loadProgressionState, saveProgressionState, type ProgressionState } from '../systems/ProgressionSystem';
 import { loadCombatStats, saveCombatStats, type CombatStats } from '../systems/CombatStats';
 import { announceScene } from '../systems/SceneUi';
+import type { VecindadState } from '../../lib/playerState';
+import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
 
 interface RemotePlayer {
   avatar: AvatarRenderer;
@@ -113,6 +115,26 @@ type DummyState = {
   isBoss: boolean;
   xpReward: number;
   tenksReward: number;
+};
+
+type ParcelVisual = {
+  title: Phaser.GameObjects.Text;
+  status: Phaser.GameObjects.Text;
+  detail: Phaser.GameObjects.Text;
+  badge: Phaser.GameObjects.Text;
+  structure: Phaser.GameObjects.Graphics;
+};
+
+type MaterialNode = {
+  id: string;
+  x: number;
+  y: number;
+  value: number;
+  available: boolean;
+  respawnAt: number;
+  crate: Phaser.GameObjects.Rectangle;
+  band: Phaser.GameObjects.Rectangle;
+  label: Phaser.GameObjects.Text;
 };
 
 const REMOTE_CHAT_MIN_MS = 1000;
@@ -241,6 +263,7 @@ export class WorldScene extends Phaser.Scene {
 
   // Interaction
   private keySpace!: Phaser.Input.Keyboard.Key;
+  private keyE!: Phaser.Input.Keyboard.Key;
   private inTransition = false;
 
   // Multiplayer
@@ -301,6 +324,16 @@ export class WorldScene extends Phaser.Scene {
   private footballTick = 0;
   private progression: ProgressionState = loadProgressionState();
   private combatStats: CombatStats = loadCombatStats();
+  private vecindadState: VecindadState = {
+    ownedParcelId: undefined,
+    buildStage: 0,
+    materials: 0,
+  };
+  private sharedParcelState = new Map<string, SharedParcelState>();
+  private parcelVisuals = new Map<string, ParcelVisual>();
+  private parcelPrompt?: Phaser.GameObjects.Text;
+  private materialNodes: MaterialNode[] = [];
+  private vecindadHud?: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'WorldScene' });
@@ -318,6 +351,7 @@ export class WorldScene extends Phaser.Scene {
     this.playerId = this.getOrCreatePlayerId();
     this.playerUsername = this.getOrCreateUsername();
     this.loadMutedPlayers();
+    this.loadVecindadState();
 
     // Init TENKS balance (local-only for ahora)
     initTenks(5000);
@@ -325,6 +359,7 @@ export class WorldScene extends Phaser.Scene {
     // Draw world layers
     this.drawBackground();
     this.drawPlaza();
+    this.drawVecindad();
     this.drawBuildings();
     this.drawStreet();
     this.drawLampPosts();
@@ -365,6 +400,7 @@ export class WorldScene extends Phaser.Scene {
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.keyE = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
     this.keyF = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.F);
     this.keyOne = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
     this.keyTwo = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
@@ -389,6 +425,7 @@ export class WorldScene extends Phaser.Scene {
     // Supabase Realtime
     const mode = this.setupRealtime();
     statusText.setText(mode === 'multiplayer' ? 'MULTI: ONLINE' : 'MULTI: SOLO MODE');
+    void this.loadSharedVecindadState();
 
     // Notify React that player is ready
     eventBus.emit(EVENTS.PLAYER_INFO, {
@@ -1271,6 +1308,34 @@ export class WorldScene extends Phaser.Scene {
     g.lineStyle(2, 0x262636, 0.9);
     g.strokeRect(0, ZONES.NORTH_SIDEWALK_Y, WORLD.WIDTH, ZONES.NORTH_SIDEWALK_H);
     g.strokeRect(0, ZONES.SOUTH_SIDEWALK_Y, WORLD.WIDTH, ZONES.SOUTH_SIDEWALK_H);
+
+    // Vecindad approach marker on the left side of the main street
+    const vecindadGuideX = ZONES.VECINDAD_X + ZONES.VECINDAD_W - 60;
+    g.fillStyle(0x5f4a34, 0.95);
+    g.fillRoundedRect(vecindadGuideX - 90, ZONES.SOUTH_SIDEWALK_Y + 16, 180, 44, 10);
+    g.lineStyle(2, COLORS.GOLD, 0.75);
+    g.strokeRoundedRect(vecindadGuideX - 90, ZONES.SOUTH_SIDEWALK_Y + 16, 180, 44, 10);
+
+    g.fillStyle(COLORS.GOLD, 0.28);
+    for (let i = 0; i < 5; i++) {
+      const arrowX = vecindadGuideX + 48 - i * 20;
+      g.fillTriangle(
+        arrowX - 8,
+        ZONES.SOUTH_SIDEWALK_Y + 38,
+        arrowX + 8,
+        ZONES.SOUTH_SIDEWALK_Y + 30,
+        arrowX + 8,
+        ZONES.SOUTH_SIDEWALK_Y + 46,
+      );
+    }
+
+    this.add.text(vecindadGuideX - 26, ZONES.SOUTH_SIDEWALK_Y + 38, 'LA VECINDAD', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
   }
 
   private drawPlaza() {
@@ -1323,12 +1388,324 @@ export class WorldScene extends Phaser.Scene {
     this.drawBench(g, fx - 120, fy - 20);
     this.drawBench(g, fx + 120, fy - 20);
 
+    // Future plaza anchors
+    this.drawConstructionSite(1188, ZONES.PLAZA_Y + 150, 280, 210, 'CASINO', '#FF4466');
+    this.drawConstructionSite(1732, ZONES.PLAZA_Y + 150, 280, 210, 'GUN SHOP', '#46B3FF');
+
     // Plaza text
     this.add.text(fx, ZONES.PLAZA_Y + 20, 'PLAZA', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#334455',
     }).setOrigin(0.5).setDepth(2);
+  }
+
+  private drawVecindad() {
+    const g = this.add.graphics().setDepth(0.6);
+    const x = ZONES.VECINDAD_X;
+    const y = ZONES.VECINDAD_Y;
+    const w = ZONES.VECINDAD_W;
+    const h = ZONES.VECINDAD_H;
+
+    // Main district ground
+    g.fillStyle(0x13210f, 0.96);
+    g.fillRoundedRect(x, y, w, h, 18);
+    g.lineStyle(3, 0x2d4b26, 0.95);
+    g.strokeRoundedRect(x, y, w, h, 18);
+
+    // Dirt roads / circulation
+    g.fillStyle(0x3e2d1d, 0.95);
+    g.fillRoundedRect(x + 34, y + 84, w - 68, 72, 18);
+    g.fillRoundedRect(x + 418, y + 76, 84, h - 134, 18);
+
+    g.lineStyle(2, 0x5a4633, 0.6);
+    for (let dx = x + 60; dx < x + w - 40; dx += 34) {
+      g.lineBetween(dx, y + 119, dx + 14, y + 119);
+    }
+    for (let dy = y + 106; dy < y + h - 60; dy += 32) {
+      g.lineBetween(x + 460, dy, x + 460, dy + 14);
+    }
+
+    // Link path toward the plaza so the district feels connected
+    g.fillStyle(0x5f4a34, 0.9);
+    g.fillRoundedRect(x + w - 80, y + 106, 210, 32, 14);
+    g.fillRoundedRect(x + w - 40, y - 96, 36, 220, 16);
+
+    // Gateway arch so the entrance reads from far away
+    g.fillStyle(0x2b2016, 1);
+    g.fillRect(x + w - 58, y - 84, 12, 120);
+    g.fillRect(x + w - 2, y - 84, 12, 120);
+    g.fillStyle(0x6a4a2b, 1);
+    g.fillRoundedRect(x + w - 78, y - 112, 96, 36, 8);
+    g.lineStyle(2, COLORS.GOLD, 0.75);
+    g.strokeRoundedRect(x + w - 78, y - 112, 96, 36, 8);
+
+    this.add.text(x + w - 30, y - 94, '< VECI', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+
+    // Entry sign
+    g.fillStyle(0x2b2016, 1);
+    g.fillRect(x + 54, y + 18, 16, 64);
+    g.fillRect(x + 194, y + 18, 16, 64);
+    g.fillStyle(0x5b4028, 1);
+    g.fillRoundedRect(x + 34, y + 8, 196, 52, 10);
+    g.lineStyle(2, 0xF5C842, 0.75);
+    g.strokeRoundedRect(x + 34, y + 8, 196, 52, 10);
+
+    this.add.text(x + 132, y + 35, 'LA VECINDAD', {
+      fontSize: '10px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+
+    this.add.text(x + 132, y + 62, 'PARCELAS / FUTURAS CASAS', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#B5B19A',
+    }).setOrigin(0.5).setDepth(2);
+
+    VECINDAD_PARCELS.forEach((parcel, index) => {
+      this.drawParcelLot(g, parcel, index === 0);
+    });
+
+    this.parcelPrompt = this.add.text(x + w / 2, y + h + 20, '', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
+      align: 'center',
+    }).setOrigin(0.5).setDepth(3);
+
+    this.setupMaterialNodes();
+    this.refreshParcelVisuals();
+  }
+
+  private drawParcelLot(
+    g: Phaser.GameObjects.Graphics,
+    parcel: VecindadParcelConfig,
+    featured: boolean,
+  ) {
+    const { x, y, w, h, id } = parcel;
+    g.fillStyle(featured ? 0x1b3020 : 0x182715, 1);
+    g.fillRoundedRect(x, y, w, h, 12);
+    g.lineStyle(2, featured ? 0xF5C842 : 0x506842, 0.9);
+    g.strokeRoundedRect(x, y, w, h, 12);
+
+    // Fence
+    g.lineStyle(2, 0x6b4b2a, 0.9);
+    for (let dx = x + 16; dx <= x + w - 16; dx += 26) {
+      g.lineBetween(dx, y + 10, dx, y + 28);
+      g.lineBetween(dx, y + h - 28, dx, y + h - 10);
+    }
+    for (let dy = y + 20; dy <= y + h - 20; dy += 24) {
+      g.lineBetween(x + 10, dy, x + 28, dy);
+      g.lineBetween(x + w - 28, dy, x + w - 10, dy);
+    }
+
+    // Foundation placeholder
+    g.fillStyle(0x2a2a32, 0.7);
+    g.fillRoundedRect(x + 76, y + 42, w - 152, h - 66, 10);
+    g.lineStyle(2, 0x44445a, 0.8);
+    g.strokeRoundedRect(x + 76, y + 42, w - 152, h - 66, 10);
+
+    const labelColor = featured ? '#F5C842' : '#C8D6B7';
+    const title = this.add.text(x + 18, y + 18, `PARCELA ${id}`, {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: labelColor,
+    }).setDepth(2);
+
+    const status = this.add.text(x + w / 2, y + 64, featured ? 'PRIMER LOTE' : 'FOR SALE', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: featured ? '#F5C842' : '#E6E1C8',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+
+    const detail = this.add.text(x + w / 2, y + 92, featured ? 'BUY + FARM + BUILD' : 'COMPRA Y CONSTRUYE', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: featured ? '#B9FF9E' : '#9EB09A',
+    }).setOrigin(0.5).setDepth(2);
+
+    const badge = this.add.text(x + w - 18, y + 18, `${parcel.cost}T`, {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+    }).setOrigin(1, 0).setDepth(2);
+
+    const structure = this.add.graphics().setDepth(2.2);
+    this.parcelVisuals.set(id, { title, status, detail, badge, structure });
+  }
+
+  private refreshParcelVisuals() {
+    for (const parcel of VECINDAD_PARCELS) {
+      const visuals = this.parcelVisuals.get(parcel.id);
+      if (!visuals) continue;
+      const shared = this.sharedParcelState.get(parcel.id);
+      const ownedByMe = this.vecindadState.ownedParcelId === parcel.id;
+      const occupiedByAnother = Boolean(shared && !ownedByMe);
+      const playerOwnsAnother = Boolean(this.vecindadState.ownedParcelId && !ownedByMe);
+      const buildStage = ownedByMe
+        ? Math.max(1, this.vecindadState.buildStage)
+        : shared?.buildStage ?? 0;
+
+      visuals.status.setText(
+        ownedByMe
+          ? 'TU PARCELA'
+          : occupiedByAnother
+            ? 'OCUPADA'
+            : 'FOR SALE'
+      );
+      visuals.status.setColor(
+        ownedByMe
+          ? '#39FF14'
+          : occupiedByAnother
+            ? '#46B3FF'
+            : '#E6E1C8'
+      );
+      visuals.detail.setText(
+        ownedByMe
+          ? `STAGE ${buildStage} / MATS ${this.vecindadState.materials}`
+          : occupiedByAnother
+            ? `${shared?.ownerUsername ?? 'VECINO'} · STAGE ${buildStage}`
+            : playerOwnsAnother
+              ? 'YA TENES OTRA PARCELA'
+              : 'COMPRA Y CONSTRUYE'
+      );
+      visuals.detail.setColor(
+        ownedByMe
+          ? '#B9FF9E'
+          : occupiedByAnother
+            ? '#9EDCFF'
+            : playerOwnsAnother
+              ? '#FFB36A'
+              : '#9EB09A'
+      );
+      visuals.badge.setText(
+        ownedByMe
+          ? 'OWNED'
+          : occupiedByAnother
+            ? `@${(shared?.ownerUsername ?? 'vecino').slice(0, 10)}`
+            : `${parcel.cost}T`
+      );
+      visuals.badge.setColor(ownedByMe ? '#39FF14' : occupiedByAnother ? '#46B3FF' : '#F5C842');
+      this.drawParcelStructure(parcel, visuals.structure, buildStage);
+    }
+    this.renderVecindadHud();
+  }
+
+  private drawParcelStructure(parcel: VecindadParcelConfig, graphics: Phaser.GameObjects.Graphics, buildStage: number) {
+    graphics.clear();
+    if (buildStage <= 0) return;
+
+    const fx = parcel.x + parcel.w / 2;
+    const fy = parcel.y + parcel.h - 22;
+
+    graphics.fillStyle(0x3b3b45, 0.8);
+    graphics.fillRoundedRect(fx - 48, fy - 14, 96, 14, 6);
+
+    if (buildStage >= 1) {
+      graphics.fillStyle(0x7a5533, 1);
+      graphics.fillRoundedRect(fx - 40, fy - 50, 80, 34, 6);
+      graphics.lineStyle(2, 0x2c1a0c, 0.9);
+      graphics.strokeRoundedRect(fx - 40, fy - 50, 80, 34, 6);
+    }
+
+    if (buildStage >= 2) {
+      graphics.fillStyle(0xb48a5a, 1);
+      graphics.fillRoundedRect(fx - 44, fy - 88, 88, 40, 6);
+      graphics.fillStyle(0x2f2114, 1);
+      graphics.fillRect(fx - 10, fy - 62, 20, 26);
+    }
+
+    if (buildStage >= 3) {
+      graphics.fillStyle(0x5d2c18, 1);
+      graphics.fillTriangle(fx - 54, fy - 88, fx, fy - 126, fx + 54, fy - 88);
+      graphics.lineStyle(2, 0x291308, 0.95);
+      graphics.strokeTriangle(fx - 54, fy - 88, fx, fy - 126, fx + 54, fy - 88);
+    }
+
+    if (buildStage >= 4) {
+      graphics.fillStyle(0x88ccff, 0.9);
+      graphics.fillRect(fx - 28, fy - 78, 18, 14);
+      graphics.fillRect(fx + 10, fy - 78, 18, 14);
+      graphics.fillStyle(0xf5c842, 0.95);
+      graphics.fillRect(fx - 30, fy - 126, 60, 6);
+    }
+  }
+
+  private setupMaterialNodes() {
+    if (this.materialNodes.length) return;
+    const defs = [
+      { x: ZONES.VECINDAD_X + 308, y: ZONES.VECINDAD_Y + 112 },
+      { x: ZONES.VECINDAD_X + 602, y: ZONES.VECINDAD_Y + 112 },
+      { x: ZONES.VECINDAD_X + 308, y: ZONES.VECINDAD_Y + 264 },
+      { x: ZONES.VECINDAD_X + 602, y: ZONES.VECINDAD_Y + 414 },
+      { x: ZONES.VECINDAD_X + 308, y: ZONES.VECINDAD_Y + 564 },
+      { x: ZONES.VECINDAD_X + 602, y: ZONES.VECINDAD_Y + 714 },
+    ];
+
+    defs.forEach((def, index) => {
+      const crate = this.add.rectangle(def.x, def.y, 28, 24, 0x8b5a2b, 1)
+        .setStrokeStyle(2, 0x3c2412, 1)
+        .setDepth(2.4);
+      const band = this.add.rectangle(def.x, def.y, 32, 5, 0xf5c842, 0.8).setDepth(2.5);
+      const label = this.add.text(def.x, def.y - 22, '+MAT', {
+        fontSize: '6px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#B9FF9E',
+        stroke: '#000000',
+        strokeThickness: 2,
+      }).setOrigin(0.5).setDepth(2.5);
+
+      this.materialNodes.push({
+        id: `mat_${index + 1}`,
+        x: def.x,
+        y: def.y,
+        value: 4,
+        available: true,
+        respawnAt: 0,
+        crate,
+        band,
+        label,
+      });
+    });
+  }
+
+  private renderVecindadHud() {
+    const parcel = this.vecindadState.ownedParcelId ? `PARCELA ${this.vecindadState.ownedParcelId}` : 'SIN PARCELA';
+    const stage = Math.max(0, this.vecindadState.buildStage);
+    const nextCost = stage >= MAX_VECINDAD_STAGE ? 0 : getBuildCost(Math.max(stage, 1));
+    const text = [
+      'LA VECINDAD',
+      parcel,
+      `MATS ${this.vecindadState.materials}`,
+      `STAGE ${stage}/${MAX_VECINDAD_STAGE}${stage >= MAX_VECINDAD_STAGE ? ' MAX' : ` NEXT ${nextCost}`}`,
+    ];
+
+    if (!this.vecindadHud) {
+      this.vecindadHud = this.add.text(8, 92, text, {
+        fontSize: '8px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#B9FF9E',
+        lineSpacing: 6,
+        stroke: '#000000',
+        strokeThickness: 3,
+      }).setScrollFactor(0).setDepth(9999);
+      return;
+    }
+
+    this.vecindadHud.setText(text);
   }
 
   private drawVignette() {
@@ -1355,6 +1732,76 @@ export class WorldScene extends Phaser.Scene {
     g.fillRect(x - 25, y, 50, 8);
     g.fillRect(x - 22, y + 8, 8, 10);
     g.fillRect(x + 14, y + 8, 8, 10);
+  }
+
+  private drawConstructionSite(x: number, y: number, w: number, h: number, label: string, accentHex: string) {
+    const g = this.add.graphics().setDepth(1.4);
+    const accent = Number(`0x${accentHex.replace('#', '')}`);
+
+    // Site slab
+    g.fillStyle(0x18161f, 0.95);
+    g.fillRoundedRect(x, y, w, h, 16);
+    g.lineStyle(3, 0x3b3544, 0.9);
+    g.strokeRoundedRect(x, y, w, h, 16);
+
+    // Excavation / unfinished footprint
+    g.fillStyle(0x23202b, 1);
+    g.fillRoundedRect(x + 22, y + 34, w - 44, h - 62, 10);
+    g.lineStyle(2, 0x4d4658, 0.8);
+    g.strokeRoundedRect(x + 22, y + 34, w - 44, h - 62, 10);
+
+    // Metal frame
+    g.lineStyle(4, 0x8a8f9d, 0.85);
+    g.strokeRect(x + 58, y + 54, w - 116, h - 106);
+    g.lineBetween(x + 58, y + 54, x + 88, y + 26);
+    g.lineBetween(x + w - 58, y + 54, x + w - 88, y + 26);
+    g.lineBetween(x + 58, y + h - 52, x + 88, y + h - 24);
+    g.lineBetween(x + w - 58, y + h - 52, x + w - 88, y + h - 24);
+
+    // Safety stripes
+    g.fillStyle(0x000000, 0.28);
+    g.fillRoundedRect(x + 28, y + h - 42, w - 56, 18, 8);
+    for (let i = 0; i < 12; i++) {
+      const sx = x + 36 + i * 18;
+      g.fillStyle(i % 2 === 0 ? 0xF5C842 : 0x111111, 0.95);
+      g.fillRect(sx, y + h - 40, 12, 14);
+    }
+
+    // Crane-ish silhouette
+    g.fillStyle(0x5d6778, 1);
+    g.fillRect(x + w - 46, y - 26, 10, 124);
+    g.fillRect(x + w - 92, y - 20, 72, 8);
+    g.fillRect(x + w - 80, y - 8, 8, 46);
+    g.fillStyle(accent, 0.85);
+    g.fillRect(x + w - 112, y - 28, 96, 12);
+
+    // Signboard
+    g.fillStyle(0x2b2016, 1);
+    g.fillRoundedRect(x + 44, y - 34, 156, 36, 8);
+    g.lineStyle(2, accent, 0.85);
+    g.strokeRoundedRect(x + 44, y - 34, 156, 36, 8);
+
+    this.add.text(x + 122, y - 16, label, {
+      fontSize: '9px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: accentHex,
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+
+    this.add.text(x + w / 2, y + h / 2 + 12, 'UNDER CONSTRUCTION', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#C5CBD8',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+
+    this.add.text(x + w / 2, y + h / 2 + 36, 'COMING SOON', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#888EA0',
+    }).setOrigin(0.5).setDepth(2);
   }
 
   private drawBuildings() {
@@ -1633,7 +2080,7 @@ export class WorldScene extends Phaser.Scene {
     ];
 
     const npcPositions = [
-      { x: 600, y: 750 }, { x: 2000, y: 720 }, { x: 1000, y: 780 },
+      { x: 180, y: 1090 }, { x: 620, y: 1240 }, { x: 600, y: 750 }, { x: 2000, y: 720 }, { x: 1000, y: 780 },
     ];
 
     npcPositions.forEach((pos, i) => {
@@ -1846,6 +2293,9 @@ export class WorldScene extends Phaser.Scene {
       })
       .on('broadcast', { event: 'player:update' }, ({ payload }) => {
         this.handleRemoteUpdate(payload);
+      })
+      .on('broadcast', { event: 'vecindad:update' }, ({ payload }) => {
+        this.handleRemoteVecindadUpdate(payload);
       })
       .on('broadcast', { event: 'player:hit' }, ({ payload }) => {
         this.handleHit(payload);
@@ -2132,6 +2582,31 @@ export class WorldScene extends Phaser.Scene {
       this.chatSystem.clearBubble(playerId);
     }));
     this.bridgeCleanupFns.push(eventBus.on(EVENTS.PLAYER_ACTION_REPORT, () => {}));
+    this.bridgeCleanupFns.push(eventBus.on(EVENTS.PARCEL_STATE_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      this.vecindadState = {
+        ownedParcelId: typeof (payload as Record<string, unknown>).ownedParcelId === 'string'
+          ? (payload as Record<string, string>).ownedParcelId
+          : undefined,
+        buildStage: typeof (payload as Record<string, unknown>).buildStage === 'number'
+          ? (payload as Record<string, number>).buildStage
+          : 0,
+        materials: typeof (payload as Record<string, unknown>).materials === 'number'
+          ? (payload as Record<string, number>).materials
+          : 0,
+      };
+      this.refreshParcelVisuals();
+    }));
+    this.bridgeCleanupFns.push(eventBus.on(EVENTS.VECINDAD_SHARED_STATE_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      const parcels = Array.isArray((payload as { parcels?: unknown[] }).parcels)
+        ? (payload as { parcels: SharedParcelState[] }).parcels
+        : [];
+      this.applySharedVecindadParcels(parcels);
+      if ((payload as { broadcast?: boolean }).broadcast) {
+        this.broadcastVecindadState(parcels);
+      }
+    }));
 
     // Apply avatar partial updates (e.g. smoke on/off) and persist in localStorage
     this.bridgeCleanupFns.push(eventBus.on(EVENTS.AVATAR_SET, (payload: unknown) => {
@@ -2197,6 +2672,112 @@ export class WorldScene extends Phaser.Scene {
     } catch {
       this.mutedPlayerIds = new Set();
     }
+  }
+
+  private loadVecindadState() {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem('waspi_player_state');
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { vecindad?: Partial<VecindadState> };
+      this.vecindadState = {
+        ownedParcelId: typeof parsed.vecindad?.ownedParcelId === 'string' ? parsed.vecindad.ownedParcelId : undefined,
+        buildStage: typeof parsed.vecindad?.buildStage === 'number' ? parsed.vecindad.buildStage : 0,
+        materials: typeof parsed.vecindad?.materials === 'number' ? parsed.vecindad.materials : 0,
+      };
+    } catch {
+      this.vecindadState = {
+        ownedParcelId: undefined,
+        buildStage: 0,
+        materials: 0,
+      };
+    }
+  }
+
+  private async loadSharedVecindadState() {
+    const res = await fetch('/api/vecindad').catch(() => null);
+    if (!res?.ok) return;
+    const json = await res.json().catch(() => null) as { parcels?: SharedParcelState[] } | null;
+    if (!json?.parcels) return;
+    this.applySharedVecindadParcels(json.parcels);
+  }
+
+  private applySharedVecindadParcels(parcels: SharedParcelState[]) {
+    this.sharedParcelState.clear();
+    parcels.forEach((parcel) => {
+      this.sharedParcelState.set(parcel.parcelId, parcel);
+    });
+    this.refreshParcelVisuals();
+  }
+
+  private broadcastVecindadState(parcels: SharedParcelState[]) {
+    if (!this.channel) return;
+    this.channel.send({
+      type: 'broadcast',
+      event: 'vecindad:update',
+      payload: { parcels },
+    });
+  }
+
+  private handleRemoteVecindadUpdate(payload: unknown) {
+    if (!payload || typeof payload !== 'object') return;
+    const parcels = Array.isArray((payload as { parcels?: unknown[] }).parcels)
+      ? (payload as { parcels: SharedParcelState[] }).parcels
+      : [];
+    this.applySharedVecindadParcels(parcels);
+  }
+
+  private updateMaterialNodes() {
+    const now = this.time.now;
+    for (const node of this.materialNodes) {
+      if (node.available || now < node.respawnAt) continue;
+      node.available = true;
+      node.crate.setVisible(true);
+      node.band.setVisible(true);
+      node.label.setVisible(true);
+    }
+  }
+
+  private getNearbyMaterialNode() {
+    return this.materialNodes.find((node) =>
+      node.available &&
+      Phaser.Math.Distance.Between(this.px, this.py, node.x, node.y) < 54
+    );
+  }
+
+  private collectMaterial(node: MaterialNode) {
+    node.available = false;
+    node.respawnAt = this.time.now + 14000;
+    node.crate.setVisible(false);
+    node.band.setVisible(false);
+    node.label.setVisible(false);
+
+    const nextState: VecindadState = {
+      ...this.vecindadState,
+      materials: this.vecindadState.materials + node.value,
+    };
+    this.vecindadState = nextState;
+    this.refreshParcelVisuals();
+    eventBus.emit(EVENTS.VECINDAD_UPDATE_REQUEST, {
+      vecindad: nextState,
+      notice: `Cache personal +${node.value} materiales`,
+    });
+  }
+
+  private buildOwnedParcel() {
+    if (!this.vecindadState.ownedParcelId) return;
+    const currentStage = Math.max(1, this.vecindadState.buildStage);
+    if (currentStage >= MAX_VECINDAD_STAGE) {
+      eventBus.emit(EVENTS.UI_NOTICE, 'Tu casa ya esta al maximo.');
+      return;
+    }
+
+    const cost = getBuildCost(currentStage);
+    if (this.vecindadState.materials < cost) {
+      eventBus.emit(EVENTS.UI_NOTICE, `Necesitas ${cost} materiales para seguir construyendo.`);
+      return;
+    }
+    eventBus.emit(EVENTS.PARCEL_BUILD_REQUEST);
   }
 
   private getCurrentAvatarConfig() {
@@ -2289,8 +2870,10 @@ export class WorldScene extends Phaser.Scene {
     this.syncPosition();
     this.chatSystem.update();
     this.updateDummies();
+    this.updateMaterialNodes();
 
     this.handleInteraction();
+    this.updateParcelPrompt();
 
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyOne)) {
       this.currentWeapon = 'pistol';
@@ -2361,6 +2944,26 @@ export class WorldScene extends Phaser.Scene {
 
   private handleInteraction() {
     if (this.inTransition) return;
+
+    if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
+      const materialNode = this.getNearbyMaterialNode();
+      if (materialNode) {
+        this.collectMaterial(materialNode);
+        return;
+      }
+
+      const parcel = this.getNearbyParcel();
+      if (parcel && !this.vecindadState.ownedParcelId && !this.sharedParcelState.has(parcel.id)) {
+        eventBus.emit(EVENTS.PARCEL_BUY_REQUEST, { parcelId: parcel.id, cost: parcel.cost });
+        return;
+      }
+
+      if (parcel && this.vecindadState.ownedParcelId === parcel.id) {
+        this.buildOwnedParcel();
+        return;
+      }
+    }
+
     if (!Phaser.Input.Keyboard.JustDown(this.keySpace)) return;
 
     // Check proximity to each building door (horizontal distance threshold)
@@ -2379,6 +2982,60 @@ export class WorldScene extends Phaser.Scene {
     } else if (nearCafe) {
       this.transitionToScene('CafeInterior');
     }
+  }
+
+  private updateParcelPrompt() {
+    if (!this.parcelPrompt) return;
+    const materialNode = this.getNearbyMaterialNode();
+    if (materialNode) {
+      this.parcelPrompt.setText(`E RECOGER TU CACHE +${materialNode.value} MATS`);
+      this.parcelPrompt.setColor('#B9FF9E');
+      return;
+    }
+
+    const parcel = this.getNearbyParcel();
+    if (!parcel) {
+      this.parcelPrompt.setText('');
+      return;
+    }
+
+    if (this.vecindadState.ownedParcelId === parcel.id) {
+      const currentStage = Math.max(1, this.vecindadState.buildStage);
+      if (currentStage >= MAX_VECINDAD_STAGE) {
+        this.parcelPrompt.setText(`PARCELA ${parcel.id} COMPLETA`);
+        this.parcelPrompt.setColor('#39FF14');
+        return;
+      }
+      const cost = getBuildCost(currentStage);
+      this.parcelPrompt.setText(`E CONSTRUIR STAGE ${currentStage + 1} - ${cost} MATS`);
+      this.parcelPrompt.setColor('#39FF14');
+      return;
+    }
+
+    const shared = this.sharedParcelState.get(parcel.id);
+    if (shared) {
+      this.parcelPrompt.setText(`PARCELA ${parcel.id} OCUPADA POR ${shared.ownerUsername.toUpperCase()}`);
+      this.parcelPrompt.setColor('#46B3FF');
+      return;
+    }
+
+    if (this.vecindadState.ownedParcelId) {
+      this.parcelPrompt.setText('YA TENES UNA PARCELA EN LA VECINDAD');
+      this.parcelPrompt.setColor('#FFB36A');
+      return;
+    }
+
+    this.parcelPrompt.setText(`E COMPRAR PARCELA ${parcel.id} - ${parcel.cost} TENKS`);
+    this.parcelPrompt.setColor('#F5C842');
+  }
+
+  private getNearbyParcel() {
+    return VECINDAD_PARCELS.find((parcel) =>
+      this.px >= parcel.x - 26 &&
+      this.px <= parcel.x + parcel.w + 26 &&
+      this.py >= parcel.y - 26 &&
+      this.py <= parcel.y + parcel.h + 26
+    );
   }
 
   private transitionToScene(targetKey: string) {

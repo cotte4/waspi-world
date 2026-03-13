@@ -11,7 +11,8 @@ import { getInventory, equipItem, hasUtilityEquipped, replaceInventory } from '@
 import { loadAudioSettings, saveAudioSettings, type AudioSettings } from '@/src/game/systems/AudioSettings';
 import { supabase } from '@/src/lib/supabase';
 import { getTenksBalance, initTenks } from '@/src/game/systems/TenksSystem';
-import { mutePlayer, type PlayerState } from '@/src/lib/playerState';
+import { mutePlayer, normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
+import type { SharedParcelState } from '@/src/lib/vecindad';
 import type { TenksPack } from '@/src/lib/tenksPacks';
 
 const PhaserGame = dynamic(() => import('@/app/components/PhaserGame'), { ssr: false });
@@ -58,6 +59,21 @@ interface PenaltyResultPayload {
 interface PlayerActionsPayload {
   playerId: string;
   username: string;
+}
+
+interface ParcelBuyPayload {
+  parcelId: string;
+  cost: number;
+}
+
+interface VecindadUpdatePayload {
+  vecindad: PlayerState['vecindad'];
+  notice?: string;
+}
+
+interface VecindadSharedPayload {
+  parcels: SharedParcelState[];
+  broadcast?: boolean;
 }
 
 const CHAT_SCENES = new Set(['WorldScene', 'StoreInterior', 'CafeInterior', 'ArcadeInterior', 'HouseInterior']);
@@ -120,7 +136,7 @@ export default function PlayPage() {
       ...loadStoredAvatarConfig(),
       ...player.avatar,
     });
-    saveStoredMutedPlayers(player.mutedPlayers ?? []);
+    saveStoredPlayerState(player);
     replaceInventory(player.inventory);
     initTenks(player.tenks);
     mutedPlayersRef.current = player.mutedPlayers ?? [];
@@ -130,6 +146,72 @@ export default function PlayPage() {
     setGunOn((player.inventory.equipped.utility ?? []).includes('UTIL-GUN-01'));
     setBallOn((player.inventory.equipped.utility ?? []).includes('UTIL-BALL-01'));
     setTenks(player.tenks);
+    eventBus.emit(EVENTS.PARCEL_STATE_CHANGED, player.vecindad);
+  }, []);
+
+  const syncPlayerState = useCallback(async (overridePlayerState?: PlayerState) => {
+    const token = tokenRef.current;
+    if (!token) return;
+
+    const base = overridePlayerState ?? playerState;
+    const nextPlayer: PlayerState = {
+      ...(base ?? {
+        tenks: getTenksBalance(),
+        inventory: getInventory(),
+        avatar: loadStoredAvatarConfig(),
+        mutedPlayers: mutedPlayersRef.current,
+        vecindad: {
+          ownedParcelId: undefined,
+          buildStage: 0,
+          materials: 0,
+        },
+      }),
+      tenks: getTenksBalance(),
+      inventory: getInventory(),
+      avatar: loadStoredAvatarConfig(),
+      mutedPlayers: base?.mutedPlayers ?? mutedPlayersRef.current,
+      vecindad: base?.vecindad ?? {
+        ownedParcelId: undefined,
+        buildStage: 0,
+        materials: 0,
+      },
+    };
+
+    await fetch('/api/player', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        player: {
+          ...nextPlayer,
+        } satisfies PlayerState,
+      }),
+    }).catch(() => undefined);
+  }, [playerState]);
+
+  const loadVecindadSharedState = useCallback(async (session?: Session | null) => {
+    const headers: HeadersInit = {};
+    const token = session?.access_token ?? tokenRef.current;
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const res = await fetch('/api/vecindad', {
+      method: 'GET',
+      headers,
+    }).catch(() => null);
+
+    if (!res?.ok) return null;
+    const json = await res.json().catch(() => null) as { parcels?: SharedParcelState[] } | null;
+    if (json?.parcels) {
+      eventBus.emit(EVENTS.VECINDAD_SHARED_STATE_CHANGED, {
+        parcels: json.parcels,
+        broadcast: false,
+      } satisfies VecindadSharedPayload);
+    }
+    return json;
   }, []);
 
   useEffect(() => {
@@ -256,6 +338,111 @@ export default function PlayPage() {
       })();
     });
 
+    const unsubParcelBuy = eventBus.on(EVENTS.PARCEL_BUY_REQUEST, (payload: unknown) => {
+      const next = payload as ParcelBuyPayload | null;
+      if (!next?.parcelId) return;
+
+      void (async () => {
+        if (!tokenRef.current) {
+          setUiNotice('Inicia sesion para comprar una parcela unica en La Vecindad.');
+          return;
+        }
+
+        const res = await fetch('/api/vecindad', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${tokenRef.current}`,
+          },
+          body: JSON.stringify({
+            action: 'buy',
+            parcelId: next.parcelId,
+          }),
+        }).catch(() => null);
+
+        const json = await res?.json().catch(() => null) as {
+          error?: string;
+          notice?: string;
+          player?: PlayerState;
+          parcels?: SharedParcelState[];
+        } | null;
+
+        if (!res?.ok || !json?.player) {
+          setUiNotice(json?.error ?? 'No pude comprar esa parcela.');
+          return;
+        }
+
+        applyPlayerState(normalizePlayerState(json.player));
+        if (json.parcels) {
+          eventBus.emit(EVENTS.VECINDAD_SHARED_STATE_CHANGED, {
+            parcels: json.parcels,
+            broadcast: true,
+          } satisfies VecindadSharedPayload);
+        }
+        setUiNotice(json.notice ?? `Compraste la parcela ${next.parcelId}.`);
+      })();
+    });
+
+    const unsubParcelBuild = eventBus.on(EVENTS.PARCEL_BUILD_REQUEST, () => {
+      void (async () => {
+        if (!tokenRef.current) {
+          setUiNotice('Inicia sesion para construir en tu parcela.');
+          return;
+        }
+
+        const res = await fetch('/api/vecindad', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${tokenRef.current}`,
+          },
+          body: JSON.stringify({ action: 'build' }),
+        }).catch(() => null);
+
+        const json = await res?.json().catch(() => null) as {
+          error?: string;
+          notice?: string;
+          player?: PlayerState;
+          parcels?: SharedParcelState[];
+        } | null;
+
+        if (!res?.ok || !json?.player) {
+          setUiNotice(json?.error ?? 'No pude mejorar la casa.');
+          return;
+        }
+
+        applyPlayerState(normalizePlayerState(json.player));
+        if (json.parcels) {
+          eventBus.emit(EVENTS.VECINDAD_SHARED_STATE_CHANGED, {
+            parcels: json.parcels,
+            broadcast: true,
+          } satisfies VecindadSharedPayload);
+        }
+        setUiNotice(json.notice ?? 'Casa mejorada.');
+      })();
+    });
+
+    const unsubVecindadUpdate = eventBus.on(EVENTS.VECINDAD_UPDATE_REQUEST, (payload: unknown) => {
+      const next = payload as VecindadUpdatePayload | null;
+      if (!next?.vecindad || !playerState) return;
+
+      const updatedPlayer: PlayerState = {
+        ...playerState,
+        tenks: getTenksBalance(),
+        vecindad: next.vecindad,
+      };
+
+      applyPlayerState(updatedPlayer);
+      void syncPlayerState(updatedPlayer);
+      if (next.notice) setUiNotice(next.notice);
+    });
+
+    const unsubUiNotice = eventBus.on(EVENTS.UI_NOTICE, (payload: unknown) => {
+      if (typeof payload === 'string' && payload.trim()) {
+        setUiNotice(payload);
+      }
+    });
+
     return () => {
       unsubChat();
       unsubInfo();
@@ -269,8 +456,12 @@ export default function PlayPage() {
       unsubShopClose();
       unsubPlayerActions();
       unsubPenalty();
+      unsubParcelBuy();
+      unsubParcelBuild();
+      unsubVecindadUpdate();
+      unsubUiNotice();
     };
-  }, [applyPlayerState]);
+  }, [applyPlayerState, playerState, syncPlayerState]);
 
   useEffect(() => {
     if (!uiNotice) return;
@@ -287,6 +478,7 @@ export default function PlayPage() {
     if (!session?.access_token) {
       tokenRef.current = null;
       setAuthEmail(session?.user?.email ?? null);
+      void loadVecindadSharedState(null);
       return;
     }
 
@@ -301,9 +493,21 @@ export default function PlayPage() {
     });
     if (!res.ok) return;
     const json = await res.json();
-    const player = json.player as PlayerState | undefined;
-    if (player) applyPlayerState(player);
-  }, [applyPlayerState]);
+    const remotePlayer = json.player as PlayerState | undefined;
+    const localPlayer = loadStoredPlayerState();
+    await loadVecindadSharedState(session);
+
+    if (remotePlayer) {
+      const merged = mergeHydratedPlayerState(
+        localPlayer,
+        normalizePlayerState(remotePlayer)
+      );
+      applyPlayerState(merged);
+      if (JSON.stringify(merged) !== JSON.stringify(normalizePlayerState(remotePlayer))) {
+        void syncPlayerState(merged);
+      }
+    }
+  }, [applyPlayerState, loadVecindadSharedState, syncPlayerState]);
 
   const refreshPlayerState = useCallback(async () => {
     let token = tokenRef.current;
@@ -327,8 +531,9 @@ export default function PlayPage() {
     if (!res?.ok) return;
     const json = await res.json();
     const player = json.player as PlayerState | undefined;
-    if (player) applyPlayerState(player);
-  }, [applyPlayerState]);
+    if (player) applyPlayerState(normalizePlayerState(player));
+    await loadVecindadSharedState();
+  }, [applyPlayerState, loadVecindadSharedState]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -368,26 +573,6 @@ export default function PlayPage() {
       timers.forEach((timer) => window.clearTimeout(timer));
     };
   }, [initialCheckout.status, refreshPlayerState]);
-
-  const syncPlayerState = useCallback(async () => {
-    const token = tokenRef.current;
-    if (!token) return;
-
-    await fetch('/api/player', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        player: {
-          tenks: getTenksBalance(),
-          inventory: getInventory(),
-          avatar: loadStoredAvatarConfig(),
-        } satisfies PlayerState,
-      }),
-    }).catch(() => undefined);
-  }, []);
 
   const sendMagicLink = useCallback(async () => {
     if (!supabase) {
@@ -1720,6 +1905,50 @@ function saveStoredAvatarConfig(config: Record<string, unknown>) {
   window.localStorage.setItem(AVATAR_STORAGE_KEY, JSON.stringify(config));
 }
 
+function saveStoredPlayerState(player: PlayerState) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(PLAYER_STATE_STORAGE_KEY, JSON.stringify(player));
+}
+
+function loadStoredPlayerState(): PlayerState | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(PLAYER_STATE_STORAGE_KEY);
+    return raw ? normalizePlayerState(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+function mergeHydratedPlayerState(
+  localPlayer: PlayerState | null,
+  remotePlayer: PlayerState
+): PlayerState {
+  if (!localPlayer) return remotePlayer;
+
+  const remoteParcelId = remotePlayer.vecindad.ownedParcelId;
+  const localParcelId = localPlayer.vecindad.ownedParcelId;
+  const canRecoverPreAuthMaterials =
+    !remoteParcelId &&
+    !localParcelId &&
+    remotePlayer.vecindad.materials === 0 &&
+    localPlayer.vecindad.materials > 0;
+
+  return normalizePlayerState({
+    ...remotePlayer,
+    mutedPlayers: (remotePlayer.mutedPlayers?.length ? remotePlayer.mutedPlayers : localPlayer.mutedPlayers) ?? [],
+    vecindad: {
+      ...remotePlayer.vecindad,
+      ownedParcelId: remoteParcelId,
+      buildStage: remotePlayer.vecindad.buildStage,
+      // Only recover pre-auth farming when the backend still has no vecindad progress at all.
+      materials: canRecoverPreAuthMaterials
+        ? localPlayer.vecindad.materials
+        : remotePlayer.vecindad.materials,
+    },
+  });
+}
+
 function loadStoredMutedPlayers() {
   if (typeof window === 'undefined') return [];
   try {
@@ -1732,11 +1961,6 @@ function loadStoredMutedPlayers() {
   } catch {
     return [];
   }
-}
-
-function saveStoredMutedPlayers(mutedPlayers: string[]) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(PLAYER_STATE_STORAGE_KEY, JSON.stringify({ mutedPlayers }));
 }
 
 function getInitialCheckoutState(): { open: boolean; tab: ShopTab; status: string } {
