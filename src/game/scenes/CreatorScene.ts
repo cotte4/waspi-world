@@ -350,10 +350,8 @@ export class CreatorScene extends Phaser.Scene {
     const src = this.textures.get(sourceKey).getSourceImage() as HTMLImageElement | HTMLCanvasElement;
     const w = (src as any).width as number;
     const h = (src as any).height as number;
-    const canvas = (typeof document !== 'undefined')
-      ? document.createElement('canvas')
-      : null;
-    if (!canvas) return;
+    // Este método solo corre en el cliente, asumimos `document` existente.
+    const canvas = document.createElement('canvas') as HTMLCanvasElement;
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
