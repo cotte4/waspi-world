@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { COLORS } from '../config/constants';
 
-export type AvatarKind = 'procedural' | 'gengar' | 'buho';
+export type AvatarKind = 'procedural' | 'gengar' | 'buho' | 'piplup';
 export type HairStyle = 'SPI' | 'FLA' | 'MOH' | 'X';
 
 export interface AvatarConfig {
@@ -279,7 +279,11 @@ export class AvatarRenderer {
 }
 
 function ensureSeedTexture(scene: Phaser.Scene, kind: Exclude<AvatarKind, 'procedural'>) {
-  const baseKey = kind === 'gengar' ? 'seed_gengar' : 'seed_buho';
+  const baseKey = kind === 'gengar'
+    ? 'seed_gengar'
+    : kind === 'piplup'
+      ? 'seed_piplup'
+      : 'seed_buho';
   const chromaKey = `${baseKey}_avatar`;
 
   if (scene.textures.exists(chromaKey)) return chromaKey;
@@ -376,6 +380,47 @@ function createFallbackSeedTexture(
     ctx.fillRect(39, 29, 4, 4);
     ctx.fillStyle = '#1a102c';
     ctx.fillRect(23, 40, 18, 4);
+  } else if (kind === 'piplup') {
+    ctx.fillStyle = '#4b8fe2';
+    ctx.beginPath();
+    ctx.arc(32, 34, 18, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#d8f1ff';
+    ctx.beginPath();
+    ctx.ellipse(32, 38, 12, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#163b72';
+    ctx.beginPath();
+    ctx.moveTo(18, 26);
+    ctx.lineTo(22, 13);
+    ctx.lineTo(29, 24);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(46, 26);
+    ctx.lineTo(42, 13);
+    ctx.lineTo(35, 24);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(25, 33, 5, 0, Math.PI * 2);
+    ctx.arc(39, 33, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#111111';
+    ctx.beginPath();
+    ctx.arc(25, 33, 2, 0, Math.PI * 2);
+    ctx.arc(39, 33, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#f7d23a';
+    ctx.beginPath();
+    ctx.moveTo(32, 37);
+    ctx.lineTo(26, 42);
+    ctx.lineTo(38, 42);
+    ctx.closePath();
+    ctx.fill();
   } else {
     ctx.fillStyle = '#6b4c2e';
     ctx.beginPath();

@@ -51,6 +51,7 @@ export class BootScene extends Phaser.Scene {
     // If they don't exist, CreatorScene will fall back to procedural preview.
     this.load.image('seed_gengar', '/assets/seeds/gengar.png');
     this.load.image('seed_buho', '/assets/seeds/buho.png');
+    this.load.image('seed_piplup', '/assets/seeds/piplup.png');
   }
 
   create() {

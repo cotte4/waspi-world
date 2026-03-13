@@ -24,12 +24,12 @@ export class ArcadeInterior extends Phaser.Scene {
 
   init(data: { penaltyReward?: { won?: boolean; goals?: number } } = {}) {
     if (data.penaltyReward?.won) {
-      this.rewardMessage = `PREMIO LISTO · ${data.penaltyReward.goals ?? 0} GOLES`;
+      this.rewardMessage = `PREMIO LISTO ï¿½ ${data.penaltyReward.goals ?? 0} GOLES`;
       this.rewardColor = '#39FF14';
       return;
     }
     if (typeof data.penaltyReward?.won === 'boolean') {
-      this.rewardMessage = `PENALES · ${data.penaltyReward.goals ?? 0} GOLES`;
+      this.rewardMessage = `PENALES ï¿½ ${data.penaltyReward.goals ?? 0} GOLES`;
       this.rewardColor = '#F5C842';
       return;
     }
@@ -105,7 +105,7 @@ export class ArcadeInterior extends Phaser.Scene {
     }).setOrigin(0.5);
     createBackButton(this, () => this.exitToWorld());
 
-    this.add.text(width / 2, roomY + roomH + 24, 'TOCA LA MAQUINA · ESC SALIR', {
+    this.add.text(width / 2, roomY + roomH + 24, 'TOCA LA MAQUINA ï¿½ ESC SALIR', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#666666',

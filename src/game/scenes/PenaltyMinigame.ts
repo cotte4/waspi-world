@@ -42,13 +42,13 @@ export class PenaltyMinigame extends Phaser.Scene {
       color: '#F5C842',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, 110, 'AIM + POWER · 5 TIROS', {
+    this.add.text(width / 2, 110, 'AIM + POWER - 5 TIROS', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#888888',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, height - 40, 'SPACE CONFIRMAR · ESC SALIR', {
+    this.add.text(width / 2, height - 40, 'SPACE CONFIRMAR - ESC SALIR', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#777777',
@@ -240,7 +240,7 @@ export class PenaltyMinigame extends Phaser.Scene {
   }
 
   private refreshHud() {
-    this.hud.setText(`TIROS ${this.shotsLeft}  ·  GOLES ${this.goals}`);
+    this.hud.setText(`TIROS ${this.shotsLeft}  -  GOLES ${this.goals}`);
   }
 
   private finishAndExit(won: boolean) {
