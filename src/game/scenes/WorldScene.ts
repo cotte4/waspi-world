@@ -27,6 +27,7 @@ type HitboxArc = Phaser.GameObjects.Arc & { body: Phaser.Physics.Arcade.Body };
 type ArcadeObject = Phaser.GameObjects.GameObject & { destroy: () => void };
 type CombatDummy = Phaser.GameObjects.Arc & { body: Phaser.Physics.Arcade.Body };
 type EquippedPayload = { top?: string; bottom?: string };
+type ShotBullet = Phaser.GameObjects.Rectangle & { damage?: number; knockback?: number; resolvedHit?: boolean };
 type RemoteMoveEvent = {
   player_id: string;
   username: string;
@@ -944,8 +945,10 @@ export class WorldScene extends Phaser.Scene {
     // PVE: bullets vs dummies (training only)
     this.physics.add.overlap(this.bullets, this.dummies, (bObj, dObj) => {
       if (!this.inTraining || !this.pveEnabled) return;
+      const bullet = bObj as ShotBullet;
+      if (bullet.resolvedHit) return;
+      bullet.resolvedHit = true;
       this.destroyArcadeObject(bObj);
-      const bullet = bObj as Phaser.GameObjects.Rectangle & { damage?: number; knockback?: number };
       this.damageDummy(dObj as CombatDummy, bullet.damage ?? WEAPON_STATS[this.currentWeapon].damage, bullet.knockback ?? 12);
     });
 
@@ -1003,7 +1006,7 @@ export class WorldScene extends Phaser.Scene {
     for (let i = 0; i < weapon.pellets; i++) {
       const spreadOffset = weapon.pellets === 1 ? Phaser.Math.FloatBetween(-weapon.spread, weapon.spread) : Phaser.Math.FloatBetween(-weapon.spread, weapon.spread);
       const shotAngle = ang + spreadOffset;
-      const b = this.add.rectangle(this.px, this.py, this.currentWeapon === 'shotgun' ? 8 : 10, this.currentWeapon === 'shotgun' ? 3 : 3, weapon.color, 1) as Phaser.GameObjects.Rectangle & { damage?: number; knockback?: number };
+      const b = this.add.rectangle(this.px, this.py, this.currentWeapon === 'shotgun' ? 8 : 10, this.currentWeapon === 'shotgun' ? 3 : 3, weapon.color, 1) as ShotBullet;
       b.damage = weapon.damage;
       b.knockback = weapon.knockback;
       this.physics.add.existing(b);
@@ -1032,12 +1035,86 @@ export class WorldScene extends Phaser.Scene {
         onComplete: () => tracer.destroy(),
       });
 
+      this.resolveImmediateShot(shotAngle, weapon, b);
+
       this.time.delayedCall(this.currentWeapon === 'shotgun' ? 420 : 900, () => this.destroyArcadeObject(b));
     }
 
     this.cameras.main.shake(this.currentWeapon === 'shotgun' ? 70 : 40, this.currentWeapon === 'shotgun' ? 0.0024 : 0.0012, false);
 
     this.renderCombatHud();
+  }
+
+  private resolveImmediateShot(angle: number, weapon: WeaponStats, bullet: ShotBullet) {
+    const maxRange = this.currentWeapon === 'shotgun' ? 280 : 430;
+    const bestDummy = this.findImmediateDummyTarget(angle, maxRange);
+    if (bestDummy) {
+      bullet.resolvedHit = true;
+      this.damageDummy(bestDummy, weapon.damage, weapon.knockback);
+      this.destroyArcadeObject(bullet);
+      return;
+    }
+
+    if (!this.inTraining || !this.pvpEnabled) return;
+    const bestRemote = this.findImmediateRemoteTarget(angle, maxRange);
+    if (!bestRemote) return;
+
+    bullet.resolvedHit = true;
+    this.channel?.send({
+      type: 'broadcast',
+      event: 'player:hit',
+      payload: { target_id: bestRemote, source_id: this.playerId, dmg: weapon.damage },
+    });
+    this.destroyArcadeObject(bullet);
+  }
+
+  private findImmediateDummyTarget(angle: number, maxRange: number) {
+    if (!this.inTraining || !this.pveEnabled) return null;
+
+    let bestDummy: CombatDummy | null = null;
+    let bestForward = Number.POSITIVE_INFINITY;
+
+    for (const [dummy, state] of this.dummyStates.entries()) {
+      if (!state.alive) continue;
+      const forward = this.getForwardShotDistance(angle, dummy.x, dummy.y);
+      if (forward === null || forward > maxRange || forward >= bestForward) continue;
+      const radius = Math.max(18, dummy.displayWidth / 2 + 8);
+      const lateral = this.getLateralShotDistance(angle, dummy.x, dummy.y);
+      if (lateral > radius) continue;
+      bestDummy = dummy;
+      bestForward = forward;
+    }
+
+    return bestDummy;
+  }
+
+  private findImmediateRemoteTarget(angle: number, maxRange: number) {
+    let bestPlayerId: string | null = null;
+    let bestForward = Number.POSITIVE_INFINITY;
+
+    for (const [playerId, rp] of this.remotePlayers.entries()) {
+      const forward = this.getForwardShotDistance(angle, rp.x, rp.y);
+      if (forward === null || forward > maxRange || forward >= bestForward) continue;
+      const lateral = this.getLateralShotDistance(angle, rp.x, rp.y);
+      if (lateral > 26) continue;
+      bestPlayerId = playerId;
+      bestForward = forward;
+    }
+
+    return bestPlayerId;
+  }
+
+  private getForwardShotDistance(angle: number, targetX: number, targetY: number) {
+    const dx = targetX - this.px;
+    const dy = targetY - this.py;
+    const forward = dx * Math.cos(angle) + dy * Math.sin(angle);
+    return forward >= 0 ? forward : null;
+  }
+
+  private getLateralShotDistance(angle: number, targetX: number, targetY: number) {
+    const dx = targetX - this.px;
+    const dy = targetY - this.py;
+    return Math.abs(-dx * Math.sin(angle) + dy * Math.cos(angle));
   }
 
   private refreshUtilitiesFromInventory() {
@@ -1833,11 +1910,14 @@ export class WorldScene extends Phaser.Scene {
     // Shooter-side: if my bullet hits remote hitbox, send hit event
     this.physics.add.overlap(this.bullets, hitbox, (bObj) => {
       if (!this.inTraining || !this.pvpEnabled) return;
+      const bullet = bObj as ShotBullet;
+      if (bullet.resolvedHit) return;
+      bullet.resolvedHit = true;
       this.destroyArcadeObject(bObj);
       this.channel?.send({
         type: 'broadcast',
         event: 'player:hit',
-        payload: { target_id: id, source_id: this.playerId, dmg: 10 },
+        payload: { target_id: id, source_id: this.playerId, dmg: bullet.damage ?? WEAPON_STATS[this.currentWeapon].damage },
       });
     });
 
@@ -2284,7 +2364,6 @@ export class WorldScene extends Phaser.Scene {
     }
     this.audioCtx = undefined;
     this.audioUnlocked = false;
-    eventBus.emit(EVENTS.PLAYER_PRESENCE, []);
   }
 
   private emitPresence() {

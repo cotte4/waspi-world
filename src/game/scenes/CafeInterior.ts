@@ -91,6 +91,8 @@ export class CafeInterior extends Phaser.Scene {
     this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    this.cameras.main.resetFX();
+    this.cameras.main.setAlpha(1);
     this.cameras.main.fadeIn(250, 0, 0, 0);
   }
 
@@ -142,4 +144,3 @@ export class CafeInterior extends Phaser.Scene {
     this.player.setDepth(10 + Math.floor(this.py / 10));
   }
 }
-

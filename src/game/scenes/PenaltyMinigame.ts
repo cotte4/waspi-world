@@ -149,6 +149,8 @@ export class PenaltyMinigame extends Phaser.Scene {
 
     this.refreshHud();
     this.redrawAimGuide();
+    this.cameras.main.resetFX();
+    this.cameras.main.setAlpha(1);
     this.cameras.main.fadeIn(220, 0, 0, 0);
   }
 

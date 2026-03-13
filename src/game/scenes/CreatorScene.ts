@@ -351,6 +351,8 @@ export class CreatorScene extends Phaser.Scene {
     this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.refreshControlHighlights();
 
+    this.cameras.main.resetFX();
+    this.cameras.main.setAlpha(1);
     this.cameras.main.fadeIn(250, 0, 0, 0);
   }
 

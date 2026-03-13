@@ -56,6 +56,7 @@ interface PlayerActionsPayload {
 }
 
 const CHAT_SCENES = new Set(['WorldScene', 'StoreInterior', 'CafeInterior', 'ArcadeInterior', 'HouseInterior']);
+const INTERIOR_SOCIAL_SCENES = new Set(['StoreInterior', 'CafeInterior', 'ArcadeInterior', 'HouseInterior']);
 
 export default function PlayPage() {
   const initialInventory = useMemo(() => getInventory(), []);
@@ -97,6 +98,7 @@ export default function PlayPage() {
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(initialAudioSettings);
   const tokenRef = useRef<string | null>(null);
   const mutedPlayersRef = useRef<string[]>(loadStoredMutedPlayers());
+  const lastInteriorChatSentRef = useRef(0);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const chatVisible = CHAT_SCENES.has(activeScene);
@@ -637,6 +639,111 @@ export default function PlayPage() {
       inputRef.current?.blur();
     }
   }, [chatVisible]);
+
+  useEffect(() => {
+    if (!playerInfo || !INTERIOR_SOCIAL_SCENES.has(activeScene)) return;
+
+    if (!supabase) {
+      const fallbackTimer = window.setTimeout(() => {
+        setPresencePlayers([playerInfo]);
+      }, 0);
+      return () => window.clearTimeout(fallbackTimer);
+    }
+
+    const channel = supabase.channel(`waspi-interior:${activeScene}`, {
+      config: {
+        presence: { key: playerInfo.playerId },
+        broadcast: { self: false },
+      },
+    });
+
+    const syncPresence = () => {
+      const rawState = channel.presenceState();
+      const nextPlayers = new Map<string, PresencePlayer>();
+      Object.values(rawState).forEach((entries) => {
+        const list = Array.isArray(entries) ? entries : [];
+        list.forEach((entry) => {
+          if (!entry || typeof entry !== 'object') return;
+          const safeEntry = entry as Record<string, unknown>;
+          const playerId = typeof safeEntry.playerId === 'string'
+            ? safeEntry.playerId
+            : '';
+          const username = typeof safeEntry.username === 'string'
+            ? safeEntry.username
+            : '';
+          if (!playerId || !username) return;
+          nextPlayers.set(playerId, { playerId, username });
+        });
+      });
+      nextPlayers.set(playerInfo.playerId, playerInfo);
+      setPresencePlayers(Array.from(nextPlayers.values()));
+    };
+
+    channel
+      .on('presence', { event: 'sync' }, syncPresence)
+      .on('broadcast', { event: 'player:chat' }, ({ payload }) => {
+        const next = payload as { playerId?: string; username?: string; message?: string } | null;
+        const playerId = next?.playerId;
+        const username = next?.username;
+        const message = next?.message;
+        if (!playerId || !message || !username) return;
+        if (mutedPlayersRef.current.includes(playerId)) return;
+        setMessages((prev) => [
+          ...prev.slice(-19),
+          {
+            id: `${Date.now()}-${Math.random()}`,
+            playerId,
+            username,
+            message,
+            isMe: false,
+          },
+        ]);
+      })
+      .subscribe(async (status) => {
+        if (status !== 'SUBSCRIBED') return;
+        await channel.track({
+          playerId: playerInfo.playerId,
+          username: playerInfo.username,
+          scene: activeScene,
+        });
+        syncPresence();
+      });
+
+    const unsubscribeInteriorChat = eventBus.on(EVENTS.CHAT_SEND, (rawMessage: unknown) => {
+      if (typeof rawMessage !== 'string') return;
+      const now = Date.now();
+      const trimmed = rawMessage.trim().slice(0, CHAT.MAX_CHARS);
+      if (!trimmed || now - lastInteriorChatSentRef.current < CHAT.RATE_LIMIT_MS) return;
+
+      const safeMessage = trimmed.replace(/\b(boludo|pelotudo|idiota|mierda|puta|puto)\b/gi, '***');
+      setMessages((prev) => [
+        ...prev.slice(-19),
+        {
+          id: `${Date.now()}-${Math.random()}`,
+          playerId: playerInfo.playerId,
+          username: playerInfo.username,
+          message: safeMessage,
+          isMe: true,
+        },
+      ]);
+      lastInteriorChatSentRef.current = now;
+      channel.send({
+        type: 'broadcast',
+        event: 'player:chat',
+        payload: {
+          playerId: playerInfo.playerId,
+          username: playerInfo.username,
+          message: safeMessage,
+        },
+      });
+    });
+
+    return () => {
+      unsubscribeInteriorChat();
+      void channel.untrack();
+      void channel.unsubscribe();
+    };
+  }, [activeScene, playerInfo]);
 
   const sendMessage = useCallback(() => {
     const now = Date.now();
