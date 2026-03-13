@@ -330,6 +330,7 @@ export class ArcadeInterior extends Phaser.Scene {
 
     if (this.sound.locked) {
       this.unlockMusicHandler = () => {
+        this.unlockMusicHandler = undefined;
         fadeIn();
       };
       this.sound.once(Phaser.Sound.Events.UNLOCKED, this.unlockMusicHandler);
@@ -341,6 +342,10 @@ export class ArcadeInterior extends Phaser.Scene {
 
   private applyMusicSettings() {
     if (!this.audioSettings.musicEnabled) {
+      if (this.unlockMusicHandler) {
+        this.sound.off(Phaser.Sound.Events.UNLOCKED, this.unlockMusicHandler);
+        this.unlockMusicHandler = undefined;
+      }
       this.stopArcadeMusic();
       return;
     }

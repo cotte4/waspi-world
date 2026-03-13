@@ -18,7 +18,7 @@ export class BootScene extends Phaser.Scene {
       color: '#F5C842',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, height / 2 - 20, 'Open World · Chat Social · Streetwear', {
+    this.add.text(width / 2, height / 2 - 20, 'Open World - Chat Social - Streetwear', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", "Courier New", monospace',
       color: '#888888',
@@ -58,3 +58,4 @@ export class BootScene extends Phaser.Scene {
     this.scene.start('CreatorScene');
   }
 }
+
