@@ -371,7 +371,8 @@ export class CreatorScene extends Phaser.Scene {
       if (isGreen) d[i + 3] = 0;
     }
     ctx.putImageData(img, 0, 0);
-    this.textures
+    const textures = this.textures as Phaser.Textures.TextureManager;
+    textures
       .addCanvas(outKey, canvas as HTMLCanvasElement)
       .setFilter(Phaser.Textures.FilterMode.NEAREST);
   }
