@@ -36,52 +36,63 @@ export class AvatarRenderer {
   private buildAvatar(scene: Phaser.Scene) {
     const c = this.config;
 
-    // Shadow
-    const shadow = scene.add.ellipse(0, 28, 22, 7, 0x000000, 0.45);
+    // Shadow (más ancha y difusa)
+    const shadow = scene.add.ellipse(0, 30, 26, 9, 0x000000, 0.5);
 
-    // Legs (split into left/right for walk animation)
-    this.leftLeg = scene.add.rectangle(-4, 18, 8, 14, c.bottomColor);
-    this.rightLeg = scene.add.rectangle(4, 18, 8, 14, c.bottomColor);
+    // Piernas — cuerpo más pequeño, cabeza más grande (proporción chibi)
+    this.leftLeg = scene.add.rectangle(-4, 19, 7, 13, c.bottomColor);
+    this.rightLeg = scene.add.rectangle(4, 19, 7, 13, c.bottomColor);
 
-    // Body / shirt
-    const body = scene.add.rectangle(0, 3, 20, 18, c.topColor);
+    // Cuerpo / remera (más corto)
+    const body = scene.add.rectangle(0, 5, 18, 15, c.topColor);
 
-    // Collar / neck
-    const neck = scene.add.rectangle(0, -6, 7, 5, c.bodyColor);
+    // Cuello
+    const neck = scene.add.rectangle(0, -4, 7, 4, c.bodyColor);
 
-    // Arms (left and right)
-    this.leftArm = scene.add.rectangle(-12, 4, 7, 14, c.topColor);
-    this.rightArm = scene.add.rectangle(12, 4, 7, 14, c.topColor);
+    // Brazos
+    this.leftArm = scene.add.rectangle(-11, 5, 6, 13, c.topColor);
+    this.rightArm = scene.add.rectangle(11, 5, 6, 13, c.topColor);
 
-    // Head
-    const head = scene.add.arc(0, -18, 13, 0, 360, false, c.bodyColor);
+    // Cabeza más grande
+    const head = scene.add.arc(0, -18, 15, 0, 360, false, c.bodyColor);
 
-    // Hair top (dome)
-    const hairTop = scene.add.arc(0, -24, 13, 180, 360, false, c.hairColor);
-    // Hair sides
-    const hairL = scene.add.rectangle(-12, -20, 5, 10, c.hairColor);
-    const hairR = scene.add.rectangle(12, -20, 5, 10, c.hairColor);
-    // Hair back
-    const hairBack = scene.add.rectangle(0, -30, 22, 8, c.hairColor);
+    // Contorno oscuro tipo “stroke” alrededor de la cabeza/cuerpo
+    const headOutline = scene.add.arc(0, -18, 16, 0, 360, true, 0x000000);
+    headOutline.setAlpha(0.7);
 
-    // Eye whites
-    const eyeWhiteL = scene.add.arc(-5, -20, 4.5, 0, 360, false, 0xFFFFFF);
-    const eyeWhiteR = scene.add.arc(5, -20, 4.5, 0, 360, false, 0xFFFFFF);
+    // Pelo top (dome)
+    const hairTop = scene.add.arc(0, -25, 15, 180, 360, false, c.hairColor);
+    const hairL = scene.add.rectangle(-13, -20, 5, 11, c.hairColor);
+    const hairR = scene.add.rectangle(13, -20, 5, 11, c.hairColor);
+    const hairBack = scene.add.rectangle(0, -30, 24, 8, c.hairColor);
 
-    // Pupils
-    const pupilL = scene.add.arc(-5, -19, 2.8, 0, 360, false, c.eyeColor);
-    const pupilR = scene.add.arc(5, -19, 2.8, 0, 360, false, c.eyeColor);
+    // Ojos: un toque más separados y “tristes”
+    const eyeWhiteL = scene.add.arc(-6, -20, 4.8, 0, 360, false, 0xFFFFFF);
+    const eyeWhiteR = scene.add.arc(6, -20, 4.8, 0, 360, false, 0xFFFFFF);
+    const pupilL = scene.add.arc(-6, -19, 2.6, 0, 360, false, c.eyeColor);
+    const pupilR = scene.add.arc(6, -19, 2.6, 0, 360, false, c.eyeColor);
+
+    // Pequeña caída en los ojos (parpado) para el mood
+    const eyelidL = scene.add.rectangle(-6, -21.5, 6, 2, 0xE0B090);
+    const eyelidR = scene.add.rectangle(6, -21.5, 6, 2, 0xE0B090);
 
     // Eye shine
-    const shineL = scene.add.arc(-3.5, -20.5, 1.2, 0, 360, false, 0xFFFFFF);
-    const shineR = scene.add.arc(6.5, -20.5, 1.2, 0, 360, false, 0xFFFFFF);
+    const shineL = scene.add.arc(-4.2, -20.8, 1.1, 0, 360, false, 0xFFFFFF);
+    const shineR = scene.add.arc(7.0, -20.8, 1.1, 0, 360, false, 0xFFFFFF);
 
-    // Blush
-    const blushL = scene.add.arc(-8, -16, 3, 0, 360, false, 0xFF9999, 0.35);
-    const blushR = scene.add.arc(8, -16, 3, 0, 360, false, 0xFF9999, 0.35);
+    // Blush más sutil
+    const blushL = scene.add.arc(-9, -15.5, 3, 0, 360, false, 0xFF9999, 0.28);
+    const blushR = scene.add.arc(9, -15.5, 3, 0, 360, false, 0xFF9999, 0.28);
+
+    // Contorno inferior del cuerpo
+    const bodyOutline = scene.add.rectangle(0, 5, 19, 16);
+    bodyOutline.setStrokeStyle(2, 0x000000, 0.8);
+    bodyOutline.setFillStyle(0x000000, 0); // solo borde
 
     this.container.add([
       shadow,
+      headOutline,
+      bodyOutline,
       this.leftLeg, this.rightLeg,
       this.leftArm, this.rightArm,
       body, neck,
@@ -89,6 +100,7 @@ export class AvatarRenderer {
       hairBack, hairTop, hairL, hairR,
       eyeWhiteL, eyeWhiteR,
       pupilL, pupilR,
+      eyelidL, eyelidR,
       shineL, shineR,
       blushL, blushR,
     ]);

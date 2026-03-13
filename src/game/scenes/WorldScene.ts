@@ -37,6 +37,10 @@ export class WorldScene extends Phaser.Scene {
   private chatSystem!: ChatSystem;
   private lastChatSent = 0;
 
+  // Interaction
+  private keySpace!: Phaser.Input.Keyboard.Key;
+  private inTransition = false;
+
   // Multiplayer
   private remotePlayers = new Map<string, RemotePlayer>();
   private lastPosSent = 0;
@@ -44,6 +48,10 @@ export class WorldScene extends Phaser.Scene {
 
   constructor() {
     super({ key: 'WorldScene' });
+  }
+
+  init() {
+    this.inTransition = false;
   }
 
   create() {
@@ -57,6 +65,13 @@ export class WorldScene extends Phaser.Scene {
     this.drawBuildings();
     this.drawStreet();
     this.drawLampPosts();
+
+    // Multiplayer status indicator (tiny debug text)
+    const statusText = this.add.text(8, 8, '', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", "Courier New", monospace',
+      color: '#5555AA',
+    }).setScrollFactor(0).setDepth(9999);
 
     // Invisible camera target
     this.playerBody = this.add.rectangle(this.px, this.py, 2, 2, 0x000000, 0).setDepth(0);
@@ -88,6 +103,7 @@ export class WorldScene extends Phaser.Scene {
     this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
     // Camera
     this.cameras.main.setBounds(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
@@ -101,7 +117,8 @@ export class WorldScene extends Phaser.Scene {
     this.setupReactBridge();
 
     // Supabase Realtime
-    this.setupRealtime();
+    const mode = this.setupRealtime();
+    statusText.setText(mode === 'multiplayer' ? 'MULTI: ONLINE' : 'MULTI: SOLO MODE');
 
     // Notify React that player is ready
     eventBus.emit(EVENTS.PLAYER_INFO, {
@@ -133,27 +150,44 @@ export class WorldScene extends Phaser.Scene {
   private drawStreet() {
     const g = this.add.graphics().setDepth(1);
 
-    // North sidewalk
+    // North sidewalk base
     g.fillStyle(COLORS.SIDEWALK);
     g.fillRect(0, ZONES.NORTH_SIDEWALK_Y, WORLD.WIDTH, ZONES.NORTH_SIDEWALK_H);
 
-    // Street
+    // Street base
     g.fillStyle(COLORS.STREET);
     g.fillRect(0, ZONES.STREET_Y, WORLD.WIDTH, ZONES.STREET_H);
 
-    // Center dashes
-    const dashY = ZONES.STREET_Y + ZONES.STREET_H / 2;
-    g.fillStyle(0xFFFFFF, 0.15);
-    for (let dx = 0; dx < WORLD.WIDTH; dx += 80) {
-      g.fillRect(dx, dashY - 2, 48, 4);
+    // Faux tile / pattern para que el asfalto no sea un plano liso
+    g.lineStyle(1, 0x191922, 0.45);
+    const tileSize = 32;
+    for (let x = 0; x < WORLD.WIDTH; x += tileSize) {
+      g.lineBetween(x, ZONES.STREET_Y, x, ZONES.STREET_Y + ZONES.STREET_H);
+    }
+    for (let y = ZONES.STREET_Y; y <= ZONES.STREET_Y + ZONES.STREET_H; y += tileSize) {
+      g.lineBetween(0, y, WORLD.WIDTH, y);
     }
 
-    // South sidewalk
+    // Center dashes
+    const dashY = ZONES.STREET_Y + ZONES.STREET_H / 2;
+    g.fillStyle(0xFFFFFF, 0.12);
+    for (let dx = 0; dx < WORLD.WIDTH; dx += 90) {
+      g.fillRect(dx, dashY - 2, 42, 3);
+    }
+
+    // South sidewalk base
     g.fillStyle(COLORS.SIDEWALK);
     g.fillRect(0, ZONES.SOUTH_SIDEWALK_Y, WORLD.WIDTH, ZONES.SOUTH_SIDEWALK_H);
 
+    // Textura sutil en veredas
+    g.lineStyle(1, 0x20202C, 0.35);
+    for (let x = 0; x < WORLD.WIDTH; x += tileSize * 2) {
+      g.lineBetween(x, ZONES.NORTH_SIDEWALK_Y, x, ZONES.NORTH_SIDEWALK_Y + ZONES.NORTH_SIDEWALK_H);
+      g.lineBetween(x, ZONES.SOUTH_SIDEWALK_Y, x, ZONES.SOUTH_SIDEWALK_Y + ZONES.SOUTH_SIDEWALK_H);
+    }
+
     // Curb lines
-    g.lineStyle(2, 0x333344, 0.8);
+    g.lineStyle(2, 0x262636, 0.9);
     g.strokeRect(0, ZONES.NORTH_SIDEWALK_Y, WORLD.WIDTH, ZONES.NORTH_SIDEWALK_H);
     g.strokeRect(0, ZONES.SOUTH_SIDEWALK_Y, WORLD.WIDTH, ZONES.SOUTH_SIDEWALK_H);
   }
@@ -166,8 +200,22 @@ export class WorldScene extends Phaser.Scene {
     g.fillRect(0, ZONES.PLAZA_Y, WORLD.WIDTH, WORLD.HEIGHT - ZONES.PLAZA_Y);
 
     // Plaza stone area
-    g.fillStyle(0x111118);
-    g.fillRect(1100, ZONES.PLAZA_Y + 50, 1000, 600);
+    g.fillStyle(0x101018);
+    const px = 1100;
+    const py = ZONES.PLAZA_Y + 50;
+    const pw = 1000;
+    const ph = 600;
+    g.fillRect(px, py, pw, ph);
+
+    // Sutil patrón cuadriculado en la plaza
+    g.lineStyle(1, 0x1A1A24, 0.45);
+    const tile = 32;
+    for (let x = px; x < px + pw; x += tile) {
+      g.lineBetween(x, py, x, py + ph);
+    }
+    for (let y = py; y <= py + ph; y += tile) {
+      g.lineBetween(px, y, px + pw, y);
+    }
 
     // Fountain
     const fx = 1600, fy = ZONES.PLAZA_Y + 300;
@@ -196,6 +244,26 @@ export class WorldScene extends Phaser.Scene {
       fontFamily: '"Press Start 2P", monospace',
       color: '#334455',
     }).setOrigin(0.5).setDepth(2);
+  }
+
+  private drawVignette() {
+    // Viñeta simple: círculo oscuro grande sobre todo el viewport
+    const { width, height } = this.cameras.main;
+    const vignette = this.add.graphics().setDepth(9999);
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    const radius = Math.max(width, height) * 0.9;
+    const steps = 6;
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1);
+      const alpha = Phaser.Math.Linear(0.0, 0.65, t);
+      vignette.fillStyle(0x000000, alpha);
+      vignette.fillCircle(centerX, centerY, radius * (0.35 + t * 0.65));
+    }
+
+    vignette.setScrollFactor(0);
+    vignette.setBlendMode(Phaser.BlendModes.MULTIPLY);
   }
 
   private drawBench(g: Phaser.GameObjects.Graphics, x: number, y: number) {
@@ -563,10 +631,10 @@ export class WorldScene extends Phaser.Scene {
 
   // ─── Realtime / Multiplayer ──────────────────────────────────────────────────
 
-  private setupRealtime() {
+  private setupRealtime(): 'multiplayer' | 'solo' {
     if (!supabase || !isConfigured) {
       console.log('[Waspi] Supabase not configured — solo mode');
-      return;
+      return 'solo';
     }
 
     this.channel = supabase.channel('waspi-world', {
@@ -599,6 +667,7 @@ export class WorldScene extends Phaser.Scene {
           },
         });
       });
+    return 'multiplayer';
   }
 
   private handleRemoteJoin(payload: { playerId: string; username: string; x: number; y: number }) {
@@ -731,10 +800,15 @@ export class WorldScene extends Phaser.Scene {
 
   private getOrCreatePlayerId(): string {
     if (typeof window === 'undefined') return crypto.randomUUID();
-    const stored = localStorage.getItem('waspi_player_id');
+
+    // Use per-tab session ID so each browser tab is a distinct player,
+    // even si comparten localStorage.
+    const key = 'waspi_session_id';
+    const stored = window.sessionStorage.getItem(key);
     if (stored) return stored;
+
     const id = crypto.randomUUID();
-    localStorage.setItem('waspi_player_id', id);
+    window.sessionStorage.setItem(key, id);
     return id;
   }
 
@@ -756,6 +830,8 @@ export class WorldScene extends Phaser.Scene {
     this.syncPosition();
     this.chatSystem.update();
 
+    this.handleInteraction();
+
     // Interpolate remote players
     for (const [, rp] of this.remotePlayers) {
       rp.x = Phaser.Math.Linear(rp.x, rp.targetX, 0.18);
@@ -765,6 +841,38 @@ export class WorldScene extends Phaser.Scene {
       rp.nameplate.setPosition(rp.x, rp.y - 46);
       this.chatSystem.updatePosition(rp.avatar.getContainer().name ?? '', rp.x, rp.y);
     }
+  }
+
+  // ─── Interaction ───────────────────────────────────────────────────────────────
+
+  private handleInteraction() {
+    if (this.inTransition) return;
+    if (!Phaser.Input.Keyboard.JustDown(this.keySpace)) return;
+
+    // Check proximity to each building door (horizontal distance threshold)
+    const arcadeDoorX = BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2;
+    const storeDoorX = BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2;
+    const cafeDoorX = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
+
+    const nearArcade = Math.abs(this.px - arcadeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
+    const nearStore = Math.abs(this.px - storeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
+    const nearCafe = Math.abs(this.px - cafeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
+
+    if (nearArcade) {
+      this.transitionToScene('ArcadeInterior');
+    } else if (nearStore) {
+      this.transitionToScene('StoreInterior');
+    } else if (nearCafe) {
+      this.transitionToScene('CafeInterior');
+    }
+  }
+
+  private transitionToScene(targetKey: string) {
+    this.inTransition = true;
+    this.cameras.main.fadeOut(250, 0, 0, 0);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      this.scene.start(targetKey);
+    });
   }
 
   shutdown() {
