@@ -350,7 +350,10 @@ export class CreatorScene extends Phaser.Scene {
     const src = this.textures.get(sourceKey).getSourceImage() as HTMLImageElement | HTMLCanvasElement;
     const w = (src as any).width as number;
     const h = (src as any).height as number;
-    const canvas = document.createElement('canvas');
+    const canvas = (typeof document !== 'undefined')
+      ? document.createElement('canvas')
+      : null;
+    if (!canvas) return;
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -370,7 +373,9 @@ export class CreatorScene extends Phaser.Scene {
       if (isGreen) d[i + 3] = 0;
     }
     ctx.putImageData(img, 0, 0);
-    this.textures.addCanvas(outKey, canvas).setFilter(Phaser.Textures.FilterMode.NEAREST);
+    this.textures
+      .addCanvas(outKey, canvas as HTMLCanvasElement)
+      .setFilter(Phaser.Textures.FilterMode.NEAREST);
   }
 }
 

@@ -1,10 +1,10 @@
 # WASPI WORLD — Product Requirements Document
 
-**Versión:** 1.1 — MVP
-**Estado:** En desarrollo
+**Versión:** 1.2 — MVP ampliado
+**Estado:** En desarrollo (client jugable en Vercel)
 **Autor:** Memas AI Solutions
 **Fecha:** Marzo 2026
-**Última actualización:** 2026-03-13 — Fase 1 scaffoldeada y corriendo
+**Última actualización:** 2026-03-13 — Mundo jugable con creator, inventario y penales
 
 ---
 
@@ -216,28 +216,33 @@ WebSockets via **Supabase Realtime** (Channels). Canal global `waspi-world`.
 
 ### 5.1 Sistema de avatar
 
-| Parámetro | Opciones MVP |
+| Parámetro | Opciones MVP actuales |
 |---|---|
 | Color de piel | 6 tonos (claro a oscuro) |
 | Color de ojos | 6 colores |
 | Color de pelo | 6 colores |
-| Estilo de pelo | 4 estilos (spiky, flat, mohawk, none) |
-| Ropa superior | Dinámico según inventario |
-| Ropa inferior | Dinámico según inventario |
+| Estilo de pelo | 4 estilos (spiky, flat, mohawk, buzz/none) |
+| Semilla visual | 3 seeds (`PROC`, `GEN`, `BUH`) que afectan el sprite base |
+| Slider PP | 0–10 (escala parte inferior del cuerpo, efecto cómico) |
+| Slider TT | 0–10 (escala parte superior del cuerpo, efecto cómico) |
+| Username | Campo obligatorio en creator, visible en nameplate y chat |
+| Ropa superior | Dinámico según inventario/equipamiento |
+| Ropa inferior | Dinámico según inventario/equipamiento |
+| Utilidades | Ítems equipables tipo cigarrillo, arma, pelota |
 
-### 5.2 Sistema de clothing
+### 5.2 Sistema de clothing + utilidades
 
 Capas de rendering (abajo hacia arriba):
 1. Sombra (ellipse en el piso)
-2. Piernas base (color de piel)
+2. Piernas base (color de piel, afectadas por slider PP)
 3. Ropa inferior (cargo, pantalón)
-4. Cuerpo/torso base (color de piel)
+4. Cuerpo/torso base (color de piel, afectado por slider TT)
 5. Ropa superior (remera, hoodie)
 6. Brazos (color de piel, swing animado)
-7. Cabeza (círculo, color de piel)
+7. Cabeza (círculo/“blob” estilo Binding of Isaac)
 8. Pelo (según estilo y color)
-9. Ojos (esclerótica + pupila + brillo)
-10. Accesorios (gorras, lentes — post-MVP)
+9. Utilidades visibles (cigarrillo, arma, pelota) según inventario
+10. Ojos/minimals y efectos (smoke puff, balas, etc.)
 
 ### 5.3 Movimiento y colisión
 
