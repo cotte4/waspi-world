@@ -51,6 +51,7 @@ export class BootScene extends Phaser.Scene {
     this.load.image('seed_gengar', '/assets/seeds/gengar.png');
     this.load.image('seed_buho', '/assets/seeds/buho.png');
     this.load.image('seed_piplup', '/assets/seeds/piplup.png');
+    this.load.audio('arcade_theme', '/assets/audio/arcade-theme.mp3');
   }
 
   create() {

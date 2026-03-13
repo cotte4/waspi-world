@@ -114,7 +114,7 @@ const MAX_REMOTE_CHAT_DISTANCE = 2600;
 const LOCAL_HIT_COOLDOWN_MS = 180;
 const DUMMY_RESPAWN_MS = 1800;
 const PLAZA_RESPAWN_X = 980;
-const PLAZA_RESPAWN_Y = ZONES.PLAZA_Y + 250;
+const PLAZA_RESPAWN_Y = ZONES.PLAZA_Y + 72;
 const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
   pistol: {
     label: 'PISTOL',
@@ -260,6 +260,10 @@ export class WorldScene extends Phaser.Scene {
   private arenaNotice?: Phaser.GameObjects.Text;
   private audioCtx?: AudioContext;
   private audioUnlocked = false;
+  private worldPointerShootHandler?: (p: Phaser.Input.Pointer) => void;
+  private touchPointerDownHandler?: (p: Phaser.Input.Pointer) => void;
+  private touchPointerMoveHandler?: (p: Phaser.Input.Pointer) => void;
+  private touchPointerEndHandler?: () => void;
 
   // Training zone (PVE + PVP)
   private inTraining = false;
@@ -436,7 +440,7 @@ export class WorldScene extends Phaser.Scene {
       { x: ZONES.TRAINING_X + 560, y: ZONES.TRAINING_Y + 140, archetype: 'tank' },
       { x: ZONES.TRAINING_X + 720, y: ZONES.TRAINING_Y + 250, archetype: 'shooter' },
       { x: ZONES.TRAINING_X + 810, y: ZONES.TRAINING_Y + 120, archetype: 'rusher' },
-      { x: ZONES.TRAINING_X + ZONES.TRAINING_W / 2, y: ZONES.TRAINING_Y + ZONES.TRAINING_H / 2, archetype: 'boss' },
+      { x: ZONES.TRAINING_X + ZONES.TRAINING_W - 110, y: ZONES.TRAINING_Y + 90, archetype: 'boss' },
     ];
     dummyPositions.forEach((p, index) => this.spawnTrainingDummy(p.x, p.y, index, p.archetype));
   }
@@ -666,12 +670,13 @@ export class WorldScene extends Phaser.Scene {
     state.nameplate.setText('DOWN');
     state.nameplate.setColor('#888888');
     this.playCombatTone(state.isBoss ? 120 : 160, 0.16, 'sawtooth', 0.06);
-    this.trainingScore += 1;
-    if (this.trainingHud) {
-      this.trainingHud.setText(`TRAINING KOs ${this.trainingScore}`);
-    }
     if (state.isBoss) {
       this.showArenaNotice('BOSS DOWN', '#39FF14');
+    } else {
+      this.trainingScore += 1;
+      if (this.trainingHud) {
+        this.trainingHud.setText(`TRAINING KOs ${this.trainingScore}`);
+      }
     }
 
     const burst = this.add.text(dummy.x, dummy.y - 18, 'KO', {
@@ -742,7 +747,8 @@ export class WorldScene extends Phaser.Scene {
       let targetY = state.originY + Math.sin(state.phase * 1.3) * 10;
 
       const distToPlayer = Phaser.Math.Distance.Between(dummy.x, dummy.y, this.px, this.py);
-      if (this.inTraining && distToPlayer < 280) {
+      const aggroRange = state.isBoss ? 420 : 280;
+      if (this.inTraining && distToPlayer < aggroRange) {
         const angleToPlayer = Phaser.Math.Angle.Between(dummy.x, dummy.y, this.px, this.py);
         const approachMultiplier = state.isBoss ? 1.15 : 1;
         const approach = distToPlayer > state.preferredDistance + 36
@@ -913,11 +919,12 @@ export class WorldScene extends Phaser.Scene {
       maxSize: 48,
     });
 
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+    this.worldPointerShootHandler = (p: Phaser.Input.Pointer) => {
       if (!this.gunEnabled) return;
       if (this.inputBlocked) return;
       this.shootAt(p.worldX, p.worldY);
-    });
+    };
+    this.input.on('pointerdown', this.worldPointerShootHandler);
 
     // PVE: bullets vs dummies (training only)
     this.physics.add.overlap(this.bullets, this.dummies, (bObj, dObj) => {
@@ -1608,7 +1615,7 @@ export class WorldScene extends Phaser.Scene {
     });
 
     // Pointer-based joystick (left half of screen)
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+    this.touchPointerDownHandler = (p: Phaser.Input.Pointer) => {
       if (this.inputBlocked) return;
       // only start joystick if in left half and lower area, and not on A button
       if (p.x > width * 0.55) return;
@@ -1622,9 +1629,10 @@ export class WorldScene extends Phaser.Scene {
         this.joyBase.setAlpha(0.28);
         this.joyKnob.setAlpha(0.45);
       }
-    });
+    };
+    this.input.on('pointerdown', this.touchPointerDownHandler);
 
-    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+    this.touchPointerMoveHandler = (p: Phaser.Input.Pointer) => {
       if (!this.touchMoveActive) return;
       const dx = p.x - this.touchStartX;
       const dy = p.y - this.touchStartY;
@@ -1638,9 +1646,10 @@ export class WorldScene extends Phaser.Scene {
       if (this.joyKnob) {
         this.joyKnob.setPosition(this.touchStartX + this.touchDx * max, this.touchStartY + this.touchDy * max);
       }
-    });
+    };
+    this.input.on('pointermove', this.touchPointerMoveHandler);
 
-    const endTouch = () => {
+    this.touchPointerEndHandler = () => {
       this.touchMoveActive = false;
       this.touchDx = 0;
       this.touchDy = 0;
@@ -1652,8 +1661,8 @@ export class WorldScene extends Phaser.Scene {
         this.joyKnob.setAlpha(0.35);
       }
     };
-    this.input.on('pointerup', endTouch);
-    this.input.on('pointerupoutside', endTouch);
+    this.input.on('pointerup', this.touchPointerEndHandler);
+    this.input.on('pointerupoutside', this.touchPointerEndHandler);
   }
 
   // ─── Realtime / Multiplayer ──────────────────────────────────────────────────
@@ -2221,6 +2230,23 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
+    if (this.worldPointerShootHandler) {
+      this.input.off('pointerdown', this.worldPointerShootHandler);
+      this.worldPointerShootHandler = undefined;
+    }
+    if (this.touchPointerDownHandler) {
+      this.input.off('pointerdown', this.touchPointerDownHandler);
+      this.touchPointerDownHandler = undefined;
+    }
+    if (this.touchPointerMoveHandler) {
+      this.input.off('pointermove', this.touchPointerMoveHandler);
+      this.touchPointerMoveHandler = undefined;
+    }
+    if (this.touchPointerEndHandler) {
+      this.input.off('pointerup', this.touchPointerEndHandler);
+      this.input.off('pointerupoutside', this.touchPointerEndHandler);
+      this.touchPointerEndHandler = undefined;
+    }
     if (this.channel) {
       this.channel.send({
         type: 'broadcast',
@@ -2233,6 +2259,11 @@ export class WorldScene extends Phaser.Scene {
     this.chatSystem?.destroy();
     this.bridgeCleanupFns.forEach((cleanup) => cleanup());
     this.bridgeCleanupFns = [];
+    if (this.audioCtx && this.audioCtx.state !== 'closed') {
+      void this.audioCtx.close();
+    }
+    this.audioCtx = undefined;
+    this.audioUnlocked = false;
     eventBus.emit(EVENTS.PLAYER_PRESENCE, []);
   }
 

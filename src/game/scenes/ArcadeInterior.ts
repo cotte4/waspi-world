@@ -34,6 +34,8 @@ export class ArcadeInterior extends Phaser.Scene {
   private roomBounds = new Phaser.Geom.Rectangle();
   private machineHint?: Phaser.GameObjects.Text;
   private glowPad?: Phaser.GameObjects.Ellipse;
+  private arcadeMusic?: Phaser.Sound.BaseSound;
+  private unlockMusicHandler?: () => void;
 
   constructor() {
     super({ key: 'ArcadeInterior' });
@@ -65,6 +67,7 @@ export class ArcadeInterior extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
     announceScene(this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
 
     const roomW = 700;
     const roomH = 400;
@@ -175,6 +178,7 @@ export class ArcadeInterior extends Phaser.Scene {
     this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    this.startArcadeMusic();
     this.cameras.main.fadeIn(220, 0, 0, 0);
   }
 
@@ -234,6 +238,7 @@ export class ArcadeInterior extends Phaser.Scene {
   private exitToWorld() {
     if (this.inTransition) return;
     this.inTransition = true;
+    this.stopArcadeMusic();
     this.cameras.main.fadeOut(250, 0, 0, 0);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
       this.scene.start('WorldScene');
@@ -288,5 +293,59 @@ export class ArcadeInterior extends Phaser.Scene {
       ease: 'Sine.easeOut',
       onComplete: () => text.destroy(),
     });
+  }
+
+  private startArcadeMusic() {
+    if (!this.cache.audio.exists('arcade_theme') || this.arcadeMusic) return;
+
+    this.arcadeMusic = this.sound.add('arcade_theme', {
+      loop: true,
+      volume: 0,
+    });
+
+    const fadeIn = () => {
+      if (!this.arcadeMusic || this.arcadeMusic.isPlaying) return;
+      this.arcadeMusic.play();
+      this.tweens.add({
+        targets: this.arcadeMusic,
+        volume: 0.42,
+        duration: 700,
+        ease: 'Sine.easeOut',
+      });
+    };
+
+    if (this.sound.locked) {
+      this.unlockMusicHandler = () => {
+        fadeIn();
+      };
+      this.sound.once(Phaser.Sound.Events.UNLOCKED, this.unlockMusicHandler);
+      return;
+    }
+
+    fadeIn();
+  }
+
+  private stopArcadeMusic() {
+    if (!this.arcadeMusic) return;
+    const sound = this.arcadeMusic;
+    this.arcadeMusic = undefined;
+    this.tweens.add({
+      targets: sound,
+      volume: 0,
+      duration: 250,
+      ease: 'Sine.easeIn',
+      onComplete: () => {
+        sound.stop();
+        sound.destroy();
+      },
+    });
+  }
+
+  private handleSceneShutdown() {
+    if (this.unlockMusicHandler) {
+      this.sound.off(Phaser.Sound.Events.UNLOCKED, this.unlockMusicHandler);
+      this.unlockMusicHandler = undefined;
+    }
+    this.stopArcadeMusic();
   }
 }
