@@ -497,23 +497,22 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private drawVignette() {
-    // Viñeta simple: círculo oscuro grande sobre todo el viewport
+    // Keep a subtle edge vignette so the world stays readable on all displays.
     const { width, height } = this.cameras.main;
     const vignette = this.add.graphics().setDepth(9999);
     const centerX = width / 2;
     const centerY = height / 2;
 
-    const radius = Math.max(width, height) * 0.9;
-    const steps = 6;
+    const radius = Math.max(width, height) * 1.08;
+    const steps = 5;
     for (let i = 0; i < steps; i++) {
       const t = i / (steps - 1);
-      const alpha = Phaser.Math.Linear(0.0, 0.65, t);
+      const alpha = Phaser.Math.Linear(0.0, 0.18, t);
       vignette.fillStyle(0x000000, alpha);
-      vignette.fillCircle(centerX, centerY, radius * (0.35 + t * 0.65));
+      vignette.fillCircle(centerX, centerY, radius * (0.55 + t * 0.45));
     }
 
     vignette.setScrollFactor(0);
-    vignette.setBlendMode(Phaser.BlendModes.MULTIPLY);
   }
 
   private drawBench(g: Phaser.GameObjects.Graphics, x: number, y: number) {
@@ -1658,3 +1657,4 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 }
+
