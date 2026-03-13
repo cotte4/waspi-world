@@ -14,8 +14,8 @@ type CreatorControl = 'seed' | 'bodyColor' | 'eyeColor' | 'hairColor' | 'hairSty
 
 export class CreatorScene extends Phaser.Scene {
   private preview!: AvatarRenderer;
-  private selectedSeed: 'procedural' | 'gengar' | 'buho' | 'piplup' = 'procedural';
-  private seedButtons: Array<{ id: 'procedural' | 'gengar' | 'buho' | 'piplup'; rect: Phaser.GameObjects.Rectangle; text: Phaser.GameObjects.Text }> = [];
+  private selectedSeed: 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha' = 'procedural';
+  private seedButtons: Array<{ id: 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha'; rect: Phaser.GameObjects.Rectangle; text: Phaser.GameObjects.Text }> = [];
   private config: Required<AvatarConfig>;
   private styleButtons: Array<{ style: HairStyle; rect: Phaser.GameObjects.Rectangle; text: Phaser.GameObjects.Text }> = [];
   private ppDots: Phaser.GameObjects.Rectangle[] = [];
@@ -36,7 +36,7 @@ export class CreatorScene extends Phaser.Scene {
   private readonly bodyColorOptions = [0xF5D5A4, 0xE6B98A, 0xD89B73, 0xBF7B4E, 0x9B5A3A, 0x7A412A];
   private readonly eyeColorOptions = [0x222222, 0x3B82F6, 0x22C55E, 0xA855F7, 0xDC2626, 0xFACC15];
   private readonly hairColorOptions = [0x1F130A, 0x8B5A2B, 0xF97316, 0xEF4444, 0xFFFFFF, 0xEC4899];
-  private readonly seedOptions: Array<'procedural' | 'gengar' | 'buho' | 'piplup'> = ['procedural', 'gengar', 'buho', 'piplup'];
+  private readonly seedOptions: Array<'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha'> = ['procedural', 'gengar', 'buho', 'piplup', 'chacha'];
   private readonly hairStyleOptions: HairStyle[] = ['SPI', 'FLA', 'MOH', 'X'];
 
   constructor() {
@@ -120,14 +120,15 @@ export class CreatorScene extends Phaser.Scene {
     }).setOrigin(0.5);
     this.controlLabels.set('seed', seedLabel);
 
-    const seeds: Array<{ id: 'procedural' | 'gengar' | 'buho' | 'piplup'; label: string }> = [
+    const seeds: Array<{ id: 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha'; label: string }> = [
       { id: 'procedural', label: 'PROC' },
       { id: 'gengar', label: 'GEN' },
       { id: 'buho', label: 'BUH' },
       { id: 'piplup', label: 'PIP' },
+      { id: 'chacha', label: 'CHA' },
     ];
     seeds.forEach((s, i) => {
-      const x = panelX - 105 + i * 70;
+      const x = panelX - 140 + i * 70;
       const y = 170;
       const rect = this.add.rectangle(x, y, 46, 22, 0x111111, 1)
         .setStrokeStyle(1, s.id === this.selectedSeed ? 0xF5C842 : 0x333333, 1)

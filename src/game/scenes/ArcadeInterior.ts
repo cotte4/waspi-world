@@ -12,8 +12,16 @@ interface ArcadePenaltyReward {
   shots?: number;
 }
 
+interface ArcadeBasketReward {
+  score?: number;
+  shots?: number;
+  tenksEarned?: number;
+}
+
 interface ArcadeInteriorData {
+  basketReward?: ArcadeBasketReward;
   penaltyReward?: ArcadePenaltyReward;
+  basketCooldownMs?: number;
   penaltyCooldownMs?: number;
 }
 
@@ -28,14 +36,18 @@ export class ArcadeInterior extends Phaser.Scene {
   private keyD!: Phaser.Input.Keyboard.Key;
   private px = 0;
   private py = 0;
+  private basketMachineZone = new Phaser.Geom.Rectangle();
   private penaltyMachineZone = new Phaser.Geom.Rectangle();
+  private wasInsideBasketZone = false;
   private wasInsidePenaltyZone = false;
+  private basketCooldownMs = 0;
   private penaltyCooldownMs = 0;
   private rewardMessage = '';
   private rewardColor = '#39FF14';
   private rewardDetail = '';
   private roomBounds = new Phaser.Geom.Rectangle();
   private machineHint?: Phaser.GameObjects.Text;
+  private basketGlowPad?: Phaser.GameObjects.Ellipse;
   private glowPad?: Phaser.GameObjects.Ellipse;
   private arcadeMusic?: Phaser.Sound.BaseSound;
   private unlockMusicHandler?: () => void;
@@ -50,8 +62,17 @@ export class ArcadeInterior extends Phaser.Scene {
   }
 
   init(data: ArcadeInteriorData = {}) {
+    this.basketCooldownMs = data.basketCooldownMs ?? 0;
     this.penaltyCooldownMs = data.penaltyCooldownMs ?? 0;
+    const basketReward = data.basketReward;
     const reward = data.penaltyReward;
+
+    if (basketReward) {
+      this.rewardMessage = basketReward.tenksEarned && basketReward.tenksEarned > 0 ? 'BASKET COBRADO' : 'BASKET TERMINADO';
+      this.rewardDetail = `${basketReward.score ?? 0} PTS / ${basketReward.shots ?? 0} TIROS${basketReward.tenksEarned ? ` / +${basketReward.tenksEarned} TENKS` : ''}`;
+      this.rewardColor = basketReward.tenksEarned && basketReward.tenksEarned > 0 ? '#39FF14' : '#46B3FF';
+      return;
+    }
 
     if (reward?.won) {
       this.rewardMessage = 'PREMIO LISTO';
@@ -146,7 +167,12 @@ export class ArcadeInterior extends Phaser.Scene {
         color: isPenaltyMachine ? '#F5C842' : '#6A8BFF',
       }).setOrigin(0.5);
 
-      if (isPenaltyMachine) {
+      if (index === 1) {
+        this.basketMachineZone = new Phaser.Geom.Rectangle(mx - 36, roomY + 56, 72, 122);
+        this.basketGlowPad = this.add.ellipse(mx, roomY + 192, 94, 24, 0x46b3ff, 0.12)
+          .setStrokeStyle(1, 0x46b3ff, 0.35)
+          .setDepth(1);
+      } else if (isPenaltyMachine) {
         this.penaltyMachineZone = new Phaser.Geom.Rectangle(mx - 36, roomY + 56, 72, 122);
         this.glowPad = this.add.ellipse(mx, roomY + 192, 94, 24, 0xF5C842, 0.12)
           .setStrokeStyle(1, 0xF5C842, 0.35)
@@ -166,7 +192,7 @@ export class ArcadeInterior extends Phaser.Scene {
       color: '#FF006E',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, roomY + 54, 'PISA LA CABINA CENTRAL PARA JUGAR PENALES', {
+    this.add.text(width / 2, roomY + 54, 'PISA BASKET O PENALES PARA JUGAR', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#A0A0B4',
@@ -214,6 +240,10 @@ export class ArcadeInterior extends Phaser.Scene {
   update(_time: number, delta: number) {
     if (this.inTransition) return;
 
+    if (this.basketCooldownMs > 0) {
+      this.basketCooldownMs = Math.max(0, this.basketCooldownMs - delta);
+    }
+
     if (this.penaltyCooldownMs > 0) {
       this.penaltyCooldownMs = Math.max(0, this.penaltyCooldownMs - delta);
     }
@@ -228,7 +258,13 @@ export class ArcadeInterior extends Phaser.Scene {
   }
 
   private updateMachineState() {
+    const inBasketZone = this.basketMachineZone.contains(this.px, this.py);
     const inPenaltyZone = this.penaltyMachineZone.contains(this.px, this.py);
+
+    if (this.basketGlowPad) {
+      const pulse = 0.1 + Math.abs(Math.sin(this.time.now / 320)) * 0.08;
+      this.basketGlowPad.setAlpha(inBasketZone ? 0.28 : pulse);
+    }
 
     if (this.glowPad) {
       const pulse = 0.1 + Math.abs(Math.sin(this.time.now / 280)) * 0.08;
@@ -236,7 +272,13 @@ export class ArcadeInterior extends Phaser.Scene {
     }
 
     if (this.machineHint) {
-      if (this.penaltyCooldownMs > 0 && inPenaltyZone) {
+      if (this.basketCooldownMs > 0 && inBasketZone) {
+        this.machineHint.setText('BASKET RECARGANDO...');
+        this.machineHint.setColor('#888888');
+      } else if (inBasketZone) {
+        this.machineHint.setText('BASKET LISTO');
+        this.machineHint.setColor('#46B3FF');
+      } else if (this.penaltyCooldownMs > 0 && inPenaltyZone) {
         this.machineHint.setText('CABINA RECARGANDO...');
         this.machineHint.setColor('#888888');
       } else if (inPenaltyZone) {
@@ -248,11 +290,26 @@ export class ArcadeInterior extends Phaser.Scene {
       }
     }
 
+    if (inBasketZone && !this.wasInsideBasketZone && this.basketCooldownMs <= 0) {
+      this.startBasket();
+    }
+
     if (inPenaltyZone && !this.wasInsidePenaltyZone && this.penaltyCooldownMs <= 0) {
       this.startPenalty();
     }
 
+    this.wasInsideBasketZone = inBasketZone;
     this.wasInsidePenaltyZone = inPenaltyZone;
+  }
+
+  private startBasket() {
+    if (this.inTransition) return;
+    this.inTransition = true;
+    this.flashMessage(this.scale.width / 2, this.scale.height / 2 + 52, 'ENTRANDO A BASKET', '#46B3FF');
+    this.cameras.main.fadeOut(250, 0, 0, 0);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      this.scene.start('BasketMinigame');
+    });
   }
 
   private startPenalty() {
