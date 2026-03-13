@@ -7,7 +7,8 @@ import { supabase, isConfigured } from '../../lib/supabase';
 import { addTenks, initTenks } from '../systems/TenksSystem';
 import { getEquippedColors, hasUtilityEquipped } from '../systems/InventorySystem';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
-import { addXpToProgression, getLevelMilestones, loadProgressionState, saveProgressionState, type ProgressionState } from '../systems/ProgressionSystem';
+import { loadHudSettings, type HudSettings } from '../systems/HudSettings';
+import { addXpToProgression, loadProgressionState, saveProgressionState, type ProgressionState } from '../systems/ProgressionSystem';
 import { loadCombatStats, saveCombatStats, type CombatStats } from '../systems/CombatStats';
 import { announceScene } from '../systems/SceneUi';
 import type { VecindadState } from '../../lib/playerState';
@@ -301,6 +302,7 @@ export class WorldScene extends Phaser.Scene {
   private audioCtx?: AudioContext;
   private audioUnlocked = false;
   private audioSettings: AudioSettings = loadAudioSettings();
+  private hudSettings: HudSettings = loadHudSettings();
   private audioSettingsCleanup?: () => void;
   private worldPointerShootHandler?: (p: Phaser.Input.Pointer) => void;
   private touchPointerDownHandler?: (p: Phaser.Input.Pointer) => void;
@@ -339,8 +341,10 @@ export class WorldScene extends Phaser.Scene {
     super({ key: 'WorldScene' });
   }
 
-  init() {
+  init(data?: { returnX?: number; returnY?: number }) {
     this.inTransition = false;
+    this.px = data?.returnX ?? PLAYER.SPAWN_X;
+    this.py = data?.returnY ?? PLAYER.SPAWN_Y;
   }
 
   create() {
@@ -359,7 +363,6 @@ export class WorldScene extends Phaser.Scene {
     // Draw world layers
     this.drawBackground();
     this.drawPlaza();
-    this.drawVecindad();
     this.drawBuildings();
     this.drawStreet();
     this.drawLampPosts();
@@ -425,7 +428,6 @@ export class WorldScene extends Phaser.Scene {
     // Supabase Realtime
     const mode = this.setupRealtime();
     statusText.setText(mode === 'multiplayer' ? 'MULTI: ONLINE' : 'MULTI: SOLO MODE');
-    void this.loadSharedVecindadState();
 
     // Notify React that player is ready
     eventBus.emit(EVENTS.PLAYER_INFO, {
@@ -433,6 +435,7 @@ export class WorldScene extends Phaser.Scene {
       username: this.playerUsername,
     });
     eventBus.emit(EVENTS.PLAYER_COMBAT_STATS, this.combatStats);
+    eventBus.emit(EVENTS.PLAYER_PROGRESSION, this.progression);
     this.emitPresence();
 
     // Ambient NPC
@@ -450,6 +453,15 @@ export class WorldScene extends Phaser.Scene {
         sfxEnabled: next.sfxEnabled ?? this.audioSettings.sfxEnabled,
       };
     });
+    this.bridgeCleanupFns.push(eventBus.on(EVENTS.HUD_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      const next = payload as Partial<HudSettings>;
+      this.hudSettings = {
+        ...this.hudSettings,
+        ...next,
+      };
+      this.applyHudVisibility();
+    }));
 
     // Training arena
     this.setupTrainingZone();
@@ -507,6 +519,7 @@ export class WorldScene extends Phaser.Scene {
       lineSpacing: 5,
     }).setScrollFactor(0).setDepth(9999);
     this.renderProgressionHud();
+    this.applyHudVisibility();
 
     this.setupBossHud();
 
@@ -554,7 +567,6 @@ export class WorldScene extends Phaser.Scene {
       this.combatHud.setText([
         'WEAPON OFFLINE',
         'ACTIVA GUN EN INVENTARIO',
-        'TRAINING LISTO',
       ]);
       this.combatHud.setColor('#888888');
       return;
@@ -562,30 +574,28 @@ export class WorldScene extends Phaser.Scene {
     const weapon = WEAPON_STATS[this.currentWeapon];
     this.combatHud.setColor(this.currentWeapon === 'shotgun' ? '#FF8B3D' : '#F5C842');
     this.combatHud.setText([
-      `WEAPON ${weapon.label}`,
-      '1 PISTOL  2 SHOTGUN',
-      'F / CLICK DISPARA',
-      'RUSH / SHOT / TANK / BOSS',
+      `WEAPON ${weapon.label} | 1/2 CAMBIA`,
+      'F / CLICK DISPARA | R1 S2 T3 B5',
     ]);
   }
 
   private renderProgressionHud() {
     if (!this.progressionHud) return;
     const nextLabel = this.progression.nextLevelAt === null
-      ? 'MAX LVL'
+      ? 'MAX'
       : `${this.progression.nextLevelAt - this.progression.xp} XP`;
-    const milestonePreview = getLevelMilestones()
-      .map((xp, index) => `L${index + 1}:${xp}`)
-      .slice(0, 11)
-      .join(' ');
 
     this.progressionHud.setText([
-      `LVL ${this.progression.level}/11`,
-      `TOTAL XP ${this.progression.xp}`,
-      `TOTAL KOs ${this.progression.kills}`,
-      `SIGUIENTE ${nextLabel}`,
-      milestonePreview,
+      `LVL ${this.progression.level}/11 | XP ${this.progression.xp}`,
+      `KOs ${this.progression.kills} | NEXT ${nextLabel}`,
     ]);
+  }
+
+  private applyHudVisibility() {
+    const visible = this.hudSettings.showArenaHud;
+    this.trainingHud?.setVisible(visible);
+    this.combatHud?.setVisible(visible);
+    this.progressionHud?.setVisible(visible);
   }
 
   private getEnemyNameColor(archetype: EnemyArchetype) {
@@ -779,6 +789,7 @@ export class WorldScene extends Phaser.Scene {
     this.progression = addXpToProgression(this.progression, state.xpReward);
     saveProgressionState(this.progression);
     this.renderProgressionHud();
+    eventBus.emit(EVENTS.PLAYER_PROGRESSION, this.progression);
     addTenks(state.tenksReward, `training_${state.archetype}`);
     if (state.isBoss) {
       this.showArenaNotice(`BOSS DOWN +${state.xpReward} XP +${state.tenksReward} TENKS`, '#39FF14');
@@ -1309,30 +1320,30 @@ export class WorldScene extends Phaser.Scene {
     g.strokeRect(0, ZONES.NORTH_SIDEWALK_Y, WORLD.WIDTH, ZONES.NORTH_SIDEWALK_H);
     g.strokeRect(0, ZONES.SOUTH_SIDEWALK_Y, WORLD.WIDTH, ZONES.SOUTH_SIDEWALK_H);
 
-    // Vecindad approach marker on the left side of the main street
-    const vecindadGuideX = ZONES.VECINDAD_X + ZONES.VECINDAD_W - 60;
+    // Vecindad gate on the far left, leading to the dedicated barrio map.
+    const vecindadGuideX = 112;
+    g.fillStyle(0x2b2016, 1);
+    g.fillRect(56, ZONES.SOUTH_SIDEWALK_Y - 18, 16, 114);
+    g.fillRect(152, ZONES.SOUTH_SIDEWALK_Y - 18, 16, 114);
     g.fillStyle(0x5f4a34, 0.95);
-    g.fillRoundedRect(vecindadGuideX - 90, ZONES.SOUTH_SIDEWALK_Y + 16, 180, 44, 10);
+    g.fillRoundedRect(34, ZONES.SOUTH_SIDEWALK_Y - 48, 156, 40, 10);
     g.lineStyle(2, COLORS.GOLD, 0.75);
-    g.strokeRoundedRect(vecindadGuideX - 90, ZONES.SOUTH_SIDEWALK_Y + 16, 180, 44, 10);
+    g.strokeRoundedRect(34, ZONES.SOUTH_SIDEWALK_Y - 48, 156, 40, 10);
+    g.fillStyle(0x5f4a34, 0.9);
+    g.fillRoundedRect(42, ZONES.SOUTH_SIDEWALK_Y + 18, 148, 42, 12);
+    g.strokeRoundedRect(42, ZONES.SOUTH_SIDEWALK_Y + 18, 148, 42, 12);
 
-    g.fillStyle(COLORS.GOLD, 0.28);
-    for (let i = 0; i < 5; i++) {
-      const arrowX = vecindadGuideX + 48 - i * 20;
-      g.fillTriangle(
-        arrowX - 8,
-        ZONES.SOUTH_SIDEWALK_Y + 38,
-        arrowX + 8,
-        ZONES.SOUTH_SIDEWALK_Y + 30,
-        arrowX + 8,
-        ZONES.SOUTH_SIDEWALK_Y + 46,
-      );
-    }
-
-    this.add.text(vecindadGuideX - 26, ZONES.SOUTH_SIDEWALK_Y + 38, 'LA VECINDAD', {
+    this.add.text(vecindadGuideX, ZONES.SOUTH_SIDEWALK_Y - 28, 'LA VECINDAD', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+    this.add.text(vecindadGuideX, ZONES.SOUTH_SIDEWALK_Y + 38, 'SPACE ENTRAR', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#C8D6B7',
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(2);
@@ -2870,10 +2881,7 @@ export class WorldScene extends Phaser.Scene {
     this.syncPosition();
     this.chatSystem.update();
     this.updateDummies();
-    this.updateMaterialNodes();
-
     this.handleInteraction();
-    this.updateParcelPrompt();
 
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyOne)) {
       this.currentWeapon = 'pistol';
@@ -2945,37 +2953,21 @@ export class WorldScene extends Phaser.Scene {
   private handleInteraction() {
     if (this.inTransition) return;
 
-    if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
-      const materialNode = this.getNearbyMaterialNode();
-      if (materialNode) {
-        this.collectMaterial(materialNode);
-        return;
-      }
-
-      const parcel = this.getNearbyParcel();
-      if (parcel && !this.vecindadState.ownedParcelId && !this.sharedParcelState.has(parcel.id)) {
-        eventBus.emit(EVENTS.PARCEL_BUY_REQUEST, { parcelId: parcel.id, cost: parcel.cost });
-        return;
-      }
-
-      if (parcel && this.vecindadState.ownedParcelId === parcel.id) {
-        this.buildOwnedParcel();
-        return;
-      }
-    }
-
     if (!Phaser.Input.Keyboard.JustDown(this.keySpace)) return;
 
     // Check proximity to each building door (horizontal distance threshold)
     const arcadeDoorX = BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2;
     const storeDoorX = BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2;
     const cafeDoorX = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
+    const nearVecindad = this.px < 220 && this.py > ZONES.SOUTH_SIDEWALK_Y - 30 && this.py < ZONES.PLAZA_Y + 120;
 
     const nearArcade = Math.abs(this.px - arcadeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearStore = Math.abs(this.px - storeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearCafe = Math.abs(this.px - cafeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
 
-    if (nearArcade) {
+    if (nearVecindad) {
+      this.transitionToScene('VecindadScene');
+    } else if (nearArcade) {
       this.transitionToScene('ArcadeInterior');
     } else if (nearStore) {
       this.transitionToScene('StoreInterior');

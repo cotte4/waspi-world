@@ -9,6 +9,8 @@ import { CHAT } from '@/src/game/config/constants';
 import { CATALOG, type CatalogItem } from '@/src/game/config/catalog';
 import { getInventory, equipItem, hasUtilityEquipped, replaceInventory } from '@/src/game/systems/InventorySystem';
 import { loadAudioSettings, saveAudioSettings, type AudioSettings } from '@/src/game/systems/AudioSettings';
+import { loadHudSettings, saveHudSettings, type HudSettings } from '@/src/game/systems/HudSettings';
+import { loadProgressionState, type ProgressionState } from '@/src/game/systems/ProgressionSystem';
 import { supabase } from '@/src/lib/supabase';
 import { getTenksBalance, initTenks } from '@/src/game/systems/TenksSystem';
 import { mutePlayer, normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
@@ -76,13 +78,15 @@ interface VecindadSharedPayload {
   broadcast?: boolean;
 }
 
-const CHAT_SCENES = new Set(['WorldScene', 'StoreInterior', 'CafeInterior', 'ArcadeInterior', 'HouseInterior']);
-const INTERIOR_SOCIAL_SCENES = new Set(['StoreInterior', 'CafeInterior', 'ArcadeInterior', 'HouseInterior']);
+const CHAT_SCENES = new Set(['WorldScene', 'VecindadScene', 'StoreInterior', 'CafeInterior', 'ArcadeInterior', 'HouseInterior']);
+const INTERIOR_SOCIAL_SCENES = new Set(['VecindadScene', 'StoreInterior', 'CafeInterior', 'ArcadeInterior', 'HouseInterior']);
 
 export default function PlayPage() {
   const initialInventory = useMemo(() => getInventory(), []);
   const initialCheckout = useMemo(() => getInitialCheckoutState(), []);
   const initialAudioSettings = useMemo(() => loadAudioSettings(), []);
+  const initialHudSettings = useMemo(() => loadHudSettings(), []);
+  const initialProgression = useMemo(() => loadProgressionState(), []);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [lastSent, setLastSent] = useState(0);
@@ -90,6 +94,7 @@ export default function PlayPage() {
   const [connected, setConnected] = useState(false);
   const [presencePlayers, setPresencePlayers] = useState<PresencePlayer[]>([]);
   const [combatStats, setCombatStats] = useState<CombatStats>({ kills: 0, deaths: 0 });
+  const [progression, setProgression] = useState<ProgressionState>(initialProgression);
   const [playerState, setPlayerState] = useState<PlayerState | null>(null);
   const [tenks, setTenks] = useState<number | null>(null);
   const [inventoryOpen, setInventoryOpen] = useState(false);
@@ -118,6 +123,7 @@ export default function PlayPage() {
   const [playerActions, setPlayerActions] = useState<PlayerActionsPayload | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(initialAudioSettings);
+  const [hudSettings, setHudSettings] = useState<HudSettings>(initialHudSettings);
   const tokenRef = useRef<string | null>(null);
   const mutedPlayersRef = useRef<string[]>(loadStoredMutedPlayers());
   const lastInteriorChatSentRef = useRef(0);
@@ -256,6 +262,18 @@ export default function PlayPage() {
       setCombatStats({
         kills: typeof next?.kills === 'number' ? next.kills : 0,
         deaths: typeof next?.deaths === 'number' ? next.deaths : 0,
+      });
+    });
+
+    const unsubProgression = eventBus.on(EVENTS.PLAYER_PROGRESSION, (payload: unknown) => {
+      const next = payload as Partial<ProgressionState> | null;
+      setProgression({
+        kills: typeof next?.kills === 'number' ? next.kills : 0,
+        xp: typeof next?.xp === 'number' ? next.xp : 0,
+        level: typeof next?.level === 'number' ? next.level : 1,
+        nextLevelAt: typeof next?.nextLevelAt === 'number' || next?.nextLevelAt === null
+          ? next.nextLevelAt
+          : null,
       });
     });
 
@@ -448,6 +466,7 @@ export default function PlayPage() {
       unsubInfo();
       unsubPresence();
       unsubCombatStats();
+      unsubProgression();
       unsubTenks();
       unsubScene();
       unsubInv();
@@ -473,6 +492,11 @@ export default function PlayPage() {
     saveAudioSettings(audioSettings);
     eventBus.emit(EVENTS.AUDIO_SETTINGS_CHANGED, audioSettings);
   }, [audioSettings]);
+
+  useEffect(() => {
+    saveHudSettings(hudSettings);
+    eventBus.emit(EVENTS.HUD_SETTINGS_CHANGED, hudSettings);
+  }, [hudSettings]);
 
   const hydratePlayerState = useCallback(async (session: Session | null) => {
     if (!session?.access_token) {
@@ -943,6 +967,13 @@ export default function PlayPage() {
     setLastSent(now);
   }, [chatVisible, input, lastSent]);
 
+  const nextLevelDelta = progression.nextLevelAt === null
+    ? 0
+    : Math.max(0, progression.nextLevelAt - progression.xp);
+  const progressPct = progression.nextLevelAt === null
+    ? 1
+    : Math.max(0, Math.min(1, progression.xp / progression.nextLevelAt));
+
   return (
     <>
       <style jsx global>{`
@@ -1076,7 +1107,7 @@ export default function PlayPage() {
       >
         <PhaserGame />
 
-        <div className="absolute top-2 left-2 flex items-center gap-2 pointer-events-none">
+        <div className="absolute top-2 left-2 flex items-center gap-2 pointer-events-none flex-wrap max-w-[68%]">
           <div className="ww-chip px-2 py-1 text-xs" style={hudBadge('#F5C842', 'rgba(245,200,66,0.4)')}>
             {playerInfo ? playerInfo.username : 'CARGANDO...'}
           </div>
@@ -1091,80 +1122,156 @@ export default function PlayPage() {
               TENKS {tenks}
             </div>
           )}
+          <div className="ww-chip px-2 py-1 text-xs" style={hudBadge('#46B3FF', 'rgba(70,179,255,0.35)')}>
+            LVL {progression.level}
+          </div>
           <div className="ww-chip px-2 py-1 text-xs" style={hudBadge('#88AAFF', 'rgba(136,170,255,0.35)')}>
             K/D {combatStats.kills}/{combatStats.deaths}
           </div>
         </div>
 
-        <div
-          className="ww-panel ww-panel-delayed absolute top-12 left-2"
-          style={{
-            width: 172,
-            background: 'rgba(0,0,0,0.7)',
-            border: '1px solid rgba(57,255,20,0.22)',
-            padding: '6px 8px',
-            boxShadow: '0 10px 24px rgba(0,0,0,0.28)',
-          }}
-        >
-          <div
-            style={{
-              fontFamily: '"Press Start 2P", monospace',
-              fontSize: '7px',
-              color: '#39FF14',
-              marginBottom: 6,
-            }}
-          >
-            CONECTADOS {presencePlayers.length}
-          </div>
-          <div style={{ display: 'grid', gap: 4 }}>
-            {presencePlayers.slice(0, 6).map((player, index) => (
-              <div
-                className="ww-presence-row"
-                key={player.playerId}
-                style={{
-                  fontFamily: '"Silkscreen", monospace',
-                  fontSize: '11px',
-                  color: player.playerId === playerInfo?.playerId ? '#F5C842' : 'rgba(255,255,255,0.8)',
-                  lineHeight: 1.1,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  animationDelay: `${index * 45}ms`,
-                }}
-              >
-                {player.playerId === playerInfo?.playerId ? 'TU ' : '• '} {player.username}
+        <div className="absolute top-12 left-2 flex flex-col gap-2">
+          {hudSettings.showSocialPanel && (
+            <div
+              className="ww-panel ww-panel-delayed"
+              style={{
+                width: 182,
+                background: 'rgba(0,0,0,0.7)',
+                border: '1px solid rgba(57,255,20,0.22)',
+                padding: '6px 8px',
+                boxShadow: '0 10px 24px rgba(0,0,0,0.28)',
+              }}
+            >
+              <div className="flex items-center justify-between" style={{ marginBottom: hudSettings.socialCollapsed ? 0 : 6 }}>
+                <div
+                  style={{
+                    fontFamily: '"Press Start 2P", monospace',
+                    fontSize: '7px',
+                    color: '#39FF14',
+                  }}
+                >
+                  CONECTADOS {presencePlayers.length}
+                </div>
+                <button
+                  onClick={() => setHudSettings((current) => ({ ...current, socialCollapsed: !current.socialCollapsed }))}
+                  style={hudCollapseButtonStyle()}
+                >
+                  {hudSettings.socialCollapsed ? '+' : '-'}
+                </button>
               </div>
-            ))}
-            {presencePlayers.length === 0 && (
-              <div
-                style={{
-                  fontFamily: '"Silkscreen", monospace',
-                  fontSize: '11px',
-                  color: 'rgba(255,255,255,0.45)',
-                }}
-              >
-                Solo vos por ahora.
+              {!hudSettings.socialCollapsed && (
+                <div style={{ display: 'grid', gap: 4 }}>
+                  {presencePlayers.slice(0, 6).map((player, index) => (
+                    <div
+                      className="ww-presence-row"
+                      key={player.playerId}
+                      style={{
+                        fontFamily: '"Silkscreen", monospace',
+                        fontSize: '11px',
+                        color: player.playerId === playerInfo?.playerId ? '#F5C842' : 'rgba(255,255,255,0.8)',
+                        lineHeight: 1.1,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        animationDelay: `${index * 45}ms`,
+                      }}
+                    >
+                      {player.playerId === playerInfo?.playerId ? 'TU ' : '+ '} {player.username}
+                    </div>
+                  ))}
+                  {presencePlayers.length === 0 && (
+                    <div
+                      style={{
+                        fontFamily: '"Silkscreen", monospace',
+                        fontSize: '11px',
+                        color: 'rgba(255,255,255,0.45)',
+                      }}
+                    >
+                      Solo vos por ahora.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {hudSettings.showProgressPanel && (
+            <div
+              className="ww-panel"
+              style={{
+                width: 182,
+                background: 'rgba(0,0,0,0.74)',
+                border: '1px solid rgba(70,179,255,0.24)',
+                padding: '6px 8px',
+                boxShadow: '0 10px 24px rgba(0,0,0,0.28)',
+              }}
+            >
+              <div className="flex items-center justify-between" style={{ marginBottom: hudSettings.progressCollapsed ? 0 : 6 }}>
+                <div
+                  style={{
+                    fontFamily: '"Press Start 2P", monospace',
+                    fontSize: '7px',
+                    color: '#46B3FF',
+                  }}
+                >
+                  PROGRESO
+                </div>
+                <button
+                  onClick={() => setHudSettings((current) => ({ ...current, progressCollapsed: !current.progressCollapsed }))}
+                  style={hudCollapseButtonStyle()}
+                >
+                  {hudSettings.progressCollapsed ? '+' : '-'}
+                </button>
               </div>
-            )}
-          </div>
+              {hudSettings.progressCollapsed ? (
+                <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: '12px', color: 'rgba(255,255,255,0.82)' }}>
+                  LVL {progression.level} {nextLevelDelta > 0 ? `| NEXT ${nextLevelDelta} XP` : '| MAX'}
+                </div>
+              ) : (
+                <>
+                  <div style={{ display: 'grid', gap: 4, fontFamily: '"Silkscreen", monospace', fontSize: '12px', color: 'rgba(255,255,255,0.82)' }}>
+                    <div className="flex items-center justify-between">
+                      <span>LVL {progression.level}</span>
+                      <span>{progression.nextLevelAt === null ? 'MAX' : `${nextLevelDelta} XP`}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>XP {progression.xp}</span>
+                      <span>KOs {progression.kills}</span>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 6, height: 8, border: '1px solid rgba(70,179,255,0.28)', background: 'rgba(255,255,255,0.05)' }}>
+                    <div
+                      style={{
+                        width: `${progressPct * 100}%`,
+                        height: '100%',
+                        background: 'linear-gradient(90deg, #46B3FF 0%, #8CE0FF 100%)',
+                      }}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
-        <div
-          className="ww-panel absolute top-2 right-2 pointer-events-none"
-          style={{
-            background: 'rgba(0,0,0,0.6)',
-            border: '1px solid rgba(255,255,255,0.1)',
-            padding: '4px 8px',
-            fontFamily: '"Press Start 2P", monospace',
-            color: 'rgba(255,255,255,0.3)',
-            fontSize: isMobile ? '5px' : '6px',
-            lineHeight: '1.8',
-          }}
-        >
-          WASD / FLECHAS MOVER<br />
-          {chatVisible ? 'ENTER CHATEAR' : 'ENTER CHAT OFF'}<br />
-          I INVENTARIO
-        </div>
+        {hudSettings.showControlsPanel && (
+          <div
+            className="ww-panel absolute top-2 right-2 pointer-events-none"
+            style={{
+              background: 'rgba(0,0,0,0.6)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              padding: '4px 8px',
+              fontFamily: '"Press Start 2P", monospace',
+              color: 'rgba(255,255,255,0.3)',
+              fontSize: isMobile ? '5px' : '6px',
+              lineHeight: '1.8',
+            }}
+          >
+            WASD / FLECHAS MOVER<br />
+            {chatVisible ? 'ENTER CHATEAR' : 'ENTER CHAT OFF'}<br />
+            I INVENTARIO
+          </div>
+        )}
 
         <button
           onClick={() => {
@@ -1756,7 +1863,7 @@ export default function PlayPage() {
             <div
               className="ww-modal p-4"
               style={{
-                width: isMobile ? '94%' : 360,
+                width: isMobile ? '94%' : 420,
                 background: 'rgba(10,10,18,0.96)',
                 border: '1px solid rgba(245,200,66,0.35)',
                 boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
@@ -1784,22 +1891,76 @@ export default function PlayPage() {
                   </button>
                 </div>
 
-                <div className="flex items-center justify-between py-2">
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>AUDIO</div>
-                    <div style={{ fontSize: '16px' }}>SFX</div>
-                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Combat shots, hits, boss cues</div>
+                  <div className="flex items-center justify-between py-2">
+                    <div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>AUDIO</div>
+                      <div style={{ fontSize: '16px' }}>SFX</div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Combat shots, hits, boss cues</div>
                   </div>
                   <button
                     onClick={() => setAudioSettings((current) => ({ ...current, sfxEnabled: !current.sfxEnabled }))}
                     style={toggleButtonStyle(audioSettings.sfxEnabled)}
-                  >
-                    {audioSettings.sfxEnabled ? 'ON' : 'OFF'}
-                  </button>
+                    >
+                      {audioSettings.sfxEnabled ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginTop: 12, marginBottom: 4 }}>HUD</div>
+
+                  <div className="flex items-center justify-between py-2">
+                    <div>
+                      <div style={{ fontSize: '16px' }}>SOCIAL PANEL</div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Connected players card on the left</div>
+                    </div>
+                    <button
+                      onClick={() => setHudSettings((current) => ({ ...current, showSocialPanel: !current.showSocialPanel }))}
+                      style={toggleButtonStyle(hudSettings.showSocialPanel)}
+                    >
+                      {hudSettings.showSocialPanel ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between py-2">
+                    <div>
+                      <div style={{ fontSize: '16px' }}>PROGRESS PANEL</div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Level, XP and KOs summary card</div>
+                    </div>
+                    <button
+                      onClick={() => setHudSettings((current) => ({ ...current, showProgressPanel: !current.showProgressPanel }))}
+                      style={toggleButtonStyle(hudSettings.showProgressPanel)}
+                    >
+                      {hudSettings.showProgressPanel ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between py-2">
+                    <div>
+                      <div style={{ fontSize: '16px' }}>CONTROLS TIP</div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Top-right gameplay hint card</div>
+                    </div>
+                    <button
+                      onClick={() => setHudSettings((current) => ({ ...current, showControlsPanel: !current.showControlsPanel }))}
+                      style={toggleButtonStyle(hudSettings.showControlsPanel)}
+                    >
+                      {hudSettings.showControlsPanel ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between py-2">
+                    <div>
+                      <div style={{ fontSize: '16px' }}>ARENA HUD</div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Training combat and progression text in-world</div>
+                    </div>
+                    <button
+                      onClick={() => setHudSettings((current) => ({ ...current, showArenaHud: !current.showArenaHud }))}
+                      style={toggleButtonStyle(hudSettings.showArenaHud)}
+                    >
+                      {hudSettings.showArenaHud ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
         )}
 
         {uiNotice && (
@@ -1887,6 +2048,19 @@ function hudBadge(color: string, border: string) {
     fontFamily: '"Press Start 2P", monospace',
     color,
     fontSize: '7px',
+  } as const;
+}
+
+function hudCollapseButtonStyle() {
+  return {
+    fontFamily: '"Press Start 2P", monospace',
+    fontSize: '8px',
+    color: '#BBBBBB',
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    padding: 0,
+    lineHeight: 1,
   } as const;
 }
 
@@ -2002,3 +2176,4 @@ const textInputStyle = {
   padding: '8px 10px',
   outline: 'none',
 } as const;
+

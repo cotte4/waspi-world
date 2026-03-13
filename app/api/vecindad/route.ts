@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: `Necesitas ${parcel.cost} TENKS para comprar esta parcela.` }, { status: 400 });
       }
 
-      const nextBuildStage = Math.max(1, myParcel?.buildStage ?? player.vecindad.buildStage ?? 0);
+      const nextBuildStage = myParcel?.buildStage ?? player.vecindad.buildStage ?? 0;
       player = {
         ...player,
         tenks: Math.max(0, player.tenks - parcel.cost),
@@ -124,20 +124,20 @@ export async function POST(request: NextRequest) {
         throw error;
       }
 
-      const parcels = await listVecindadParcels(admin);
-      return NextResponse.json({
-        player: await mergePlayerWithVecindad(admin, user.id, player),
-        parcels,
-        notice: `Compraste la parcela ${parcel.id}. Ahora si, a construir.`,
-      });
-    }
+        const parcels = await listVecindadParcels(admin);
+        return NextResponse.json({
+          player: await mergePlayerWithVecindad(admin, user.id, player),
+          parcels,
+          notice: `Compraste la parcela ${parcel.id}. Ahora junta materiales y empeza a construir.`,
+        });
+      }
 
     const myParcel = await getUserVecindadParcel(admin, user.id);
     if (!myParcel) {
       return NextResponse.json({ error: 'Primero necesitas comprar una parcela.' }, { status: 400 });
     }
 
-    const currentStage = Math.max(1, myParcel.buildStage);
+    const currentStage = myParcel.buildStage;
     if (currentStage >= MAX_VECINDAD_STAGE) {
       return NextResponse.json({ error: 'Tu casa ya esta al maximo.' }, { status: 400 });
     }
@@ -179,7 +179,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       player: await mergePlayerWithVecindad(admin, user.id, player),
       parcels,
-      notice: `Casa mejorada a STAGE ${nextStage}.`,
+      notice: nextStage === 1
+        ? 'Levantaste la primera estructura de tu casa.'
+        : `Casa mejorada a STAGE ${nextStage}.`,
     });
   } catch (error) {
     const errorCode = typeof error === 'object' && error && 'code' in error

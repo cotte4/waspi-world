@@ -20,6 +20,7 @@ export default function PhaserGame() {
       const { ArcadeInterior } = await import('@/src/game/scenes/ArcadeInterior');
       const { CafeInterior } = await import('@/src/game/scenes/CafeInterior');
       const { HouseInterior } = await import('@/src/game/scenes/HouseInterior');
+      const { VecindadScene } = await import('@/src/game/scenes/VecindadScene');
       const { PenaltyMinigame } = await import('@/src/game/scenes/PenaltyMinigame');
       const { BasketMinigame } = await import('@/src/game/scenes/BasketMinigame');
       const { VIEWPORT } = await import('@/src/game/config/constants');
@@ -37,7 +38,7 @@ export default function PhaserGame() {
           default: 'arcade',
           arcade: { debug: false },
         },
-        scene: [BootScene, CreatorScene, WorldScene, StoreInterior, ArcadeInterior, CafeInterior, HouseInterior, PenaltyMinigame, BasketMinigame],
+        scene: [BootScene, CreatorScene, WorldScene, VecindadScene, StoreInterior, ArcadeInterior, CafeInterior, HouseInterior, PenaltyMinigame, BasketMinigame],
         render: {
           antialias: false,
           pixelArt: true,
