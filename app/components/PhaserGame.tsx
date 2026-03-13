@@ -14,11 +14,13 @@ export default function PhaserGame() {
     const init = async () => {
       const Phaser = (await import('phaser')).default;
       const { BootScene } = await import('@/src/game/scenes/BootScene');
+      const { CreatorScene } = await import('@/src/game/scenes/CreatorScene');
       const { WorldScene } = await import('@/src/game/scenes/WorldScene');
       const { StoreInterior } = await import('@/src/game/scenes/StoreInterior');
       const { ArcadeInterior } = await import('@/src/game/scenes/ArcadeInterior');
       const { CafeInterior } = await import('@/src/game/scenes/CafeInterior');
       const { HouseInterior } = await import('@/src/game/scenes/HouseInterior');
+      const { PenaltyMinigame } = await import('@/src/game/scenes/PenaltyMinigame');
       const { VIEWPORT } = await import('@/src/game/config/constants');
 
       game = new Phaser.Game({
@@ -27,11 +29,14 @@ export default function PhaserGame() {
         height: VIEWPORT.HEIGHT,
         backgroundColor: '#0E0E14',
         parent: containerRef.current!,
+        dom: {
+          createContainer: true,
+        },
         physics: {
           default: 'arcade',
           arcade: { debug: false },
         },
-        scene: [BootScene, WorldScene, StoreInterior, ArcadeInterior, CafeInterior, HouseInterior],
+        scene: [BootScene, CreatorScene, WorldScene, StoreInterior, ArcadeInterior, CafeInterior, HouseInterior, PenaltyMinigame],
         render: {
           antialias: false,
           pixelArt: false,

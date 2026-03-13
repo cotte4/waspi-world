@@ -28,4 +28,9 @@ export const EVENTS = {
   CHAT_INPUT_BLUR: 'chat:input:blur',
   PLAYER_READY: 'player:ready',
   PLAYER_INFO: 'player:info',
+   TENKS_CHANGED: 'tenks:changed',
+  INVENTORY_TOGGLE: 'inventory:toggle',
+  INVENTORY_CHANGED: 'inventory:changed',
+  AVATAR_SET: 'avatar:set',
+  OPEN_CREATOR: 'creator:open',
 } as const;

@@ -4,6 +4,8 @@ import { ChatSystem } from '../systems/ChatSystem';
 import { WORLD, VIEWPORT, PLAYER, COLORS, ZONES, BUILDINGS, CHAT } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
+import { initTenks } from '../systems/TenksSystem';
+import { getEquippedColors } from '../systems/InventorySystem';
 
 interface RemotePlayer {
   avatar: AvatarRenderer;
@@ -59,6 +61,9 @@ export class WorldScene extends Phaser.Scene {
     this.playerId = this.getOrCreatePlayerId();
     this.playerUsername = this.getOrCreateUsername();
 
+    // Init TENKS balance (local-only for ahora)
+    initTenks(5000);
+
     // Draw world layers
     this.drawBackground();
     this.drawPlaza();
@@ -76,12 +81,30 @@ export class WorldScene extends Phaser.Scene {
     // Invisible camera target
     this.playerBody = this.add.rectangle(this.px, this.py, 2, 2, 0x000000, 0).setDepth(0);
 
-    // Player avatar
-    this.playerAvatar = new AvatarRenderer(this, this.px, this.py, {
+    // Load avatar config from CreatorScene if present
+    let avatarConfig: AvatarConfig = {
       bodyColor: COLORS.SKIN_LIGHT,
       hairColor: COLORS.HAIR_BROWN,
       topColor: COLORS.BODY_BLUE,
       bottomColor: COLORS.LEGS_DARK,
+    };
+    if (typeof window !== 'undefined') {
+      const raw = window.localStorage.getItem('waspi_avatar_config');
+      if (raw) {
+        try {
+          avatarConfig = { ...avatarConfig, ...(JSON.parse(raw) as AvatarConfig) };
+        } catch {
+          // ignore parse error
+        }
+      }
+    }
+
+    // Player avatar
+    const equipped = getEquippedColors();
+    this.playerAvatar = new AvatarRenderer(this, this.px, this.py, {
+      ...avatarConfig,
+      topColor: equipped.topColor ?? avatarConfig.topColor,
+      bottomColor: equipped.bottomColor ?? avatarConfig.bottomColor,
     });
     this.playerAvatar.setDepth(50);
 
@@ -794,6 +817,50 @@ export class WorldScene extends Phaser.Scene {
 
     eventBus.on(EVENTS.CHAT_INPUT_FOCUS, () => { this.inputBlocked = true; });
     eventBus.on(EVENTS.CHAT_INPUT_BLUR, () => { this.inputBlocked = false; });
+
+    // Inventory toggle (I)
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', (e) => {
+        if (e.key.toLowerCase() === 'i') {
+          eventBus.emit(EVENTS.INVENTORY_TOGGLE);
+        }
+      });
+    }
+
+    // Apply avatar partial updates (e.g. smoke on/off) and persist in localStorage
+    eventBus.on(EVENTS.AVATAR_SET, (payload: unknown) => {
+      if (typeof window === 'undefined') return;
+      if (!payload || typeof payload !== 'object') return;
+
+      const key = 'waspi_avatar_config';
+      let current: Record<string, unknown> = {};
+      const raw = window.localStorage.getItem(key);
+      if (raw) {
+        try { current = JSON.parse(raw) as Record<string, unknown>; } catch { /* ignore */ }
+      }
+      const next = { ...current, ...(payload as Record<string, unknown>) };
+      window.localStorage.setItem(key, JSON.stringify(next));
+
+      // Rebuild player avatar with new config
+      const cfg = next as AvatarConfig;
+      const x = this.px;
+      const y = this.py;
+      const depth = this.playerAvatar.getContainer().depth;
+      this.playerAvatar.destroy();
+      const equipped = getEquippedColors();
+      this.playerAvatar = new AvatarRenderer(this, x, y, {
+        ...cfg,
+        topColor: equipped.topColor ?? cfg.topColor,
+        bottomColor: equipped.bottomColor ?? cfg.bottomColor,
+      });
+      this.playerAvatar.setDepth(depth);
+    });
+
+    // Open creator from inventory
+    eventBus.on(EVENTS.OPEN_CREATOR, () => {
+      if (this.inTransition) return;
+      this.transitionToScene('CreatorScene');
+    });
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────

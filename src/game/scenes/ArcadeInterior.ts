@@ -83,7 +83,7 @@ export class ArcadeInterior extends Phaser.Scene {
       this.inTransition = true;
       this.cameras.main.fadeOut(250, 0, 0, 0);
       this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-        this.scene.start('WorldScene');
+        this.scene.start('PenaltyMinigame');
       });
     }
   }
