@@ -56,7 +56,7 @@ type RemoteHitEvent = {
 };
 
 type WeaponMode = 'pistol' | 'shotgun';
-type EnemyArchetype = 'rusher' | 'shooter' | 'tank';
+type EnemyArchetype = 'rusher' | 'shooter' | 'tank' | 'boss';
 
 type WeaponStats = {
   label: string;
@@ -80,6 +80,7 @@ type EnemyProfile = {
   contactDamage: number;
   rangedDamage: number;
   shotCooldownMs: number;
+  respawnMs?: number;
 };
 
 type DummyState = {
@@ -102,6 +103,8 @@ type DummyState = {
   contactDamage: number;
   rangedDamage: number;
   shotCooldownMs: number;
+  respawnMs: number;
+  isBoss: boolean;
 };
 
 const REMOTE_CHAT_MIN_MS = 1000;
@@ -171,6 +174,19 @@ const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
     rangedDamage: 0,
     shotCooldownMs: 999999,
   },
+  boss: {
+    label: 'BOSS',
+    tint: 0x3DD6FF,
+    maxHp: 220,
+    radius: 28,
+    speed: 1.45,
+    preferredDistance: 180,
+    strafe: 0.95,
+    contactDamage: 24,
+    rangedDamage: 14,
+    shotCooldownMs: 620,
+    respawnMs: 5000,
+  },
 };
 
 export class WorldScene extends Phaser.Scene {
@@ -237,6 +253,13 @@ export class WorldScene extends Phaser.Scene {
   private combatHud?: Phaser.GameObjects.Text;
   private dummyStates = new Map<CombatDummy, DummyState>();
   private currentWeapon: WeaponMode = 'pistol';
+  private bossDummy?: CombatDummy;
+  private bossHud?: Phaser.GameObjects.Container;
+  private bossBar?: Phaser.GameObjects.Graphics;
+  private bossName?: Phaser.GameObjects.Text;
+  private arenaNotice?: Phaser.GameObjects.Text;
+  private audioCtx?: AudioContext;
+  private audioUnlocked = false;
 
   // Training zone (PVE + PVP)
   private inTraining = false;
@@ -388,6 +411,14 @@ export class WorldScene extends Phaser.Scene {
       color: '#39FF14',
     }).setScrollFactor(0).setDepth(9999);
 
+    this.arenaNotice = this.add.text(this.scale.width / 2, 88, '', {
+      fontSize: '9px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#3DD6FF',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(10002).setAlpha(0);
+
     this.combatHud = this.add.text(8, 74, '', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
@@ -396,6 +427,8 @@ export class WorldScene extends Phaser.Scene {
     }).setScrollFactor(0).setDepth(9999);
     this.renderCombatHud();
 
+    this.setupBossHud();
+
     // Spawn a few local dummies (PVE)
     const dummyPositions: Array<{ x: number; y: number; archetype: EnemyArchetype }> = [
       { x: ZONES.TRAINING_X + 150, y: ZONES.TRAINING_Y + 150, archetype: 'rusher' },
@@ -403,6 +436,7 @@ export class WorldScene extends Phaser.Scene {
       { x: ZONES.TRAINING_X + 560, y: ZONES.TRAINING_Y + 140, archetype: 'tank' },
       { x: ZONES.TRAINING_X + 720, y: ZONES.TRAINING_Y + 250, archetype: 'shooter' },
       { x: ZONES.TRAINING_X + 810, y: ZONES.TRAINING_Y + 120, archetype: 'rusher' },
+      { x: ZONES.TRAINING_X + ZONES.TRAINING_W / 2, y: ZONES.TRAINING_Y + ZONES.TRAINING_H / 2, archetype: 'boss' },
     ];
     dummyPositions.forEach((p, index) => this.spawnTrainingDummy(p.x, p.y, index, p.archetype));
   }
@@ -450,8 +484,75 @@ export class WorldScene extends Phaser.Scene {
       `WEAPON ${weapon.label}`,
       '1 PISTOL  2 SHOTGUN',
       'F / CLICK DISPARA',
-      'RUSH / SHOT / TANK EN TRAINING',
+      'RUSH / SHOT / TANK / BOSS',
     ]);
+  }
+
+  private getEnemyNameColor(archetype: EnemyArchetype) {
+    if (archetype === 'boss') return '#3DD6FF';
+    if (archetype === 'tank') return '#D8A8FF';
+    if (archetype === 'shooter') return '#FFC38D';
+    return '#FF8B8B';
+  }
+
+  private setupBossHud() {
+    const x = this.scale.width / 2;
+    const y = 26;
+    const frame = this.add.rectangle(x, y, 320, 26, 0x000000, 0.66)
+      .setScrollFactor(0)
+      .setDepth(10003)
+      .setStrokeStyle(1, 0x3DD6FF, 0.55);
+    this.bossBar = this.add.graphics().setScrollFactor(0).setDepth(10004);
+    this.bossName = this.add.text(x, y - 1, 'PLAZA BOSS', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#3DD6FF',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(10005);
+
+    this.bossHud = this.add.container(0, 0, [frame, this.bossBar, this.bossName]);
+    this.bossHud.setVisible(false);
+  }
+
+  private renderBossHud() {
+    if (!this.bossHud || !this.bossBar || !this.bossName || !this.bossDummy) return;
+    const state = this.dummyStates.get(this.bossDummy);
+    if (!state) {
+      this.bossHud.setVisible(false);
+      return;
+    }
+
+    this.bossHud.setVisible(this.inTraining && state.alive);
+    this.bossBar.clear();
+    if (!this.inTraining || !state.alive) return;
+
+    const width = 292;
+    const height = 10;
+    const x = this.scale.width / 2 - width / 2;
+    const y = 22;
+    const pct = Phaser.Math.Clamp(state.hp / state.maxHp, 0, 1);
+    this.bossName.setText(`PLAZA BOSS ${state.hp}/${state.maxHp}`);
+    this.bossBar.fillStyle(0x09131A, 0.85);
+    this.bossBar.fillRoundedRect(x, y, width, height, 3);
+    this.bossBar.fillStyle(0x3DD6FF, 0.88);
+    this.bossBar.fillRoundedRect(x + 1, y + 1, (width - 2) * pct, height - 2, 3);
+  }
+
+  private showArenaNotice(message: string, color = '#3DD6FF') {
+    if (!this.arenaNotice) return;
+    this.arenaNotice.setText(message);
+    this.arenaNotice.setColor(color);
+    this.arenaNotice.setAlpha(1);
+    this.arenaNotice.setY(88);
+    this.tweens.killTweensOf(this.arenaNotice);
+    this.tweens.add({
+      targets: this.arenaNotice,
+      alpha: { from: 1, to: 0 },
+      y: 70,
+      duration: 1400,
+      ease: 'Sine.easeOut',
+    });
   }
 
   private spawnTrainingDummy(x: number, y: number, index: number, archetype: EnemyArchetype) {
@@ -469,7 +570,7 @@ export class WorldScene extends Phaser.Scene {
     const nameplate = this.add.text(x, y - 34, label, {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
-      color: archetype === 'tank' ? '#D8A8FF' : archetype === 'shooter' ? '#FFC38D' : '#FF8B8B',
+      color: this.getEnemyNameColor(archetype),
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(32);
@@ -495,9 +596,16 @@ export class WorldScene extends Phaser.Scene {
       contactDamage: profile.contactDamage,
       rangedDamage: profile.rangedDamage,
       shotCooldownMs: profile.shotCooldownMs,
+      respawnMs: profile.respawnMs ?? DUMMY_RESPAWN_MS,
+      isBoss: archetype === 'boss',
     };
     this.dummyStates.set(dummy, state);
+    if (archetype === 'boss') {
+      this.bossDummy = dummy;
+      this.showArenaNotice('PLAZA BOSS ONLINE', '#3DD6FF');
+    }
     this.renderDummyState(dummy, state);
+    this.renderBossHud();
   }
 
   private renderDummyState(dummy: CombatDummy, state: DummyState) {
@@ -518,6 +626,8 @@ export class WorldScene extends Phaser.Scene {
     const state = this.dummyStates.get(dummy);
     if (!state || !state.alive) return;
 
+    this.ensureAudioReady();
+    this.playCombatTone(state.isBoss ? 220 : 260, 0.045, 'triangle', 0.05);
     state.hp = Math.max(0, state.hp - damage);
     const pushAngle = Phaser.Math.Angle.Between(this.px, this.py, dummy.x, dummy.y);
     dummy.setPosition(
@@ -545,18 +655,23 @@ export class WorldScene extends Phaser.Scene {
     });
 
     this.renderDummyState(dummy, state);
+    this.renderBossHud();
     if (state.hp > 0) return;
 
     state.alive = false;
-    state.respawnAt = this.time.now + DUMMY_RESPAWN_MS;
+    state.respawnAt = this.time.now + state.respawnMs;
     state.hp = 0;
     dummy.setAlpha(0.16);
     dummy.body.enable = false;
     state.nameplate.setText('DOWN');
     state.nameplate.setColor('#888888');
+    this.playCombatTone(state.isBoss ? 120 : 160, 0.16, 'sawtooth', 0.06);
     this.trainingScore += 1;
     if (this.trainingHud) {
       this.trainingHud.setText(`TRAINING KOs ${this.trainingScore}`);
+    }
+    if (state.isBoss) {
+      this.showArenaNotice('BOSS DOWN', '#39FF14');
     }
 
     const burst = this.add.text(dummy.x, dummy.y - 18, 'KO', {
@@ -591,6 +706,7 @@ export class WorldScene extends Phaser.Scene {
         onComplete: () => shard.destroy(),
       });
     }
+    this.renderBossHud();
   }
 
   private updateDummies() {
@@ -603,7 +719,7 @@ export class WorldScene extends Phaser.Scene {
         dummy.setAlpha(0.7);
         dummy.setFillStyle(state.tint, 0.7);
         state.nameplate.setText(state.label);
-        state.nameplate.setColor('#FF8B8B');
+        state.nameplate.setColor(this.getEnemyNameColor(state.archetype));
         state.lastShotAt = this.time.now + Phaser.Math.Between(180, 520);
         const ring = this.add.circle(dummy.x, dummy.y, 10, state.tint, 0).setDepth(4999);
         ring.setStrokeStyle(2, state.tint, 0.8);
@@ -615,6 +731,10 @@ export class WorldScene extends Phaser.Scene {
           ease: 'Sine.easeOut',
           onComplete: () => ring.destroy(),
         });
+        if (state.isBoss) {
+          this.showArenaNotice('BOSS RESPAWN', '#3DD6FF');
+          this.playCombatTone(180, 0.18, 'square', 0.05);
+        }
       }
 
       state.phase += 0.018;
@@ -624,12 +744,13 @@ export class WorldScene extends Phaser.Scene {
       const distToPlayer = Phaser.Math.Distance.Between(dummy.x, dummy.y, this.px, this.py);
       if (this.inTraining && distToPlayer < 280) {
         const angleToPlayer = Phaser.Math.Angle.Between(dummy.x, dummy.y, this.px, this.py);
+        const approachMultiplier = state.isBoss ? 1.15 : 1;
         const approach = distToPlayer > state.preferredDistance + 36
-          ? state.speed
+          ? state.speed * approachMultiplier
           : distToPlayer < Math.max(40, state.preferredDistance - 30)
             ? -state.speed * 0.9
             : state.speed * 0.25;
-        const strafe = distToPlayer < 220 ? Math.sin(this.time.now / 180 + state.phase) * state.strafe : 0;
+        const strafe = distToPlayer < 220 ? Math.sin(this.time.now / (state.isBoss ? 120 : 180) + state.phase) * state.strafe : 0;
         const moveX = Math.cos(angleToPlayer) * approach + Math.cos(angleToPlayer + Math.PI / 2) * strafe;
         const moveY = Math.sin(angleToPlayer) * approach + Math.sin(angleToPlayer + Math.PI / 2) * strafe;
         targetX = dummy.x + moveX;
@@ -642,11 +763,18 @@ export class WorldScene extends Phaser.Scene {
         if (
           state.rangedDamage > 0 &&
           distToPlayer >= 90 &&
-          distToPlayer < 320 &&
+          distToPlayer < (state.isBoss ? 420 : 320) &&
           this.time.now - state.lastShotAt > state.shotCooldownMs
         ) {
           state.lastShotAt = this.time.now + Phaser.Math.Between(0, 160);
-          this.fireEnemyBullet(dummy.x, dummy.y, this.px, this.py, state.tint, state.rangedDamage);
+          if (state.isBoss) {
+            for (const offset of [-0.18, 0, 0.18]) {
+              this.fireEnemyBullet(dummy.x, dummy.y, this.px, this.py, state.tint, state.rangedDamage, offset);
+            }
+            this.playCombatTone(150, 0.12, 'sawtooth', 0.04);
+          } else {
+            this.fireEnemyBullet(dummy.x, dummy.y, this.px, this.py, state.tint, state.rangedDamage, 0);
+          }
         }
       }
 
@@ -655,11 +783,12 @@ export class WorldScene extends Phaser.Scene {
       dummy.setPosition(targetX, targetY);
       this.renderDummyState(dummy, state);
     }
+    this.renderBossHud();
   }
 
-  private fireEnemyBullet(fromX: number, fromY: number, targetX: number, targetY: number, color: number, damage: number) {
+  private fireEnemyBullet(fromX: number, fromY: number, targetX: number, targetY: number, color: number, damage: number, angleOffset: number) {
     const baseAngle = Phaser.Math.Angle.Between(fromX, fromY, targetX, targetY);
-    const angle = baseAngle + Phaser.Math.FloatBetween(-0.08, 0.08);
+    const angle = baseAngle + angleOffset + Phaser.Math.FloatBetween(-0.08, 0.08);
     const bullet = this.add.circle(fromX, fromY, 5, color, 0.95) as Phaser.GameObjects.Arc & {
       damage?: number;
       sourceX?: number;
@@ -690,10 +819,42 @@ export class WorldScene extends Phaser.Scene {
     this.time.delayedCall(1400, () => this.destroyArcadeObject(bullet));
   }
 
+  private ensureAudioReady() {
+    if (typeof window === 'undefined') return;
+    if (!this.audioCtx) {
+      const Ctx = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctx) return;
+      this.audioCtx = new Ctx();
+    }
+    if (this.audioCtx.state === 'suspended') {
+      void this.audioCtx.resume();
+    }
+    this.audioUnlocked = this.audioCtx.state === 'running';
+  }
+
+  private playCombatTone(freq: number, duration: number, type: OscillatorType, gainValue: number) {
+    this.ensureAudioReady();
+    if (!this.audioCtx || !this.audioUnlocked) return;
+
+    const now = this.audioCtx.currentTime;
+    const osc = this.audioCtx.createOscillator();
+    const gain = this.audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, now);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(80, freq * 0.55), now + duration);
+    gain.gain.setValueAtTime(gainValue, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    osc.connect(gain);
+    gain.connect(this.audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + duration);
+  }
+
   private applyLocalDamage(dmg: number, sourceX: number, sourceY: number) {
     this.lastDamageAt = this.time.now;
     this.hp = Math.max(0, this.hp - dmg);
     this.renderHpHud();
+    this.playCombatTone(90, 0.08, 'triangle', 0.045);
 
     const flash = this.add.rectangle(400, 300, 800, 600, 0xFF0000, 0.08)
       .setScrollFactor(0)
@@ -720,6 +881,7 @@ export class WorldScene extends Phaser.Scene {
     this.playerNameplate.setPosition(this.px, this.py - 46);
     this.chatSystem.updatePosition('__player__', this.px, this.py);
     this.cameras.main.flash(180, 255, 255, 255, false);
+    this.playCombatTone(140, 0.2, 'square', 0.05);
 
     const respawnText = this.add.text(this.px, this.py - 54, 'RESPAWN PLAZA', {
       fontSize: '8px',
@@ -782,6 +944,13 @@ export class WorldScene extends Phaser.Scene {
     const weapon = WEAPON_STATS[this.currentWeapon];
     if (now - this.lastShotAt < weapon.cooldownMs) return;
     this.lastShotAt = now;
+    this.ensureAudioReady();
+    this.playCombatTone(
+      this.currentWeapon === 'shotgun' ? 120 : 220,
+      this.currentWeapon === 'shotgun' ? 0.11 : 0.07,
+      this.currentWeapon === 'shotgun' ? 'sawtooth' : 'square',
+      this.currentWeapon === 'shotgun' ? 0.05 : 0.035,
+    );
 
     const ang = Phaser.Math.Angle.Between(this.px, this.py, wx, wy);
 
@@ -1996,6 +2165,9 @@ export class WorldScene extends Phaser.Scene {
       this.inTraining = nowInTraining;
       if (this.trainingBanner) {
         this.trainingBanner.setText(this.inTraining ? 'TRAINING: PVP + PVE - F DISPARA - 1/2 CAMBIAN ARMA' : '');
+      }
+      if (this.inTraining) {
+        this.showArenaNotice('TRAINING HOT ZONE', '#39FF14');
       }
     }
 
