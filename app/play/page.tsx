@@ -1128,6 +1128,7 @@ export default function PlayPage() {
                       <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>UTIL</div>
                       <div style={{ fontSize: '16px' }}>GUN</div>
                       <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Click o F para disparar</div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)' }}>1 pistol / 2 shotgun en training</div>
                     </div>
                     <button
                       onClick={() => {

@@ -55,6 +55,19 @@ type RemoteHitEvent = {
   dmg: number;
 };
 
+type WeaponMode = 'pistol' | 'shotgun';
+
+type WeaponStats = {
+  label: string;
+  pellets: number;
+  spread: number;
+  speed: number;
+  damage: number;
+  cooldownMs: number;
+  color: number;
+  knockback: number;
+};
+
 type DummyState = {
   label: string;
   nameplate: Phaser.GameObjects.Text;
@@ -67,15 +80,37 @@ type DummyState = {
   respawnAt: number;
   alive: boolean;
   tint: number;
+  lastShotAt: number;
 };
 
 const REMOTE_CHAT_MIN_MS = 1000;
 const REMOTE_MOVE_MIN_MS = 50;
 const REMOTE_HIT_MIN_MS = 120;
 const MAX_REMOTE_CHAT_DISTANCE = 2600;
-const GUN_SHOT_COOLDOWN_MS = 170;
 const LOCAL_HIT_COOLDOWN_MS = 180;
 const DUMMY_RESPAWN_MS = 1800;
+const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
+  pistol: {
+    label: 'PISTOL',
+    pellets: 1,
+    spread: 0.03,
+    speed: 620,
+    damage: 16,
+    cooldownMs: 170,
+    color: 0xF5C842,
+    knockback: 16,
+  },
+  shotgun: {
+    label: 'SHOTGUN',
+    pellets: 5,
+    spread: 0.19,
+    speed: 560,
+    damage: 10,
+    cooldownMs: 420,
+    color: 0xFF8B3D,
+    knockback: 26,
+  },
+};
 
 export class WorldScene extends Phaser.Scene {
   // Player
@@ -129,13 +164,18 @@ export class WorldScene extends Phaser.Scene {
   private hpText!: Phaser.GameObjects.Text;
   private gunEnabled = false;
   private keyF!: Phaser.Input.Keyboard.Key;
+  private keyOne!: Phaser.Input.Keyboard.Key;
+  private keyTwo!: Phaser.Input.Keyboard.Key;
   private bullets!: Phaser.Physics.Arcade.Group;
+  private enemyBullets!: Phaser.Physics.Arcade.Group;
   private playerHitbox!: HitboxArc;
   private lastShotAt = 0;
   private lastDamageAt = 0;
   private trainingScore = 0;
   private trainingHud?: Phaser.GameObjects.Text;
+  private combatHud?: Phaser.GameObjects.Text;
   private dummyStates = new Map<CombatDummy, DummyState>();
+  private currentWeapon: WeaponMode = 'pistol';
 
   // Training zone (PVE + PVP)
   private inTraining = false;
@@ -217,6 +257,8 @@ export class WorldScene extends Phaser.Scene {
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyF = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.F);
+    this.keyOne = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
+    this.keyTwo = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
 
     // Touch controls (mobile)
     this.setupTouchControls();
@@ -285,6 +327,14 @@ export class WorldScene extends Phaser.Scene {
       color: '#39FF14',
     }).setScrollFactor(0).setDepth(9999);
 
+    this.combatHud = this.add.text(8, 74, '', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      lineSpacing: 5,
+    }).setScrollFactor(0).setDepth(9999);
+    this.renderCombatHud();
+
     // Spawn a few local dummies (PVE)
     const dummyPositions = [
       { x: ZONES.TRAINING_X + 150, y: ZONES.TRAINING_Y + 150 },
@@ -321,6 +371,26 @@ export class WorldScene extends Phaser.Scene {
     this.hpText.setText(`HP ${this.hp}`);
   }
 
+  private renderCombatHud() {
+    if (!this.combatHud) return;
+    if (!this.gunEnabled) {
+      this.combatHud.setText([
+        'WEAPON OFFLINE',
+        'ACTIVA GUN EN INVENTARIO',
+        'TRAINING LISTO',
+      ]);
+      this.combatHud.setColor('#888888');
+      return;
+    }
+    const weapon = WEAPON_STATS[this.currentWeapon];
+    this.combatHud.setColor(this.currentWeapon === 'shotgun' ? '#FF8B3D' : '#F5C842');
+    this.combatHud.setText([
+      `WEAPON ${weapon.label}`,
+      '1 PISTOL  2 SHOTGUN',
+      'F / CLICK DISPARA',
+    ]);
+  }
+
   private spawnTrainingDummy(x: number, y: number, index: number) {
     const tint = [0xFF5E5E, 0xFF8844, 0xFF4D8D, 0xFF6C3A][index % 4];
     const label = `BOT_${index + 1}`;
@@ -354,6 +424,7 @@ export class WorldScene extends Phaser.Scene {
       respawnAt: 0,
       alive: true,
       tint,
+      lastShotAt: 0,
     };
     this.dummyStates.set(dummy, state);
     this.renderDummyState(dummy, state);
@@ -373,12 +444,16 @@ export class WorldScene extends Phaser.Scene {
     state.hpBar.fillRoundedRect(dummy.x - width / 2 + 1, dummy.y - 23, (width - 2) * pct, height - 2, 2);
   }
 
-  private damageDummy(dummy: CombatDummy) {
+  private damageDummy(dummy: CombatDummy, damage: number, knockback: number) {
     const state = this.dummyStates.get(dummy);
     if (!state || !state.alive) return;
 
-    const damage = Phaser.Math.Between(14, 18);
     state.hp = Math.max(0, state.hp - damage);
+    const pushAngle = Phaser.Math.Angle.Between(this.px, this.py, dummy.x, dummy.y);
+    dummy.setPosition(
+      Phaser.Math.Clamp(dummy.x + Math.cos(pushAngle) * knockback, ZONES.TRAINING_X + 26, ZONES.TRAINING_X + ZONES.TRAINING_W - 26),
+      Phaser.Math.Clamp(dummy.y + Math.sin(pushAngle) * knockback, ZONES.TRAINING_Y + 26, ZONES.TRAINING_Y + ZONES.TRAINING_H - 26),
+    );
     const flash = this.add.circle(dummy.x, dummy.y, 20, 0xFF4444, 0.24);
     flash.setDepth(5000);
     this.tweens.add({ targets: flash, alpha: 0, scale: 1.8, duration: 180, onComplete: () => flash.destroy() });
@@ -462,6 +537,11 @@ export class WorldScene extends Phaser.Scene {
         if (distToPlayer < 38 && this.time.now - this.lastDamageAt > LOCAL_HIT_COOLDOWN_MS) {
           this.applyLocalDamage(8, dummy.x, dummy.y);
         }
+
+        if (distToPlayer >= 90 && distToPlayer < 320 && this.time.now - state.lastShotAt > 850) {
+          state.lastShotAt = this.time.now + Phaser.Math.Between(0, 160);
+          this.fireEnemyBullet(dummy.x, dummy.y, this.px, this.py, state.tint);
+        }
       }
 
       targetX = Phaser.Math.Clamp(targetX, ZONES.TRAINING_X + 26, ZONES.TRAINING_X + ZONES.TRAINING_W - 26);
@@ -469,6 +549,39 @@ export class WorldScene extends Phaser.Scene {
       dummy.setPosition(targetX, targetY);
       this.renderDummyState(dummy, state);
     }
+  }
+
+  private fireEnemyBullet(fromX: number, fromY: number, targetX: number, targetY: number, color: number) {
+    const baseAngle = Phaser.Math.Angle.Between(fromX, fromY, targetX, targetY);
+    const angle = baseAngle + Phaser.Math.FloatBetween(-0.08, 0.08);
+    const bullet = this.add.circle(fromX, fromY, 5, color, 0.95) as Phaser.GameObjects.Arc & {
+      damage?: number;
+      sourceX?: number;
+      sourceY?: number;
+    };
+    bullet.damage = 9;
+    bullet.sourceX = fromX;
+    bullet.sourceY = fromY;
+    bullet.setDepth(1900);
+    bullet.setStrokeStyle(2, 0x000000, 0.28);
+    this.physics.add.existing(bullet);
+    const body = bullet.body as Phaser.Physics.Arcade.Body;
+    body.setAllowGravity(false);
+    body.setCircle(5);
+    body.setVelocity(Math.cos(angle) * 260, Math.sin(angle) * 260);
+    this.enemyBullets.add(bullet);
+
+    const tracer = this.add.line(0, 0, fromX, fromY, fromX + Math.cos(angle) * 16, fromY + Math.sin(angle) * 16, color, 0.45)
+      .setLineWidth(2, 2)
+      .setDepth(1899);
+    this.tweens.add({
+      targets: tracer,
+      alpha: { from: 0.45, to: 0 },
+      duration: 90,
+      onComplete: () => tracer.destroy(),
+    });
+
+    this.time.delayedCall(1400, () => this.destroyArcadeObject(bullet));
   }
 
   private applyLocalDamage(dmg: number, sourceX: number, sourceY: number) {
@@ -506,6 +619,11 @@ export class WorldScene extends Phaser.Scene {
       collideWorldBounds: true,
       maxSize: 32,
     });
+    this.enemyBullets = this.physics.add.group({
+      allowGravity: false,
+      collideWorldBounds: true,
+      maxSize: 48,
+    });
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
       if (!this.gunEnabled) return;
@@ -517,25 +635,37 @@ export class WorldScene extends Phaser.Scene {
     this.physics.add.overlap(this.bullets, this.dummies, (bObj, dObj) => {
       if (!this.inTraining || !this.pveEnabled) return;
       this.destroyArcadeObject(bObj);
-      this.damageDummy(dObj as CombatDummy);
+      const bullet = bObj as Phaser.GameObjects.Rectangle & { damage?: number; knockback?: number };
+      this.damageDummy(dObj as CombatDummy, bullet.damage ?? WEAPON_STATS[this.currentWeapon].damage, bullet.knockback ?? 12);
+    });
+
+    this.physics.add.overlap(this.enemyBullets, this.playerHitbox, (bObj) => {
+      if (!this.inTraining || !this.pveEnabled) return;
+      const bullet = bObj as Phaser.GameObjects.Arc & { damage?: number; sourceX?: number; sourceY?: number };
+      this.destroyArcadeObject(bullet);
+      this.applyLocalDamage(
+        Math.max(4, Math.floor(bullet.damage ?? 8)),
+        bullet.sourceX ?? this.px - 1,
+        bullet.sourceY ?? this.py,
+      );
     });
   }
 
   private shootAt(wx: number, wy: number) {
     const now = this.time.now;
-    if (now - this.lastShotAt < GUN_SHOT_COOLDOWN_MS) return;
+    const weapon = WEAPON_STATS[this.currentWeapon];
+    if (now - this.lastShotAt < weapon.cooldownMs) return;
     this.lastShotAt = now;
 
     const ang = Phaser.Math.Angle.Between(this.px, this.py, wx, wy);
-    const speed = 620;
 
     // Muzzle flash
-    const flash = this.add.circle(this.px + Math.cos(ang) * 14, this.py + Math.sin(ang) * 14, 7, 0xF5C842, 0.95);
+    const flash = this.add.circle(this.px + Math.cos(ang) * 14, this.py + Math.sin(ang) * 14, this.currentWeapon === 'shotgun' ? 10 : 7, weapon.color, 0.95);
     flash.setDepth(2100);
     this.tweens.add({
       targets: flash,
       alpha: { from: 0.95, to: 0 },
-      scale: { from: 1, to: 1.8 },
+      scale: { from: 1, to: this.currentWeapon === 'shotgun' ? 2.4 : 1.8 },
       duration: 120,
       onComplete: () => flash.destroy(),
     });
@@ -549,45 +679,57 @@ export class WorldScene extends Phaser.Scene {
       x: container.x + recoilX,
       y: container.y + recoilY,
       yoyo: true,
-      duration: 80,
+      duration: this.currentWeapon === 'shotgun' ? 110 : 80,
       ease: 'Sine.easeOut',
     });
 
-    // Bullet
-    const b = this.add.rectangle(this.px, this.py, 10, 3, 0xF5C842, 1);
-    this.physics.add.existing(b);
-    const body = b.body as Phaser.Physics.Arcade.Body;
-    body.setAllowGravity(false);
-    body.setSize(10, 3);
-    body.setVelocity(Math.cos(ang) * speed, Math.sin(ang) * speed);
-    b.setRotation(ang);
-    b.setDepth(2000);
-    this.bullets.add(b);
-    this.cameras.main.shake(40, 0.0012, false);
+    for (let i = 0; i < weapon.pellets; i++) {
+      const spreadOffset = weapon.pellets === 1 ? Phaser.Math.FloatBetween(-weapon.spread, weapon.spread) : Phaser.Math.FloatBetween(-weapon.spread, weapon.spread);
+      const shotAngle = ang + spreadOffset;
+      const b = this.add.rectangle(this.px, this.py, this.currentWeapon === 'shotgun' ? 8 : 10, this.currentWeapon === 'shotgun' ? 3 : 3, weapon.color, 1) as Phaser.GameObjects.Rectangle & { damage?: number; knockback?: number };
+      b.damage = weapon.damage;
+      b.knockback = weapon.knockback;
+      this.physics.add.existing(b);
+      const body = b.body as Phaser.Physics.Arcade.Body;
+      body.setAllowGravity(false);
+      body.setSize(10, 3);
+      body.setVelocity(Math.cos(shotAngle) * weapon.speed, Math.sin(shotAngle) * weapon.speed);
+      b.setRotation(shotAngle);
+      b.setDepth(2000);
+      this.bullets.add(b);
 
-    const tracer = this.add.line(
-      0,
-      0,
-      this.px,
-      this.py,
-      this.px + Math.cos(ang) * 18,
-      this.py + Math.sin(ang) * 18,
-      0xF5C842,
-      0.4,
-    ).setLineWidth(2, 2).setDepth(1999);
-    this.tweens.add({
-      targets: tracer,
-      alpha: { from: 0.4, to: 0 },
-      duration: 70,
-      onComplete: () => tracer.destroy(),
-    });
+      const tracer = this.add.line(
+        0,
+        0,
+        this.px,
+        this.py,
+        this.px + Math.cos(shotAngle) * (this.currentWeapon === 'shotgun' ? 24 : 18),
+        this.py + Math.sin(shotAngle) * (this.currentWeapon === 'shotgun' ? 24 : 18),
+        weapon.color,
+        this.currentWeapon === 'shotgun' ? 0.55 : 0.4,
+      ).setLineWidth(this.currentWeapon === 'shotgun' ? 3 : 2, this.currentWeapon === 'shotgun' ? 3 : 2).setDepth(1999);
+      this.tweens.add({
+        targets: tracer,
+        alpha: { from: tracer.alpha, to: 0 },
+        duration: this.currentWeapon === 'shotgun' ? 90 : 70,
+        onComplete: () => tracer.destroy(),
+      });
 
-    this.time.delayedCall(900, () => this.destroyArcadeObject(b));
+      this.time.delayedCall(this.currentWeapon === 'shotgun' ? 420 : 900, () => this.destroyArcadeObject(b));
+    }
+
+    this.cameras.main.shake(this.currentWeapon === 'shotgun' ? 70 : 40, this.currentWeapon === 'shotgun' ? 0.0024 : 0.0012, false);
+
+    this.renderCombatHud();
   }
 
   private refreshUtilitiesFromInventory() {
     this.gunEnabled = hasUtilityEquipped('UTIL-GUN-01');
     this.ballEnabled = hasUtilityEquipped('UTIL-BALL-01');
+    if (!this.gunEnabled) {
+      this.currentWeapon = 'pistol';
+    }
+    this.renderCombatHud();
 
     if (this.ballEnabled && !this.football) {
       this.football = this.add.arc(this.px + 18, this.py - 6, 7, 0, 360, false, 0xFFFFFF);
@@ -1689,6 +1831,15 @@ export class WorldScene extends Phaser.Scene {
 
     this.handleInteraction();
 
+    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyOne)) {
+      this.currentWeapon = 'pistol';
+      this.renderCombatHud();
+    }
+    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyTwo)) {
+      this.currentWeapon = 'shotgun';
+      this.renderCombatHud();
+    }
+
     // Gun shoot with keyboard
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyF) && !this.inputBlocked) {
       const p = this.input.activePointer;
@@ -1718,7 +1869,7 @@ export class WorldScene extends Phaser.Scene {
     if (nowInTraining !== this.inTraining) {
       this.inTraining = nowInTraining;
       if (this.trainingBanner) {
-        this.trainingBanner.setText(this.inTraining ? 'TRAINING: PVP + PVE - F DISPARA' : '');
+        this.trainingBanner.setText(this.inTraining ? 'TRAINING: PVP + PVE - F DISPARA - 1/2 CAMBIAN ARMA' : '');
       }
     }
 
