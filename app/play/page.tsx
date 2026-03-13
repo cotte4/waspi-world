@@ -72,6 +72,7 @@ export default function PlayPage() {
   const [emailInput, setEmailInput] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [authStatus, setAuthStatus] = useState('');
+  const [authPanelOpen, setAuthPanelOpen] = useState(true);
   const [shopOpen, setShopOpen] = useState(initialCheckout.open);
   const [shopTab, setShopTab] = useState<ShopTab>(initialCheckout.tab);
   const [shopItems, setShopItems] = useState<CatalogItem[]>([]);
@@ -228,11 +229,13 @@ export default function PlayPage() {
     if (!session?.access_token) {
       tokenRef.current = null;
       setAuthEmail(session?.user?.email ?? null);
+      setAuthPanelOpen(true);
       return;
     }
 
     tokenRef.current = session.access_token;
     setAuthEmail(session.user.email ?? null);
+    setAuthPanelOpen(false);
 
     const res = await fetch('/api/player', {
       method: 'GET',
@@ -288,8 +291,10 @@ export default function PlayPage() {
       setAuthBusy(false);
       if (event === 'SIGNED_IN') {
         setAuthStatus('Sesion iniciada.');
+        setAuthPanelOpen(false);
       } else if (event === 'SIGNED_OUT') {
         setAuthStatus('Sesion cerrada.');
+        setAuthPanelOpen(true);
       }
     });
 
@@ -384,6 +389,7 @@ export default function PlayPage() {
     tokenRef.current = null;
     setAuthEmail(null);
     setAuthStatus('Sesion cerrada.');
+    setAuthPanelOpen(true);
   }, []);
 
   const ensureStripe = useCallback(async () => {
@@ -681,73 +687,104 @@ export default function PlayPage() {
         <div
           className="absolute top-20 right-2"
           style={{
-            width: 228,
+            width: authPanelOpen ? 228 : 170,
             background: 'rgba(0,0,0,0.78)',
             border: '1px solid rgba(245,200,66,0.18)',
             padding: '8px',
             boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
           }}
         >
-          <div
-            style={{
-              fontFamily: '"Press Start 2P", monospace',
-              fontSize: '7px',
-              color: '#F5C842',
-              marginBottom: 8,
-            }}
-          >
-            {isAuthenticated ? 'CUENTA CONECTADA' : 'LOGIN OPCIONAL'}
+          <div className="flex items-center justify-between" style={{ marginBottom: authPanelOpen ? 8 : 0 }}>
+            <div
+              style={{
+                fontFamily: '"Press Start 2P", monospace',
+                fontSize: '7px',
+                color: '#F5C842',
+              }}
+            >
+              {isAuthenticated ? 'CUENTA CONECTADA' : 'LOGIN OPCIONAL'}
+            </div>
+            {isAuthenticated && (
+              <button
+                onClick={() => setAuthPanelOpen((value) => !value)}
+                style={{
+                  fontFamily: '"Press Start 2P", monospace',
+                  fontSize: '7px',
+                  color: '#BBBBBB',
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                {authPanelOpen ? 'OCULTAR' : 'ABRIR'}
+              </button>
+            )}
           </div>
 
-          {isAuthenticated ? (
-            <div>
+          {authPanelOpen ? (
+            <>
+              {isAuthenticated ? (
+                <div>
+                  <div
+                    style={{
+                      fontFamily: '"Silkscreen", monospace',
+                      fontSize: '13px',
+                      color: '#FFFFFF',
+                      marginBottom: 8,
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {authEmail}
+                  </div>
+                  <button onClick={() => void signOut()} disabled={authBusy} style={authButtonStyle('#F5C842', '#0E0E14', authBusy)}>
+                    {authBusy ? 'CERRANDO...' : 'CERRAR SESION'}
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <input
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    placeholder="email@waspi.world"
+                    autoComplete="email"
+                    style={textInputStyle}
+                  />
+                  <button onClick={() => void sendMagicLink()} disabled={authBusy} style={authButtonStyle('#F5C842', '#0E0E14', authBusy)}>
+                    {authBusy ? 'ENVIANDO...' : 'MAGIC LINK'}
+                  </button>
+                  <button onClick={() => void signInWithProvider('google')} disabled={authBusy} style={authButtonStyle('rgba(255,255,255,0.08)', '#FFFFFF', authBusy, true)}>
+                    ENTRAR CON GOOGLE
+                  </button>
+                  <button onClick={() => void signInWithProvider('discord')} disabled={authBusy} style={authButtonStyle('rgba(88,101,242,0.22)', '#FFFFFF', authBusy, true)}>
+                    ENTRAR CON DISCORD
+                  </button>
+                </div>
+              )}
+
               <div
                 style={{
                   fontFamily: '"Silkscreen", monospace',
-                  fontSize: '13px',
-                  color: '#FFFFFF',
-                  marginBottom: 8,
-                  wordBreak: 'break-word',
+                  fontSize: '11px',
+                  color: authStatus ? '#BBBBBB' : 'rgba(255,255,255,0.35)',
+                  marginTop: 8,
+                  minHeight: 14,
                 }}
               >
-                {authEmail}
+                {authStatus || 'Guarda TENKS, inventario y avatar en tu cuenta.'}
               </div>
-              <button onClick={() => void signOut()} disabled={authBusy} style={authButtonStyle('#F5C842', '#0E0E14', authBusy)}>
-                {authBusy ? 'CERRANDO...' : 'CERRAR SESION'}
-              </button>
-            </div>
+            </>
           ) : (
-            <div className="flex flex-col gap-2">
-              <input
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                placeholder="email@waspi.world"
-                autoComplete="email"
-                style={textInputStyle}
-              />
-              <button onClick={() => void sendMagicLink()} disabled={authBusy} style={authButtonStyle('#F5C842', '#0E0E14', authBusy)}>
-                {authBusy ? 'ENVIANDO...' : 'MAGIC LINK'}
-              </button>
-              <button onClick={() => void signInWithProvider('google')} disabled={authBusy} style={authButtonStyle('rgba(255,255,255,0.08)', '#FFFFFF', authBusy, true)}>
-                ENTRAR CON GOOGLE
-              </button>
-              <button onClick={() => void signInWithProvider('discord')} disabled={authBusy} style={authButtonStyle('rgba(88,101,242,0.22)', '#FFFFFF', authBusy, true)}>
-                ENTRAR CON DISCORD
-              </button>
+            <div
+              style={{
+                fontFamily: '"Silkscreen", monospace',
+                fontSize: '11px',
+                color: 'rgba(255,255,255,0.7)',
+                marginTop: 6,
+              }}
+            >
+              Cuenta lista.
             </div>
           )}
-
-          <div
-            style={{
-              fontFamily: '"Silkscreen", monospace',
-              fontSize: '11px',
-              color: authStatus ? '#BBBBBB' : 'rgba(255,255,255,0.35)',
-              marginTop: 8,
-              minHeight: 14,
-            }}
-          >
-            {authStatus || 'Guarda TENKS, inventario y avatar en tu cuenta.'}
-          </div>
         </div>
 
         {shopOpen && (
