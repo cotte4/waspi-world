@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { COLORS, WORLD } from '../config/constants';
+import { WORLD } from '../config/constants';
 import { announceScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 
@@ -138,10 +138,8 @@ export class HouseInterior extends Phaser.Scene {
   }
 
   private handleInteraction() {
-    const { width, height } = this.scale;
-    const roomW = 560;
+    const { height } = this.scale;
     const roomH = 340;
-    const roomX = (width - roomW) / 2;
     const roomY = (height - roomH) / 2;
 
     // Door area: borde inferior de la habitación
@@ -170,4 +168,3 @@ export class HouseInterior extends Phaser.Scene {
     }
   }
 }
-
