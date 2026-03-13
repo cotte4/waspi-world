@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { COLORS, WORLD } from '../config/constants';
 import { announceScene, createBackButton } from '../systems/SceneUi';
+import { InteriorRoom } from '../systems/InteriorRoom';
+import { eventBus, EVENTS } from '../config/eventBus';
 
 export class CafeInterior extends Phaser.Scene {
   private player!: AvatarRenderer;
@@ -15,6 +17,9 @@ export class CafeInterior extends Phaser.Scene {
   private keyD!: Phaser.Input.Keyboard.Key;
   private px = 0;
   private py = 0;
+  private room?: InteriorRoom;
+  private lastMoveDx = 0;
+  private lastIsMoving = false;
 
   constructor() {
     super({ key: 'CafeInterior' });
@@ -23,6 +28,7 @@ export class CafeInterior extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
     announceScene(this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
 
     const g = this.add.graphics();
     g.fillStyle(0x0d0505);
@@ -62,6 +68,16 @@ export class CafeInterior extends Phaser.Scene {
     this.py = roomY + roomH - 80;
     this.player = new AvatarRenderer(this, this.px, this.py, loadStoredAvatarConfig());
     this.player.setDepth(10);
+    this.room = new InteriorRoom(this, {
+      roomKey: 'waspi-room-cafe',
+      getPosition: () => ({ x: this.px, y: this.py }),
+      getMovement: () => ({ dx: this.lastMoveDx, isMoving: this.lastIsMoving }),
+      getAvatarConfig: () => loadStoredAvatarConfig(),
+      onRemoteClick: (playerId, username) => {
+        eventBus.emit(EVENTS.PLAYER_ACTIONS_OPEN, { playerId, username });
+      },
+    });
+    this.room.start();
 
     // Title
     this.add.text(width / 2, roomY + 24, 'CAFÉ', {
@@ -99,6 +115,7 @@ export class CafeInterior extends Phaser.Scene {
   update() {
     if (this.inTransition) return;
     this.handleMovement();
+    this.room?.update();
     if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
       this.exitToWorld();
     }
@@ -142,5 +159,12 @@ export class CafeInterior extends Phaser.Scene {
     this.player.update(dx !== 0 || dy !== 0, dx);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(10 + Math.floor(this.py / 10));
+    this.lastMoveDx = dx;
+    this.lastIsMoving = dx !== 0 || dy !== 0;
+  }
+
+  private handleSceneShutdown() {
+    this.room?.shutdown();
+    this.room = undefined;
   }
 }

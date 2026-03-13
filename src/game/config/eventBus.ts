@@ -30,6 +30,7 @@ export const EVENTS = {
   PLAYER_READY: 'player:ready',
   PLAYER_INFO: 'player:info',
   PLAYER_PRESENCE: 'player:presence',
+  PLAYER_COMBAT_STATS: 'player:combat:stats',
    TENKS_CHANGED: 'tenks:changed',
   INVENTORY_TOGGLE: 'inventory:toggle',
   INVENTORY_CHANGED: 'inventory:changed',

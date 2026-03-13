@@ -3,6 +3,7 @@ import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRendere
 import { WORLD } from '../config/constants';
 import { announceScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
+import { InteriorRoom } from '../systems/InteriorRoom';
 
 export class HouseInterior extends Phaser.Scene {
   private player!: AvatarRenderer;
@@ -17,6 +18,9 @@ export class HouseInterior extends Phaser.Scene {
   private py = 0;
   private mirrorRect!: Phaser.Geom.Rectangle;
   private wardrobeRect!: Phaser.Geom.Rectangle;
+  private room?: InteriorRoom;
+  private lastMoveDx = 0;
+  private lastIsMoving = false;
 
   constructor() {
     super({ key: 'HouseInterior' });
@@ -25,6 +29,7 @@ export class HouseInterior extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
     announceScene(this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
 
     const g = this.add.graphics();
     g.fillStyle(0x0B0B14);
@@ -69,6 +74,17 @@ export class HouseInterior extends Phaser.Scene {
     this.py = roomY + roomH - 80;
     this.player = new AvatarRenderer(this, this.px, this.py, loadStoredAvatarConfig());
     this.player.setDepth(10);
+    this.room = new InteriorRoom(this, {
+      roomKey: 'waspi-room-house',
+      getPosition: () => ({ x: this.px, y: this.py }),
+      getMovement: () => ({ dx: this.lastMoveDx, isMoving: this.lastIsMoving }),
+      getAvatarConfig: () => loadStoredAvatarConfig(),
+      onRemoteClick: (playerId, username) => {
+        eventBus.emit(EVENTS.PLAYER_ACTIONS_OPEN, { playerId, username });
+      },
+      remoteColor: '#CCCCFF',
+    });
+    this.room.start();
 
     // Title / labels
     this.add.text(width / 2, roomY + 24, 'TU CASA', {
@@ -103,6 +119,7 @@ export class HouseInterior extends Phaser.Scene {
   update() {
     if (this.inTransition) return;
     this.handleMovement();
+    this.room?.update();
     if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
       this.handleInteraction();
     }
@@ -137,6 +154,8 @@ export class HouseInterior extends Phaser.Scene {
     this.player.update(dx !== 0 || dy !== 0, dx);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(10 + Math.floor(this.py / 10));
+    this.lastMoveDx = dx;
+    this.lastIsMoving = dx !== 0 || dy !== 0;
   }
 
   private handleInteraction() {
@@ -168,5 +187,10 @@ export class HouseInterior extends Phaser.Scene {
         this.scene.start('WorldScene');
       });
     }
+  }
+
+  private handleSceneShutdown() {
+    this.room?.shutdown();
+    this.room = undefined;
   }
 }

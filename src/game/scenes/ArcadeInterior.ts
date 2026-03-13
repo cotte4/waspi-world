@@ -4,6 +4,7 @@ import { COLORS, WORLD } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
 import { announceScene, createBackButton } from '../systems/SceneUi';
+import { InteriorRoom } from '../systems/InteriorRoom';
 
 interface ArcadePenaltyReward {
   won?: boolean;
@@ -40,6 +41,9 @@ export class ArcadeInterior extends Phaser.Scene {
   private unlockMusicHandler?: () => void;
   private audioSettings: AudioSettings = loadAudioSettings();
   private audioSettingsCleanup?: () => void;
+  private room?: InteriorRoom;
+  private lastMoveDx = 0;
+  private lastIsMoving = false;
 
   constructor() {
     super({ key: 'ArcadeInterior' });
@@ -180,6 +184,16 @@ export class ArcadeInterior extends Phaser.Scene {
     this.py = roomY + roomH - 82;
     this.player = new AvatarRenderer(this, this.px, this.py, loadStoredAvatarConfig());
     this.player.setDepth(10);
+    this.room = new InteriorRoom(this, {
+      roomKey: 'waspi-room-arcade',
+      getPosition: () => ({ x: this.px, y: this.py }),
+      getMovement: () => ({ dx: this.lastMoveDx, isMoving: this.lastIsMoving }),
+      getAvatarConfig: () => loadStoredAvatarConfig(),
+      onRemoteClick: (playerId, username) => {
+        eventBus.emit(EVENTS.PLAYER_ACTIONS_OPEN, { playerId, username });
+      },
+    });
+    this.room.start();
 
     if (this.rewardMessage) {
       this.flashMessage(width / 2, roomY + roomH + 46, this.rewardMessage, this.rewardColor, this.rewardDetail);
@@ -206,6 +220,7 @@ export class ArcadeInterior extends Phaser.Scene {
 
     this.handleMovement(delta);
     this.updateMachineState();
+    this.room?.update();
 
     if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
       this.exitToWorld();
@@ -286,6 +301,8 @@ export class ArcadeInterior extends Phaser.Scene {
     this.player.update(dx !== 0 || dy !== 0, dx);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(10 + Math.floor(this.py / 10));
+    this.lastMoveDx = dx;
+    this.lastIsMoving = dx !== 0 || dy !== 0;
   }
 
   private flashMessage(x: number, y: number, message: string, color: string, detail = '') {
@@ -371,6 +388,8 @@ export class ArcadeInterior extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
+    this.room?.shutdown();
+    this.room = undefined;
     if (this.unlockMusicHandler) {
       this.sound.off(Phaser.Sound.Events.UNLOCKED, this.unlockMusicHandler);
       this.unlockMusicHandler = undefined;

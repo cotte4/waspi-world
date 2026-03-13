@@ -1,10 +1,24 @@
 import Phaser from 'phaser';
-import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
+import { AvatarRenderer, AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { COLORS, WORLD } from '../config/constants';
 import { CATALOG } from '../config/catalog';
 import { announceScene, createBackButton } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { DialogSystem } from '../systems/DialogSystem';
+import { supabase, isConfigured } from '../../lib/supabase';
+
+type StoreRemotePlayer = {
+  avatar: AvatarRenderer;
+  nameplate: Phaser.GameObjects.Text;
+  username: string;
+  x: number;
+  y: number;
+  targetX: number;
+  targetY: number;
+  moveDx: number;
+  isMoving: boolean;
+  avatarConfig: AvatarConfig;
+};
 
 export class StoreInterior extends Phaser.Scene {
   private player!: AvatarRenderer;
@@ -24,6 +38,14 @@ export class StoreInterior extends Phaser.Scene {
   private vendorY = 0;
   private shopOverlayOpen = false;
   private cleanupFns: Array<() => void> = [];
+  private playerId = '';
+  private playerUsername = '';
+  private localNameplate?: Phaser.GameObjects.Text;
+  private remotePlayers = new Map<string, StoreRemotePlayer>();
+  private channel: ReturnType<NonNullable<typeof supabase>['channel']> | null = null;
+  private lastPosSent = 0;
+  private lastMoveDx = 0;
+  private lastIsMoving = false;
 
   constructor() {
     super({ key: 'StoreInterior' });
@@ -32,6 +54,8 @@ export class StoreInterior extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
     announceScene(this);
+    this.playerId = this.getOrCreatePlayerId();
+    this.playerUsername = this.getOrCreateUsername();
     this.dialog = new DialogSystem(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     this.cleanupFns.push(eventBus.on(EVENTS.SHOP_OPEN, () => {
@@ -68,6 +92,13 @@ export class StoreInterior extends Phaser.Scene {
     this.py = roomY + roomH - 80;
     this.player = new AvatarRenderer(this, this.px, this.py, loadStoredAvatarConfig());
     this.player.setDepth(10);
+    this.localNameplate = this.add.text(this.px, this.py - 44, this.playerUsername, {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(20);
 
     this.add.text(width / 2, roomY + 24, 'WASPI STORE', {
       fontSize: '16px',
@@ -152,6 +183,7 @@ export class StoreInterior extends Phaser.Scene {
     this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    this.setupRealtime();
 
     this.cameras.main.resetFX();
     this.cameras.main.setAlpha(1);
@@ -183,6 +215,8 @@ export class StoreInterior extends Phaser.Scene {
     if (!this.dialog.isActive()) {
       this.handleMovement();
     }
+    this.syncPosition();
+    this.updateRemotePlayers();
 
     if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
       if (this.dialog.isActive()) {
@@ -273,11 +307,214 @@ export class StoreInterior extends Phaser.Scene {
     this.player.update(dx !== 0 || dy !== 0, dx);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(10 + Math.floor(this.py / 10));
+    this.localNameplate?.setPosition(this.px, this.py - 44);
+    this.lastMoveDx = dx;
+    this.lastIsMoving = dx !== 0 || dy !== 0;
   }
 
   private handleSceneShutdown() {
+    if (this.channel) {
+      this.channel.send({
+        type: 'broadcast',
+        event: 'player:leave',
+        payload: { player_id: this.playerId },
+      });
+      this.channel.unsubscribe();
+      this.channel = null;
+    }
+    this.remotePlayers.forEach((player) => {
+      player.avatar.destroy();
+      player.nameplate.destroy();
+    });
+    this.remotePlayers.clear();
     eventBus.emit(EVENTS.SHOP_CLOSE);
     this.cleanupFns.forEach((cleanup) => cleanup());
     this.cleanupFns = [];
+  }
+
+  private setupRealtime() {
+    if (!supabase || !isConfigured) return;
+
+    this.channel = supabase.channel('waspi-room-store', {
+      config: { broadcast: { self: false } },
+    });
+
+    this.channel
+      .on('broadcast', { event: 'player:move' }, ({ payload }) => {
+        this.handleRemoteMove(payload);
+      })
+      .on('broadcast', { event: 'player:join' }, ({ payload }) => {
+        this.handleRemoteJoin(payload);
+      })
+      .on('broadcast', { event: 'player:leave' }, ({ payload }) => {
+        this.handleRemoteLeave(payload);
+      })
+      .subscribe(() => {
+        this.broadcastSelfState('player:join');
+      });
+  }
+
+  private broadcastSelfState(event: 'player:join' | 'player:move') {
+    if (!this.channel) return;
+    this.channel.send({
+      type: 'broadcast',
+      event,
+      payload: {
+        player_id: this.playerId,
+        username: this.playerUsername,
+        x: Math.round(this.px),
+        y: Math.round(this.py),
+        dir: this.lastMoveDx,
+        moving: this.lastIsMoving,
+        avatar: loadStoredAvatarConfig(),
+      },
+    });
+  }
+
+  private syncPosition() {
+    if (!this.channel) return;
+    const now = Date.now();
+    if (now - this.lastPosSent < 66) return;
+    this.lastPosSent = now;
+    this.broadcastSelfState('player:move');
+  }
+
+  private updateRemotePlayers() {
+    for (const remote of this.remotePlayers.values()) {
+      remote.x = Phaser.Math.Linear(remote.x, remote.targetX, 0.18);
+      remote.y = Phaser.Math.Linear(remote.y, remote.targetY, 0.18);
+      remote.avatar.update(remote.isMoving, remote.moveDx);
+      remote.avatar.setPosition(remote.x, remote.y);
+      remote.avatar.setDepth(10 + Math.floor(remote.y / 10));
+      remote.nameplate.setPosition(remote.x, remote.y - 44);
+    }
+  }
+
+  private handleRemoteJoin(payload: unknown) {
+    const next = this.parseRemoteState(payload);
+    if (!next || next.player_id === this.playerId) return;
+    if (!this.remotePlayers.has(next.player_id)) {
+      this.spawnRemotePlayer(next.player_id, next.username, next.x, next.y, next.avatar ?? {});
+      return;
+    }
+    const remote = this.remotePlayers.get(next.player_id)!;
+    remote.targetX = next.x;
+    remote.targetY = next.y;
+    remote.username = next.username;
+    remote.nameplate.setText(next.username);
+  }
+
+  private handleRemoteMove(payload: unknown) {
+    const next = this.parseRemoteState(payload);
+    if (!next || next.player_id === this.playerId) return;
+    if (!this.remotePlayers.has(next.player_id)) {
+      this.spawnRemotePlayer(next.player_id, next.username, next.x, next.y, next.avatar ?? {});
+    }
+    const remote = this.remotePlayers.get(next.player_id)!;
+    remote.targetX = next.x;
+    remote.targetY = next.y;
+    remote.moveDx = next.dir ?? 0;
+    remote.isMoving = next.moving ?? false;
+    remote.username = next.username;
+    remote.nameplate.setText(next.username);
+  }
+
+  private handleRemoteLeave(payload: unknown) {
+    const playerId = this.readStringField(payload, 'player_id', 'playerId');
+    if (!playerId) return;
+    const remote = this.remotePlayers.get(playerId);
+    if (!remote) return;
+    remote.avatar.destroy();
+    remote.nameplate.destroy();
+    this.remotePlayers.delete(playerId);
+  }
+
+  private spawnRemotePlayer(playerId: string, username: string, x: number, y: number, avatarConfig: AvatarConfig) {
+    const avatar = new AvatarRenderer(this, x, y, avatarConfig);
+    avatar.setDepth(10 + Math.floor(y / 10));
+    const nameplate = this.add.text(x, y - 44, username, {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#88AAFF',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(20);
+
+    this.remotePlayers.set(playerId, {
+      avatar,
+      nameplate,
+      username,
+      x,
+      y,
+      targetX: x,
+      targetY: y,
+      moveDx: 0,
+      isMoving: false,
+      avatarConfig,
+    });
+  }
+
+  private getOrCreatePlayerId() {
+    if (typeof window === 'undefined') return crypto.randomUUID();
+    const key = 'waspi_session_id';
+    const stored = window.sessionStorage.getItem(key);
+    if (stored) return stored;
+    const id = crypto.randomUUID();
+    window.sessionStorage.setItem(key, id);
+    return id;
+  }
+
+  private getOrCreateUsername() {
+    if (typeof window === 'undefined') return 'waspi_guest';
+    const stored = window.localStorage.getItem('waspi_username');
+    if (stored) return stored;
+    return 'waspi_guest';
+  }
+
+  private readStringField(payload: unknown, ...keys: string[]) {
+    if (!payload || typeof payload !== 'object') return null;
+    for (const key of keys) {
+      const value = (payload as Record<string, unknown>)[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return null;
+  }
+
+  private readNumberField(payload: unknown, ...keys: string[]) {
+    if (!payload || typeof payload !== 'object') return null;
+    for (const key of keys) {
+      const value = (payload as Record<string, unknown>)[key];
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+    }
+    return null;
+  }
+
+  private readBooleanField(payload: unknown, ...keys: string[]) {
+    if (!payload || typeof payload !== 'object') return null;
+    for (const key of keys) {
+      const value = (payload as Record<string, unknown>)[key];
+      if (typeof value === 'boolean') return value;
+    }
+    return null;
+  }
+
+  private parseRemoteState(payload: unknown) {
+    const playerId = this.readStringField(payload, 'player_id', 'playerId');
+    const username = this.readStringField(payload, 'username') ?? 'waspi_guest';
+    const x = this.readNumberField(payload, 'x');
+    const y = this.readNumberField(payload, 'y');
+    if (!playerId || x === null || y === null) return null;
+    const avatar = payload && typeof payload === 'object' && 'avatar' in payload && payload.avatar && typeof payload.avatar === 'object'
+      ? payload.avatar as AvatarConfig
+      : undefined;
+    return {
+      player_id: playerId,
+      username,
+      x,
+      y,
+      dir: this.readNumberField(payload, 'dir', 'dx'),
+      moving: this.readBooleanField(payload, 'moving', 'isMoving'),
+      avatar,
+    };
   }
 }

@@ -36,6 +36,11 @@ interface PresencePlayer {
   username: string;
 }
 
+interface CombatStats {
+  kills: number;
+  deaths: number;
+}
+
 type ShopTab = 'products' | 'tenks';
 
 interface ShopOpenPayload {
@@ -68,6 +73,7 @@ export default function PlayPage() {
   const [playerInfo, setPlayerInfo] = useState<PlayerInfo | null>(null);
   const [connected, setConnected] = useState(false);
   const [presencePlayers, setPresencePlayers] = useState<PresencePlayer[]>([]);
+  const [combatStats, setCombatStats] = useState<CombatStats>({ kills: 0, deaths: 0 });
   const [playerState, setPlayerState] = useState<PlayerState | null>(null);
   const [tenks, setTenks] = useState<number | null>(null);
   const [inventoryOpen, setInventoryOpen] = useState(false);
@@ -84,6 +90,7 @@ export default function PlayPage() {
   const [authPanelOpen, setAuthPanelOpen] = useState(true);
   const [uiNotice, setUiNotice] = useState('');
   const [shopOpen, setShopOpen] = useState(initialCheckout.open);
+  const [shopSource, setShopSource] = useState(initialCheckout.open ? 'checkout_return' : '');
   const [shopTab, setShopTab] = useState<ShopTab>(initialCheckout.tab);
   const [shopItems, setShopItems] = useState<CatalogItem[]>([]);
   const [selectedProductId, setSelectedProductId] = useState('');
@@ -163,6 +170,14 @@ export default function PlayPage() {
       setPresencePlayers(players);
     });
 
+    const unsubCombatStats = eventBus.on(EVENTS.PLAYER_COMBAT_STATS, (payload: unknown) => {
+      const next = payload as Partial<CombatStats> | null;
+      setCombatStats({
+        kills: typeof next?.kills === 'number' ? next.kills : 0,
+        deaths: typeof next?.deaths === 'number' ? next.deaths : 0,
+      });
+    });
+
     const unsubTenks = eventBus.on(EVENTS.TENKS_CHANGED, (payload: unknown) => {
       const p = payload as { balance: number };
       setTenks(p.balance);
@@ -188,11 +203,13 @@ export default function PlayPage() {
       const next = (payload as ShopOpenPayload | undefined) ?? {};
       setShopTab(next.tab ?? 'products');
       if (next.itemId) setSelectedProductId(next.itemId);
+      setShopSource(next.source ?? 'scene');
       setShopOpen(true);
       setShopStatus(next.source === 'store_interior' ? 'Elegi talle y completa el checkout.' : '');
     });
 
     const unsubShopClose = eventBus.on(EVENTS.SHOP_CLOSE, () => {
+      setShopSource('');
       setShopOpen(false);
     });
 
@@ -244,6 +261,7 @@ export default function PlayPage() {
       unsubChat();
       unsubInfo();
       unsubPresence();
+      unsubCombatStats();
       unsubTenks();
       unsubScene();
       unsubInv();
@@ -641,6 +659,16 @@ export default function PlayPage() {
   }, [chatVisible]);
 
   useEffect(() => {
+    if (shopSource !== 'store_interior') return;
+    if (activeScene === 'StoreInterior') return;
+    const closeTimer = window.setTimeout(() => {
+      setShopOpen(false);
+      setShopSource('');
+    }, 0);
+    return () => window.clearTimeout(closeTimer);
+  }, [activeScene, shopSource]);
+
+  useEffect(() => {
     if (!playerInfo || !INTERIOR_SOCIAL_SCENES.has(activeScene)) return;
 
     if (!supabase) {
@@ -903,6 +931,9 @@ export default function PlayPage() {
               TENKS {tenks}
             </div>
           )}
+          <div className="ww-chip px-2 py-1 text-xs" style={hudBadge('#88AAFF', 'rgba(136,170,255,0.35)')}>
+            K/D {combatStats.kills}/{combatStats.deaths}
+          </div>
         </div>
 
         <div
@@ -978,6 +1009,7 @@ export default function PlayPage() {
         <button
           onClick={() => {
             setShopTab('tenks');
+            setShopSource('hud');
             setShopOpen(true);
           }}
           className="absolute right-2 top-16"
@@ -1146,6 +1178,7 @@ export default function PlayPage() {
                 <span>WASPI SHOP</span>
                 <button
                   onClick={() => {
+                    setShopSource('');
                     setShopOpen(false);
                     eventBus.emit(EVENTS.SHOP_CLOSE);
                   }}

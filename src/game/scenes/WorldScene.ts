@@ -4,9 +4,11 @@ import { ChatSystem } from '../systems/ChatSystem';
 import { WORLD, PLAYER, COLORS, ZONES, BUILDINGS, CHAT } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
-import { initTenks } from '../systems/TenksSystem';
+import { addTenks, initTenks } from '../systems/TenksSystem';
 import { getEquippedColors, hasUtilityEquipped } from '../systems/InventorySystem';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
+import { addXpToProgression, getLevelMilestones, loadProgressionState, saveProgressionState, type ProgressionState } from '../systems/ProgressionSystem';
+import { loadCombatStats, saveCombatStats, type CombatStats } from '../systems/CombatStats';
 import { announceScene } from '../systems/SceneUi';
 
 interface RemotePlayer {
@@ -76,6 +78,8 @@ type EnemyProfile = {
   tint: number;
   maxHp: number;
   radius: number;
+  xpReward: number;
+  tenksReward: number;
   speed: number;
   preferredDistance: number;
   strafe: number;
@@ -107,6 +111,8 @@ type DummyState = {
   shotCooldownMs: number;
   respawnMs: number;
   isBoss: boolean;
+  xpReward: number;
+  tenksReward: number;
 };
 
 const REMOTE_CHAT_MIN_MS = 1000;
@@ -145,6 +151,8 @@ const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
     tint: 0xFF5E5E,
     maxHp: 34,
     radius: 16,
+    xpReward: 2,
+    tenksReward: 1,
     speed: 2.45,
     preferredDistance: 48,
     strafe: 0.35,
@@ -157,6 +165,8 @@ const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
     tint: 0xFF8B3D,
     maxHp: 40,
     radius: 18,
+    xpReward: 3,
+    tenksReward: 2,
     speed: 1.7,
     preferredDistance: 150,
     strafe: 1.2,
@@ -169,6 +179,8 @@ const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
     tint: 0xB74DFF,
     maxHp: 72,
     radius: 22,
+    xpReward: 5,
+    tenksReward: 3,
     speed: 1.1,
     preferredDistance: 78,
     strafe: 0.18,
@@ -181,6 +193,8 @@ const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
     tint: 0x3DD6FF,
     maxHp: 220,
     radius: 28,
+    xpReward: 12,
+    tenksReward: 5,
     speed: 1.45,
     preferredDistance: 180,
     strafe: 0.95,
@@ -253,6 +267,7 @@ export class WorldScene extends Phaser.Scene {
   private trainingScore = 0;
   private trainingHud?: Phaser.GameObjects.Text;
   private combatHud?: Phaser.GameObjects.Text;
+  private progressionHud?: Phaser.GameObjects.Text;
   private dummyStates = new Map<CombatDummy, DummyState>();
   private currentWeapon: WeaponMode = 'pistol';
   private bossDummy?: CombatDummy;
@@ -284,6 +299,8 @@ export class WorldScene extends Phaser.Scene {
   private ballEnabled = false;
   private football?: Phaser.GameObjects.Arc;
   private footballTick = 0;
+  private progression: ProgressionState = loadProgressionState();
+  private combatStats: CombatStats = loadCombatStats();
 
   constructor() {
     super({ key: 'WorldScene' });
@@ -378,6 +395,7 @@ export class WorldScene extends Phaser.Scene {
       playerId: this.playerId,
       username: this.playerUsername,
     });
+    eventBus.emit(EVENTS.PLAYER_COMBAT_STATS, this.combatStats);
     this.emitPresence();
 
     // Ambient NPC
@@ -445,6 +463,13 @@ export class WorldScene extends Phaser.Scene {
       lineSpacing: 5,
     }).setScrollFactor(0).setDepth(9999);
     this.renderCombatHud();
+    this.progressionHud = this.add.text(8, 116, '', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#46B3FF',
+      lineSpacing: 5,
+    }).setScrollFactor(0).setDepth(9999);
+    this.renderProgressionHud();
 
     this.setupBossHud();
 
@@ -504,6 +529,25 @@ export class WorldScene extends Phaser.Scene {
       '1 PISTOL  2 SHOTGUN',
       'F / CLICK DISPARA',
       'RUSH / SHOT / TANK / BOSS',
+    ]);
+  }
+
+  private renderProgressionHud() {
+    if (!this.progressionHud) return;
+    const nextLabel = this.progression.nextLevelAt === null
+      ? 'MAX LVL'
+      : `${this.progression.nextLevelAt - this.progression.xp} XP`;
+    const milestonePreview = getLevelMilestones()
+      .map((xp, index) => `L${index + 1}:${xp}`)
+      .slice(0, 11)
+      .join(' ');
+
+    this.progressionHud.setText([
+      `LVL ${this.progression.level}/11`,
+      `TOTAL XP ${this.progression.xp}`,
+      `TOTAL KOs ${this.progression.kills}`,
+      `SIGUIENTE ${nextLabel}`,
+      milestonePreview,
     ]);
   }
 
@@ -617,6 +661,8 @@ export class WorldScene extends Phaser.Scene {
       shotCooldownMs: profile.shotCooldownMs,
       respawnMs: profile.respawnMs ?? DUMMY_RESPAWN_MS,
       isBoss: archetype === 'boss',
+      xpReward: profile.xpReward,
+      tenksReward: profile.tenksReward,
     };
     this.dummyStates.set(dummy, state);
     if (archetype === 'boss') {
@@ -685,13 +731,26 @@ export class WorldScene extends Phaser.Scene {
     state.nameplate.setText('DOWN');
     state.nameplate.setColor('#888888');
     this.playCombatTone(state.isBoss ? 120 : 160, 0.16, 'sawtooth', 0.06);
+    this.trainingScore += 1;
+    this.combatStats = { ...this.combatStats, kills: this.combatStats.kills + 1 };
+    saveCombatStats(this.combatStats);
+    eventBus.emit(EVENTS.PLAYER_COMBAT_STATS, this.combatStats);
+    if (this.trainingHud) {
+      this.trainingHud.setText(`TRAINING KOs ${this.trainingScore}`);
+    }
+    const previousLevel = this.progression.level;
+    this.progression = addXpToProgression(this.progression, state.xpReward);
+    saveProgressionState(this.progression);
+    this.renderProgressionHud();
+    addTenks(state.tenksReward, `training_${state.archetype}`);
     if (state.isBoss) {
-      this.showArenaNotice('BOSS DOWN', '#39FF14');
+      this.showArenaNotice(`BOSS DOWN +${state.xpReward} XP +${state.tenksReward} TENKS`, '#39FF14');
     } else {
-      this.trainingScore += 1;
-      if (this.trainingHud) {
-        this.trainingHud.setText(`TRAINING KOs ${this.trainingScore}`);
-      }
+      this.showArenaNotice(`+${state.xpReward} XP +${state.tenksReward} TENKS ${state.label}`, '#F5C842');
+    }
+    if (this.progression.level > previousLevel) {
+      this.showArenaNotice(`LEVEL UP ${this.progression.level}/11`, '#46B3FF');
+      this.playCombatTone(260, 0.2, 'square', 0.06);
     }
 
     const burst = this.add.text(dummy.x, dummy.y - 18, 'KO', {
@@ -894,6 +953,9 @@ export class WorldScene extends Phaser.Scene {
 
     if (this.hp > 0) return;
 
+    this.combatStats = { ...this.combatStats, deaths: this.combatStats.deaths + 1 };
+    saveCombatStats(this.combatStats);
+    eventBus.emit(EVENTS.PLAYER_COMBAT_STATS, this.combatStats);
     this.hp = 100;
     this.renderHpHud();
     this.px = PLAZA_RESPAWN_X;
