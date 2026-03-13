@@ -24,7 +24,7 @@ interface RemotePlayer {
 
 type HitboxArc = Phaser.GameObjects.Arc & { body: Phaser.Physics.Arcade.Body };
 type ArcadeObject = Phaser.GameObjects.GameObject & { destroy: () => void };
-type PositionedArcadeObject = Phaser.GameObjects.GameObject & { x: number; y: number };
+type CombatDummy = Phaser.GameObjects.Arc & { body: Phaser.Physics.Arcade.Body };
 type EquippedPayload = { top?: string; bottom?: string };
 type RemoteMoveEvent = {
   player_id: string;
@@ -55,10 +55,25 @@ type RemoteHitEvent = {
   dmg: number;
 };
 
+type DummyState = {
+  nameplate: Phaser.GameObjects.Text;
+  hpBar: Phaser.GameObjects.Graphics;
+  hp: number;
+  maxHp: number;
+  originX: number;
+  originY: number;
+  phase: number;
+  respawnAt: number;
+  alive: boolean;
+};
+
 const REMOTE_CHAT_MIN_MS = 1000;
 const REMOTE_MOVE_MIN_MS = 50;
 const REMOTE_HIT_MIN_MS = 120;
 const MAX_REMOTE_CHAT_DISTANCE = 2600;
+const GUN_SHOT_COOLDOWN_MS = 170;
+const LOCAL_HIT_COOLDOWN_MS = 180;
+const DUMMY_RESPAWN_MS = 1800;
 
 export class WorldScene extends Phaser.Scene {
   // Player
@@ -114,6 +129,11 @@ export class WorldScene extends Phaser.Scene {
   private keyF!: Phaser.Input.Keyboard.Key;
   private bullets!: Phaser.Physics.Arcade.Group;
   private playerHitbox!: HitboxArc;
+  private lastShotAt = 0;
+  private lastDamageAt = 0;
+  private trainingScore = 0;
+  private trainingHud?: Phaser.GameObjects.Text;
+  private dummyStates = new Map<CombatDummy, DummyState>();
 
   // Training zone (PVE + PVP)
   private inTraining = false;
@@ -257,21 +277,20 @@ export class WorldScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setScrollFactor(0).setDepth(10001).setOrigin(0.5);
 
+    this.trainingHud = this.add.text(8, 58, 'TRAINING KOs 0', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#39FF14',
+    }).setScrollFactor(0).setDepth(9999);
+
     // Spawn a few local dummies (PVE)
     const dummyPositions = [
       { x: ZONES.TRAINING_X + 150, y: ZONES.TRAINING_Y + 150 },
       { x: ZONES.TRAINING_X + 360, y: ZONES.TRAINING_Y + 220 },
       { x: ZONES.TRAINING_X + 560, y: ZONES.TRAINING_Y + 140 },
+      { x: ZONES.TRAINING_X + 720, y: ZONES.TRAINING_Y + 250 },
     ];
-    dummyPositions.forEach((p) => {
-      const d = this.add.circle(p.x, p.y, 16, 0xFF4444, 0.35);
-      d.setDepth(30);
-      this.physics.add.existing(d);
-      const body = d.body as Phaser.Physics.Arcade.Body;
-      body.setCircle(16);
-      body.setImmovable(true);
-      this.dummies.add(d);
-    });
+    dummyPositions.forEach((p, index) => this.spawnTrainingDummy(p.x, p.y, index));
   }
 
   private setupHpHud() {
@@ -300,6 +319,133 @@ export class WorldScene extends Phaser.Scene {
     this.hpText.setText(`HP ${this.hp}`);
   }
 
+  private spawnTrainingDummy(x: number, y: number, index: number) {
+    const dummy = this.add.circle(x, y, 18, 0xFF5E5E, 0.7) as CombatDummy;
+    dummy.setDepth(30);
+    dummy.setStrokeStyle(2, 0xFFFFFF, 0.2);
+    this.physics.add.existing(dummy);
+    dummy.body.setCircle(18);
+    dummy.body.setImmovable(true);
+    dummy.body.setAllowGravity(false);
+    this.dummies.add(dummy);
+
+    const nameplate = this.add.text(x, y - 34, `BOT_${index + 1}`, {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FF8B8B',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(32);
+
+    const hpBar = this.add.graphics().setDepth(31);
+    const state: DummyState = {
+      nameplate,
+      hpBar,
+      hp: 40,
+      maxHp: 40,
+      originX: x,
+      originY: y,
+      phase: index * 1.4,
+      respawnAt: 0,
+      alive: true,
+    };
+    this.dummyStates.set(dummy, state);
+    this.renderDummyState(dummy, state);
+  }
+
+  private renderDummyState(dummy: CombatDummy, state: DummyState) {
+    state.nameplate.setPosition(dummy.x, dummy.y - 34);
+    state.hpBar.clear();
+    if (!state.alive) return;
+
+    const width = 42;
+    const height = 5;
+    const pct = Phaser.Math.Clamp(state.hp / state.maxHp, 0, 1);
+    state.hpBar.fillStyle(0x000000, 0.55);
+    state.hpBar.fillRoundedRect(dummy.x - width / 2, dummy.y - 24, width, height, 2);
+    state.hpBar.fillStyle(0x39FF14, 0.85);
+    state.hpBar.fillRoundedRect(dummy.x - width / 2 + 1, dummy.y - 23, (width - 2) * pct, height - 2, 2);
+  }
+
+  private damageDummy(dummy: CombatDummy) {
+    const state = this.dummyStates.get(dummy);
+    if (!state || !state.alive) return;
+
+    const damage = Phaser.Math.Between(14, 18);
+    state.hp = Math.max(0, state.hp - damage);
+    const flash = this.add.circle(dummy.x, dummy.y, 20, 0xFF4444, 0.24);
+    flash.setDepth(5000);
+    this.tweens.add({ targets: flash, alpha: 0, scale: 1.8, duration: 180, onComplete: () => flash.destroy() });
+
+    const hitNumber = this.add.text(dummy.x, dummy.y - 8, `-${damage}`, {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(5001);
+    this.tweens.add({
+      targets: hitNumber,
+      y: dummy.y - 28,
+      alpha: { from: 1, to: 0 },
+      duration: 420,
+      ease: 'Sine.easeOut',
+      onComplete: () => hitNumber.destroy(),
+    });
+
+    this.renderDummyState(dummy, state);
+    if (state.hp > 0) return;
+
+    state.alive = false;
+    state.respawnAt = this.time.now + DUMMY_RESPAWN_MS;
+    state.hp = 0;
+    dummy.setAlpha(0.16);
+    dummy.body.enable = false;
+    state.nameplate.setText('DOWN');
+    state.nameplate.setColor('#888888');
+    this.trainingScore += 1;
+    if (this.trainingHud) {
+      this.trainingHud.setText(`TRAINING KOs ${this.trainingScore}`);
+    }
+
+    const burst = this.add.text(dummy.x, dummy.y - 18, 'KO', {
+      fontSize: '10px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#39FF14',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(5002);
+    this.tweens.add({
+      targets: burst,
+      y: dummy.y - 38,
+      alpha: { from: 1, to: 0 },
+      scale: { from: 1, to: 1.3 },
+      duration: 520,
+      ease: 'Sine.easeOut',
+      onComplete: () => burst.destroy(),
+    });
+  }
+
+  private updateDummies() {
+    for (const [dummy, state] of this.dummyStates) {
+      if (!state.alive) {
+        if (this.time.now < state.respawnAt) continue;
+        state.alive = true;
+        state.hp = state.maxHp;
+        dummy.body.enable = true;
+        dummy.setAlpha(0.7);
+        state.nameplate.setText('BOT');
+        state.nameplate.setColor('#FF8B8B');
+      }
+
+      state.phase += 0.018;
+      const driftX = Math.cos(state.phase) * 18;
+      const driftY = Math.sin(state.phase * 1.3) * 10;
+      dummy.setPosition(state.originX + driftX, state.originY + driftY);
+      this.renderDummyState(dummy, state);
+    }
+  }
+
   private setupCombat() {
     this.dummies = this.physics.add.group({ allowGravity: false, immovable: true });
     this.bullets = this.physics.add.group({
@@ -318,14 +464,15 @@ export class WorldScene extends Phaser.Scene {
     this.physics.add.overlap(this.bullets, this.dummies, (bObj, dObj) => {
       if (!this.inTraining || !this.pveEnabled) return;
       this.destroyArcadeObject(bObj);
-      const dummy = dObj as PositionedArcadeObject;
-      const flash = this.add.circle(dummy.x, dummy.y, 18, 0xFF4444, 0.22);
-      flash.setDepth(5000);
-      this.tweens.add({ targets: flash, alpha: 0, scale: 1.6, duration: 180, onComplete: () => flash.destroy() });
+      this.damageDummy(dObj as CombatDummy);
     });
   }
 
   private shootAt(wx: number, wy: number) {
+    const now = this.time.now;
+    if (now - this.lastShotAt < GUN_SHOT_COOLDOWN_MS) return;
+    this.lastShotAt = now;
+
     const ang = Phaser.Math.Angle.Between(this.px, this.py, wx, wy);
     const speed = 620;
 
@@ -363,6 +510,25 @@ export class WorldScene extends Phaser.Scene {
     b.setRotation(ang);
     b.setDepth(2000);
     this.bullets.add(b);
+    this.cameras.main.shake(40, 0.0012, false);
+
+    const tracer = this.add.line(
+      0,
+      0,
+      this.px,
+      this.py,
+      this.px + Math.cos(ang) * 18,
+      this.py + Math.sin(ang) * 18,
+      0xF5C842,
+      0.4,
+    ).setLineWidth(2, 2).setDepth(1999);
+    this.tweens.add({
+      targets: tracer,
+      alpha: { from: 0.4, to: 0 },
+      duration: 70,
+      onComplete: () => tracer.destroy(),
+    });
+
     this.time.delayedCall(900, () => this.destroyArcadeObject(b));
   }
 
@@ -1042,6 +1208,8 @@ export class WorldScene extends Phaser.Scene {
     if (!next || next.target_id !== this.playerId) return;
     if (!this.allowRemoteEvent(this.remoteHitTimes, next.source_id, REMOTE_HIT_MIN_MS)) return;
     if (!this.inTraining || !this.pvpEnabled) return;
+    if (this.time.now - this.lastDamageAt < LOCAL_HIT_COOLDOWN_MS) return;
+    this.lastDamageAt = this.time.now;
     const dmg = Math.max(1, Math.min(40, Math.floor(next.dmg ?? 10)));
     this.hp = Math.max(0, this.hp - dmg);
     this.renderHpHud();
@@ -1481,6 +1649,7 @@ export class WorldScene extends Phaser.Scene {
     this.handleMovement(delta);
     this.syncPosition();
     this.chatSystem.update();
+    this.updateDummies();
 
     this.handleInteraction();
 
@@ -1513,7 +1682,7 @@ export class WorldScene extends Phaser.Scene {
     if (nowInTraining !== this.inTraining) {
       this.inTraining = nowInTraining;
       if (this.trainingBanner) {
-        this.trainingBanner.setText(this.inTraining ? 'TRAINING: PVP + PVE' : '');
+        this.trainingBanner.setText(this.inTraining ? 'TRAINING: PVP + PVE - F DISPARA' : '');
       }
     }
 
