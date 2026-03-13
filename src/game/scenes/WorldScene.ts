@@ -5,7 +5,7 @@ import { WORLD, VIEWPORT, PLAYER, COLORS, ZONES, BUILDINGS, CHAT } from '../conf
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
 import { initTenks } from '../systems/TenksSystem';
-import { getEquippedColors } from '../systems/InventorySystem';
+import { getEquippedColors, hasUtilityEquipped } from '../systems/InventorySystem';
 
 interface RemotePlayer {
   avatar: AvatarRenderer;
@@ -15,6 +15,8 @@ interface RemotePlayer {
   y: number;
   targetX: number;
   targetY: number;
+  avatarConfig: AvatarConfig;
+  hitbox: Phaser.Physics.Arcade.Image;
 }
 
 export class WorldScene extends Phaser.Scene {
@@ -35,6 +37,18 @@ export class WorldScene extends Phaser.Scene {
   private keyD!: Phaser.Input.Keyboard.Key;
   private inputBlocked = false; // true when chat input is focused
 
+  // Mobile touch controls
+  private isTouch = false;
+  private touchMoveActive = false;
+  private touchStartX = 0;
+  private touchStartY = 0;
+  private touchDx = 0; // -1..1
+  private touchDy = 0; // -1..1
+  private joyBase?: Phaser.GameObjects.Arc;
+  private joyKnob?: Phaser.GameObjects.Arc;
+  private btnA?: Phaser.GameObjects.Rectangle;
+  private btnAText?: Phaser.GameObjects.Text;
+
   // Chat
   private chatSystem!: ChatSystem;
   private lastChatSent = 0;
@@ -47,6 +61,27 @@ export class WorldScene extends Phaser.Scene {
   private remotePlayers = new Map<string, RemotePlayer>();
   private lastPosSent = 0;
   private channel: ReturnType<NonNullable<typeof supabase>['channel']> | null = null;
+
+  // Combat / HP
+  private hp = 100;
+  private hpBar!: Phaser.GameObjects.Graphics;
+  private hpText!: Phaser.GameObjects.Text;
+  private gunEnabled = false;
+  private keyF!: Phaser.Input.Keyboard.Key;
+  private bullets!: Phaser.Physics.Arcade.Group;
+  private playerHitbox!: Phaser.Physics.Arcade.Image;
+
+  // Training zone (PVE + PVP)
+  private inTraining = false;
+  private trainingBanner?: Phaser.GameObjects.Text;
+  private pvpEnabled = true;
+  private pveEnabled = true;
+  private dummies!: Phaser.Physics.Arcade.Group;
+
+  // Football cosmetic
+  private ballEnabled = false;
+  private football?: Phaser.GameObjects.Arc;
+  private footballTick = 0;
 
   constructor() {
     super({ key: 'WorldScene' });
@@ -80,6 +115,11 @@ export class WorldScene extends Phaser.Scene {
 
     // Invisible camera target
     this.playerBody = this.add.rectangle(this.px, this.py, 2, 2, 0x000000, 0).setDepth(0);
+    // Physics hitbox for PVP/PVE detection
+    this.playerHitbox = this.physics.add.image(this.px, this.py, undefined as any)
+      .setCircle(16)
+      .setImmovable(true)
+      .setVisible(false);
 
     // Load avatar config from CreatorScene if present
     let avatarConfig: AvatarConfig = {
@@ -127,6 +167,10 @@ export class WorldScene extends Phaser.Scene {
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.keyF = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.F);
+
+    // Touch controls (mobile)
+    this.setupTouchControls();
 
     // Camera
     this.cameras.main.setBounds(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
@@ -151,6 +195,134 @@ export class WorldScene extends Phaser.Scene {
 
     // Ambient NPC
     this.spawnAmbientNPCs();
+
+    // HP/Combat/Utilities
+    this.setupHpHud();
+    this.setupCombat();
+    this.refreshUtilitiesFromInventory();
+
+    // Training arena
+    this.setupTrainingZone();
+  }
+
+  private setupTrainingZone() {
+    // Dummies group already created in setupCombat
+
+    // Visual arena (in plaza)
+    const g = this.add.graphics().setDepth(2);
+    g.fillStyle(0x000000, 0.10);
+    g.fillRoundedRect(ZONES.TRAINING_X, ZONES.TRAINING_Y, ZONES.TRAINING_W, ZONES.TRAINING_H, 12);
+    g.lineStyle(2, 0x39FF14, 0.35);
+    g.strokeRoundedRect(ZONES.TRAINING_X, ZONES.TRAINING_Y, ZONES.TRAINING_W, ZONES.TRAINING_H, 12);
+    this.add.text(
+      ZONES.TRAINING_X + ZONES.TRAINING_W / 2,
+      ZONES.TRAINING_Y - 14,
+      'TRAINING',
+      { fontSize: '8px', fontFamily: '"Press Start 2P", monospace', color: '#39FF14' }
+    ).setOrigin(0.5).setDepth(3);
+
+    this.trainingBanner = this.add.text(400, 560, '', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#39FF14',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setScrollFactor(0).setDepth(10001).setOrigin(0.5);
+
+    // Spawn a few local dummies (PVE)
+    const dummyPositions = [
+      { x: ZONES.TRAINING_X + 150, y: ZONES.TRAINING_Y + 150 },
+      { x: ZONES.TRAINING_X + 360, y: ZONES.TRAINING_Y + 220 },
+      { x: ZONES.TRAINING_X + 560, y: ZONES.TRAINING_Y + 140 },
+    ];
+    dummyPositions.forEach((p) => {
+      const d = this.add.circle(p.x, p.y, 16, 0xFF4444, 0.35);
+      d.setDepth(30);
+      this.physics.add.existing(d);
+      const body = d.body as Phaser.Physics.Arcade.Body;
+      body.setCircle(16);
+      body.setImmovable(true);
+      this.dummies.add(d);
+    });
+  }
+
+  private setupHpHud() {
+    this.hpBar = this.add.graphics().setScrollFactor(0).setDepth(9999);
+    this.hpText = this.add.text(8, 28, '', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FF6666',
+    }).setScrollFactor(0).setDepth(9999);
+    this.renderHpHud();
+  }
+
+  private renderHpHud() {
+    const w = 120;
+    const h = 8;
+    const x = 8;
+    const y = 44;
+    const pct = Phaser.Math.Clamp(this.hp / 100, 0, 1);
+    this.hpBar.clear();
+    this.hpBar.fillStyle(0x000000, 0.55);
+    this.hpBar.fillRoundedRect(x, y, w, h, 2);
+    this.hpBar.fillStyle(0xFF4444, 0.85);
+    this.hpBar.fillRoundedRect(x + 1, y + 1, Math.max(0, (w - 2) * pct), h - 2, 2);
+    this.hpBar.lineStyle(1, 0xFFFFFF, 0.12);
+    this.hpBar.strokeRoundedRect(x, y, w, h, 2);
+    this.hpText.setText(`HP ${this.hp}`);
+  }
+
+  private setupCombat() {
+    this.dummies = this.physics.add.group({ allowGravity: false, immovable: true });
+    this.bullets = this.physics.add.group({
+      allowGravity: false,
+      collideWorldBounds: true,
+    });
+
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (!this.gunEnabled) return;
+      if (this.inputBlocked) return;
+      this.shootAt(p.worldX, p.worldY);
+    });
+
+    // PVE: bullets vs dummies (training only)
+    this.physics.add.overlap(this.bullets, this.dummies, (bObj, dObj) => {
+      if (!this.inTraining || !this.pveEnabled) return;
+      (bObj as any).destroy?.();
+      const flash = this.add.circle((dObj as any).x, (dObj as any).y, 18, 0xFF4444, 0.22);
+      flash.setDepth(5000);
+      this.tweens.add({ targets: flash, alpha: 0, scale: 1.6, duration: 180, onComplete: () => flash.destroy() });
+    });
+  }
+
+  private shootAt(wx: number, wy: number) {
+    const b = this.add.rectangle(this.px, this.py, 6, 2, 0xF5C842, 1);
+    this.physics.add.existing(b);
+    const body = b.body as Phaser.Physics.Arcade.Body;
+    body.setAllowGravity(false);
+    body.setSize(6, 2);
+    const ang = Phaser.Math.Angle.Between(this.px, this.py, wx, wy);
+    const speed = 540;
+    body.setVelocity(Math.cos(ang) * speed, Math.sin(ang) * speed);
+    b.setRotation(ang);
+    b.setDepth(2000);
+    this.bullets.add(b);
+    this.time.delayedCall(900, () => b.destroy());
+  }
+
+  private refreshUtilitiesFromInventory() {
+    this.gunEnabled = hasUtilityEquipped('UTIL-GUN-01');
+    this.ballEnabled = hasUtilityEquipped('UTIL-BALL-01');
+
+    if (this.ballEnabled && !this.football) {
+      this.football = this.add.arc(this.px + 18, this.py - 6, 7, 0, 360, false, 0xFFFFFF);
+      this.football.setStrokeStyle(2, 0x111111, 0.6);
+      this.football.setDepth(160);
+    }
+    if (!this.ballEnabled && this.football) {
+      this.football.destroy();
+      this.football = undefined;
+    }
   }
 
   // ─── World Drawing ───────────────────────────────────────────────────────────
@@ -612,6 +784,12 @@ export class WorldScene extends Phaser.Scene {
     if (up) dy -= 1;
     if (down) dy += 1;
 
+    // Touch fallback if no keyboard input
+    if (dx === 0 && dy === 0 && this.isTouch) {
+      dx = this.touchDx;
+      dy = this.touchDy;
+    }
+
     // Normalize diagonal
     if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
 
@@ -652,6 +830,98 @@ export class WorldScene extends Phaser.Scene {
     this.chatSystem.updatePosition('__player__', this.px, this.py);
   }
 
+  private setupTouchControls() {
+    // Basic heuristic
+    this.isTouch = this.sys.game.device.input.touch;
+    if (!this.isTouch) return;
+
+    const cam = this.cameras.main;
+    const { width, height } = cam;
+
+    // Joystick visuals (bottom-left)
+    const baseX = 90;
+    const baseY = height - 90;
+    this.joyBase = this.add.circle(baseX, baseY, 44, 0x000000, 0.22)
+      .setScrollFactor(0)
+      .setDepth(9999)
+      .setVisible(true);
+    this.joyBase.setStrokeStyle(2, 0xFFFFFF, 0.08);
+
+    this.joyKnob = this.add.circle(baseX, baseY, 18, 0xF5C842, 0.35)
+      .setScrollFactor(0)
+      .setDepth(10000)
+      .setVisible(true);
+    this.joyKnob.setStrokeStyle(2, 0x000000, 0.18);
+
+    // Interact button (bottom-right)
+    const ax = width - 90;
+    const ay = height - 90;
+    this.btnA = this.add.rectangle(ax, ay, 64, 64, 0x000000, 0.25)
+      .setScrollFactor(0)
+      .setDepth(9999)
+      .setInteractive({ useHandCursor: true });
+    this.btnA.setStrokeStyle(2, 0xFFFFFF, 0.08);
+    this.btnAText = this.add.text(ax, ay, 'A', {
+      fontSize: '16px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(10000);
+
+    this.btnA.on('pointerdown', () => {
+      if (this.inTransition) return;
+      // Trigger same interaction as SPACE
+      this.handleInteraction();
+    });
+
+    // Pointer-based joystick (left half of screen)
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (this.inputBlocked) return;
+      // only start joystick if in left half and lower area, and not on A button
+      if (p.x > width * 0.55) return;
+      if (p.y < height * 0.35) return;
+      this.touchMoveActive = true;
+      this.touchStartX = p.x;
+      this.touchStartY = p.y;
+      if (this.joyBase && this.joyKnob) {
+        this.joyBase.setPosition(p.x, p.y);
+        this.joyKnob.setPosition(p.x, p.y);
+        this.joyBase.setAlpha(0.28);
+        this.joyKnob.setAlpha(0.45);
+      }
+    });
+
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      if (!this.touchMoveActive) return;
+      const dx = p.x - this.touchStartX;
+      const dy = p.y - this.touchStartY;
+      const max = 44;
+      const len = Math.min(max, Math.hypot(dx, dy));
+      const ang = Math.atan2(dy, dx);
+      const nx = (len / max) * Math.cos(ang);
+      const ny = (len / max) * Math.sin(ang);
+      this.touchDx = Phaser.Math.Clamp(nx, -1, 1);
+      this.touchDy = Phaser.Math.Clamp(ny, -1, 1);
+      if (this.joyKnob) {
+        this.joyKnob.setPosition(this.touchStartX + this.touchDx * max, this.touchStartY + this.touchDy * max);
+      }
+    });
+
+    const endTouch = () => {
+      this.touchMoveActive = false;
+      this.touchDx = 0;
+      this.touchDy = 0;
+      if (this.joyBase && this.joyKnob) {
+        // snap back to default corner
+        this.joyBase.setPosition(baseX, baseY);
+        this.joyKnob.setPosition(baseX, baseY);
+        this.joyBase.setAlpha(0.22);
+        this.joyKnob.setAlpha(0.35);
+      }
+    };
+    this.input.on('pointerup', endTouch);
+    this.input.on('pointerupoutside', endTouch);
+  }
+
   // ─── Realtime / Multiplayer ──────────────────────────────────────────────────
 
   private setupRealtime(): 'multiplayer' | 'solo' {
@@ -677,8 +947,25 @@ export class WorldScene extends Phaser.Scene {
       .on('broadcast', { event: 'player:leave' }, ({ payload }) => {
         this.handleRemoteLeave(payload);
       })
+      .on('broadcast', { event: 'player:update' }, ({ payload }) => {
+        this.handleRemoteUpdate(payload);
+      })
+      .on('broadcast', { event: 'player:hit' }, ({ payload }) => {
+        this.handleHit(payload);
+      })
       .subscribe(() => {
         // Announce join
+        const rawCfg = typeof window !== 'undefined' ? window.localStorage.getItem('waspi_avatar_config') : null;
+        let cfg: AvatarConfig = {};
+        if (rawCfg) {
+          try { cfg = JSON.parse(rawCfg) as AvatarConfig; } catch { /* ignore */ }
+        }
+        const invRaw = typeof window !== 'undefined' ? window.localStorage.getItem('waspi_inventory_v1') : null;
+        let equipped: { top?: string; bottom?: string } = {};
+        if (invRaw) {
+          try { equipped = (JSON.parse(invRaw) as { equipped?: { top?: string; bottom?: string } }).equipped ?? {}; } catch { /* ignore */ }
+        }
+
         this.channel!.send({
           type: 'broadcast',
           event: 'player:join',
@@ -687,16 +974,52 @@ export class WorldScene extends Phaser.Scene {
             username: this.playerUsername,
             x: this.px,
             y: this.py,
+            avatar: cfg,
+            equipped,
+            topColor: (getEquippedColors().topColor ?? cfg.topColor),
+            bottomColor: (getEquippedColors().bottomColor ?? cfg.bottomColor),
           },
         });
       });
     return 'multiplayer';
   }
 
-  private handleRemoteJoin(payload: { playerId: string; username: string; x: number; y: number }) {
+  private handleHit(payload: { targetId: string; sourceId: string; dmg: number }) {
+    if (!payload || payload.targetId !== this.playerId) return;
+    if (!this.inTraining || !this.pvpEnabled) return;
+    const dmg = Math.max(1, Math.min(40, Math.floor(payload.dmg ?? 10)));
+    this.hp = Math.max(0, this.hp - dmg);
+    this.renderHpHud();
+
+    // hit feedback
+    const flash = this.add.rectangle(400, 300, 800, 600, 0xFF0000, 0.08)
+      .setScrollFactor(0)
+      .setDepth(20000);
+    this.tweens.add({ targets: flash, alpha: 0, duration: 140, onComplete: () => flash.destroy() });
+
+    if (this.hp <= 0) {
+      this.hp = 100;
+      this.renderHpHud();
+      // respawn at house spawn
+      this.px = PLAYER.SPAWN_X;
+      this.py = PLAYER.SPAWN_Y;
+      this.playerBody.setPosition(this.px, this.py);
+      this.playerAvatar.setPosition(this.px, this.py);
+      this.playerNameplate.setPosition(this.px, this.py - 46);
+    }
+  }
+
+  private handleRemoteJoin(payload: { playerId: string; username: string; x: number; y: number; avatar?: AvatarConfig; equipped?: { top?: string; bottom?: string }; topColor?: number; bottomColor?: number }) {
     if (payload.playerId === this.playerId) return;
     if (!this.remotePlayers.has(payload.playerId)) {
-      this.spawnRemotePlayer(payload.playerId, payload.username, payload.x, payload.y);
+      const cfg = payload.avatar ?? {};
+      // Apply colors if provided (best-effort)
+      if (typeof payload.topColor === 'number') cfg.topColor = payload.topColor;
+      if (typeof payload.bottomColor === 'number') cfg.bottomColor = payload.bottomColor;
+      this.spawnRemotePlayer(payload.playerId, payload.username, payload.x, payload.y, cfg);
+      if (payload.equipped) {
+        this.applyRemoteEquipped(payload.playerId, payload.equipped);
+      }
     }
   }
 
@@ -714,7 +1037,7 @@ export class WorldScene extends Phaser.Scene {
     if (payload.playerId === this.playerId) return;
 
     if (!this.remotePlayers.has(payload.playerId)) {
-      this.spawnRemotePlayer(payload.playerId, payload.username, payload.x, payload.y);
+      this.spawnRemotePlayer(payload.playerId, payload.username, payload.x, payload.y, {});
     } else {
       const rp = this.remotePlayers.get(payload.playerId)!;
       rp.targetX = payload.x;
@@ -727,7 +1050,7 @@ export class WorldScene extends Phaser.Scene {
 
     // Ensure remote player exists
     if (!this.remotePlayers.has(payload.playerId)) {
-      this.spawnRemotePlayer(payload.playerId, payload.username, payload.x, payload.y);
+      this.spawnRemotePlayer(payload.playerId, payload.username, payload.x, payload.y, {});
     }
 
     this.chatSystem.showBubble(payload.playerId, payload.message, payload.x, payload.y, false);
@@ -741,13 +1064,18 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
-  private spawnRemotePlayer(id: string, username: string, x: number, y: number) {
+  private spawnRemotePlayer(id: string, username: string, x: number, y: number, cfg: AvatarConfig) {
     const avatar = new AvatarRenderer(this, x, y, {
-      bodyColor: COLORS.SKIN_LIGHT,
-      hairColor: 0x000000,
-      topColor: 0x442255,
-      bottomColor: 0x221133,
-    });
+      bodyColor: cfg.bodyColor ?? COLORS.SKIN_LIGHT,
+      hairColor: cfg.hairColor ?? 0x000000,
+      eyeColor: cfg.eyeColor ?? 0x2244CC,
+      hairStyle: (cfg as any).hairStyle,
+      pp: (cfg as any).pp,
+      tt: (cfg as any).tt,
+      smoke: (cfg as any).smoke,
+      topColor: cfg.topColor ?? 0x442255,
+      bottomColor: cfg.bottomColor ?? 0x221133,
+    } as AvatarConfig);
     avatar.setDepth(40);
 
     const nameplate = this.add.text(x, y - 46, username, {
@@ -758,7 +1086,54 @@ export class WorldScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5, 1).setDepth(120);
 
-    this.remotePlayers.set(id, { avatar, nameplate, username, x, y, targetX: x, targetY: y });
+    // Hitbox for PVP targeting
+    const hitbox = this.physics.add.image(x, y, undefined as any)
+      .setCircle(16)
+      .setImmovable(true)
+      .setVisible(false);
+
+    // Shooter-side: if my bullet hits remote hitbox, send hit event
+    this.physics.add.overlap(this.bullets, hitbox, (bObj) => {
+      if (!this.inTraining || !this.pvpEnabled) return;
+      (bObj as any).destroy?.();
+      this.channel?.send({
+        type: 'broadcast',
+        event: 'player:hit',
+        payload: { targetId: id, sourceId: this.playerId, dmg: 10 },
+      });
+    });
+
+    this.remotePlayers.set(id, { avatar, nameplate, username, x, y, targetX: x, targetY: y, avatarConfig: cfg, hitbox });
+  }
+
+  private handleRemoteUpdate(payload: { playerId: string; avatar?: AvatarConfig; equipped?: { top?: string; bottom?: string } }) {
+    if (payload.playerId === this.playerId) return;
+    const rp = this.remotePlayers.get(payload.playerId);
+    if (!rp) return;
+
+    if (payload.avatar) {
+      rp.avatarConfig = { ...rp.avatarConfig, ...payload.avatar };
+      // rebuild avatar visuals
+      const x = rp.x;
+      const y = rp.y;
+      const depth = rp.avatar.getContainer().depth;
+      rp.avatar.destroy();
+      rp.avatar = new AvatarRenderer(this, x, y, rp.avatarConfig);
+      rp.avatar.setDepth(depth);
+    }
+
+    if (payload.equipped) {
+      this.applyRemoteEquipped(payload.playerId, payload.equipped);
+    }
+  }
+
+  private applyRemoteEquipped(playerId: string, equipped: { top?: string; bottom?: string }) {
+    const rp = this.remotePlayers.get(playerId);
+    if (!rp) return;
+    // Just store ids in config; colors will be resolved client-side by catalog getter
+    (rp.avatarConfig as any).equipTop = equipped.top;
+    (rp.avatarConfig as any).equipBottom = equipped.bottom;
+    // If you want, we can resolve to colors here later.
   }
 
   private syncPosition() {
@@ -818,15 +1193,6 @@ export class WorldScene extends Phaser.Scene {
     eventBus.on(EVENTS.CHAT_INPUT_FOCUS, () => { this.inputBlocked = true; });
     eventBus.on(EVENTS.CHAT_INPUT_BLUR, () => { this.inputBlocked = false; });
 
-    // Inventory toggle (I)
-    if (typeof window !== 'undefined') {
-      window.addEventListener('keydown', (e) => {
-        if (e.key.toLowerCase() === 'i') {
-          eventBus.emit(EVENTS.INVENTORY_TOGGLE);
-        }
-      });
-    }
-
     // Apply avatar partial updates (e.g. smoke on/off) and persist in localStorage
     eventBus.on(EVENTS.AVATAR_SET, (payload: unknown) => {
       if (typeof window === 'undefined') return;
@@ -854,6 +1220,29 @@ export class WorldScene extends Phaser.Scene {
         bottomColor: equipped.bottomColor ?? cfg.bottomColor,
       });
       this.playerAvatar.setDepth(depth);
+      this.refreshUtilitiesFromInventory();
+
+      // Broadcast avatar update so other players see smoke/clothing changes
+      if (this.channel) {
+        const invRaw = window.localStorage.getItem('waspi_inventory_v1');
+        let equippedIds: { top?: string; bottom?: string } = {};
+        if (invRaw) {
+          try { equippedIds = (JSON.parse(invRaw) as { equipped?: { top?: string; bottom?: string } }).equipped ?? {}; } catch { /* ignore */ }
+        }
+        this.channel.send({
+          type: 'broadcast',
+          event: 'player:update',
+          payload: {
+            playerId: this.playerId,
+            avatar: {
+              ...cfg,
+              topColor: equipped.topColor ?? cfg.topColor,
+              bottomColor: equipped.bottomColor ?? cfg.bottomColor,
+            },
+            equipped: equippedIds,
+          },
+        });
+      }
     });
 
     // Open creator from inventory
@@ -899,6 +1288,39 @@ export class WorldScene extends Phaser.Scene {
 
     this.handleInteraction();
 
+    // Gun shoot with keyboard
+    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyF) && !this.inputBlocked) {
+      const p = this.input.activePointer;
+      this.shootAt(p.worldX, p.worldY);
+    }
+
+    // Football follow animation
+    if (this.football && this.ballEnabled) {
+      this.footballTick += delta;
+      const t = this.footballTick / 220;
+      const ox = Math.cos(t) * 18;
+      const oy = Math.sin(t * 1.3) * 8;
+      this.football.setPosition(this.px + ox, this.py - 10 + oy);
+      this.football.setRotation(t * 0.5);
+      this.football.setDepth(Math.floor((this.py - 10 + oy) / 10) + 30);
+    }
+
+    // Update combat hitbox follow
+    this.playerHitbox.setPosition(this.px, this.py);
+
+    // Training zone enter/exit
+    const nowInTraining =
+      this.px >= ZONES.TRAINING_X &&
+      this.px <= ZONES.TRAINING_X + ZONES.TRAINING_W &&
+      this.py >= ZONES.TRAINING_Y &&
+      this.py <= ZONES.TRAINING_Y + ZONES.TRAINING_H;
+    if (nowInTraining !== this.inTraining) {
+      this.inTraining = nowInTraining;
+      if (this.trainingBanner) {
+        this.trainingBanner.setText(this.inTraining ? 'TRAINING: PVP + PVE' : '');
+      }
+    }
+
     // Interpolate remote players
     for (const [, rp] of this.remotePlayers) {
       rp.x = Phaser.Math.Linear(rp.x, rp.targetX, 0.18);
@@ -907,6 +1329,7 @@ export class WorldScene extends Phaser.Scene {
       rp.avatar.setDepth(Math.floor(rp.y / 10));
       rp.nameplate.setPosition(rp.x, rp.y - 46);
       this.chatSystem.updatePosition(rp.avatar.getContainer().name ?? '', rp.x, rp.y);
+      rp.hitbox.setPosition(rp.x, rp.y);
     }
   }
 

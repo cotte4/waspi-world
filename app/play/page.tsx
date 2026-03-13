@@ -5,7 +5,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 import { CHAT } from '@/src/game/config/constants';
 import { CATALOG } from '@/src/game/config/catalog';
-import { getInventory, equipItem } from '@/src/game/systems/InventorySystem';
+import { getInventory, equipItem, hasUtilityEquipped } from '@/src/game/systems/InventorySystem';
+import { supabase } from '@/src/lib/supabase';
 
 const PhaserGame = dynamic(() => import('@/app/components/PhaserGame'), { ssr: false });
 
@@ -32,6 +33,8 @@ export default function PlayPage() {
   const [smoking, setSmoking] = useState(false);
   const [owned, setOwned] = useState<string[]>([]);
   const [equipped, setEquipped] = useState<{ top?: string; bottom?: string }>({});
+  const [gunOn, setGunOn] = useState(false);
+  const [ballOn, setBallOn] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -41,6 +44,8 @@ export default function PlayPage() {
     const snap = getInventory();
     setOwned(snap.owned);
     setEquipped(snap.equipped);
+    setGunOn(hasUtilityEquipped('UTIL-GUN-01'));
+    setBallOn(hasUtilityEquipped('UTIL-BALL-01'));
 
     const unsubChat = eventBus.on(EVENTS.CHAT_RECEIVED, (msg: unknown) => {
       const m = msg as Omit<ChatMsg, 'id'>;
@@ -68,6 +73,8 @@ export default function PlayPage() {
       const p = payload as { owned: string[]; equipped: { top?: string; bottom?: string } };
       setOwned(p.owned ?? []);
       setEquipped(p.equipped ?? {});
+      setGunOn(hasUtilityEquipped('UTIL-GUN-01'));
+      setBallOn(hasUtilityEquipped('UTIL-BALL-01'));
     });
 
     return () => {
@@ -76,6 +83,35 @@ export default function PlayPage() {
       unsubTenks();
       unsubInv();
       unsubInvChanged();
+    };
+  }, []);
+
+  // Initial sync with Supabase /api/player when logged-in
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!supabase) return;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) return;
+
+      const res = await fetch('/api/player', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      if (cancelled) return;
+
+      // For ahora solo logueamos TENKS/owned; lo iremos usando más
+      // eslint-disable-next-line no-console
+      console.log('[Waspi] /api/player', json);
+    };
+    run();
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -92,6 +128,10 @@ export default function PlayPage() {
       if (e.key === 'Enter' && document.activeElement !== inputRef.current) {
         e.preventDefault();
         inputRef.current?.focus();
+      }
+      if (e.key.toLowerCase() === 'i' && document.activeElement !== inputRef.current) {
+        e.preventDefault();
+        eventBus.emit(EVENTS.INVENTORY_TOGGLE);
       }
     };
     window.addEventListener('keydown', handleKey);
@@ -239,6 +279,64 @@ export default function PlayPage() {
                   </button>
                 </div>
 
+                <div className="mt-2 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>UTIL</div>
+                      <div style={{ fontSize: '16px' }}>GUN</div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Click o F para disparar</div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        equipItem('UTIL-GUN-01'); // toggles
+                        const snap = getInventory();
+                        setOwned(snap.owned);
+                        setEquipped(snap.equipped);
+                        setGunOn(hasUtilityEquipped('UTIL-GUN-01'));
+                      }}
+                      style={{
+                        fontFamily: '"Press Start 2P", monospace',
+                        fontSize: '9px',
+                        padding: '10px 12px',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        background: gunOn ? '#39FF14' : 'rgba(255,255,255,0.08)',
+                        color: gunOn ? '#0E0E14' : '#FFFFFF',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {gunOn ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>UTIL</div>
+                      <div style={{ fontSize: '16px' }}>FOOTBALL</div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Bote cosmetic</div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        equipItem('UTIL-BALL-01'); // toggles
+                        const snap = getInventory();
+                        setOwned(snap.owned);
+                        setEquipped(snap.equipped);
+                        setBallOn(hasUtilityEquipped('UTIL-BALL-01'));
+                      }}
+                      style={{
+                        fontFamily: '"Press Start 2P", monospace',
+                        fontSize: '9px',
+                        padding: '10px 12px',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        background: ballOn ? '#39FF14' : 'rgba(255,255,255,0.08)',
+                        color: ballOn ? '#0E0E14' : '#FFFFFF',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {ballOn ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                </div>
+
                 <div className="mt-3">
                   <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>ROPA</div>
                   <div className="mt-2 space-y-1">
@@ -247,9 +345,12 @@ export default function PlayPage() {
                         No tenés ropa todavía. Comprá en la tienda.
                       </div>
                     )}
-                    {owned.map((id) => {
-                      const item = CATALOG.find(i => i.id === id);
-                      if (!item) return null;
+                    {owned
+                      .map((id) => CATALOG.find(i => i.id === id))
+                      .filter((item): item is NonNullable<typeof item> => !!item)
+                      .filter((item) => item.slot !== 'utility')
+                      .map((item) => {
+                      const id = item.id;
                       const active = (item.slot === 'top' ? equipped.top === id : equipped.bottom === id);
                       return (
                         <div key={id} className="flex items-center justify-between">
@@ -259,7 +360,7 @@ export default function PlayPage() {
                               style={{
                                 width: 10,
                                 height: 10,
-                                background: `#${item.color.toString(16).padStart(6, '0')}`,
+                                background: `#${(item.color ?? 0x777777).toString(16).padStart(6, '0')}`,
                                 border: '1px solid rgba(0,0,0,0.35)',
                               }}
                             />
@@ -269,7 +370,12 @@ export default function PlayPage() {
                             </span>
                           </div>
                           <button
-                            onClick={() => equipItem(id)}
+                            onClick={() => {
+                              equipItem(id);
+                              const snap = getInventory();
+                              setOwned(snap.owned);
+                              setEquipped(snap.equipped);
+                            }}
                             style={{
                               fontFamily: '"Press Start 2P", monospace',
                               fontSize: '8px',
@@ -363,6 +469,8 @@ export default function PlayPage() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => {
+                // Don't let Phaser/global handlers steal keystrokes while typing
+                e.stopPropagation();
                 if (e.key === 'Enter') {
                   sendMessage();
                   e.preventDefault();

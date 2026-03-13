@@ -41,6 +41,16 @@ export class BootScene extends Phaser.Scene {
     this.load.on('complete', () => {
       status.setText('LISTO!');
     });
+
+    this.load.on('loaderror', (file: unknown) => {
+      // eslint-disable-next-line no-console
+      console.log('[Waspi] Asset load error', file);
+    });
+
+    // Seed sprites (drop files into public/assets/seeds/)
+    // If they don't exist, CreatorScene will fall back to procedural preview.
+    this.load.image('seed_gengar', '/assets/seeds/gengar.png');
+    this.load.image('seed_buho', '/assets/seeds/buho.png');
   }
 
   create() {

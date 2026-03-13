@@ -6,6 +6,13 @@ export class HouseInterior extends Phaser.Scene {
   private player!: AvatarRenderer;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private inTransition = false;
+  private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+  private keyW!: Phaser.Input.Keyboard.Key;
+  private keyA!: Phaser.Input.Keyboard.Key;
+  private keyS!: Phaser.Input.Keyboard.Key;
+  private keyD!: Phaser.Input.Keyboard.Key;
+  private px = 0;
+  private py = 0;
 
   constructor() {
     super({ key: 'HouseInterior' });
@@ -49,7 +56,9 @@ export class HouseInterior extends Phaser.Scene {
     floor.setStrokeStyle(2, 0x000000, 0.7);
 
     // Player avatar
-    this.player = new AvatarRenderer(this, width / 2, roomY + roomH - 80, {
+    this.px = width / 2;
+    this.py = roomY + roomH - 80;
+    this.player = new AvatarRenderer(this, this.px, this.py, {
       bodyColor: COLORS.SKIN_LIGHT,
       hairColor: COLORS.HAIR_BROWN,
       topColor: COLORS.BODY_BLUE,
@@ -77,11 +86,17 @@ export class HouseInterior extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.cursors = this.input.keyboard!.createCursorKeys();
+    this.keyW = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.W);
+    this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
+    this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+    this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
     this.cameras.main.fadeIn(250, 0, 0, 0);
   }
 
   update() {
     if (this.inTransition) return;
+    this.handleMovement();
     if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
       this.inTransition = true;
       this.cameras.main.fadeOut(250, 0, 0, 0);
@@ -89,6 +104,37 @@ export class HouseInterior extends Phaser.Scene {
         this.scene.start('WorldScene');
       });
     }
+  }
+
+  private handleMovement() {
+    const speed = 180 / 60;
+    let dx = 0;
+    let dy = 0;
+
+    const left = this.cursors.left.isDown || this.keyA.isDown;
+    const right = this.cursors.right.isDown || this.keyD.isDown;
+    const up = this.cursors.up.isDown || this.keyW.isDown;
+    const down = this.cursors.down.isDown || this.keyS.isDown;
+
+    if (left) dx -= 1;
+    if (right) dx += 1;
+    if (up) dy -= 1;
+    if (down) dy += 1;
+
+    if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
+
+    const { width, height } = this.scale;
+    const roomW = 560;
+    const roomH = 340;
+    const roomX = (width - roomW) / 2 + 20;
+    const roomY = (height - roomH) / 2 + 20;
+
+    this.px = Phaser.Math.Clamp(this.px + dx * speed * 16.6, roomX, roomX + roomW - 40);
+    this.py = Phaser.Math.Clamp(this.py + dy * speed * 16.6, roomY + 40, roomY + roomH - 10);
+
+    this.player.update(dx !== 0 || dy !== 0, dx);
+    this.player.setPosition(this.px, this.py);
+    this.player.setDepth(10 + Math.floor(this.py / 10));
   }
 }
 

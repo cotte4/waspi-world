@@ -6,6 +6,7 @@ type InventoryState = {
   equipped: {
     top?: string;
     bottom?: string;
+    utility?: string[]; // e.g. ['UTIL-GUN-01', 'UTIL-BALL-01']
   };
 };
 
@@ -17,9 +18,12 @@ function loadState(): InventoryState {
   if (!raw) return { owned: [], equipped: {} };
   try {
     const parsed = JSON.parse(raw) as InventoryState;
+    // Migrate old shapes
+    const equipped = typeof parsed.equipped === 'object' && parsed.equipped ? parsed.equipped : {};
+    if (!Array.isArray(equipped.utility)) equipped.utility = [];
     return {
       owned: Array.isArray(parsed.owned) ? parsed.owned : [],
-      equipped: typeof parsed.equipped === 'object' && parsed.equipped ? parsed.equipped : {},
+      equipped,
     };
   } catch {
     return { owned: [], equipped: {} };
@@ -50,7 +54,13 @@ export function equipItem(id: string) {
   if (!item) return false;
   const s = loadState();
   if (!s.owned.includes(id)) return false;
-  s.equipped[item.slot] = id;
+  if (item.slot === 'utility') {
+    const list = s.equipped.utility ?? [];
+    const has = list.includes(id);
+    s.equipped.utility = has ? list.filter(x => x !== id) : [...list, id];
+  } else {
+    s.equipped[item.slot] = id;
+  }
   saveState(s);
   eventBus.emit(EVENTS.INVENTORY_CHANGED, s);
   // Tell world to rebuild avatar with new clothing colors
@@ -66,5 +76,10 @@ export function getEquippedColors(): { topColor?: number; bottomColor?: number }
     topColor: top?.color,
     bottomColor: bottom?.color,
   };
+}
+
+export function hasUtilityEquipped(id: string) {
+  const s = loadState();
+  return (s.equipped.utility ?? []).includes(id);
 }
 

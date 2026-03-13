@@ -33,4 +33,5 @@ export const EVENTS = {
   INVENTORY_CHANGED: 'inventory:changed',
   AVATAR_SET: 'avatar:set',
   OPEN_CREATOR: 'creator:open',
+  REMOTE_AVATAR_UPDATE: 'remote:avatar:update',
 } as const;

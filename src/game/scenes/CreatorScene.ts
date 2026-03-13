@@ -7,6 +7,9 @@ const USERNAME_KEY = 'waspi_username';
 
 export class CreatorScene extends Phaser.Scene {
   private preview!: AvatarRenderer;
+  private seedSprite?: Phaser.GameObjects.Image;
+  private selectedSeed: 'procedural' | 'gengar' | 'buho' = 'procedural';
+  private seedButtons: Array<{ id: 'procedural' | 'gengar' | 'buho'; rect: Phaser.GameObjects.Rectangle; text: Phaser.GameObjects.Text }> = [];
   private config: Required<AvatarConfig>;
   private styleButtons: Array<{ style: HairStyle; rect: Phaser.GameObjects.Rectangle; text: Phaser.GameObjects.Text }> = [];
   private ppDots: Phaser.GameObjects.Rectangle[] = [];
@@ -57,6 +60,37 @@ export class CreatorScene extends Phaser.Scene {
     g.fillRoundedRect(panelX - panelW / 2, panelY - panelH / 2, panelW, panelH, 8);
     g.lineStyle(2, 0x222233, 1);
     g.strokeRoundedRect(panelX - panelW / 2, panelY - panelH / 2, panelW, panelH, 8);
+
+    // Seed selector
+    this.add.text(width / 2, 146, 'SEED', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#666666',
+    }).setOrigin(0.5);
+
+    const seeds: Array<{ id: 'procedural' | 'gengar' | 'buho'; label: string }> = [
+      { id: 'procedural', label: 'PROC' },
+      { id: 'gengar', label: 'GEN' },
+      { id: 'buho', label: 'BUH' },
+    ];
+    seeds.forEach((s, i) => {
+      const x = width / 2 - 60 + i * 60;
+      const y = 170;
+      const rect = this.add.rectangle(x, y, 46, 22, 0x111111, 1)
+        .setStrokeStyle(1, s.id === this.selectedSeed ? 0xF5C842 : 0x333333, 1)
+        .setInteractive({ useHandCursor: true });
+      const txt = this.add.text(x, y, s.label, {
+        fontSize: '8px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: s.id === this.selectedSeed ? '#F5C842' : '#CCCCCC',
+      }).setOrigin(0.5);
+      rect.on('pointerdown', () => {
+        this.selectedSeed = s.id;
+        this.refreshSeedButtons();
+        this.refreshPreview();
+      });
+      this.seedButtons.push({ id: s.id, rect, text: txt });
+    });
 
     // Avatar preview (no walk animation)
     this.preview = new AvatarRenderer(this, panelX, panelY + 20, this.config);
@@ -266,14 +300,77 @@ export class CreatorScene extends Phaser.Scene {
   }
 
   private refreshPreview() {
+    // Clear both preview types
     this.preview.destroy();
+    this.seedSprite?.destroy();
+    this.seedSprite = undefined;
+
     const { width } = this.scale;
     const panelY = 210;
+
+    if (this.selectedSeed !== 'procedural') {
+      const key = this.selectedSeed === 'gengar' ? 'seed_gengar' : 'seed_buho';
+      if (this.textures.exists(key)) {
+        const tex = this.textures.get(key);
+        tex.setFilter(Phaser.Textures.FilterMode.NEAREST);
+        // Chroma-key remove green into a new runtime texture
+        const outKey = `${key}_ck`;
+        if (!this.textures.exists(outKey)) {
+          this.createChromaKeyTexture(key, outKey, 26);
+        }
+        this.seedSprite = this.add.image(width / 2, panelY + 20, outKey);
+        // Fit into the panel nicely
+        const src = this.textures.get(outKey).getSourceImage() as any;
+        const w = src?.width ?? 1;
+        const h = src?.height ?? 1;
+        const maxSize = 120;
+        const scale = Math.min(maxSize / w, maxSize / h);
+        this.seedSprite.setScale(scale);
+        return;
+      }
+    }
+
+    // Fallback: procedural
     this.preview = new AvatarRenderer(this, width / 2, panelY + 20, this.config);
   }
 
   shutdown() {
     this.usernameInput?.destroy();
+  }
+
+  private refreshSeedButtons() {
+    for (const b of this.seedButtons) {
+      const active = b.id === this.selectedSeed;
+      b.rect.setStrokeStyle(1, active ? 0xF5C842 : 0x333333, 1);
+      b.text.setColor(active ? '#F5C842' : '#CCCCCC');
+    }
+  }
+
+  private createChromaKeyTexture(sourceKey: string, outKey: string, tolerance: number) {
+    const src = this.textures.get(sourceKey).getSourceImage() as HTMLImageElement | HTMLCanvasElement;
+    const w = (src as any).width as number;
+    const h = (src as any).height as number;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    ctx.drawImage(src as any, 0, 0);
+    const img = ctx.getImageData(0, 0, w, h);
+    const d = img.data;
+    // key out bright green backgrounds (robust)
+    for (let i = 0; i < d.length; i += 4) {
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      const isGreen =
+        g > 140 &&
+        (g - r) > (110 - tolerance) &&
+        (g - b) > (110 - tolerance) &&
+        r < 140 &&
+        b < 140;
+      if (isGreen) d[i + 3] = 0;
+    }
+    ctx.putImageData(img, 0, 0);
+    this.textures.addCanvas(outKey, canvas).setFilter(Phaser.Textures.FilterMode.NEAREST);
   }
 }
 

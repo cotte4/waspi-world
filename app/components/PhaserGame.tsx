@@ -39,7 +39,7 @@ export default function PhaserGame() {
         scene: [BootScene, CreatorScene, WorldScene, StoreInterior, ArcadeInterior, CafeInterior, HouseInterior, PenaltyMinigame],
         render: {
           antialias: false,
-          pixelArt: false,
+          pixelArt: true,
         },
       });
 

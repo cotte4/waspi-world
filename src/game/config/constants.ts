@@ -58,6 +58,11 @@ export const ZONES = {
   HOUSE_Y: 920,
   HOUSE_H: 180,
   PLAZA_Y: 1100,
+  // Training arena (PVE/PVP) inside plaza
+  TRAINING_X: 2250,
+  TRAINING_Y: 1320,
+  TRAINING_W: 720,
+  TRAINING_H: 420,
 };
 
 export const BUILDINGS = {
