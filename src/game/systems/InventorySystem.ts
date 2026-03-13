@@ -1,14 +1,6 @@
 import { eventBus, EVENTS } from '../config/eventBus';
 import { getItem } from '../config/catalog';
-
-type InventoryState = {
-  owned: string[];
-  equipped: {
-    top?: string;
-    bottom?: string;
-    utility?: string[]; // e.g. ['UTIL-GUN-01', 'UTIL-BALL-01']
-  };
-};
+import type { InventoryState } from '../../lib/playerState';
 
 const KEY = 'waspi_inventory_v1';
 
@@ -37,6 +29,11 @@ function saveState(s: InventoryState) {
 
 export function getInventory() {
   return loadState();
+}
+
+export function replaceInventory(next: InventoryState) {
+  saveState(next);
+  eventBus.emit(EVENTS.INVENTORY_CHANGED, next);
 }
 
 export function ownItem(id: string) {

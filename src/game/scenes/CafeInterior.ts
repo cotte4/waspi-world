@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
-import { AvatarRenderer } from '../systems/AvatarRenderer';
+import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { COLORS, WORLD } from '../config/constants';
+import { announceScene, createBackButton } from '../systems/SceneUi';
 
 export class CafeInterior extends Phaser.Scene {
   private player!: AvatarRenderer;
@@ -21,9 +22,10 @@ export class CafeInterior extends Phaser.Scene {
 
   create() {
     const { width, height } = this.scale;
+    announceScene(this);
 
     const g = this.add.graphics();
-    g.fillStyle(0x140608);
+    g.fillStyle(0x0d0505);
     g.fillRect(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
 
     const roomW = 640;
@@ -31,7 +33,7 @@ export class CafeInterior extends Phaser.Scene {
     const roomX = (width - roomW) / 2;
     const roomY = (height - roomH) / 2;
 
-    g.fillStyle(0x1C0E10);
+    g.fillStyle(0x1a0c0c);
     g.fillRect(roomX, roomY, roomW, roomH);
     g.lineStyle(3, COLORS.NEON_ORANGE, 0.55);
     g.strokeRect(roomX, roomY, roomW, roomH);
@@ -58,12 +60,7 @@ export class CafeInterior extends Phaser.Scene {
     // Player avatar
     this.px = width / 2;
     this.py = roomY + roomH - 80;
-    this.player = new AvatarRenderer(this, this.px, this.py, {
-      bodyColor: COLORS.SKIN_LIGHT,
-      hairColor: COLORS.HAIR_BROWN,
-      topColor: COLORS.BODY_BLUE,
-      bottomColor: COLORS.LEGS_DARK,
-    });
+    this.player = new AvatarRenderer(this, this.px, this.py, loadStoredAvatarConfig());
     this.player.setDepth(10);
 
     // Title
@@ -78,6 +75,7 @@ export class CafeInterior extends Phaser.Scene {
       fontFamily: '"Press Start 2P", monospace',
       color: '#BBBBBB',
     }).setOrigin(0.5);
+    createBackButton(this, () => this.exitToWorld());
 
     // Exit hint
     this.add.text(width / 2, roomY + roomH + 24, 'ESC PARA SALIR', {
@@ -100,12 +98,17 @@ export class CafeInterior extends Phaser.Scene {
     if (this.inTransition) return;
     this.handleMovement();
     if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
-      this.inTransition = true;
-      this.cameras.main.fadeOut(250, 0, 0, 0);
-      this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-        this.scene.start('WorldScene');
-      });
+      this.exitToWorld();
     }
+  }
+
+  private exitToWorld() {
+    if (this.inTransition) return;
+    this.inTransition = true;
+    this.cameras.main.fadeOut(250, 0, 0, 0);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      this.scene.start('WorldScene');
+    });
   }
 
   private handleMovement() {

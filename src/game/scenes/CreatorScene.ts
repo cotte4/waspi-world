@@ -1,13 +1,12 @@
 import Phaser from 'phaser';
-import { AvatarRenderer, AvatarConfig, HairStyle } from '../systems/AvatarRenderer';
+import { AvatarRenderer, AvatarConfig, HairStyle, loadStoredAvatarConfig, saveStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { COLORS } from '../config/constants';
+import { announceScene } from '../systems/SceneUi';
 
-const STORAGE_KEY = 'waspi_avatar_config';
 const USERNAME_KEY = 'waspi_username';
 
 export class CreatorScene extends Phaser.Scene {
   private preview!: AvatarRenderer;
-  private seedSprite?: Phaser.GameObjects.Image;
   private selectedSeed: 'procedural' | 'gengar' | 'buho' = 'procedural';
   private seedButtons: Array<{ id: 'procedural' | 'gengar' | 'buho'; rect: Phaser.GameObjects.Rectangle; text: Phaser.GameObjects.Text }> = [];
   private config: Required<AvatarConfig>;
@@ -19,6 +18,7 @@ export class CreatorScene extends Phaser.Scene {
   constructor() {
     super({ key: 'CreatorScene' });
     this.config = {
+      avatarKind: 'procedural',
       bodyColor: COLORS.SKIN_LIGHT,
       hairColor: COLORS.HAIR_BROWN,
       eyeColor: 0x2244CC,
@@ -28,14 +28,36 @@ export class CreatorScene extends Phaser.Scene {
       pp: 2,
       tt: 2,
       smoke: false,
+      equipTop: '',
+      equipBottom: '',
     };
   }
 
   create() {
     const { width, height } = this.scale;
+    const storedConfig = loadStoredAvatarConfig();
+    this.config = storedConfig;
+    this.selectedSeed = storedConfig.avatarKind;
+    announceScene(this);
 
     // Background
     this.cameras.main.setBackgroundColor('#05050A');
+    const bg = this.add.graphics().setDepth(-1);
+    bg.fillStyle(0x05050a, 1);
+    bg.fillRect(0, 0, width, height);
+    bg.fillStyle(0x0b0b18, 1);
+    bg.fillRect(32, 54, width - 64, height - 96);
+    bg.lineStyle(2, 0x2a2236, 0.9);
+    bg.strokeRect(32, 54, width - 64, height - 96);
+
+    // Soft grid on the right side (editor)
+    bg.lineStyle(1, 0x141424, 0.5);
+    for (let x = width / 2 + 40; x < width - 48; x += 24) {
+      bg.lineBetween(x, 120, x, height - 72);
+    }
+    for (let y = 120; y < height - 72; y += 20) {
+      bg.lineBetween(width / 2 + 40, y, width - 48, y);
+    }
 
     // Title
     this.add.text(width / 2, 80, 'WASPI WORLD', {
@@ -51,18 +73,20 @@ export class CreatorScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     // Preview panel
-    const panelW = 160;
-    const panelH = 160;
-    const panelX = width / 2;
+    const panelW = 190;
+    const panelH = 190;
+    const panelX = width / 2 - 180;
     const panelY = 210;
     const g = this.add.graphics();
-    g.fillStyle(0x050508);
-    g.fillRoundedRect(panelX - panelW / 2, panelY - panelH / 2, panelW, panelH, 8);
-    g.lineStyle(2, 0x222233, 1);
-    g.strokeRoundedRect(panelX - panelW / 2, panelY - panelH / 2, panelW, panelH, 8);
+    g.fillStyle(0x030308);
+    g.fillRoundedRect(panelX - panelW / 2, panelY - panelH / 2, panelW, panelH, 14);
+    g.lineStyle(2, 0x3a3344, 1);
+    g.strokeRoundedRect(panelX - panelW / 2, panelY - panelH / 2, panelW, panelH, 14);
+    g.lineStyle(1, 0xF5C842, 0.22);
+    g.strokeRoundedRect(panelX - panelW / 2 + 5, panelY - panelH / 2 + 5, panelW - 10, panelH - 10, 11);
 
     // Seed selector
-    this.add.text(width / 2, 146, 'SEED', {
+    this.add.text(panelX, 146, 'SEED', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#666666',
@@ -74,7 +98,7 @@ export class CreatorScene extends Phaser.Scene {
       { id: 'buho', label: 'BUH' },
     ];
     seeds.forEach((s, i) => {
-      const x = width / 2 - 60 + i * 60;
+      const x = panelX - 70 + i * 70;
       const y = 170;
       const rect = this.add.rectangle(x, y, 46, 22, 0x111111, 1)
         .setStrokeStyle(1, s.id === this.selectedSeed ? 0xF5C842 : 0x333333, 1)
@@ -100,7 +124,7 @@ export class CreatorScene extends Phaser.Scene {
     const storedName = (typeof window !== 'undefined' ? window.localStorage.getItem(USERNAME_KEY) : null) ?? '';
     const defaultName = storedName || `WASPI_${Math.floor(Math.random() * 999)}`;
 
-    this.add.text(width / 2, 295, 'NOMBRE', {
+    this.add.text(width / 2 + 120, 142, 'NOMBRE', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#888888',
@@ -111,7 +135,7 @@ export class CreatorScene extends Phaser.Scene {
     inputEl.maxLength = 18;
     inputEl.autocomplete = 'off';
     inputEl.spellcheck = false;
-    inputEl.style.width = '240px';
+    inputEl.style.width = '260px';
     inputEl.style.padding = '10px 12px';
     inputEl.style.background = 'rgba(0,0,0,0.65)';
     inputEl.style.border = '1px solid rgba(245,200,66,0.35)';
@@ -130,9 +154,9 @@ export class CreatorScene extends Phaser.Scene {
       if (cleaned !== inputEl.value) inputEl.value = cleaned;
     });
 
-    this.usernameInput = this.add.dom(width / 2, 325, inputEl);
+    this.usernameInput = this.add.dom(width / 2 + 120, 170, inputEl);
 
-    let rowY = 370;
+    let rowY = 210;
 
     const labelStyle = {
       fontSize: '8px',
@@ -141,8 +165,8 @@ export class CreatorScene extends Phaser.Scene {
     };
 
     const makeRow = (label: string, colors: number[], onPick: (c: number) => void) => {
-      this.add.text(width / 2 - 190, rowY, label, labelStyle).setOrigin(0, 0.5);
-      const startX = width / 2 - 100;
+      this.add.text(width / 2 - 10, rowY, label, labelStyle).setOrigin(0, 0.5);
+      const startX = width / 2 + 80;
       colors.forEach((c, i) => {
         const x = startX + i * 26;
         const rect = this.add.rectangle(x, rowY, 20, 20, c)
@@ -156,7 +180,7 @@ export class CreatorScene extends Phaser.Scene {
       rowY += 32;
     };
 
-    // Colors similar to screenshot
+    // Colors
     makeRow('CUERPO', [
       0xF5D5A4, 0xE6B98A, 0xD89B73, 0xBF7B4E, 0x9B5A3A, 0x7A412A,
     ], c => { this.config.bodyColor = c; });
@@ -262,7 +286,7 @@ export class CreatorScene extends Phaser.Scene {
     // ENTRAR button
     const btnW = 160;
     const btnH = 36;
-    const btnY = rowY + 24;
+    const btnY = height - 70;
     const btn = this.add.rectangle(width / 2, btnY, btnW, btnH, 0xF5C842, 1)
       .setInteractive({ useHandCursor: true });
     this.add.text(width / 2, btnY, 'ENTRAR', {
@@ -275,7 +299,10 @@ export class CreatorScene extends Phaser.Scene {
       if (typeof window !== 'undefined') {
         const name = (inputEl.value || '').trim();
         if (name) window.localStorage.setItem(USERNAME_KEY, name);
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.config));
+        saveStoredAvatarConfig({
+          ...this.config,
+          avatarKind: this.selectedSeed,
+        });
       }
       this.cameras.main.fadeOut(250, 0, 0, 0);
       this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
@@ -300,38 +327,14 @@ export class CreatorScene extends Phaser.Scene {
   }
 
   private refreshPreview() {
-    // Clear both preview types
     this.preview.destroy();
-    this.seedSprite?.destroy();
-    this.seedSprite = undefined;
 
     const { width } = this.scale;
     const panelY = 210;
-
-    if (this.selectedSeed !== 'procedural') {
-      const key = this.selectedSeed === 'gengar' ? 'seed_gengar' : 'seed_buho';
-      if (this.textures.exists(key)) {
-        const tex = this.textures.get(key);
-        tex.setFilter(Phaser.Textures.FilterMode.NEAREST);
-        // Chroma-key remove green into a new runtime texture
-        const outKey = `${key}_ck`;
-        if (!this.textures.exists(outKey)) {
-          this.createChromaKeyTexture(key, outKey, 26);
-        }
-        this.seedSprite = this.add.image(width / 2, panelY + 20, outKey);
-        // Fit into the panel nicely
-        const src = this.textures.get(outKey).getSourceImage() as any;
-        const w = src?.width ?? 1;
-        const h = src?.height ?? 1;
-        const maxSize = 120;
-        const scale = Math.min(maxSize / w, maxSize / h);
-        this.seedSprite.setScale(scale);
-        return;
-      }
-    }
-
-    // Fallback: procedural
-    this.preview = new AvatarRenderer(this, width / 2, panelY + 20, this.config);
+    this.preview = new AvatarRenderer(this, width / 2, panelY + 20, {
+      ...this.config,
+      avatarKind: this.selectedSeed,
+    });
   }
 
   shutdown() {
@@ -345,36 +348,4 @@ export class CreatorScene extends Phaser.Scene {
       b.text.setColor(active ? '#F5C842' : '#CCCCCC');
     }
   }
-
-  private createChromaKeyTexture(sourceKey: string, outKey: string, tolerance: number) {
-    const src = this.textures.get(sourceKey).getSourceImage() as HTMLImageElement | HTMLCanvasElement;
-    const w = (src as any).width as number;
-    const h = (src as any).height as number;
-    // Este método solo corre en el cliente, asumimos `document` existente.
-    const canvas = document.createElement('canvas') as HTMLCanvasElement;
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
-    ctx.drawImage(src as any, 0, 0);
-    const img = ctx.getImageData(0, 0, w, h);
-    const d = img.data;
-    // key out bright green backgrounds (robust)
-    for (let i = 0; i < d.length; i += 4) {
-      const r = d[i], g = d[i + 1], b = d[i + 2];
-      const isGreen =
-        g > 140 &&
-        (g - r) > (110 - tolerance) &&
-        (g - b) > (110 - tolerance) &&
-        r < 140 &&
-        b < 140;
-      if (isGreen) d[i + 3] = 0;
-    }
-    ctx.putImageData(img, 0, 0);
-    const textures = this.textures as Phaser.Textures.TextureManager;
-    const texture = textures.addCanvas(outKey, canvas as HTMLCanvasElement);
-    if (!texture) return;
-    texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
-  }
 }
-

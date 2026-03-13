@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import { addTenks } from '../systems/TenksSystem';
+import { announceScene } from '../systems/SceneUi';
+import { eventBus, EVENTS } from '../config/eventBus';
 
 export class PenaltyMinigame extends Phaser.Scene {
   private isFinished = false;
@@ -28,6 +30,7 @@ export class PenaltyMinigame extends Phaser.Scene {
 
   create() {
     const { width, height } = this.scale;
+    announceScene(this);
 
     this.cameras.main.setBackgroundColor('#05050A');
 
@@ -241,6 +244,11 @@ export class PenaltyMinigame extends Phaser.Scene {
   }
 
   private finishAndExit(_won: boolean) {
+    eventBus.emit(EVENTS.PENALTY_RESULT, {
+      won: _won,
+      goals: this.goals,
+      shots: 5,
+    });
     this.isFinished = true;
     this.cameras.main.fadeOut(250, 0, 0, 0);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
@@ -248,4 +256,3 @@ export class PenaltyMinigame extends Phaser.Scene {
     });
   }
 }
-

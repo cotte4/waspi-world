@@ -1,59 +1,82 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin, hasAdminConfig } from '@/src/lib/supabaseAdmin';
+import { createSupabaseAdminClient, getAuthenticatedUser, hasServiceRole, isServerSupabaseConfigured } from '@/src/lib/supabaseServer';
+import { DEFAULT_PLAYER_STATE, normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
+import { ensureCatalogSeeded, ensurePlayerRow, syncPlayerInventory } from '@/src/lib/commercePersistence';
 
-export async function GET(req: NextRequest) {
-  if (!hasAdminConfig || !supabaseAdmin) {
-    return NextResponse.json({ error: 'Supabase admin not configured' }, { status: 500 });
+const PLAYER_METADATA_KEY = 'waspiPlayer';
+
+export async function GET(request: NextRequest) {
+  if (!isServerSupabaseConfigured) {
+    return NextResponse.json({ error: 'Supabase is not configured.' }, { status: 503 });
   }
 
-  const authHeader = req.headers.get('authorization') ?? '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  if (!token) {
-    return NextResponse.json({ error: 'Missing Bearer token' }, { status: 401 });
+  const user = await getAuthenticatedUser(request.headers.get('authorization'));
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Get user from access token
-  const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
-  if (userError || !userData?.user) {
-    return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-  }
-  const user = userData.user;
+  const player = normalizePlayerState(user.user_metadata?.[PLAYER_METADATA_KEY] ?? DEFAULT_PLAYER_STATE);
 
-  // Upsert player row
-  const username =
-    (user.user_metadata as any)?.username ??
-    (user.email ? user.email.split('@')[0] : `player_${user.id.slice(0, 8)}`);
-
-  const { data: upserted, error: upsertErr } = await supabaseAdmin
-    .from('players')
-    .upsert(
-      {
-        id: user.id,
-        username,
-      },
-      { onConflict: 'id' }
-    )
-    .select('*')
-    .single();
-
-  if (upsertErr) {
-    return NextResponse.json({ error: upsertErr.message }, { status: 500 });
-  }
-
-  // Load inventory
-  const { data: inventory, error: invErr } = await supabaseAdmin
-    .from('player_inventory')
-    .select('item_id, acquired_via, created_at')
-    .eq('player_id', user.id)
-    .order('created_at', { ascending: true });
-
-  if (invErr) {
-    return NextResponse.json({ error: invErr.message }, { status: 500 });
+  if (hasServiceRole) {
+    const admin = createSupabaseAdminClient();
+    if (admin) {
+      await ensureCatalogSeeded(admin);
+      await ensurePlayerRow(admin, user, player);
+    }
   }
 
   return NextResponse.json({
-    player: upserted,
-    inventory: inventory ?? [],
+    playerId: user.id,
+    email: user.email ?? null,
+    player,
+    persistence: hasServiceRole ? 'supabase_user_metadata' : 'read_only_session',
+  });
+}
+
+export async function PUT(request: NextRequest) {
+  if (!isServerSupabaseConfigured) {
+    return NextResponse.json({ error: 'Supabase is not configured.' }, { status: 503 });
+  }
+
+  const user = await getAuthenticatedUser(request.headers.get('authorization'));
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  if (!hasServiceRole) {
+    return NextResponse.json({ error: 'Server persistence is not configured.' }, { status: 501 });
+  }
+
+  const body = await request.json().catch(() => null) as { player?: Partial<PlayerState> } | null;
+  const nextPlayer = normalizePlayerState({
+    ...(user.user_metadata?.[PLAYER_METADATA_KEY] ?? DEFAULT_PLAYER_STATE),
+    ...(body?.player ?? {}),
+  });
+
+  const admin = createSupabaseAdminClient();
+  if (!admin) {
+    return NextResponse.json({ error: 'Admin client unavailable.' }, { status: 500 });
+  }
+
+  await ensureCatalogSeeded(admin);
+  await ensurePlayerRow(admin, user, nextPlayer);
+  await syncPlayerInventory(admin, user.id, nextPlayer);
+
+  const { error } = await admin.auth.admin.updateUserById(user.id, {
+    user_metadata: {
+      ...(user.user_metadata ?? {}),
+      [PLAYER_METADATA_KEY]: nextPlayer,
+    },
+  });
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({
+    playerId: user.id,
+    player: nextPlayer,
+    persistence: 'supabase_user_metadata',
   });
 }
 

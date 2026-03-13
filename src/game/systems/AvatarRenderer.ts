@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
 import { COLORS } from '../config/constants';
 
+export type AvatarKind = 'procedural' | 'gengar' | 'buho';
 export type HairStyle = 'SPI' | 'FLA' | 'MOH' | 'X';
 
 export interface AvatarConfig {
+  avatarKind?: AvatarKind;
   bodyColor?: number;
   hairColor?: number;
   eyeColor?: number;
@@ -13,9 +15,14 @@ export interface AvatarConfig {
   pp?: number; // 0..10 lower-body proportion (fun label)
   tt?: number; // 0..10 upper-body proportion (fun label)
   smoke?: boolean;
+  equipTop?: string;
+  equipBottom?: string;
 }
 
-const DEFAULT_CONFIG: Required<AvatarConfig> = {
+export const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
+
+export const DEFAULT_AVATAR_CONFIG: Required<AvatarConfig> = {
+  avatarKind: 'procedural',
   bodyColor: COLORS.SKIN_LIGHT,
   hairColor: COLORS.HAIR_BROWN,
   eyeColor: 0x2244CC,
@@ -25,35 +32,65 @@ const DEFAULT_CONFIG: Required<AvatarConfig> = {
   pp: 2,
   tt: 2,
   smoke: false,
+  equipTop: '',
+  equipBottom: '',
 };
+
+export function normalizeAvatarConfig(config: AvatarConfig = {}): Required<AvatarConfig> {
+  return { ...DEFAULT_AVATAR_CONFIG, ...config };
+}
+
+export function loadStoredAvatarConfig(): Required<AvatarConfig> {
+  if (typeof window === 'undefined') return { ...DEFAULT_AVATAR_CONFIG };
+  const raw = window.localStorage.getItem(AVATAR_STORAGE_KEY);
+  if (!raw) return { ...DEFAULT_AVATAR_CONFIG };
+  try {
+    return normalizeAvatarConfig(JSON.parse(raw) as AvatarConfig);
+  } catch {
+    return { ...DEFAULT_AVATAR_CONFIG };
+  }
+}
+
+export function saveStoredAvatarConfig(config: AvatarConfig) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(AVATAR_STORAGE_KEY, JSON.stringify(normalizeAvatarConfig(config)));
+}
 
 export class AvatarRenderer {
   private container: Phaser.GameObjects.Container;
   private facingLeft = false;
   private walkTick = 0;
-  private body!: Phaser.GameObjects.Arc;
-  private ppBlob!: Phaser.GameObjects.Ellipse;
-  private ttLeft!: Phaser.GameObjects.Ellipse;
-  private ttRight!: Phaser.GameObjects.Ellipse;
-  private leftFoot!: Phaser.GameObjects.Rectangle;
-  private rightFoot!: Phaser.GameObjects.Rectangle;
-  private leftHand!: Phaser.GameObjects.Rectangle;
-  private rightHand!: Phaser.GameObjects.Rectangle;
-  private hair!: Phaser.GameObjects.Graphics;
+  private body?: Phaser.GameObjects.Arc;
+  private ppBlob?: Phaser.GameObjects.Ellipse;
+  private ttLeft?: Phaser.GameObjects.Ellipse;
+  private ttRight?: Phaser.GameObjects.Ellipse;
+  private leftFoot?: Phaser.GameObjects.Rectangle;
+  private rightFoot?: Phaser.GameObjects.Rectangle;
+  private leftHand?: Phaser.GameObjects.Rectangle;
+  private rightHand?: Phaser.GameObjects.Rectangle;
+  private hair?: Phaser.GameObjects.Graphics;
+  private specialSprite?: Phaser.GameObjects.Image;
+  private specialBaseY = 12;
   private lastPuffAt = 0;
   readonly config: Required<AvatarConfig>;
 
   constructor(scene: Phaser.Scene, x: number, y: number, config: AvatarConfig = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.config = normalizeAvatarConfig(config);
     this.container = scene.add.container(x, y);
     this.buildAvatar(scene);
   }
 
   private buildAvatar(scene: Phaser.Scene) {
-    const c = this.config;
-
     // Shadow
     const shadow = scene.add.ellipse(0, 26, 26, 9, 0x000000, 0.35);
+    this.container.add(shadow);
+
+    if (this.config.avatarKind !== 'procedural') {
+      this.buildSpecialAvatar(scene, this.config.avatarKind);
+      return;
+    }
+
+    const c = this.config;
 
     // Separate attributes (0..10) — bizarre extremes without scaling whole character
     const tt = Phaser.Math.Clamp(c.tt ?? 2, 0, 10);
@@ -105,7 +142,6 @@ export class AvatarRenderer {
     this.drawHairVariant(bodyR);
 
     this.container.add([
-      shadow,
       this.leftFoot,
       this.rightFoot,
       this.body,
@@ -123,8 +159,22 @@ export class AvatarRenderer {
     ]);
   }
 
+  private buildSpecialAvatar(scene: Phaser.Scene, kind: Exclude<AvatarKind, 'procedural'>) {
+    const textureKey = ensureSeedTexture(scene, kind);
+    this.specialSprite = scene.add.image(0, this.specialBaseY, textureKey);
+    this.specialSprite.setOrigin(0.5, 1);
+
+    const src = scene.textures.get(textureKey).getSourceImage() as { width?: number; height?: number };
+    const w = src?.width ?? 1;
+    const h = src?.height ?? 1;
+    const scale = Math.min(54 / w, 54 / h);
+    this.specialSprite.setScale(scale);
+    this.container.add(this.specialSprite);
+  }
+
   private drawHairVariant(bodyR: number) {
     const c = this.config;
+    if (!this.hair) return;
     this.hair.clear();
     this.hair.fillStyle(c.hairColor, 1);
 
@@ -162,28 +212,28 @@ export class AvatarRenderer {
       this.facingLeft = false;
     }
 
-    // Walk animation (simple feet/hand bob)
-    if (isMoving) {
-      this.walkTick += 0.25;
-      const swing = Math.sin(this.walkTick) * 2.5;
-      this.leftFoot.setAngle(swing);
-      this.rightFoot.setAngle(-swing);
-      this.leftHand.setAngle(-swing);
-      this.rightHand.setAngle(swing);
-    } else {
-      this.walkTick = 0;
-      this.leftFoot.setAngle(0);
-      this.rightFoot.setAngle(0);
-      this.leftHand.setAngle(0);
-      this.rightHand.setAngle(0);
+    // Walk / idle animation (feet + subtle bob)
+    this.walkTick += isMoving ? 0.30 : 0.08;
+    const swing = isMoving ? Math.sin(this.walkTick) * 3 : Math.sin(this.walkTick) * 1.2;
+    const bob = isMoving ? Math.sin(this.walkTick * 0.5) * 1.1 : Math.sin(this.walkTick * 0.5) * 0.6;
 
-      // Smoking idle puffs
-      if (this.config.smoke) {
-        const now = Date.now();
-        if (now - this.lastPuffAt > 900) {
-          this.lastPuffAt = now;
-          this.puffSmoke();
-        }
+    this.leftFoot?.setAngle(swing);
+    this.rightFoot?.setAngle(-swing);
+    this.leftHand?.setAngle(-swing * 0.7);
+    this.rightHand?.setAngle(swing * 0.7);
+
+    this.container.setY(this.container.y + bob * 0.2);
+
+    if (this.specialSprite) {
+      this.specialSprite.setY(this.specialBaseY + bob);
+    }
+
+    // Smoking idle puffs
+    if (!isMoving && this.config.smoke) {
+      const now = Date.now();
+      if (now - this.lastPuffAt > 900) {
+        this.lastPuffAt = now;
+        this.puffSmoke();
       }
     }
   }
@@ -226,4 +276,144 @@ export class AvatarRenderer {
   destroy() {
     this.container.destroy();
   }
+}
+
+function ensureSeedTexture(scene: Phaser.Scene, kind: Exclude<AvatarKind, 'procedural'>) {
+  const baseKey = kind === 'gengar' ? 'seed_gengar' : 'seed_buho';
+  const chromaKey = `${baseKey}_avatar`;
+
+  if (scene.textures.exists(chromaKey)) return chromaKey;
+
+  if (scene.textures.exists(baseKey) && createChromaKeyTexture(scene, baseKey, chromaKey, 26)) {
+    return chromaKey;
+  }
+
+  const fallbackKey = `${baseKey}_fallback`;
+  if (!scene.textures.exists(fallbackKey)) {
+    createFallbackSeedTexture(scene, fallbackKey, kind);
+  }
+  return fallbackKey;
+}
+
+function createChromaKeyTexture(
+  scene: Phaser.Scene,
+  sourceKey: string,
+  outKey: string,
+  tolerance: number,
+) {
+  if (typeof document === 'undefined') return false;
+
+  const src = scene.textures.get(sourceKey).getSourceImage() as HTMLImageElement | HTMLCanvasElement;
+  const w = (src as { width?: number }).width ?? 0;
+  const h = (src as { height?: number }).height ?? 0;
+  if (!w || !h) return false;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return false;
+
+  ctx.drawImage(src, 0, 0);
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i];
+    const g = d[i + 1];
+    const b = d[i + 2];
+    const isGreen =
+      g > 140 &&
+      (g - r) > (110 - tolerance) &&
+      (g - b) > (110 - tolerance) &&
+      r < 140 &&
+      b < 140;
+    if (isGreen) d[i + 3] = 0;
+  }
+
+  ctx.putImageData(img, 0, 0);
+  const texture = scene.textures.addCanvas(outKey, canvas);
+  if (!texture) return false;
+  texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+  return true;
+}
+
+function createFallbackSeedTexture(
+  scene: Phaser.Scene,
+  key: string,
+  kind: Exclude<AvatarKind, 'procedural'>,
+) {
+  if (typeof document === 'undefined') return;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.clearRect(0, 0, 64, 64);
+
+  if (kind === 'gengar') {
+    ctx.fillStyle = '#5f2aa6';
+    ctx.beginPath();
+    ctx.moveTo(15, 46);
+    ctx.lineTo(10, 24);
+    ctx.lineTo(18, 12);
+    ctx.lineTo(24, 18);
+    ctx.lineTo(30, 10);
+    ctx.lineTo(36, 18);
+    ctx.lineTo(44, 12);
+    ctx.lineTo(52, 24);
+    ctx.lineTo(49, 46);
+    ctx.quadraticCurveTo(32, 58, 15, 46);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(18, 27, 10, 8);
+    ctx.fillRect(36, 27, 10, 8);
+    ctx.fillStyle = '#ff3355';
+    ctx.fillRect(21, 29, 4, 4);
+    ctx.fillRect(39, 29, 4, 4);
+    ctx.fillStyle = '#1a102c';
+    ctx.fillRect(23, 40, 18, 4);
+  } else {
+    ctx.fillStyle = '#6b4c2e';
+    ctx.beginPath();
+    ctx.arc(32, 34, 18, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#8c6239';
+    ctx.beginPath();
+    ctx.moveTo(16, 26);
+    ctx.lineTo(20, 12);
+    ctx.lineTo(30, 24);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(48, 26);
+    ctx.lineTo(44, 12);
+    ctx.lineTo(34, 24);
+    ctx.fill();
+
+    ctx.fillStyle = '#f5c842';
+    ctx.beginPath();
+    ctx.arc(24, 32, 7, 0, Math.PI * 2);
+    ctx.arc(40, 32, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#111111';
+    ctx.beginPath();
+    ctx.arc(24, 32, 2, 0, Math.PI * 2);
+    ctx.arc(40, 32, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#d48018';
+    ctx.beginPath();
+    ctx.moveTo(32, 36);
+    ctx.lineTo(27, 42);
+    ctx.lineTo(37, 42);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  const texture = scene.textures.addCanvas(key, canvas);
+  if (!texture) return;
+  texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
 }

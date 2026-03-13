@@ -1,11 +1,12 @@
 import Phaser from 'phaser';
-import { AvatarRenderer, AvatarConfig } from '../systems/AvatarRenderer';
+import { AvatarRenderer, AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { ChatSystem } from '../systems/ChatSystem';
-import { WORLD, VIEWPORT, PLAYER, COLORS, ZONES, BUILDINGS, CHAT } from '../config/constants';
+import { WORLD, PLAYER, COLORS, ZONES, BUILDINGS, CHAT } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
 import { initTenks } from '../systems/TenksSystem';
 import { getEquippedColors, hasUtilityEquipped } from '../systems/InventorySystem';
+import { announceScene } from '../systems/SceneUi';
 
 interface RemotePlayer {
   avatar: AvatarRenderer;
@@ -15,14 +16,54 @@ interface RemotePlayer {
   y: number;
   targetX: number;
   targetY: number;
+  isMoving: boolean;
+  moveDx: number;
   avatarConfig: AvatarConfig;
-  hitbox: Phaser.Physics.Arcade.Image;
+  hitbox: HitboxArc;
 }
+
+type HitboxArc = Phaser.GameObjects.Arc & { body: Phaser.Physics.Arcade.Body };
+type ArcadeObject = Phaser.GameObjects.GameObject & { destroy: () => void };
+type PositionedArcadeObject = Phaser.GameObjects.GameObject & { x: number; y: number };
+type EquippedPayload = { top?: string; bottom?: string };
+type RemoteMoveEvent = {
+  player_id: string;
+  username: string;
+  x: number;
+  y: number;
+  dir: number;
+  moving: boolean;
+};
+type RemoteChatEvent = {
+  player_id: string;
+  username: string;
+  message: string;
+  x: number;
+  y: number;
+};
+type RemoteStateEvent = {
+  player_id: string;
+  username: string;
+  x: number;
+  y: number;
+  avatar?: AvatarConfig;
+  equipped?: EquippedPayload;
+};
+type RemoteHitEvent = {
+  target_id: string;
+  source_id: string;
+  dmg: number;
+};
+
+const REMOTE_CHAT_MIN_MS = 1000;
+const REMOTE_MOVE_MIN_MS = 50;
+const REMOTE_HIT_MIN_MS = 120;
+const MAX_REMOTE_CHAT_DISTANCE = 420;
 
 export class WorldScene extends Phaser.Scene {
   // Player
-  private px = PLAYER.SPAWN_X;
-  private py = PLAYER.SPAWN_Y;
+  private px: number = PLAYER.SPAWN_X;
+  private py: number = PLAYER.SPAWN_Y;
   private playerId = '';
   private playerUsername = '';
   private playerAvatar!: AvatarRenderer;
@@ -61,6 +102,9 @@ export class WorldScene extends Phaser.Scene {
   private remotePlayers = new Map<string, RemotePlayer>();
   private lastPosSent = 0;
   private channel: ReturnType<NonNullable<typeof supabase>['channel']> | null = null;
+  private bridgeCleanupFns: Array<() => void> = [];
+  private lastMoveDx = 0;
+  private lastIsMoving = false;
 
   // Combat / HP
   private hp = 100;
@@ -69,7 +113,7 @@ export class WorldScene extends Phaser.Scene {
   private gunEnabled = false;
   private keyF!: Phaser.Input.Keyboard.Key;
   private bullets!: Phaser.Physics.Arcade.Group;
-  private playerHitbox!: Phaser.Physics.Arcade.Image;
+  private playerHitbox!: HitboxArc;
 
   // Training zone (PVE + PVP)
   private inTraining = false;
@@ -77,6 +121,10 @@ export class WorldScene extends Phaser.Scene {
   private pvpEnabled = true;
   private pveEnabled = true;
   private dummies!: Phaser.Physics.Arcade.Group;
+  private mutedPlayerIds = new Set<string>();
+  private remoteMoveTimes = new Map<string, number>();
+  private remoteChatTimes = new Map<string, number>();
+  private remoteHitTimes = new Map<string, number>();
 
   // Football cosmetic
   private ballEnabled = false;
@@ -92,9 +140,13 @@ export class WorldScene extends Phaser.Scene {
   }
 
   create() {
+    announceScene(this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
+
     // Generate player ID and username
     this.playerId = this.getOrCreatePlayerId();
     this.playerUsername = this.getOrCreateUsername();
+    this.loadMutedPlayers();
 
     // Init TENKS balance (local-only for ahora)
     initTenks(5000);
@@ -105,6 +157,7 @@ export class WorldScene extends Phaser.Scene {
     this.drawBuildings();
     this.drawStreet();
     this.drawLampPosts();
+    this.drawVignette();
 
     // Multiplayer status indicator (tiny debug text)
     const statusText = this.add.text(8, 8, '', {
@@ -116,36 +169,10 @@ export class WorldScene extends Phaser.Scene {
     // Invisible camera target
     this.playerBody = this.add.rectangle(this.px, this.py, 2, 2, 0x000000, 0).setDepth(0);
     // Physics hitbox for PVP/PVE detection
-    this.playerHitbox = this.physics.add.image(this.px, this.py, undefined as any)
-      .setCircle(16)
-      .setImmovable(true)
-      .setVisible(false);
-
-    // Load avatar config from CreatorScene if present
-    let avatarConfig: AvatarConfig = {
-      bodyColor: COLORS.SKIN_LIGHT,
-      hairColor: COLORS.HAIR_BROWN,
-      topColor: COLORS.BODY_BLUE,
-      bottomColor: COLORS.LEGS_DARK,
-    };
-    if (typeof window !== 'undefined') {
-      const raw = window.localStorage.getItem('waspi_avatar_config');
-      if (raw) {
-        try {
-          avatarConfig = { ...avatarConfig, ...(JSON.parse(raw) as AvatarConfig) };
-        } catch {
-          // ignore parse error
-        }
-      }
-    }
+    this.playerHitbox = this.createHitbox(this.px, this.py);
 
     // Player avatar
-    const equipped = getEquippedColors();
-    this.playerAvatar = new AvatarRenderer(this, this.px, this.py, {
-      ...avatarConfig,
-      topColor: equipped.topColor ?? avatarConfig.topColor,
-      bottomColor: equipped.bottomColor ?? avatarConfig.bottomColor,
-    });
+    this.playerAvatar = new AvatarRenderer(this, this.px, this.py, this.getCurrentAvatarConfig());
     this.playerAvatar.setDepth(50);
 
     // Player nameplate
@@ -277,6 +304,7 @@ export class WorldScene extends Phaser.Scene {
     this.bullets = this.physics.add.group({
       allowGravity: false,
       collideWorldBounds: true,
+      maxSize: 32,
     });
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
@@ -288,26 +316,53 @@ export class WorldScene extends Phaser.Scene {
     // PVE: bullets vs dummies (training only)
     this.physics.add.overlap(this.bullets, this.dummies, (bObj, dObj) => {
       if (!this.inTraining || !this.pveEnabled) return;
-      (bObj as any).destroy?.();
-      const flash = this.add.circle((dObj as any).x, (dObj as any).y, 18, 0xFF4444, 0.22);
+      this.destroyArcadeObject(bObj);
+      const dummy = dObj as PositionedArcadeObject;
+      const flash = this.add.circle(dummy.x, dummy.y, 18, 0xFF4444, 0.22);
       flash.setDepth(5000);
       this.tweens.add({ targets: flash, alpha: 0, scale: 1.6, duration: 180, onComplete: () => flash.destroy() });
     });
   }
 
   private shootAt(wx: number, wy: number) {
-    const b = this.add.rectangle(this.px, this.py, 6, 2, 0xF5C842, 1);
+    const ang = Phaser.Math.Angle.Between(this.px, this.py, wx, wy);
+    const speed = 620;
+
+    // Muzzle flash
+    const flash = this.add.circle(this.px + Math.cos(ang) * 14, this.py + Math.sin(ang) * 14, 7, 0xF5C842, 0.95);
+    flash.setDepth(2100);
+    this.tweens.add({
+      targets: flash,
+      alpha: { from: 0.95, to: 0 },
+      scale: { from: 1, to: 1.8 },
+      duration: 120,
+      onComplete: () => flash.destroy(),
+    });
+
+    // Subtle recoil on hands/weapon
+    const recoilX = Math.cos(ang) * -2;
+    const recoilY = Math.sin(ang) * -2;
+    const container = this.playerAvatar.getContainer();
+    this.tweens.add({
+      targets: container,
+      x: container.x + recoilX,
+      y: container.y + recoilY,
+      yoyo: true,
+      duration: 80,
+      ease: 'Sine.easeOut',
+    });
+
+    // Bullet
+    const b = this.add.rectangle(this.px, this.py, 10, 3, 0xF5C842, 1);
     this.physics.add.existing(b);
     const body = b.body as Phaser.Physics.Arcade.Body;
     body.setAllowGravity(false);
-    body.setSize(6, 2);
-    const ang = Phaser.Math.Angle.Between(this.px, this.py, wx, wy);
-    const speed = 540;
+    body.setSize(10, 3);
     body.setVelocity(Math.cos(ang) * speed, Math.sin(ang) * speed);
     b.setRotation(ang);
     b.setDepth(2000);
     this.bullets.add(b);
-    this.time.delayedCall(900, () => b.destroy());
+    this.time.delayedCall(900, () => this.destroyArcadeObject(b));
   }
 
   private refreshUtilitiesFromInventory() {
@@ -769,7 +824,11 @@ export class WorldScene extends Phaser.Scene {
   // ─── Player & Input ──────────────────────────────────────────────────────────
 
   private handleMovement(delta: number) {
-    if (this.inputBlocked) return;
+    if (this.inputBlocked) {
+      this.lastIsMoving = false;
+      this.lastMoveDx = 0;
+      return;
+    }
 
     const speed = PLAYER.SPEED * (delta / 1000);
     let dx = 0, dy = 0;
@@ -794,13 +853,15 @@ export class WorldScene extends Phaser.Scene {
     if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
 
     const isMoving = dx !== 0 || dy !== 0;
+    this.lastIsMoving = isMoving;
+    this.lastMoveDx = dx;
     const newX = Phaser.Math.Clamp(this.px + dx * speed, 20, WORLD.WIDTH - 20);
     const newY = Phaser.Math.Clamp(this.py + dy * speed, 20, WORLD.HEIGHT - 20);
 
     // Simple building collision: can't enter building zone unless near a door
     const inBuildingZone = newY < ZONES.BUILDING_BOTTOM && newY > ZONES.BUILDING_TOP;
 
-    let finalX = newX;
+    const finalX = newX;
     let finalY = newY;
 
     if (inBuildingZone) {
@@ -954,40 +1015,17 @@ export class WorldScene extends Phaser.Scene {
         this.handleHit(payload);
       })
       .subscribe(() => {
-        // Announce join
-        const rawCfg = typeof window !== 'undefined' ? window.localStorage.getItem('waspi_avatar_config') : null;
-        let cfg: AvatarConfig = {};
-        if (rawCfg) {
-          try { cfg = JSON.parse(rawCfg) as AvatarConfig; } catch { /* ignore */ }
-        }
-        const invRaw = typeof window !== 'undefined' ? window.localStorage.getItem('waspi_inventory_v1') : null;
-        let equipped: { top?: string; bottom?: string } = {};
-        if (invRaw) {
-          try { equipped = (JSON.parse(invRaw) as { equipped?: { top?: string; bottom?: string } }).equipped ?? {}; } catch { /* ignore */ }
-        }
-
-        this.channel!.send({
-          type: 'broadcast',
-          event: 'player:join',
-          payload: {
-            playerId: this.playerId,
-            username: this.playerUsername,
-            x: this.px,
-            y: this.py,
-            avatar: cfg,
-            equipped,
-            topColor: (getEquippedColors().topColor ?? cfg.topColor),
-            bottomColor: (getEquippedColors().bottomColor ?? cfg.bottomColor),
-          },
-        });
+        this.broadcastSelfState('player:join');
       });
     return 'multiplayer';
   }
 
-  private handleHit(payload: { targetId: string; sourceId: string; dmg: number }) {
-    if (!payload || payload.targetId !== this.playerId) return;
+  private handleHit(payload: unknown) {
+    const next = this.parseRemoteHit(payload);
+    if (!next || next.target_id !== this.playerId) return;
+    if (!this.allowRemoteEvent(this.remoteHitTimes, next.source_id, REMOTE_HIT_MIN_MS)) return;
     if (!this.inTraining || !this.pvpEnabled) return;
-    const dmg = Math.max(1, Math.min(40, Math.floor(payload.dmg ?? 10)));
+    const dmg = Math.max(1, Math.min(40, Math.floor(next.dmg ?? 10)));
     this.hp = Math.max(0, this.hp - dmg);
     this.renderHpHud();
 
@@ -1009,73 +1047,91 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  private handleRemoteJoin(payload: { playerId: string; username: string; x: number; y: number; avatar?: AvatarConfig; equipped?: { top?: string; bottom?: string }; topColor?: number; bottomColor?: number }) {
-    if (payload.playerId === this.playerId) return;
-    if (!this.remotePlayers.has(payload.playerId)) {
-      const cfg = payload.avatar ?? {};
-      // Apply colors if provided (best-effort)
-      if (typeof payload.topColor === 'number') cfg.topColor = payload.topColor;
-      if (typeof payload.bottomColor === 'number') cfg.bottomColor = payload.bottomColor;
-      this.spawnRemotePlayer(payload.playerId, payload.username, payload.x, payload.y, cfg);
-      if (payload.equipped) {
-        this.applyRemoteEquipped(payload.playerId, payload.equipped);
+  private handleRemoteJoin(payload: unknown) {
+    const next = this.parseRemoteState(payload);
+    if (!next || next.player_id === this.playerId) return;
+    const cfg = next.avatar ?? {};
+
+    if (!this.remotePlayers.has(next.player_id)) {
+      this.spawnRemotePlayer(next.player_id, next.username, next.x, next.y, cfg);
+      if (next.equipped) {
+        this.applyRemoteEquipped(next.player_id, next.equipped);
       }
+      this.broadcastSelfState('player:join');
+      return;
+    }
+
+    const rp = this.remotePlayers.get(next.player_id)!;
+    rp.username = next.username;
+    rp.nameplate.setText(next.username);
+    rp.targetX = next.x;
+    rp.targetY = next.y;
+    if (next.avatar) {
+      rp.avatarConfig = { ...rp.avatarConfig, ...cfg };
+      const depth = rp.avatar.getContainer().depth;
+      rp.avatar.destroy();
+      rp.avatar = new AvatarRenderer(this, rp.x, rp.y, rp.avatarConfig);
+      rp.avatar.setDepth(depth);
+    }
+    if (next.equipped) {
+      this.applyRemoteEquipped(next.player_id, next.equipped);
     }
   }
 
-  private handleRemoteLeave(payload: { playerId: string }) {
-    const rp = this.remotePlayers.get(payload.playerId);
+  private handleRemoteLeave(payload: unknown) {
+    const playerId = this.readStringField(payload, 'player_id', 'playerId');
+    if (!playerId) return;
+    const rp = this.remotePlayers.get(playerId);
     if (rp) {
       rp.avatar.destroy();
       rp.nameplate.destroy();
-      this.remotePlayers.delete(payload.playerId);
-      this.chatSystem.clearBubble(payload.playerId);
+      this.remotePlayers.delete(playerId);
+      this.chatSystem.clearBubble(playerId);
     }
   }
 
-  private handleRemoteMove(payload: { playerId: string; username: string; x: number; y: number }) {
-    if (payload.playerId === this.playerId) return;
+  private handleRemoteMove(payload: unknown) {
+    const next = this.parseRemoteMove(payload);
+    if (!next || next.player_id === this.playerId) return;
+    if (!this.allowRemoteEvent(this.remoteMoveTimes, next.player_id, REMOTE_MOVE_MIN_MS)) return;
 
-    if (!this.remotePlayers.has(payload.playerId)) {
-      this.spawnRemotePlayer(payload.playerId, payload.username, payload.x, payload.y, {});
-    } else {
-      const rp = this.remotePlayers.get(payload.playerId)!;
-      rp.targetX = payload.x;
-      rp.targetY = payload.y;
+    if (!this.remotePlayers.has(next.player_id)) {
+      this.spawnRemotePlayer(next.player_id, next.username, next.x, next.y, {});
     }
+    const rp = this.remotePlayers.get(next.player_id)!;
+    rp.targetX = next.x;
+    rp.targetY = next.y;
+    rp.username = next.username;
+    rp.nameplate.setText(next.username);
+    rp.isMoving = next.moving;
+    rp.moveDx = next.dir;
   }
 
-  private handleRemoteChat(payload: { playerId: string; username: string; message: string; x: number; y: number }) {
-    if (payload.playerId === this.playerId) return;
+  private handleRemoteChat(payload: unknown) {
+    const next = this.parseRemoteChat(payload);
+    if (!next || next.player_id === this.playerId) return;
+    if (this.mutedPlayerIds.has(next.player_id)) return;
+    if (!this.allowRemoteEvent(this.remoteChatTimes, next.player_id, REMOTE_CHAT_MIN_MS)) return;
+    if (Phaser.Math.Distance.Between(this.px, this.py, next.x, next.y) > MAX_REMOTE_CHAT_DISTANCE) return;
 
     // Ensure remote player exists
-    if (!this.remotePlayers.has(payload.playerId)) {
-      this.spawnRemotePlayer(payload.playerId, payload.username, payload.x, payload.y, {});
+    if (!this.remotePlayers.has(next.player_id)) {
+      this.spawnRemotePlayer(next.player_id, next.username, next.x, next.y, {});
     }
 
-    this.chatSystem.showBubble(payload.playerId, payload.message, payload.x, payload.y, false);
+    this.chatSystem.showBubble(next.player_id, next.message, next.x, next.y, false);
 
     // Notify React chat log
     eventBus.emit(EVENTS.CHAT_RECEIVED, {
-      playerId: payload.playerId,
-      username: payload.username,
-      message: payload.message,
+      playerId: next.player_id,
+      username: next.username,
+      message: next.message,
       isMe: false,
     });
   }
 
   private spawnRemotePlayer(id: string, username: string, x: number, y: number, cfg: AvatarConfig) {
-    const avatar = new AvatarRenderer(this, x, y, {
-      bodyColor: cfg.bodyColor ?? COLORS.SKIN_LIGHT,
-      hairColor: cfg.hairColor ?? 0x000000,
-      eyeColor: cfg.eyeColor ?? 0x2244CC,
-      hairStyle: (cfg as any).hairStyle,
-      pp: (cfg as any).pp,
-      tt: (cfg as any).tt,
-      smoke: (cfg as any).smoke,
-      topColor: cfg.topColor ?? 0x442255,
-      bottomColor: cfg.bottomColor ?? 0x221133,
-    } as AvatarConfig);
+    const avatar = new AvatarRenderer(this, x, y, cfg);
     avatar.setDepth(40);
 
     const nameplate = this.add.text(x, y - 46, username, {
@@ -1087,32 +1143,52 @@ export class WorldScene extends Phaser.Scene {
     }).setOrigin(0.5, 1).setDepth(120);
 
     // Hitbox for PVP targeting
-    const hitbox = this.physics.add.image(x, y, undefined as any)
-      .setCircle(16)
-      .setImmovable(true)
-      .setVisible(false);
+    const hitbox = this.createHitbox(x, y);
 
     // Shooter-side: if my bullet hits remote hitbox, send hit event
     this.physics.add.overlap(this.bullets, hitbox, (bObj) => {
       if (!this.inTraining || !this.pvpEnabled) return;
-      (bObj as any).destroy?.();
+      this.destroyArcadeObject(bObj);
       this.channel?.send({
         type: 'broadcast',
         event: 'player:hit',
-        payload: { targetId: id, sourceId: this.playerId, dmg: 10 },
+        payload: { target_id: id, source_id: this.playerId, dmg: 10 },
       });
     });
 
-    this.remotePlayers.set(id, { avatar, nameplate, username, x, y, targetX: x, targetY: y, avatarConfig: cfg, hitbox });
+    this.remotePlayers.set(id, {
+      avatar,
+      nameplate,
+      username,
+      x,
+      y,
+      targetX: x,
+      targetY: y,
+      isMoving: false,
+      moveDx: 0,
+      avatarConfig: cfg,
+      hitbox,
+    });
+
+    nameplate.setInteractive({ useHandCursor: true });
+    nameplate.on('pointerdown', () => {
+      eventBus.emit(EVENTS.PLAYER_ACTIONS_OPEN, { playerId: id, username });
+    });
   }
 
-  private handleRemoteUpdate(payload: { playerId: string; avatar?: AvatarConfig; equipped?: { top?: string; bottom?: string } }) {
-    if (payload.playerId === this.playerId) return;
-    const rp = this.remotePlayers.get(payload.playerId);
+  private handleRemoteUpdate(payload: unknown) {
+    const next = this.parseRemoteState(payload);
+    if (!next || next.player_id === this.playerId) return;
+    const rp = this.remotePlayers.get(next.player_id);
     if (!rp) return;
 
-    if (payload.avatar) {
-      rp.avatarConfig = { ...rp.avatarConfig, ...payload.avatar };
+    rp.username = next.username;
+    rp.nameplate.setText(next.username);
+    rp.targetX = next.x;
+    rp.targetY = next.y;
+
+    if (next.avatar) {
+      rp.avatarConfig = { ...rp.avatarConfig, ...next.avatar };
       // rebuild avatar visuals
       const x = rp.x;
       const y = rp.y;
@@ -1122,8 +1198,8 @@ export class WorldScene extends Phaser.Scene {
       rp.avatar.setDepth(depth);
     }
 
-    if (payload.equipped) {
-      this.applyRemoteEquipped(payload.playerId, payload.equipped);
+    if (next.equipped) {
+      this.applyRemoteEquipped(next.player_id, next.equipped);
     }
   }
 
@@ -1131,9 +1207,31 @@ export class WorldScene extends Phaser.Scene {
     const rp = this.remotePlayers.get(playerId);
     if (!rp) return;
     // Just store ids in config; colors will be resolved client-side by catalog getter
-    (rp.avatarConfig as any).equipTop = equipped.top;
-    (rp.avatarConfig as any).equipBottom = equipped.bottom;
+    rp.avatarConfig = {
+      ...rp.avatarConfig,
+      equipTop: equipped.top,
+      equipBottom: equipped.bottom,
+    };
     // If you want, we can resolve to colors here later.
+  }
+
+  private createHitbox(x: number, y: number): HitboxArc {
+    const hitbox = this.add.circle(x, y, 16, 0x000000, 0) as HitboxArc;
+    this.physics.add.existing(hitbox);
+    hitbox.body.setCircle(16);
+    hitbox.body.setImmovable(true);
+    hitbox.body.setAllowGravity(false);
+    return hitbox;
+  }
+
+  private destroyArcadeObject(obj: Phaser.Types.Physics.Arcade.GameObjectWithBody | Phaser.Physics.Arcade.Body | Phaser.Physics.Arcade.StaticBody | Phaser.Tilemaps.Tile) {
+    if ('gameObject' in obj && obj.gameObject) {
+      (obj.gameObject as ArcadeObject).destroy();
+      return;
+    }
+    if ('destroy' in obj) {
+      (obj as ArcadeObject).destroy();
+    }
   }
 
   private syncPosition() {
@@ -1145,10 +1243,12 @@ export class WorldScene extends Phaser.Scene {
       type: 'broadcast',
       event: 'player:move',
       payload: {
-        playerId: this.playerId,
+        player_id: this.playerId,
         username: this.playerUsername,
         x: Math.round(this.px),
         y: Math.round(this.py),
+        dir: this.lastMoveDx,
+        moving: this.lastIsMoving,
       },
     });
   }
@@ -1156,7 +1256,7 @@ export class WorldScene extends Phaser.Scene {
   // ─── Chat Bridge (React ↔ Phaser) ───────────────────────────────────────────
 
   private setupReactBridge() {
-    eventBus.on(EVENTS.CHAT_SEND, (message: unknown) => {
+    this.bridgeCleanupFns.push(eventBus.on(EVENTS.CHAT_SEND, async (message: unknown) => {
       if (typeof message !== 'string') return;
       const trimmed = message.trim();
       if (!trimmed) return;
@@ -1165,17 +1265,20 @@ export class WorldScene extends Phaser.Scene {
       if (now - this.lastChatSent < CHAT.RATE_LIMIT_MS) return;
       this.lastChatSent = now;
 
+      const moderated = await this.moderateChat(trimmed);
+      if (!moderated) return;
+
       // Show bubble on own player
-      this.chatSystem.showBubble('__player__', trimmed, this.px, this.py, true);
+      this.chatSystem.showBubble('__player__', moderated, this.px, this.py, true);
 
       // Broadcast to others
       this.channel?.send({
         type: 'broadcast',
         event: 'player:chat',
         payload: {
-          playerId: this.playerId,
+          player_id: this.playerId,
           username: this.playerUsername,
-          message: trimmed,
+          message: moderated,
           x: Math.round(this.px),
           y: Math.round(this.py),
         },
@@ -1185,70 +1288,133 @@ export class WorldScene extends Phaser.Scene {
       eventBus.emit(EVENTS.CHAT_RECEIVED, {
         playerId: this.playerId,
         username: this.playerUsername,
-        message: trimmed,
+        message: moderated,
         isMe: true,
       });
-    });
+    }));
 
-    eventBus.on(EVENTS.CHAT_INPUT_FOCUS, () => { this.inputBlocked = true; });
-    eventBus.on(EVENTS.CHAT_INPUT_BLUR, () => { this.inputBlocked = false; });
+    this.bridgeCleanupFns.push(eventBus.on(EVENTS.CHAT_INPUT_FOCUS, () => { this.inputBlocked = true; }));
+    this.bridgeCleanupFns.push(eventBus.on(EVENTS.CHAT_INPUT_BLUR, () => { this.inputBlocked = false; }));
+    this.bridgeCleanupFns.push(eventBus.on(EVENTS.PLAYER_ACTION_MUTE, (payload: unknown) => {
+      const playerId = (payload as { playerId?: string } | null)?.playerId;
+      if (!playerId) return;
+      this.mutedPlayerIds.add(playerId);
+      this.chatSystem.clearBubble(playerId);
+    }));
+    this.bridgeCleanupFns.push(eventBus.on(EVENTS.PLAYER_ACTION_REPORT, () => {}));
 
     // Apply avatar partial updates (e.g. smoke on/off) and persist in localStorage
-    eventBus.on(EVENTS.AVATAR_SET, (payload: unknown) => {
-      if (typeof window === 'undefined') return;
+    this.bridgeCleanupFns.push(eventBus.on(EVENTS.AVATAR_SET, (payload: unknown) => {
       if (!payload || typeof payload !== 'object') return;
 
-      const key = 'waspi_avatar_config';
-      let current: Record<string, unknown> = {};
-      const raw = window.localStorage.getItem(key);
-      if (raw) {
-        try { current = JSON.parse(raw) as Record<string, unknown>; } catch { /* ignore */ }
-      }
-      const next = { ...current, ...(payload as Record<string, unknown>) };
-      window.localStorage.setItem(key, JSON.stringify(next));
-
-      // Rebuild player avatar with new config
-      const cfg = next as AvatarConfig;
-      const x = this.px;
-      const y = this.py;
-      const depth = this.playerAvatar.getContainer().depth;
-      this.playerAvatar.destroy();
-      const equipped = getEquippedColors();
-      this.playerAvatar = new AvatarRenderer(this, x, y, {
-        ...cfg,
-        topColor: equipped.topColor ?? cfg.topColor,
-        bottomColor: equipped.bottomColor ?? cfg.bottomColor,
-      });
-      this.playerAvatar.setDepth(depth);
+      const next = {
+        ...loadStoredAvatarConfig(),
+        ...(payload as AvatarConfig),
+      };
+      this.rebuildLocalAvatar(next);
       this.refreshUtilitiesFromInventory();
 
       // Broadcast avatar update so other players see smoke/clothing changes
-      if (this.channel) {
-        const invRaw = window.localStorage.getItem('waspi_inventory_v1');
-        let equippedIds: { top?: string; bottom?: string } = {};
-        if (invRaw) {
-          try { equippedIds = (JSON.parse(invRaw) as { equipped?: { top?: string; bottom?: string } }).equipped ?? {}; } catch { /* ignore */ }
-        }
-        this.channel.send({
-          type: 'broadcast',
-          event: 'player:update',
-          payload: {
-            playerId: this.playerId,
-            avatar: {
-              ...cfg,
-              topColor: equipped.topColor ?? cfg.topColor,
-              bottomColor: equipped.bottomColor ?? cfg.bottomColor,
-            },
-            equipped: equippedIds,
-          },
-        });
-      }
-    });
+      this.broadcastSelfState('player:update');
+    }));
 
     // Open creator from inventory
-    eventBus.on(EVENTS.OPEN_CREATOR, () => {
+    this.bridgeCleanupFns.push(eventBus.on(EVENTS.OPEN_CREATOR, () => {
       if (this.inTransition) return;
       this.transitionToScene('CreatorScene');
+    }));
+  }
+
+  private async moderateChat(message: string) {
+    if (!supabase || !isConfigured) return message;
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) return message;
+
+    const res = await fetch('/api/chat/moderate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        message,
+        zone: this.scene.key,
+        x: Math.round(this.px),
+        y: Math.round(this.py),
+      }),
+    }).catch(() => null);
+
+    if (!res?.ok) return null;
+    const json = await res.json().catch(() => null) as { message?: string } | null;
+    return json?.message?.trim() || null;
+  }
+
+  private loadMutedPlayers() {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem('waspi_player_state');
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { mutedPlayers?: string[] };
+      this.mutedPlayerIds = new Set(parsed.mutedPlayers ?? []);
+    } catch {
+      this.mutedPlayerIds = new Set();
+    }
+  }
+
+  private getCurrentAvatarConfig() {
+    const cfg = loadStoredAvatarConfig();
+    const equipped = getEquippedColors();
+    return {
+      ...cfg,
+      topColor: equipped.topColor ?? cfg.topColor,
+      bottomColor: equipped.bottomColor ?? cfg.bottomColor,
+    } as AvatarConfig;
+  }
+
+  private getEquippedIds() {
+    if (typeof window === 'undefined') return {};
+    const invRaw = window.localStorage.getItem('waspi_inventory_v1');
+    if (!invRaw) return {};
+    try {
+      return (JSON.parse(invRaw) as { equipped?: { top?: string; bottom?: string } }).equipped ?? {};
+    } catch {
+      return {};
+    }
+  }
+
+  private rebuildLocalAvatar(nextConfig: AvatarConfig) {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('waspi_avatar_config', JSON.stringify(nextConfig));
+    }
+    const x = this.px;
+    const y = this.py;
+    const depth = this.playerAvatar.getContainer().depth;
+    this.playerAvatar.destroy();
+    this.playerAvatar = new AvatarRenderer(this, x, y, {
+      ...this.getCurrentAvatarConfig(),
+      ...nextConfig,
+    });
+    this.playerAvatar.setDepth(depth);
+  }
+
+  private broadcastSelfState(event: 'player:join' | 'player:update') {
+    if (!this.channel) return;
+    const cfg = this.getCurrentAvatarConfig();
+    const payload = {
+      player_id: this.playerId,
+      username: this.playerUsername,
+      x: this.px,
+      y: this.py,
+      avatar: cfg,
+      equipped: this.getEquippedIds(),
+      topColor: cfg.topColor,
+      bottomColor: cfg.bottomColor,
+    };
+    this.channel.send({
+      type: 'broadcast',
+      event,
+      payload,
     });
   }
 
@@ -1322,13 +1488,18 @@ export class WorldScene extends Phaser.Scene {
     }
 
     // Interpolate remote players
-    for (const [, rp] of this.remotePlayers) {
+    for (const [playerId, rp] of this.remotePlayers) {
       rp.x = Phaser.Math.Linear(rp.x, rp.targetX, 0.18);
       rp.y = Phaser.Math.Linear(rp.y, rp.targetY, 0.18);
+      const deltaX = rp.targetX - rp.x;
+      const deltaY = rp.targetY - rp.y;
+      const isMoving = rp.isMoving || Math.abs(deltaX) > 0.8 || Math.abs(deltaY) > 0.8;
+      const visualDx = Math.abs(deltaX) > 0.1 ? deltaX : rp.moveDx;
+      rp.avatar.update(isMoving, visualDx);
       rp.avatar.setPosition(rp.x, rp.y);
       rp.avatar.setDepth(Math.floor(rp.y / 10));
       rp.nameplate.setPosition(rp.x, rp.y - 46);
-      this.chatSystem.updatePosition(rp.avatar.getContainer().name ?? '', rp.x, rp.y);
+      this.chatSystem.updatePosition(playerId, rp.x, rp.y);
       rp.hitbox.setPosition(rp.x, rp.y);
     }
   }
@@ -1365,11 +1536,123 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
-  shutdown() {
-    this.channel?.unsubscribe();
-    this.chatSystem.destroy();
-    eventBus.off(EVENTS.CHAT_SEND, () => {});
-    eventBus.off(EVENTS.CHAT_INPUT_FOCUS, () => {});
-    eventBus.off(EVENTS.CHAT_INPUT_BLUR, () => {});
+  private handleSceneShutdown() {
+    if (this.channel) {
+      this.channel.send({
+        type: 'broadcast',
+        event: 'player:leave',
+        payload: { player_id: this.playerId },
+      });
+      this.channel.unsubscribe();
+      this.channel = null;
+    }
+    this.chatSystem?.destroy();
+    this.bridgeCleanupFns.forEach((cleanup) => cleanup());
+    this.bridgeCleanupFns = [];
+  }
+
+  private allowRemoteEvent(cache: Map<string, number>, playerId: string, minMs: number) {
+    const now = Date.now();
+    const last = cache.get(playerId) ?? 0;
+    if (now - last < minMs) return false;
+    cache.set(playerId, now);
+    return true;
+  }
+
+  private readStringField(payload: unknown, ...keys: string[]) {
+    if (!payload || typeof payload !== 'object') return null;
+    for (const key of keys) {
+      const value = (payload as Record<string, unknown>)[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return null;
+  }
+
+  private readNumberField(payload: unknown, ...keys: string[]) {
+    if (!payload || typeof payload !== 'object') return null;
+    for (const key of keys) {
+      const value = (payload as Record<string, unknown>)[key];
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+    }
+    return null;
+  }
+
+  private readBooleanField(payload: unknown, ...keys: string[]) {
+    if (!payload || typeof payload !== 'object') return null;
+    for (const key of keys) {
+      const value = (payload as Record<string, unknown>)[key];
+      if (typeof value === 'boolean') return value;
+    }
+    return null;
+  }
+
+  private parseRemoteMove(payload: unknown): RemoteMoveEvent | null {
+    const playerId = this.readStringField(payload, 'player_id', 'playerId');
+    const username = this.readStringField(payload, 'username') ?? 'waspi_guest';
+    const x = this.readNumberField(payload, 'x');
+    const y = this.readNumberField(payload, 'y');
+    if (!playerId || x === null || y === null) return null;
+    return {
+      player_id: playerId,
+      username,
+      x,
+      y,
+      dir: this.readNumberField(payload, 'dir', 'dx') ?? 0,
+      moving: this.readBooleanField(payload, 'moving', 'isMoving') ?? false,
+    };
+  }
+
+  private parseRemoteChat(payload: unknown): RemoteChatEvent | null {
+    const playerId = this.readStringField(payload, 'player_id', 'playerId');
+    const username = this.readStringField(payload, 'username') ?? 'waspi_guest';
+    const message = this.readStringField(payload, 'message');
+    const x = this.readNumberField(payload, 'x');
+    const y = this.readNumberField(payload, 'y');
+    if (!playerId || !message || x === null || y === null) return null;
+    return {
+      player_id: playerId,
+      username,
+      message: message.slice(0, CHAT.MAX_CHARS),
+      x,
+      y,
+    };
+  }
+
+  private parseRemoteState(payload: unknown): RemoteStateEvent | null {
+    const playerId = this.readStringField(payload, 'player_id', 'playerId');
+    const username = this.readStringField(payload, 'username') ?? 'waspi_guest';
+    const x = this.readNumberField(payload, 'x');
+    const y = this.readNumberField(payload, 'y');
+    if (!playerId || x === null || y === null) return null;
+    const avatar = payload && typeof payload === 'object' && 'avatar' in payload && payload.avatar && typeof payload.avatar === 'object'
+      ? payload.avatar as AvatarConfig
+      : undefined;
+    const equippedRaw = payload && typeof payload === 'object' && 'equipped' in payload ? payload.equipped : null;
+    const equipped = equippedRaw && typeof equippedRaw === 'object'
+      ? {
+          top: typeof (equippedRaw as Record<string, unknown>).top === 'string' ? (equippedRaw as Record<string, string>).top : undefined,
+          bottom: typeof (equippedRaw as Record<string, unknown>).bottom === 'string' ? (equippedRaw as Record<string, string>).bottom : undefined,
+        }
+      : undefined;
+    return {
+      player_id: playerId,
+      username,
+      x,
+      y,
+      avatar,
+      equipped,
+    };
+  }
+
+  private parseRemoteHit(payload: unknown): RemoteHitEvent | null {
+    const targetId = this.readStringField(payload, 'target_id', 'targetId');
+    const sourceId = this.readStringField(payload, 'source_id', 'sourceId');
+    const dmg = this.readNumberField(payload, 'dmg');
+    if (!targetId || !sourceId || dmg === null) return null;
+    return {
+      target_id: targetId,
+      source_id: sourceId,
+      dmg,
+    };
   }
 }

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
-import { AvatarRenderer } from '../systems/AvatarRenderer';
+import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { COLORS, WORLD } from '../config/constants';
+import { announceScene, createBackButton } from '../systems/SceneUi';
 
 export class ArcadeInterior extends Phaser.Scene {
   private player!: AvatarRenderer;
@@ -21,10 +22,11 @@ export class ArcadeInterior extends Phaser.Scene {
 
   create() {
     const { width, height } = this.scale;
+    announceScene(this);
 
     // Dark neon room
     const g = this.add.graphics();
-    g.fillStyle(0x08081A);
+    g.fillStyle(0x050511);
     g.fillRect(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
 
     const roomW = 640;
@@ -32,35 +34,41 @@ export class ArcadeInterior extends Phaser.Scene {
     const roomX = (width - roomW) / 2;
     const roomY = (height - roomH) / 2;
 
-    g.fillStyle(0x10102A);
+    g.fillStyle(0x0f1022);
     g.fillRect(roomX, roomY, roomW, roomH);
     g.lineStyle(3, COLORS.NEON_PINK, 0.6);
     g.strokeRect(roomX, roomY, roomW, roomH);
 
-    // Simple arcade machines
+    // Subtle floor grid
+    g.lineStyle(1, 0x18183a, 0.35);
+    for (let x = roomX; x <= roomX + roomW; x += 28) {
+      g.lineBetween(x, roomY + 120, x, roomY + roomH);
+    }
+    for (let y = roomY + 120; y <= roomY + roomH; y += 24) {
+      g.lineBetween(roomX, y, roomX + roomW, y);
+    }
+
+    // Simple arcade machines with glowing screens
     const machinePositions = [roomX + 80, roomX + 200, roomX + 320, roomX + 440, roomX + 560];
     machinePositions.forEach(mx => {
-      g.fillStyle(0x080820);
-      g.fillRect(mx - 20, roomY + 70, 40, 90);
+      g.fillStyle(0x05051a);
+      g.fillRect(mx - 22, roomY + 70, 44, 96);
       g.fillStyle(0x111144);
-      g.fillRect(mx - 18, roomY + 74, 36, 32);
-      g.fillStyle(COLORS.NEON_BLUE, 0.6);
-      g.fillRect(mx - 16, roomY + 78, 32, 24);
+      g.fillRect(mx - 20, roomY + 76, 40, 32);
+      g.fillStyle(COLORS.NEON_BLUE, 0.8);
+      g.fillRect(mx - 18, roomY + 80, 36, 24);
+      g.fillStyle(0x191932);
+      g.fillRect(mx - 20, roomY + 112, 40, 18);
     });
 
     // Floor glow
-    const floor = this.add.rectangle(width / 2, roomY + roomH - 60, roomW - 60, 80, 0x090912, 0.95);
+    const floor = this.add.rectangle(width / 2, roomY + roomH - 60, roomW - 60, 80, 0x060611, 0.95);
     floor.setStrokeStyle(2, 0x000000, 0.7);
 
     // Player avatar
     this.px = width / 2;
     this.py = roomY + roomH - 80;
-    this.player = new AvatarRenderer(this, this.px, this.py, {
-      bodyColor: COLORS.SKIN_LIGHT,
-      hairColor: COLORS.HAIR_BROWN,
-      topColor: COLORS.BODY_BLUE,
-      bottomColor: COLORS.LEGS_DARK,
-    });
+    this.player = new AvatarRenderer(this, this.px, this.py, loadStoredAvatarConfig());
     this.player.setDepth(10);
 
     // Title
@@ -75,6 +83,7 @@ export class ArcadeInterior extends Phaser.Scene {
       fontFamily: '"Press Start 2P", monospace',
       color: '#AAAAAA',
     }).setOrigin(0.5);
+    createBackButton(this, () => this.exitToWorld());
 
     // Exit hint
     this.add.text(width / 2, roomY + roomH + 24, 'SPACE JUGAR · ESC SALIR', {
@@ -97,11 +106,7 @@ export class ArcadeInterior extends Phaser.Scene {
     if (this.inTransition) return;
     this.handleMovement();
     if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
-      this.inTransition = true;
-      this.cameras.main.fadeOut(250, 0, 0, 0);
-      this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-        this.scene.start('WorldScene');
-      });
+      this.exitToWorld();
       return;
     }
 
@@ -112,6 +117,15 @@ export class ArcadeInterior extends Phaser.Scene {
         this.scene.start('PenaltyMinigame');
       });
     }
+  }
+
+  private exitToWorld() {
+    if (this.inTransition) return;
+    this.inTransition = true;
+    this.cameras.main.fadeOut(250, 0, 0, 0);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      this.scene.start('WorldScene');
+    });
   }
 
   private handleMovement() {

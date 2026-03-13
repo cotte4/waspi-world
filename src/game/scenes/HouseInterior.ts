@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
-import { AvatarRenderer } from '../systems/AvatarRenderer';
+import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { COLORS, WORLD } from '../config/constants';
+import { announceScene } from '../systems/SceneUi';
+import { eventBus, EVENTS } from '../config/eventBus';
 
 export class HouseInterior extends Phaser.Scene {
   private player!: AvatarRenderer;
@@ -13,6 +15,8 @@ export class HouseInterior extends Phaser.Scene {
   private keyD!: Phaser.Input.Keyboard.Key;
   private px = 0;
   private py = 0;
+  private mirrorRect!: Phaser.Geom.Rectangle;
+  private wardrobeRect!: Phaser.Geom.Rectangle;
 
   constructor() {
     super({ key: 'HouseInterior' });
@@ -20,6 +24,7 @@ export class HouseInterior extends Phaser.Scene {
 
   create() {
     const { width, height } = this.scale;
+    announceScene(this);
 
     const g = this.add.graphics();
     g.fillStyle(0x0B0B14);
@@ -44,12 +49,16 @@ export class HouseInterior extends Phaser.Scene {
     // Simple wardrobe
     g.fillStyle(0x2A1A10);
     g.fillRect(roomX + roomW - 120, roomY + 70, 80, 140);
+    this.wardrobeRect = new Phaser.Geom.Rectangle(roomX + roomW - 120, roomY + 70, 80, 140);
 
     // Mirror (character creator in el futuro)
+    const mirrorX = roomX + roomW / 2 - 40;
+    const mirrorY = roomY + 60;
     g.fillStyle(0x222244);
-    g.fillRect(roomX + roomW / 2 - 40, roomY + 60, 80, 120);
+    g.fillRect(mirrorX, mirrorY, 80, 120);
     g.fillStyle(0x88AAFF, 0.4);
-    g.fillRect(roomX + roomW / 2 - 36, roomY + 64, 72, 112);
+    g.fillRect(mirrorX + 4, mirrorY + 4, 72, 112);
+    this.mirrorRect = new Phaser.Geom.Rectangle(mirrorX, mirrorY, 80, 120);
 
     // Floor soft light
     const floor = this.add.rectangle(width / 2, roomY + roomH - 50, roomW - 80, 80, 0x101018, 0.95);
@@ -58,12 +67,7 @@ export class HouseInterior extends Phaser.Scene {
     // Player avatar
     this.px = width / 2;
     this.py = roomY + roomH - 80;
-    this.player = new AvatarRenderer(this, this.px, this.py, {
-      bodyColor: COLORS.SKIN_LIGHT,
-      hairColor: COLORS.HAIR_BROWN,
-      topColor: COLORS.BODY_BLUE,
-      bottomColor: COLORS.LEGS_DARK,
-    });
+    this.player = new AvatarRenderer(this, this.px, this.py, loadStoredAvatarConfig());
     this.player.setDepth(10);
 
     // Title / labels
@@ -73,13 +77,13 @@ export class HouseInterior extends Phaser.Scene {
       color: '#CCCCFF',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, roomY + 52, 'CUSTOMIZACIÓN COMING SOON', {
+    this.add.text(width / 2, roomY + 52, 'ESPEJO = CREATOR · ARMARIO = INVENTARIO', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#AAAAAA',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, roomY + roomH + 24, 'SPACE PARA SALIR AL MUNDO', {
+    this.add.text(width / 2, roomY + roomH + 24, 'WASD MOVER · SPACE INTERACTUAR', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#777777',
@@ -98,11 +102,7 @@ export class HouseInterior extends Phaser.Scene {
     if (this.inTransition) return;
     this.handleMovement();
     if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
-      this.inTransition = true;
-      this.cameras.main.fadeOut(250, 0, 0, 0);
-      this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-        this.scene.start('WorldScene');
-      });
+      this.handleInteraction();
     }
   }
 
@@ -135,6 +135,39 @@ export class HouseInterior extends Phaser.Scene {
     this.player.update(dx !== 0 || dy !== 0, dx);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(10 + Math.floor(this.py / 10));
+  }
+
+  private handleInteraction() {
+    const { width, height } = this.scale;
+    const roomW = 560;
+    const roomH = 340;
+    const roomX = (width - roomW) / 2;
+    const roomY = (height - roomH) / 2;
+
+    // Door area: borde inferior de la habitación
+    const nearDoor = this.py > roomY + roomH - 30;
+
+    const point = new Phaser.Geom.Point(this.px, this.py);
+    const nearMirror = Phaser.Geom.Rectangle.ContainsPoint(this.mirrorRect, point);
+    const nearWardrobe = Phaser.Geom.Rectangle.ContainsPoint(this.wardrobeRect, point);
+
+    if (nearMirror) {
+      eventBus.emit(EVENTS.OPEN_CREATOR);
+      return;
+    }
+
+    if (nearWardrobe) {
+      eventBus.emit(EVENTS.INVENTORY_TOGGLE);
+      return;
+    }
+
+    if (nearDoor) {
+      this.inTransition = true;
+      this.cameras.main.fadeOut(250, 0, 0, 0);
+      this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+        this.scene.start('WorldScene');
+      });
+    }
   }
 }
 
