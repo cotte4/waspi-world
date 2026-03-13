@@ -43,7 +43,6 @@ export class BootScene extends Phaser.Scene {
     });
 
     this.load.on('loaderror', (file: unknown) => {
-      // eslint-disable-next-line no-console
       console.log('[Waspi] Asset load error', file);
     });
 

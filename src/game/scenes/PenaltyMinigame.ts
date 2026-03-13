@@ -3,26 +3,37 @@ import { addTenks } from '../systems/TenksSystem';
 import { announceScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 
-export class PenaltyMinigame extends Phaser.Scene {
-  private isFinished = false;
-  private shotsLeft = 5;
-  private goals = 0;
+type PenaltyPhase = 'aiming' | 'shooting' | 'result' | 'done' | 'exiting';
 
+export class PenaltyMinigame extends Phaser.Scene {
+  private readonly maxShots = 5;
+  private isFinished = false;
+  private goals = 0;
+  private shotsTaken = 0;
+  private phase: PenaltyPhase = 'aiming';
   private aimX = 0;
   private aimDir = 1;
-  private aimSpeed = 1.35;
+  private goalieTargetX = 0;
+  private resultTimerMs = 0;
+  private doneTimerMs = 0;
+  private resultText = '';
+  private resultColor = '#FFFFFF';
 
-  private power = 0;
-  private powerDir = 1;
-  private powerSpeed = 1.8;
+  private readonly goalW = 360;
+  private readonly goalH = 150;
+  private goalX = 0;
+  private goalY = 0;
+  private ballStartX = 0;
+  private ballStartY = 0;
 
-  private phase: 'aim' | 'power' | 'anim' | 'done' = 'aim';
-
-  private goalie!: Phaser.GameObjects.Rectangle;
+  private goalie!: Phaser.GameObjects.Container;
   private ball!: Phaser.GameObjects.Arc;
-  private aimMarker!: Phaser.GameObjects.Rectangle;
-  private powerMarker!: Phaser.GameObjects.Rectangle;
+  private aimMarker!: Phaser.GameObjects.Arc;
+  private aimGuide!: Phaser.GameObjects.Graphics;
   private hud!: Phaser.GameObjects.Text;
+  private footer!: Phaser.GameObjects.Text;
+  private resultLabel!: Phaser.GameObjects.Text;
+  private summaryLabel!: Phaser.GameObjects.Text;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private keyEsc!: Phaser.Input.Keyboard.Key;
 
@@ -34,81 +45,111 @@ export class PenaltyMinigame extends Phaser.Scene {
     const { width, height } = this.scale;
     announceScene(this);
 
-    this.cameras.main.setBackgroundColor('#05050A');
+    this.goalX = width / 2;
+    this.goalY = 188;
+    this.ballStartX = width / 2;
+    this.ballStartY = height - 110;
+    this.goalieTargetX = this.goalX;
+    this.aimX = this.goalX;
 
-    this.add.text(width / 2, 70, 'PENALES', {
+    this.cameras.main.setBackgroundColor('#08111a');
+
+    const g = this.add.graphics();
+    g.fillGradientStyle(0x102d12, 0x102d12, 0x061408, 0x061408, 1);
+    g.fillRect(0, 0, width, height);
+
+    g.fillStyle(0x153d18, 0.95);
+    g.fillRect(70, this.goalY - 20, width - 140, height - (this.goalY - 20) - 60);
+
+    g.lineStyle(2, 0xffffff, 0.1);
+    g.strokeCircle(width / 2, height - 72, 44);
+    g.beginPath();
+    g.moveTo(width / 2 - 100, height - 58);
+    g.lineTo(width / 2 + 100, height - 58);
+    g.strokePath();
+
+    g.lineStyle(4, 0xffffff, 0.8);
+    g.strokeRect(this.goalX - this.goalW / 2, this.goalY - this.goalH / 2, this.goalW, this.goalH);
+
+    g.fillStyle(0x000000, 0.24);
+    g.fillRect(this.goalX - this.goalW / 2, this.goalY - this.goalH / 2, this.goalW, this.goalH);
+
+    g.lineStyle(1, 0xffffff, 0.14);
+    for (let i = 1; i < 7; i++) {
+      const x = this.goalX - this.goalW / 2 + (this.goalW * i) / 7;
+      g.lineBetween(x, this.goalY - this.goalH / 2, x, this.goalY + this.goalH / 2);
+    }
+    for (let i = 1; i < 5; i++) {
+      const y = this.goalY - this.goalH / 2 + (this.goalH * i) / 5;
+      g.lineBetween(this.goalX - this.goalW / 2, y, this.goalX + this.goalW / 2, y);
+    }
+
+    this.add.text(width / 2, 56, 'PENALES', {
       fontSize: '18px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, 110, 'AIM + POWER - 5 TIROS', {
+    this.add.text(width / 2, 88, 'MATA EL TIMING. 3 GOLES = PREMIO.', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
-      color: '#888888',
+      color: '#A0A0B4',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, height - 40, 'SPACE CONFIRMAR - ESC SALIR', {
+    this.hud = this.add.text(18, 18, '', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FFFFFF',
+      lineSpacing: 6,
+    });
+
+    this.footer = this.add.text(width / 2, height - 30, 'SPACE O CLICK PARA PATEAR - ESC SALIR', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#777777',
       align: 'center',
     }).setOrigin(0.5);
 
-    const goalW = 420;
-    const goalH = 170;
-    const goalX = width / 2;
-    const goalY = 200;
+    this.aimGuide = this.add.graphics();
+    this.aimMarker = this.add.circle(this.goalX, this.goalY - 18, 7, 0xF5C842, 1);
+    this.aimMarker.setStrokeStyle(2, 0x000000, 0.3);
 
-    const g = this.add.graphics();
-    g.lineStyle(3, 0xDDDDDD, 0.65);
-    g.strokeRect(goalX - goalW / 2, goalY - goalH / 2, goalW, goalH);
-    g.lineStyle(1, 0xDDDDDD, 0.25);
-    for (let i = 1; i < 7; i++) {
-      const x = goalX - goalW / 2 + (goalW * i) / 7;
-      g.lineBetween(x, goalY - goalH / 2, x, goalY + goalH / 2);
-    }
-    for (let i = 1; i < 4; i++) {
-      const y = goalY - goalH / 2 + (goalH * i) / 4;
-      g.lineBetween(goalX - goalW / 2, y, goalX + goalW / 2, y);
-    }
+    this.goalie = this.add.container(this.goalX, this.goalY - 10);
+    const body = this.add.rectangle(0, 10, 34, 28, 0xD94444, 1);
+    const head = this.add.circle(0, -10, 9, 0xF5D6B8, 1);
+    const gloveL = this.add.rectangle(-18, 8, 8, 8, 0xFFD2AA, 1);
+    const gloveR = this.add.rectangle(18, 8, 8, 8, 0xFFD2AA, 1);
+    this.goalie.add([body, head, gloveL, gloveR]);
 
-    this.goalie = this.add.rectangle(goalX, goalY + 30, 36, 18, 0x88AAFF, 1);
+    this.ball = this.add.circle(this.ballStartX, this.ballStartY, 10, 0xFFFFFF, 1);
+    this.ball.setStrokeStyle(2, 0x111111, 0.45);
 
-    this.ball = this.add.circle(goalX, height - 120, 10, 0xFFFFFF, 1);
-    this.ball.setStrokeStyle(2, 0x111111, 0.5);
-
-    this.hud = this.add.text(14, 14, '', {
-      fontSize: '8px',
+    this.resultLabel = this.add.text(width / 2, 352, '', {
+      fontSize: '14px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#FFFFFF',
-    });
-    this.refreshHud();
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setAlpha(0);
 
-    const aimBarY = goalY + goalH / 2 + 40;
-    this.add.rectangle(goalX, aimBarY, goalW, 10, 0x222233);
-    this.aimMarker = this.add.rectangle(goalX - goalW / 2, aimBarY, 6, 22, 0xF5C842);
-
-    const powerBarX = goalX + goalW / 2 + 70;
-    const powerBarH = 180;
-    this.add.rectangle(powerBarX, goalY + 10, 10, powerBarH, 0x222233);
-    this.powerMarker = this.add.rectangle(powerBarX, goalY + powerBarH / 2, 22, 6, 0x39FF14);
-
-    this.add.text(goalX, aimBarY - 20, 'AIM', {
-      fontSize: '8px',
+    this.summaryLabel = this.add.text(width / 2, 356, '', {
+      fontSize: '10px',
       fontFamily: '"Press Start 2P", monospace',
-      color: '#666666',
-    }).setOrigin(0.5);
-    this.add.text(powerBarX, goalY - powerBarH / 2 - 18, 'PWR', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#666666',
-    }).setOrigin(0.5);
+      color: '#F5C842',
+      align: 'center',
+      lineSpacing: 8,
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setAlpha(0);
 
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.input.on('pointerdown', this.handleShootInput, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
 
-    this.cameras.main.fadeIn(250, 0, 0, 0);
+    this.refreshHud();
+    this.redrawAimGuide();
+    this.cameras.main.fadeIn(220, 0, 0, 0);
   }
 
   update(_time: number, delta: number) {
@@ -120,144 +161,223 @@ export class PenaltyMinigame extends Phaser.Scene {
     }
 
     if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
-      this.handleSpace(this.scale.width / 2, 200, 420, 170);
+      this.handleShootInput();
     }
 
-    if (this.phase !== 'done') {
-      this.goalie.x += (Math.sin(this.time.now / 420) * 0.35) * (delta / 16.6) * 5;
-      this.goalie.x = Phaser.Math.Clamp(this.goalie.x, 220, this.scale.width - 220);
-    }
+    this.updateGoalieIdle();
 
-    if (this.phase === 'aim') {
-      this.aimX += (this.aimDir * this.aimSpeed * delta) / 1000;
-      if (this.aimX >= 1) {
-        this.aimX = 1;
-        this.aimDir = -1;
-      }
-      if (this.aimX <= -1) {
-        this.aimX = -1;
-        this.aimDir = 1;
-      }
-      const goalX = this.scale.width / 2;
-      const aimBarY = 200 + 170 / 2 + 40;
-      this.aimMarker.setPosition(goalX + this.aimX * (420 / 2), aimBarY);
-    } else if (this.phase === 'power') {
-      this.power += (this.powerDir * this.powerSpeed * delta) / 1000;
-      if (this.power >= 1) {
-        this.power = 1;
-        this.powerDir = -1;
-      }
-      if (this.power <= 0) {
-        this.power = 0;
-        this.powerDir = 1;
-      }
-      const goalX = this.scale.width / 2;
-      const powerBarX = goalX + 420 / 2 + 70;
-      const top = 200 + 10 - 180 / 2;
-      const y = top + (1 - this.power) * 180;
-      this.powerMarker.setPosition(powerBarX, y);
-    }
-  }
-
-  private handleSpace(goalX: number, goalY: number, goalW: number, goalH: number) {
-    if (this.phase === 'aim') {
-      this.phase = 'power';
+    if (this.phase === 'aiming') {
+      this.updateAim(delta);
       return;
     }
-    if (this.phase === 'power') {
-      this.phase = 'anim';
-      this.takeShot(goalX, goalY, goalW, goalH);
+
+    if (this.phase === 'result') {
+      this.resultTimerMs -= delta;
+      if (this.resultTimerMs <= 0) {
+        if (this.shotsTaken >= this.maxShots) {
+          this.showFinalSummary();
+        } else {
+          this.resetForNextShot();
+        }
+      }
+      return;
+    }
+
+    if (this.phase === 'done') {
+      this.doneTimerMs -= delta;
+      if (this.doneTimerMs <= 0) {
+        this.finishAndExit(this.goals >= 3);
+      }
     }
   }
 
-  private takeShot(goalX: number, goalY: number, goalW: number, goalH: number) {
-    const tx = goalX + this.aimX * (goalW / 2 - 30);
-    const ty = goalY + goalH / 2 - (this.power * (goalH - 20));
+  private updateGoalieIdle() {
+    if (this.phase === 'shooting' || this.phase === 'exiting') return;
+    this.goalie.x = this.goalX + Math.sin(this.time.now * 0.004) * 30;
+    this.goalie.y = this.goalY - 10 + Math.sin(this.time.now * 0.008) * 3;
+  }
 
-    const dive = Phaser.Math.RND.pick([-1, 0, 1]);
-    const goalieTargetX = goalX + dive * (goalW / 4);
-    const goalieTargetY = goalY + Phaser.Math.Between(20, 80);
+  private updateAim(delta: number) {
+    const leftBound = this.goalX - this.goalW / 2 + 28;
+    const rightBound = this.goalX + this.goalW / 2 - 28;
+    this.aimX += this.aimDir * (delta * 0.22);
+
+    if (this.aimX >= rightBound) {
+      this.aimX = rightBound;
+      this.aimDir = -1;
+    }
+    if (this.aimX <= leftBound) {
+      this.aimX = leftBound;
+      this.aimDir = 1;
+    }
+
+    this.aimMarker.setPosition(this.aimX, this.goalY - 18);
+    this.redrawAimGuide();
+  }
+
+  private redrawAimGuide() {
+    this.aimGuide.clear();
+    this.aimGuide.lineStyle(2, 0xF5C842, 0.75);
+    this.aimGuide.strokeCircle(this.aimX, this.goalY - 18, 7);
+    this.aimGuide.lineStyle(1, 0xF5C842, 0.35);
+
+    const segments = 16;
+    for (let i = 0; i < segments; i++) {
+      if (i % 2 === 1) continue;
+      const t0 = i / segments;
+      const t1 = (i + 1) / segments;
+      const x0 = Phaser.Math.Linear(this.aimX, this.ball.x, t0);
+      const y0 = Phaser.Math.Linear(this.goalY - 8, this.ball.y, t0);
+      const x1 = Phaser.Math.Linear(this.aimX, this.ball.x, t1);
+      const y1 = Phaser.Math.Linear(this.goalY - 8, this.ball.y, t1);
+      this.aimGuide.lineBetween(x0, y0, x1, y1);
+    }
+  }
+
+  private handleShootInput() {
+    if (this.phase !== 'aiming' || this.isFinished) return;
+    this.takeShot();
+  }
+
+  private takeShot() {
+    this.phase = 'shooting';
+    this.resultLabel.setAlpha(0);
+    this.summaryLabel.setAlpha(0);
+
+    const shotTargetX = this.aimX + Phaser.Math.Between(-18, 18);
+    const shotTargetY = Phaser.Math.Between(this.goalY - this.goalH / 2 + 22, this.goalY + this.goalH / 2 - 22);
+    const diveX = this.goalX + Phaser.Math.Between(-100, 100);
 
     this.tweens.add({
       targets: this.goalie,
-      x: goalieTargetX,
-      y: goalieTargetY,
+      x: diveX,
+      y: shotTargetY + 4,
+      angle: Phaser.Math.Between(-18, 18),
       duration: 260,
       ease: 'Sine.easeOut',
-      yoyo: true,
     });
 
-    const dist = Phaser.Math.Distance.Between(tx, ty, goalieTargetX, goalieTargetY);
-    const saved = dist < 60;
-
-    const startX = this.ball.x;
-    const startY = this.ball.y;
     this.tweens.add({
       targets: this.ball,
-      x: tx,
-      y: ty,
-      duration: 320,
+      x: shotTargetX,
+      y: shotTargetY,
+      scaleX: 0.72,
+      scaleY: 0.72,
+      duration: 280,
       ease: 'Sine.easeOut',
       onComplete: () => {
-        this.onShotResult(!saved);
-        this.ball.setPosition(startX, startY);
+        const inGoal =
+          shotTargetX > this.goalX - this.goalW / 2 + 8 &&
+          shotTargetX < this.goalX + this.goalW / 2 - 8 &&
+          shotTargetY > this.goalY - this.goalH / 2 + 6 &&
+          shotTargetY < this.goalY + this.goalH / 2 - 6;
+        const saved = Phaser.Math.Distance.Between(shotTargetX, shotTargetY, this.goalie.x, this.goalie.y) < 42;
+        this.resolveShot(inGoal && !saved, inGoal, saved);
       },
     });
   }
 
-  private onShotResult(isGoal: boolean) {
-    this.shotsLeft -= 1;
+  private resolveShot(isGoal: boolean, inGoal: boolean, saved: boolean) {
+    this.shotsTaken += 1;
     if (isGoal) this.goals += 1;
     this.refreshHud();
 
-    const { width } = this.scale;
-    const msg = isGoal ? 'GOL' : 'ATAJADO';
-    const text = this.add.text(width / 2, 420, msg, {
-      fontSize: '14px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: isGoal ? '#39FF14' : '#FF4444',
-      stroke: '#000000',
-      strokeThickness: 4,
-    }).setOrigin(0.5);
-
-    this.tweens.add({
-      targets: text,
-      alpha: { from: 1, to: 0 },
-      y: 400,
-      duration: 650,
-      onComplete: () => text.destroy(),
-    });
-
-    if (this.shotsLeft <= 0) {
-      this.phase = 'done';
-      const won = this.goals >= 3;
-      if (won) addTenks(300, 'penalty_win');
-      this.time.delayedCall(900, () => this.finishAndExit(won));
-      return;
+    if (isGoal) {
+      this.resultText = 'GOL!';
+      this.resultColor = '#39FF14';
+    } else if (!inGoal) {
+      this.resultText = 'AFUERA!';
+      this.resultColor = '#FF6B6B';
+    } else if (saved) {
+      this.resultText = 'ATAJADA!';
+      this.resultColor = '#FF6B6B';
+    } else {
+      this.resultText = 'CASI!';
+      this.resultColor = '#F5C842';
     }
 
-    this.phase = 'aim';
+    this.resultLabel.setText(this.resultText);
+    this.resultLabel.setColor(this.resultColor);
+    this.resultLabel.setAlpha(1);
+    this.resultLabel.setY(352);
+
+    this.tweens.add({
+      targets: this.resultLabel,
+      y: 338,
+      alpha: { from: 1, to: 0.15 },
+      duration: 700,
+      ease: 'Sine.easeOut',
+    });
+
+    this.phase = 'result';
+    this.resultTimerMs = 700;
+  }
+
+  private resetForNextShot() {
+    this.phase = 'aiming';
+    this.ball.setPosition(this.ballStartX, this.ballStartY);
+    this.ball.setScale(1);
+    this.goalie.setPosition(this.goalX, this.goalY - 10);
+    this.goalie.setAngle(0);
+    this.aimX = this.goalX;
+    this.aimDir = Phaser.Math.RND.pick([-1, 1]);
+    this.redrawAimGuide();
+  }
+
+  private showFinalSummary() {
+    this.phase = 'done';
+    const won = this.goals >= 3;
+    if (won) {
+      addTenks(300, 'penalty_win');
+    }
+
+    this.summaryLabel.setText([
+      'RESULTADO FINAL',
+      `${this.goals} / ${this.maxShots}`,
+      won ? 'PREMIO DESBLOQUEADO' : 'SEGUI INTENTANDO',
+    ]);
+    this.summaryLabel.setColor(won ? '#39FF14' : '#F5C842');
+    this.summaryLabel.setAlpha(1);
+    this.doneTimerMs = 1700;
+    this.footer.setText(won ? 'PREMIO GUARDANDO...' : 'VOLVIENDO AL ARCADE...');
+    this.footer.setColor(won ? '#39FF14' : '#888888');
   }
 
   private refreshHud() {
-    this.hud.setText(`TIROS ${this.shotsLeft}  -  GOLES ${this.goals}`);
+    const remaining = this.maxShots - this.shotsTaken;
+    this.hud.setText([
+      `GOLES ${this.goals}`,
+      `TIROS ${this.shotsTaken}/${this.maxShots}`,
+      `RESTAN ${remaining}`,
+    ]);
   }
 
   private finishAndExit(won: boolean) {
+    if (this.isFinished) return;
+    this.isFinished = true;
+    this.phase = 'exiting';
+    this.input.enabled = false;
+
     eventBus.emit(EVENTS.PENALTY_RESULT, {
       won,
       goals: this.goals,
-      shots: 5 - this.shotsLeft,
+      shots: this.shotsTaken,
     });
-    this.isFinished = true;
+
     this.cameras.main.fadeOut(250, 0, 0, 0);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
       this.scene.start('ArcadeInterior', {
+        penaltyCooldownMs: 1200,
         penaltyReward: {
           won,
           goals: this.goals,
+          shots: this.shotsTaken,
         },
       });
     });
+  }
+
+  private handleShutdown() {
+    this.input.off('pointerdown', this.handleShootInput, this);
   }
 }

@@ -3,6 +3,17 @@ import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRendere
 import { COLORS, WORLD } from '../config/constants';
 import { announceScene, createBackButton } from '../systems/SceneUi';
 
+interface ArcadePenaltyReward {
+  won?: boolean;
+  goals?: number;
+  shots?: number;
+}
+
+interface ArcadeInteriorData {
+  penaltyReward?: ArcadePenaltyReward;
+  penaltyCooldownMs?: number;
+}
+
 export class ArcadeInterior extends Phaser.Scene {
   private player!: AvatarRenderer;
   private keyEsc!: Phaser.Input.Keyboard.Key;
@@ -15,25 +26,39 @@ export class ArcadeInterior extends Phaser.Scene {
   private px = 0;
   private py = 0;
   private penaltyMachineZone = new Phaser.Geom.Rectangle();
+  private wasInsidePenaltyZone = false;
+  private penaltyCooldownMs = 0;
   private rewardMessage = '';
   private rewardColor = '#39FF14';
+  private rewardDetail = '';
+  private roomBounds = new Phaser.Geom.Rectangle();
+  private machineHint?: Phaser.GameObjects.Text;
+  private glowPad?: Phaser.GameObjects.Ellipse;
 
   constructor() {
     super({ key: 'ArcadeInterior' });
   }
 
-  init(data: { penaltyReward?: { won?: boolean; goals?: number } } = {}) {
-    if (data.penaltyReward?.won) {
-      this.rewardMessage = `PREMIO LISTO � ${data.penaltyReward.goals ?? 0} GOLES`;
+  init(data: ArcadeInteriorData = {}) {
+    this.penaltyCooldownMs = data.penaltyCooldownMs ?? 0;
+    const reward = data.penaltyReward;
+
+    if (reward?.won) {
+      this.rewardMessage = 'PREMIO LISTO';
+      this.rewardDetail = `${reward.goals ?? 0} GOLES / ${reward.shots ?? 5} TIROS`;
       this.rewardColor = '#39FF14';
       return;
     }
-    if (typeof data.penaltyReward?.won === 'boolean') {
-      this.rewardMessage = `PENALES � ${data.penaltyReward.goals ?? 0} GOLES`;
+
+    if (typeof reward?.won === 'boolean') {
+      this.rewardMessage = 'PENALES TERMINADOS';
+      this.rewardDetail = `${reward.goals ?? 0} GOLES / ${reward.shots ?? 5} TIROS`;
       this.rewardColor = '#F5C842';
       return;
     }
+
     this.rewardMessage = '';
+    this.rewardDetail = '';
     this.rewardColor = '#39FF14';
   }
 
@@ -41,78 +66,107 @@ export class ArcadeInterior extends Phaser.Scene {
     const { width, height } = this.scale;
     announceScene(this);
 
+    const roomW = 700;
+    const roomH = 400;
+    const roomX = (width - roomW) / 2;
+    const roomY = (height - roomH) / 2;
+    this.roomBounds = new Phaser.Geom.Rectangle(roomX + 28, roomY + 60, roomW - 56, roomH - 84);
+
     const g = this.add.graphics();
     g.fillStyle(0x050511);
     g.fillRect(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
 
-    const roomW = 640;
-    const roomH = 380;
-    const roomX = (width - roomW) / 2;
-    const roomY = (height - roomH) / 2;
+    g.fillGradientStyle(0x111127, 0x111127, 0x090914, 0x090914, 1);
+    g.fillRoundedRect(roomX, roomY, roomW, roomH, 18);
+    g.lineStyle(3, COLORS.NEON_PINK, 0.7);
+    g.strokeRoundedRect(roomX, roomY, roomW, roomH, 18);
 
-    g.fillStyle(0x0f1022);
-    g.fillRect(roomX, roomY, roomW, roomH);
-    g.lineStyle(3, COLORS.NEON_PINK, 0.6);
-    g.strokeRect(roomX, roomY, roomW, roomH);
+    g.fillStyle(0x070712, 0.95);
+    g.fillRoundedRect(roomX + 24, roomY + 52, roomW - 48, roomH - 78, 12);
 
-    g.lineStyle(1, 0x18183a, 0.35);
-    for (let x = roomX; x <= roomX + roomW; x += 28) {
-      g.lineBetween(x, roomY + 120, x, roomY + roomH);
+    g.lineStyle(1, 0x1d2144, 0.45);
+    for (let x = roomX + 36; x <= roomX + roomW - 36; x += 28) {
+      g.lineBetween(x, roomY + 122, x, roomY + roomH - 20);
     }
-    for (let y = roomY + 120; y <= roomY + roomH; y += 24) {
-      g.lineBetween(roomX, y, roomX + roomW, y);
+    for (let y = roomY + 122; y <= roomY + roomH - 20; y += 24) {
+      g.lineBetween(roomX + 36, y, roomX + roomW - 36, y);
     }
 
-    const machinePositions = [roomX + 80, roomX + 200, roomX + 320, roomX + 440, roomX + 560];
+    g.fillStyle(0x090917, 0.98);
+    g.fillRoundedRect(roomX + 22, roomY + roomH - 110, roomW - 44, 70, 18);
+    g.lineStyle(2, 0x000000, 0.45);
+    g.strokeRoundedRect(roomX + 22, roomY + roomH - 110, roomW - 44, 70, 18);
+
+    const machinePositions = [roomX + 92, roomX + 226, roomX + 350, roomX + 474, roomX + 608];
+    const machineLabels = ['RACER', 'BASKET', 'PENALES', 'DJ', 'ZOMBIS'];
+
     machinePositions.forEach((mx, index) => {
-      g.fillStyle(0x05051a);
-      g.fillRect(mx - 22, roomY + 70, 44, 96);
-      g.fillStyle(0x111144);
-      g.fillRect(mx - 20, roomY + 76, 40, 32);
-      g.fillStyle(index === 2 ? COLORS.GOLD : COLORS.NEON_BLUE, 0.82);
-      g.fillRect(mx - 18, roomY + 80, 36, 24);
-      g.fillStyle(0x191932);
-      g.fillRect(mx - 20, roomY + 112, 40, 18);
+      const isPenaltyMachine = index === 2;
+      const accent = isPenaltyMachine ? COLORS.GOLD : COLORS.NEON_BLUE;
 
-      if (index === 2) {
-        this.penaltyMachineZone = new Phaser.Geom.Rectangle(mx - 28, roomY + 62, 56, 108);
-        this.add.text(mx, roomY + 52, 'PENALES', {
-          fontSize: '7px',
+      g.fillStyle(0x07071a, 1);
+      g.fillRoundedRect(mx - 28, roomY + 64, 56, 112, 10);
+      g.lineStyle(2, accent, isPenaltyMachine ? 0.75 : 0.32);
+      g.strokeRoundedRect(mx - 28, roomY + 64, 56, 112, 10);
+
+      g.fillStyle(isPenaltyMachine ? 0x2d2410 : 0x0d1238, 1);
+      g.fillRoundedRect(mx - 21, roomY + 76, 42, 36, 6);
+
+      g.fillStyle(accent, isPenaltyMachine ? 0.88 : 0.62);
+      g.fillRect(mx - 17, roomY + 82, 34, 22);
+
+      g.fillStyle(0x16172c, 1);
+      g.fillRect(mx - 18, roomY + 118, 36, 16);
+      g.fillStyle(0x050505, 1);
+      g.fillRect(mx - 14, roomY + 142, 28, 14);
+
+      this.add.text(mx, roomY + 48, machineLabels[index], {
+        fontSize: '7px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: isPenaltyMachine ? '#F5C842' : '#6A8BFF',
+      }).setOrigin(0.5);
+
+      if (isPenaltyMachine) {
+        this.penaltyMachineZone = new Phaser.Geom.Rectangle(mx - 36, roomY + 56, 72, 122);
+        this.glowPad = this.add.ellipse(mx, roomY + 192, 94, 24, 0xF5C842, 0.12)
+          .setStrokeStyle(1, 0xF5C842, 0.35)
+          .setDepth(1);
+      } else {
+        this.add.text(mx, roomY + 190, 'SOON', {
+          fontSize: '6px',
           fontFamily: '"Press Start 2P", monospace',
-          color: '#F5C842',
+          color: '#585C78',
         }).setOrigin(0.5);
       }
     });
 
-    const floor = this.add.rectangle(width / 2, roomY + roomH - 60, roomW - 60, 80, 0x060611, 0.95);
-    floor.setStrokeStyle(2, 0x000000, 0.7);
-
-    this.px = width / 2;
-    this.py = roomY + roomH - 80;
-    this.player = new AvatarRenderer(this, this.px, this.py, loadStoredAvatarConfig());
-    this.player.setDepth(10);
-
-    this.add.text(width / 2, roomY + 24, 'ARCADE', {
+    this.add.text(width / 2, roomY + 30, 'ARCADE', {
       fontSize: '16px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#FF006E',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, roomY + 52, 'TOCA LA MAQUINA CENTRAL PARA JUGAR', {
+    this.add.text(width / 2, roomY + 54, 'PISA LA CABINA CENTRAL PARA JUGAR PENALES', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
-      color: '#AAAAAA',
+      color: '#A0A0B4',
     }).setOrigin(0.5);
-    createBackButton(this, () => this.exitToWorld());
 
-    this.add.text(width / 2, roomY + roomH + 24, 'TOCA LA MAQUINA � ESC SALIR', {
+    this.machineHint = this.add.text(width / 2, roomY + roomH + 24, 'ESC SALIR DEL ARCADE', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#666666',
     }).setOrigin(0.5);
 
+    createBackButton(this, () => this.exitToWorld());
+
+    this.px = width / 2;
+    this.py = roomY + roomH - 82;
+    this.player = new AvatarRenderer(this, this.px, this.py, loadStoredAvatarConfig());
+    this.player.setDepth(10);
+
     if (this.rewardMessage) {
-      this.flashMessage(width / 2, roomY + roomH + 48, this.rewardMessage, this.rewardColor);
+      this.flashMessage(width / 2, roomY + roomH + 46, this.rewardMessage, this.rewardColor, this.rewardDetail);
     }
 
     this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
@@ -121,17 +175,60 @@ export class ArcadeInterior extends Phaser.Scene {
     this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
-    this.cameras.main.fadeIn(250, 0, 0, 0);
+    this.cameras.main.fadeIn(220, 0, 0, 0);
   }
 
-  update() {
+  update(_time: number, delta: number) {
     if (this.inTransition) return;
-    this.handleMovement();
-    this.tryStartPenalty();
+
+    if (this.penaltyCooldownMs > 0) {
+      this.penaltyCooldownMs = Math.max(0, this.penaltyCooldownMs - delta);
+    }
+
+    this.handleMovement(delta);
+    this.updateMachineState();
 
     if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
       this.exitToWorld();
     }
+  }
+
+  private updateMachineState() {
+    const inPenaltyZone = this.penaltyMachineZone.contains(this.px, this.py);
+
+    if (this.glowPad) {
+      const pulse = 0.1 + Math.abs(Math.sin(this.time.now / 280)) * 0.08;
+      this.glowPad.setAlpha(inPenaltyZone ? 0.28 : pulse);
+    }
+
+    if (this.machineHint) {
+      if (this.penaltyCooldownMs > 0 && inPenaltyZone) {
+        this.machineHint.setText('CABINA RECARGANDO...');
+        this.machineHint.setColor('#888888');
+      } else if (inPenaltyZone) {
+        this.machineHint.setText('PENALES LISTOS');
+        this.machineHint.setColor('#F5C842');
+      } else {
+        this.machineHint.setText('ESC SALIR DEL ARCADE');
+        this.machineHint.setColor('#666666');
+      }
+    }
+
+    if (inPenaltyZone && !this.wasInsidePenaltyZone && this.penaltyCooldownMs <= 0) {
+      this.startPenalty();
+    }
+
+    this.wasInsidePenaltyZone = inPenaltyZone;
+  }
+
+  private startPenalty() {
+    if (this.inTransition) return;
+    this.inTransition = true;
+    this.flashMessage(this.scale.width / 2, this.scale.height / 2 + 52, 'ENTRANDO A PENALES', '#39FF14');
+    this.cameras.main.fadeOut(250, 0, 0, 0);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      this.scene.start('PenaltyMinigame');
+    });
   }
 
   private exitToWorld() {
@@ -143,8 +240,8 @@ export class ArcadeInterior extends Phaser.Scene {
     });
   }
 
-  private handleMovement() {
-    const speed = 180 / 60;
+  private handleMovement(delta: number) {
+    const speed = (185 * delta) / 1000;
     let dx = 0;
     let dy = 0;
 
@@ -163,47 +260,31 @@ export class ArcadeInterior extends Phaser.Scene {
       dy *= 0.707;
     }
 
-    const { width, height } = this.scale;
-    const roomW = 640;
-    const roomH = 380;
-    const roomX = (width - roomW) / 2 + 20;
-    const roomY = (height - roomH) / 2 + 20;
-
-    this.px = Phaser.Math.Clamp(this.px + dx * speed * 16.6, roomX, roomX + roomW - 40);
-    this.py = Phaser.Math.Clamp(this.py + dy * speed * 16.6, roomY + 40, roomY + roomH - 10);
+    this.px = Phaser.Math.Clamp(this.px + dx * speed, this.roomBounds.left, this.roomBounds.right);
+    this.py = Phaser.Math.Clamp(this.py + dy * speed, this.roomBounds.top, this.roomBounds.bottom);
 
     this.player.update(dx !== 0 || dy !== 0, dx);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(10 + Math.floor(this.py / 10));
   }
 
-  private tryStartPenalty() {
-    if (!this.penaltyMachineZone.contains(this.px, this.py)) return;
-
-    this.inTransition = true;
-    this.flashMessage(this.scale.width / 2, this.scale.height / 2 + 40, 'ENTRANDO A PENALES', '#39FF14');
-    this.time.delayedCall(180, () => {
-      this.cameras.main.fadeOut(250, 0, 0, 0);
-      this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-        this.scene.start('PenaltyMinigame');
-      });
-    });
-  }
-
-  private flashMessage(x: number, y: number, message: string, color: string) {
-    const text = this.add.text(x, y, message, {
+  private flashMessage(x: number, y: number, message: string, color: string, detail = '') {
+    const lines = detail ? [message, detail] : [message];
+    const text = this.add.text(x, y, lines, {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color,
+      align: 'center',
       stroke: '#000000',
       strokeThickness: 3,
+      lineSpacing: 8,
     }).setOrigin(0.5).setDepth(9999);
 
     this.tweens.add({
       targets: text,
       alpha: { from: 1, to: 0 },
-      y: y - 8,
-      duration: 1000,
+      y: y - 10,
+      duration: 1200,
       ease: 'Sine.easeOut',
       onComplete: () => text.destroy(),
     });
