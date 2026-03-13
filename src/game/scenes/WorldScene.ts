@@ -1224,12 +1224,14 @@ export class WorldScene extends Phaser.Scene {
     return hitbox;
   }
 
-  private destroyArcadeObject(obj: Phaser.Types.Physics.Arcade.GameObjectWithBody | Phaser.Physics.Arcade.Body | Phaser.Physics.Arcade.StaticBody | Phaser.Tilemaps.Tile) {
-    if ('gameObject' in obj && obj.gameObject) {
+  private destroyArcadeObject(obj: unknown) {
+    if (!obj || typeof obj !== 'object') return;
+
+    if ('gameObject' in obj && obj.gameObject && typeof obj.gameObject === 'object') {
       (obj.gameObject as ArcadeObject).destroy();
       return;
     }
-    if ('destroy' in obj) {
+    if ('destroy' in obj && typeof obj.destroy === 'function') {
       (obj as ArcadeObject).destroy();
     }
   }
