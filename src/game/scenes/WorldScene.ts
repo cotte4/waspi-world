@@ -56,6 +56,7 @@ type RemoteHitEvent = {
 };
 
 type WeaponMode = 'pistol' | 'shotgun';
+type EnemyArchetype = 'rusher' | 'shooter' | 'tank';
 
 type WeaponStats = {
   label: string;
@@ -68,8 +69,22 @@ type WeaponStats = {
   knockback: number;
 };
 
+type EnemyProfile = {
+  label: string;
+  tint: number;
+  maxHp: number;
+  radius: number;
+  speed: number;
+  preferredDistance: number;
+  strafe: number;
+  contactDamage: number;
+  rangedDamage: number;
+  shotCooldownMs: number;
+};
+
 type DummyState = {
   label: string;
+  archetype: EnemyArchetype;
   nameplate: Phaser.GameObjects.Text;
   hpBar: Phaser.GameObjects.Graphics;
   hp: number;
@@ -81,6 +96,12 @@ type DummyState = {
   alive: boolean;
   tint: number;
   lastShotAt: number;
+  speed: number;
+  preferredDistance: number;
+  strafe: number;
+  contactDamage: number;
+  rangedDamage: number;
+  shotCooldownMs: number;
 };
 
 const REMOTE_CHAT_MIN_MS = 1000;
@@ -89,6 +110,8 @@ const REMOTE_HIT_MIN_MS = 120;
 const MAX_REMOTE_CHAT_DISTANCE = 2600;
 const LOCAL_HIT_COOLDOWN_MS = 180;
 const DUMMY_RESPAWN_MS = 1800;
+const PLAZA_RESPAWN_X = 980;
+const PLAZA_RESPAWN_Y = ZONES.PLAZA_Y + 250;
 const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
   pistol: {
     label: 'PISTOL',
@@ -109,6 +132,44 @@ const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
     cooldownMs: 420,
     color: 0xFF8B3D,
     knockback: 26,
+  },
+};
+const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
+  rusher: {
+    label: 'RUSH',
+    tint: 0xFF5E5E,
+    maxHp: 34,
+    radius: 16,
+    speed: 2.45,
+    preferredDistance: 48,
+    strafe: 0.35,
+    contactDamage: 12,
+    rangedDamage: 0,
+    shotCooldownMs: 999999,
+  },
+  shooter: {
+    label: 'SHOT',
+    tint: 0xFF8B3D,
+    maxHp: 40,
+    radius: 18,
+    speed: 1.7,
+    preferredDistance: 150,
+    strafe: 1.2,
+    contactDamage: 8,
+    rangedDamage: 9,
+    shotCooldownMs: 850,
+  },
+  tank: {
+    label: 'TANK',
+    tint: 0xB74DFF,
+    maxHp: 72,
+    radius: 22,
+    speed: 1.1,
+    preferredDistance: 78,
+    strafe: 0.18,
+    contactDamage: 18,
+    rangedDamage: 0,
+    shotCooldownMs: 999999,
   },
 };
 
@@ -336,13 +397,14 @@ export class WorldScene extends Phaser.Scene {
     this.renderCombatHud();
 
     // Spawn a few local dummies (PVE)
-    const dummyPositions = [
-      { x: ZONES.TRAINING_X + 150, y: ZONES.TRAINING_Y + 150 },
-      { x: ZONES.TRAINING_X + 360, y: ZONES.TRAINING_Y + 220 },
-      { x: ZONES.TRAINING_X + 560, y: ZONES.TRAINING_Y + 140 },
-      { x: ZONES.TRAINING_X + 720, y: ZONES.TRAINING_Y + 250 },
+    const dummyPositions: Array<{ x: number; y: number; archetype: EnemyArchetype }> = [
+      { x: ZONES.TRAINING_X + 150, y: ZONES.TRAINING_Y + 150, archetype: 'rusher' },
+      { x: ZONES.TRAINING_X + 360, y: ZONES.TRAINING_Y + 220, archetype: 'shooter' },
+      { x: ZONES.TRAINING_X + 560, y: ZONES.TRAINING_Y + 140, archetype: 'tank' },
+      { x: ZONES.TRAINING_X + 720, y: ZONES.TRAINING_Y + 250, archetype: 'shooter' },
+      { x: ZONES.TRAINING_X + 810, y: ZONES.TRAINING_Y + 120, archetype: 'rusher' },
     ];
-    dummyPositions.forEach((p, index) => this.spawnTrainingDummy(p.x, p.y, index));
+    dummyPositions.forEach((p, index) => this.spawnTrainingDummy(p.x, p.y, index, p.archetype));
   }
 
   private setupHpHud() {
@@ -388,17 +450,18 @@ export class WorldScene extends Phaser.Scene {
       `WEAPON ${weapon.label}`,
       '1 PISTOL  2 SHOTGUN',
       'F / CLICK DISPARA',
+      'RUSH / SHOT / TANK EN TRAINING',
     ]);
   }
 
-  private spawnTrainingDummy(x: number, y: number, index: number) {
-    const tint = [0xFF5E5E, 0xFF8844, 0xFF4D8D, 0xFF6C3A][index % 4];
-    const label = `BOT_${index + 1}`;
-    const dummy = this.add.circle(x, y, 18, tint, 0.7) as CombatDummy;
+  private spawnTrainingDummy(x: number, y: number, index: number, archetype: EnemyArchetype) {
+    const profile = ENEMY_PROFILES[archetype];
+    const label = `${profile.label}_${index + 1}`;
+    const dummy = this.add.circle(x, y, profile.radius, profile.tint, 0.7) as CombatDummy;
     dummy.setDepth(30);
     dummy.setStrokeStyle(2, 0xFFFFFF, 0.2);
     this.physics.add.existing(dummy);
-    dummy.body.setCircle(18);
+    dummy.body.setCircle(profile.radius);
     dummy.body.setImmovable(true);
     dummy.body.setAllowGravity(false);
     this.dummies.add(dummy);
@@ -406,7 +469,7 @@ export class WorldScene extends Phaser.Scene {
     const nameplate = this.add.text(x, y - 34, label, {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
-      color: '#FF8B8B',
+      color: archetype === 'tank' ? '#D8A8FF' : archetype === 'shooter' ? '#FFC38D' : '#FF8B8B',
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(32);
@@ -414,17 +477,24 @@ export class WorldScene extends Phaser.Scene {
     const hpBar = this.add.graphics().setDepth(31);
     const state: DummyState = {
       label,
+      archetype,
       nameplate,
       hpBar,
-      hp: 40,
-      maxHp: 40,
+      hp: profile.maxHp,
+      maxHp: profile.maxHp,
       originX: x,
       originY: y,
       phase: index * 1.4,
       respawnAt: 0,
       alive: true,
-      tint,
+      tint: profile.tint,
       lastShotAt: 0,
+      speed: profile.speed,
+      preferredDistance: profile.preferredDistance,
+      strafe: profile.strafe,
+      contactDamage: profile.contactDamage,
+      rangedDamage: profile.rangedDamage,
+      shotCooldownMs: profile.shotCooldownMs,
     };
     this.dummyStates.set(dummy, state);
     this.renderDummyState(dummy, state);
@@ -435,12 +505,12 @@ export class WorldScene extends Phaser.Scene {
     state.hpBar.clear();
     if (!state.alive) return;
 
-    const width = 42;
+    const width = state.archetype === 'tank' ? 52 : 42;
     const height = 5;
     const pct = Phaser.Math.Clamp(state.hp / state.maxHp, 0, 1);
     state.hpBar.fillStyle(0x000000, 0.55);
     state.hpBar.fillRoundedRect(dummy.x - width / 2, dummy.y - 24, width, height, 2);
-    state.hpBar.fillStyle(0x39FF14, 0.85);
+    state.hpBar.fillStyle(state.archetype === 'tank' ? 0xB74DFF : state.archetype === 'shooter' ? 0xFF8B3D : 0x39FF14, 0.85);
     state.hpBar.fillRoundedRect(dummy.x - width / 2 + 1, dummy.y - 23, (width - 2) * pct, height - 2, 2);
   }
 
@@ -505,6 +575,22 @@ export class WorldScene extends Phaser.Scene {
       ease: 'Sine.easeOut',
       onComplete: () => burst.destroy(),
     });
+
+    for (let i = 0; i < 6; i++) {
+      const shard = this.add.circle(dummy.x, dummy.y, Phaser.Math.Between(2, 4), state.tint, 0.9).setDepth(5000);
+      const angle = (Math.PI * 2 * i) / 6 + Phaser.Math.FloatBetween(-0.25, 0.25);
+      const dist = Phaser.Math.Between(20, 44);
+      this.tweens.add({
+        targets: shard,
+        x: dummy.x + Math.cos(angle) * dist,
+        y: dummy.y + Math.sin(angle) * dist,
+        alpha: { from: 0.9, to: 0 },
+        scale: { from: 1, to: 0.4 },
+        duration: 380,
+        ease: 'Quad.easeOut',
+        onComplete: () => shard.destroy(),
+      });
+    }
   }
 
   private updateDummies() {
@@ -518,6 +604,17 @@ export class WorldScene extends Phaser.Scene {
         dummy.setFillStyle(state.tint, 0.7);
         state.nameplate.setText(state.label);
         state.nameplate.setColor('#FF8B8B');
+        state.lastShotAt = this.time.now + Phaser.Math.Between(180, 520);
+        const ring = this.add.circle(dummy.x, dummy.y, 10, state.tint, 0).setDepth(4999);
+        ring.setStrokeStyle(2, state.tint, 0.8);
+        this.tweens.add({
+          targets: ring,
+          scale: { from: 1, to: 3.4 },
+          alpha: { from: 0.8, to: 0 },
+          duration: 420,
+          ease: 'Sine.easeOut',
+          onComplete: () => ring.destroy(),
+        });
       }
 
       state.phase += 0.018;
@@ -527,20 +624,29 @@ export class WorldScene extends Phaser.Scene {
       const distToPlayer = Phaser.Math.Distance.Between(dummy.x, dummy.y, this.px, this.py);
       if (this.inTraining && distToPlayer < 280) {
         const angleToPlayer = Phaser.Math.Angle.Between(dummy.x, dummy.y, this.px, this.py);
-        const approach = distToPlayer > 120 ? 1.6 : distToPlayer < 84 ? -1.3 : 0.35;
-        const strafe = distToPlayer < 200 ? Math.sin(this.time.now / 180 + state.phase) * 1.1 : 0;
+        const approach = distToPlayer > state.preferredDistance + 36
+          ? state.speed
+          : distToPlayer < Math.max(40, state.preferredDistance - 30)
+            ? -state.speed * 0.9
+            : state.speed * 0.25;
+        const strafe = distToPlayer < 220 ? Math.sin(this.time.now / 180 + state.phase) * state.strafe : 0;
         const moveX = Math.cos(angleToPlayer) * approach + Math.cos(angleToPlayer + Math.PI / 2) * strafe;
         const moveY = Math.sin(angleToPlayer) * approach + Math.sin(angleToPlayer + Math.PI / 2) * strafe;
         targetX = dummy.x + moveX;
         targetY = dummy.y + moveY;
 
-        if (distToPlayer < 38 && this.time.now - this.lastDamageAt > LOCAL_HIT_COOLDOWN_MS) {
-          this.applyLocalDamage(8, dummy.x, dummy.y);
+        if (distToPlayer < dummy.radius + 20 && this.time.now - this.lastDamageAt > LOCAL_HIT_COOLDOWN_MS) {
+          this.applyLocalDamage(state.contactDamage, dummy.x, dummy.y);
         }
 
-        if (distToPlayer >= 90 && distToPlayer < 320 && this.time.now - state.lastShotAt > 850) {
+        if (
+          state.rangedDamage > 0 &&
+          distToPlayer >= 90 &&
+          distToPlayer < 320 &&
+          this.time.now - state.lastShotAt > state.shotCooldownMs
+        ) {
           state.lastShotAt = this.time.now + Phaser.Math.Between(0, 160);
-          this.fireEnemyBullet(dummy.x, dummy.y, this.px, this.py, state.tint);
+          this.fireEnemyBullet(dummy.x, dummy.y, this.px, this.py, state.tint, state.rangedDamage);
         }
       }
 
@@ -551,7 +657,7 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  private fireEnemyBullet(fromX: number, fromY: number, targetX: number, targetY: number, color: number) {
+  private fireEnemyBullet(fromX: number, fromY: number, targetX: number, targetY: number, color: number, damage: number) {
     const baseAngle = Phaser.Math.Angle.Between(fromX, fromY, targetX, targetY);
     const angle = baseAngle + Phaser.Math.FloatBetween(-0.08, 0.08);
     const bullet = this.add.circle(fromX, fromY, 5, color, 0.95) as Phaser.GameObjects.Arc & {
@@ -559,7 +665,7 @@ export class WorldScene extends Phaser.Scene {
       sourceX?: number;
       sourceY?: number;
     };
-    bullet.damage = 9;
+    bullet.damage = damage;
     bullet.sourceX = fromX;
     bullet.sourceY = fromY;
     bullet.setDepth(1900);
@@ -597,6 +703,8 @@ export class WorldScene extends Phaser.Scene {
     const pushAngle = Phaser.Math.Angle.Between(sourceX, sourceY, this.px, this.py);
     this.px += Math.cos(pushAngle) * 20;
     this.py += Math.sin(pushAngle) * 20;
+    this.px = Phaser.Math.Clamp(this.px, 20, WORLD.WIDTH - 20);
+    this.py = Phaser.Math.Clamp(this.py, 20, WORLD.HEIGHT - 20);
     this.playerBody.setPosition(this.px, this.py);
     this.playerAvatar.setPosition(this.px, this.py);
     this.playerNameplate.setPosition(this.px, this.py - 46);
@@ -605,11 +713,29 @@ export class WorldScene extends Phaser.Scene {
 
     this.hp = 100;
     this.renderHpHud();
-    this.px = PLAYER.SPAWN_X;
-    this.py = PLAYER.SPAWN_Y;
+    this.px = PLAZA_RESPAWN_X;
+    this.py = PLAZA_RESPAWN_Y;
     this.playerBody.setPosition(this.px, this.py);
     this.playerAvatar.setPosition(this.px, this.py);
     this.playerNameplate.setPosition(this.px, this.py - 46);
+    this.chatSystem.updatePosition('__player__', this.px, this.py);
+    this.cameras.main.flash(180, 255, 255, 255, false);
+
+    const respawnText = this.add.text(this.px, this.py - 54, 'RESPAWN PLAZA', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(10020);
+    this.tweens.add({
+      targets: respawnText,
+      y: this.py - 74,
+      alpha: { from: 1, to: 0 },
+      duration: 900,
+      ease: 'Sine.easeOut',
+      onComplete: () => respawnText.destroy(),
+    });
   }
 
   private setupCombat() {
