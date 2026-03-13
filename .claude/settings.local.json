@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(prd-start)",
+      "Bash(cd \"C:\\\\Users\\\\fran-\\\\OneDrive\\\\Escritorio\\\\WAS   TT WOR\\\\waspi-world\" && mkdir -p src/game/scenes src/game/systems src/game/config src/lib public/assets/tilemaps public/assets/tilesets public/assets/sprites public/assets/ui public/assets/audio)",
+      "Bash(cd \"C:\\\\Users\\\\fran-\\\\OneDrive\\\\Escritorio\\\\WAS   TT WOR\\\\waspi-world\" && npm run dev)"
+    ]
+  }
+}
