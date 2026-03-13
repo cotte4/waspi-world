@@ -687,10 +687,10 @@ export default function PlayPage() {
         <div
           className="absolute top-20 right-2"
           style={{
-            width: authPanelOpen ? 228 : 170,
+            width: authPanelOpen ? 228 : 132,
             background: 'rgba(0,0,0,0.78)',
             border: '1px solid rgba(245,200,66,0.18)',
-            padding: '8px',
+            padding: authPanelOpen ? '8px' : '6px 8px',
             boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
           }}
         >
@@ -714,9 +714,10 @@ export default function PlayPage() {
                   background: 'transparent',
                   border: 'none',
                   cursor: 'pointer',
+                  padding: 0,
                 }}
               >
-                {authPanelOpen ? 'OCULTAR' : 'ABRIR'}
+                {authPanelOpen ? 'OCULTAR' : '+'}
               </button>
             )}
           </div>
@@ -774,15 +775,28 @@ export default function PlayPage() {
               </div>
             </>
           ) : (
-            <div
-              style={{
-                fontFamily: '"Silkscreen", monospace',
-                fontSize: '11px',
-                color: 'rgba(255,255,255,0.7)',
-                marginTop: 6,
-              }}
-            >
-              Cuenta lista.
+            <div className="flex items-center gap-2" style={{ marginTop: 4 }}>
+              <span
+                className="inline-block"
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '999px',
+                  background: '#39FF14',
+                  boxShadow: '0 0 10px rgba(57,255,20,0.5)',
+                  flexShrink: 0,
+                }}
+              />
+              <div
+                style={{
+                  fontFamily: '"Silkscreen", monospace',
+                  fontSize: '11px',
+                  color: 'rgba(255,255,255,0.7)',
+                  lineHeight: 1.1,
+                }}
+              >
+                Sesion OK
+              </div>
             </div>
           )}
         </div>
