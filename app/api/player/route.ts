@@ -17,11 +17,17 @@ export async function GET(request: NextRequest) {
 
   const player = normalizePlayerState(user.user_metadata?.[PLAYER_METADATA_KEY] ?? DEFAULT_PLAYER_STATE);
 
+  let syncWarning: string | null = null;
   if (hasServiceRole) {
     const admin = createSupabaseAdminClient();
     if (admin) {
-      await ensureCatalogSeeded(admin);
-      await ensurePlayerRow(admin, user, player);
+      try {
+        await ensureCatalogSeeded(admin);
+        await ensurePlayerRow(admin, user, player);
+      } catch (error) {
+        syncWarning = error instanceof Error ? error.message : 'Player sync failed.';
+        console.error('GET /api/player sync failed:', error);
+      }
     }
   }
 
@@ -30,6 +36,7 @@ export async function GET(request: NextRequest) {
     email: user.email ?? null,
     player,
     persistence: hasServiceRole ? 'supabase_user_metadata' : 'read_only_session',
+    syncWarning,
   });
 }
 
@@ -58,10 +65,6 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Admin client unavailable.' }, { status: 500 });
   }
 
-  await ensureCatalogSeeded(admin);
-  await ensurePlayerRow(admin, user, nextPlayer);
-  await syncPlayerInventory(admin, user.id, nextPlayer);
-
   const { error } = await admin.auth.admin.updateUserById(user.id, {
     user_metadata: {
       ...(user.user_metadata ?? {}),
@@ -73,10 +76,21 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  let syncWarning: string | null = null;
+  try {
+    await ensureCatalogSeeded(admin);
+    await ensurePlayerRow(admin, user, nextPlayer);
+    await syncPlayerInventory(admin, user.id, nextPlayer);
+  } catch (syncError) {
+    syncWarning = syncError instanceof Error ? syncError.message : 'Player sync failed.';
+    console.error('PUT /api/player sync failed:', syncError);
+  }
+
   return NextResponse.json({
     playerId: user.id,
     player: nextPlayer,
     persistence: 'supabase_user_metadata',
+    syncWarning,
   });
 }
 

@@ -21,6 +21,32 @@ function getUsername(user: User) {
   return `player_${user.id.slice(0, 8)}`;
 }
 
+async function resolveUniqueUsername(admin: SupabaseClient, user: User) {
+  const baseUsername = getUsername(user)
+    .replace(/\s+/g, '_')
+    .replace(/[^a-zA-Z0-9_]/g, '')
+    .slice(0, 24) || `player_${user.id.slice(0, 8)}`;
+
+  const candidates = [
+    baseUsername,
+    `${baseUsername.slice(0, 16)}_${user.id.slice(0, 6)}`,
+    `player_${user.id.slice(0, 8)}`,
+  ];
+
+  for (const candidate of candidates) {
+    const { data, error } = await admin
+      .from('players')
+      .select('id')
+      .eq('username', candidate)
+      .maybeSingle<{ id: string }>();
+
+    if (error) throw error;
+    if (!data || data.id === user.id) return candidate;
+  }
+
+  return `player_${user.id.slice(0, 8)}`;
+}
+
 export async function ensureCatalogSeeded(admin: SupabaseClient) {
   const rows = getSerializedCatalog()
     .filter((item) => item.slot !== 'utility' || item.priceTenks > 0)
@@ -35,11 +61,12 @@ export async function ensureCatalogSeeded(admin: SupabaseClient) {
 
 export async function ensurePlayerRow(admin: SupabaseClient, user: User, playerState?: PlayerState) {
   const state = normalizePlayerState(playerState ?? user.user_metadata?.[PLAYER_METADATA_KEY] ?? DEFAULT_PLAYER_STATE);
+  const username = await resolveUniqueUsername(admin, user);
   const { error } = await admin
     .from('players')
     .upsert({
       id: user.id,
-      username: getUsername(user),
+      username,
       avatar_config: state.avatar as unknown as Json,
       equipped_top: state.inventory.equipped.top ?? null,
       equipped_bottom: state.inventory.equipped.bottom ?? null,
