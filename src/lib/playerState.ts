@@ -1,6 +1,8 @@
 import type { AvatarConfig } from '../game/systems/AvatarRenderer';
 import { getItem } from '../game/config/catalog';
 
+const DEFAULT_UTILITY_ID = 'UTIL-GUN-01';
+
 export type InventoryState = {
   owned: string[];
   equipped: {
@@ -20,9 +22,9 @@ export type PlayerState = {
 export const DEFAULT_PLAYER_STATE: PlayerState = {
   tenks: 5000,
   inventory: {
-    owned: [],
+    owned: [DEFAULT_UTILITY_ID],
     equipped: {
-      utility: [],
+      utility: [DEFAULT_UTILITY_ID],
     },
   },
   avatar: {
@@ -48,17 +50,21 @@ export function normalizePlayerState(input: unknown): PlayerState {
   const equipped = inventory.equipped && typeof inventory.equipped === 'object'
     ? inventory.equipped
     : DEFAULT_PLAYER_STATE.inventory.equipped;
+  const owned = Array.isArray(inventory.owned) ? inventory.owned.filter((v): v is string => typeof v === 'string') : [];
+  const utility = Array.isArray(equipped.utility)
+    ? equipped.utility.filter((v): v is string => typeof v === 'string')
+    : [];
+  const ownedWithDefaults = owned.includes(DEFAULT_UTILITY_ID) ? owned : [...owned, DEFAULT_UTILITY_ID];
+  const utilityWithDefaults = utility.length ? utility : [DEFAULT_UTILITY_ID];
 
   return {
     tenks: typeof state.tenks === 'number' ? state.tenks : DEFAULT_PLAYER_STATE.tenks,
     inventory: {
-      owned: Array.isArray(inventory.owned) ? inventory.owned.filter((v): v is string => typeof v === 'string') : [],
+      owned: ownedWithDefaults,
       equipped: {
         top: typeof equipped.top === 'string' ? equipped.top : undefined,
         bottom: typeof equipped.bottom === 'string' ? equipped.bottom : undefined,
-        utility: Array.isArray(equipped.utility)
-          ? equipped.utility.filter((v): v is string => typeof v === 'string')
-          : [],
+        utility: utilityWithDefaults,
       },
     },
     avatar: {

@@ -22,6 +22,8 @@ export class StoreInterior extends Phaser.Scene {
   private dialog!: DialogSystem;
   private vendorX = 0;
   private vendorY = 0;
+  private shopOverlayOpen = false;
+  private cleanupFns: Array<() => void> = [];
 
   constructor() {
     super({ key: 'StoreInterior' });
@@ -31,6 +33,13 @@ export class StoreInterior extends Phaser.Scene {
     const { width, height } = this.scale;
     announceScene(this);
     this.dialog = new DialogSystem(this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
+    this.cleanupFns.push(eventBus.on(EVENTS.SHOP_OPEN, () => {
+      this.shopOverlayOpen = true;
+    }));
+    this.cleanupFns.push(eventBus.on(EVENTS.SHOP_CLOSE, () => {
+      this.shopOverlayOpen = false;
+    }));
 
     const g = this.add.graphics();
     g.fillStyle(0x0c0c16);
@@ -112,6 +121,7 @@ export class StoreInterior extends Phaser.Scene {
       }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
 
       const openShop = () => {
+        if (this.shopOverlayOpen) return;
         this.selectedItemId = item.id;
         eventBus.emit(EVENTS.SHOP_OPEN, {
           tab: 'products',
@@ -147,7 +157,7 @@ export class StoreInterior extends Phaser.Scene {
   }
 
   private flashMessage(x: number, y: number, msg: string, color: string) {
-    const t = this.add.text(x, y, msg, {
+    const text = this.add.text(x, y, msg, {
       fontSize: '10px',
       fontFamily: '"Press Start 2P", monospace',
       color,
@@ -155,19 +165,19 @@ export class StoreInterior extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(9999);
     this.tweens.add({
-      targets: t,
+      targets: text,
       alpha: { from: 1, to: 0 },
       y: y - 10,
       duration: 700,
       ease: 'Sine.easeOut',
-      onComplete: () => t.destroy(),
+      onComplete: () => text.destroy(),
     });
   }
 
   update() {
     if (this.inTransition) return;
+    if (this.shopOverlayOpen) return;
 
-    // Bloquea movimiento mientras hay diálogo abierto
     if (!this.dialog.isActive()) {
       this.handleMovement();
     }
@@ -201,7 +211,8 @@ export class StoreInterior extends Phaser.Scene {
   }
 
   private tryStartVendorDialog() {
-    // Simple proximidad circular al NPC vendedor
+    if (this.shopOverlayOpen) return;
+
     const dx = this.px - this.vendorX;
     const dy = this.py - this.vendorY;
     const distSq = dx * dx + dy * dy;
@@ -210,11 +221,10 @@ export class StoreInterior extends Phaser.Scene {
     const lines = [
       'Vendedor: Bienvenido a WASPI STORE.',
       'Todo lo que compres aca llega a tu casa y a tu Waspi.',
-      'Elegí una prenda y abrimos el checkout con Stripe.',
+      'Elegi una prenda y abrimos el checkout con Stripe.',
     ];
 
     this.dialog.start(lines, {}, () => {
-      // Al terminar el diálogo, abre el panel de shop en la pestaña de productos
       const first = CATALOG.find((item) => typeof item.priceArs === 'number');
       const itemId = first?.id ?? undefined;
       if (itemId) {
@@ -261,5 +271,11 @@ export class StoreInterior extends Phaser.Scene {
     this.player.update(dx !== 0 || dy !== 0, dx);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(10 + Math.floor(this.py / 10));
+  }
+
+  private handleSceneShutdown() {
+    eventBus.emit(EVENTS.SHOP_CLOSE);
+    this.cleanupFns.forEach((cleanup) => cleanup());
+    this.cleanupFns = [];
   }
 }

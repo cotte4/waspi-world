@@ -1,9 +1,16 @@
 import Phaser from 'phaser';
-import { AvatarRenderer, AvatarConfig, HairStyle, loadStoredAvatarConfig, saveStoredAvatarConfig } from '../systems/AvatarRenderer';
+import {
+  AvatarRenderer,
+  AvatarConfig,
+  HairStyle,
+  loadStoredAvatarConfig,
+  saveStoredAvatarConfig,
+} from '../systems/AvatarRenderer';
 import { COLORS } from '../config/constants';
 import { announceScene } from '../systems/SceneUi';
 
 const USERNAME_KEY = 'waspi_username';
+type CreatorControl = 'seed' | 'bodyColor' | 'eyeColor' | 'hairColor' | 'hairStyle' | 'pp' | 'tt' | 'save';
 
 export class CreatorScene extends Phaser.Scene {
   private preview!: AvatarRenderer;
@@ -14,6 +21,23 @@ export class CreatorScene extends Phaser.Scene {
   private ppDots: Phaser.GameObjects.Rectangle[] = [];
   private ttDots: Phaser.GameObjects.Rectangle[] = [];
   private usernameInput?: Phaser.GameObjects.DOMElement;
+  private usernameInputElement?: HTMLInputElement;
+  private previewX = 0;
+  private previewY = 0;
+  private keyUp!: Phaser.Input.Keyboard.Key;
+  private keyDown!: Phaser.Input.Keyboard.Key;
+  private keyLeft!: Phaser.Input.Keyboard.Key;
+  private keyRight!: Phaser.Input.Keyboard.Key;
+  private keyEnter!: Phaser.Input.Keyboard.Key;
+  private keyEsc!: Phaser.Input.Keyboard.Key;
+  private controlOrder: CreatorControl[] = ['seed', 'bodyColor', 'eyeColor', 'hairColor', 'hairStyle', 'pp', 'tt', 'save'];
+  private activeControlIndex = 0;
+  private controlLabels = new Map<CreatorControl, Phaser.GameObjects.Text>();
+  private readonly bodyColorOptions = [0xF5D5A4, 0xE6B98A, 0xD89B73, 0xBF7B4E, 0x9B5A3A, 0x7A412A];
+  private readonly eyeColorOptions = [0x222222, 0x3B82F6, 0x22C55E, 0xA855F7, 0xDC2626, 0xFACC15];
+  private readonly hairColorOptions = [0x1F130A, 0x8B5A2B, 0xF97316, 0xEF4444, 0xFFFFFF, 0xEC4899];
+  private readonly seedOptions: Array<'procedural' | 'gengar' | 'buho'> = ['procedural', 'gengar', 'buho'];
+  private readonly hairStyleOptions: HairStyle[] = ['SPI', 'FLA', 'MOH', 'X'];
 
   constructor() {
     super({ key: 'CreatorScene' });
@@ -36,9 +60,10 @@ export class CreatorScene extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
     const storedConfig = loadStoredAvatarConfig();
-    this.config = storedConfig;
+    this.config = { ...storedConfig };
     this.selectedSeed = storedConfig.avatarKind;
     announceScene(this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
 
     // Background
     this.cameras.main.setBackgroundColor('#05050A');
@@ -77,6 +102,8 @@ export class CreatorScene extends Phaser.Scene {
     const panelH = 190;
     const panelX = width / 2 - 180;
     const panelY = 210;
+    this.previewX = panelX;
+    this.previewY = panelY + 20;
     const g = this.add.graphics();
     g.fillStyle(0x030308);
     g.fillRoundedRect(panelX - panelW / 2, panelY - panelH / 2, panelW, panelH, 14);
@@ -86,11 +113,12 @@ export class CreatorScene extends Phaser.Scene {
     g.strokeRoundedRect(panelX - panelW / 2 + 5, panelY - panelH / 2 + 5, panelW - 10, panelH - 10, 11);
 
     // Seed selector
-    this.add.text(panelX, 146, 'SEED', {
+    const seedLabel = this.add.text(panelX, 146, 'SEED', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#666666',
     }).setOrigin(0.5);
+    this.controlLabels.set('seed', seedLabel);
 
     const seeds: Array<{ id: 'procedural' | 'gengar' | 'buho'; label: string }> = [
       { id: 'procedural', label: 'PROC' },
@@ -117,7 +145,10 @@ export class CreatorScene extends Phaser.Scene {
     });
 
     // Avatar preview (no walk animation)
-    this.preview = new AvatarRenderer(this, panelX, panelY + 20, this.config);
+    this.preview = new AvatarRenderer(this, this.previewX, this.previewY, {
+      ...this.config,
+      avatarKind: this.selectedSeed,
+    });
     this.refreshSliders();
 
     // Name input
@@ -154,7 +185,10 @@ export class CreatorScene extends Phaser.Scene {
       if (cleaned !== inputEl.value) inputEl.value = cleaned;
     });
 
+    inputEl.name = 'waspi-username';
+    inputEl.id = 'waspi-username';
     this.usernameInput = this.add.dom(width / 2 + 120, 170, inputEl);
+    this.usernameInputElement = inputEl;
 
     let rowY = 210;
 
@@ -164,8 +198,9 @@ export class CreatorScene extends Phaser.Scene {
       color: '#888888',
     };
 
-    const makeRow = (label: string, colors: number[], onPick: (c: number) => void) => {
-      this.add.text(width / 2 - 10, rowY, label, labelStyle).setOrigin(0, 0.5);
+    const makeRow = (control: CreatorControl, label: string, colors: number[], onPick: (c: number) => void) => {
+      const labelText = this.add.text(width / 2 - 10, rowY, label, labelStyle).setOrigin(0, 0.5);
+      this.controlLabels.set(control, labelText);
       const startX = width / 2 + 80;
       colors.forEach((c, i) => {
         const x = startX + i * 26;
@@ -181,22 +216,16 @@ export class CreatorScene extends Phaser.Scene {
     };
 
     // Colors
-    makeRow('CUERPO', [
-      0xF5D5A4, 0xE6B98A, 0xD89B73, 0xBF7B4E, 0x9B5A3A, 0x7A412A,
-    ], c => { this.config.bodyColor = c; });
+    makeRow('bodyColor', 'CUERPO', this.bodyColorOptions, c => { this.config.bodyColor = c; });
 
-    makeRow('OJOS', [
-      0x222222, 0x3B82F6, 0x22C55E, 0xA855F7, 0xDC2626, 0xFACC15,
-    ], c => { this.config.eyeColor = c; });
+    makeRow('eyeColor', 'OJOS', this.eyeColorOptions, c => { this.config.eyeColor = c; });
 
-    makeRow('PELO', [
-      0x1F130A, 0x8B5A2B, 0xF97316, 0xEF4444, 0xFFFFFF, 0xEC4899,
-    ], c => { this.config.hairColor = c; });
+    makeRow('hairColor', 'PELO', this.hairColorOptions, c => { this.config.hairColor = c; });
 
     // Estilo buttons (haircuts)
-    this.add.text(width / 2 - 190, rowY, 'ESTILO', labelStyle).setOrigin(0, 0.5);
-    const styles: HairStyle[] = ['SPI', 'FLA', 'MOH', 'X'];
-    styles.forEach((s, i) => {
+    const styleLabel = this.add.text(width / 2 - 190, rowY, 'ESTILO', labelStyle).setOrigin(0, 0.5);
+    this.controlLabels.set('hairStyle', styleLabel);
+    this.hairStyleOptions.forEach((s, i) => {
       const x = width / 2 - 40 + i * 40;
       const btn = this.add.rectangle(x, rowY, 30, 22, 0x111111, 1)
         .setStrokeStyle(1, s === this.config.hairStyle ? 0xF5C842 : 0x333333, 1)
@@ -219,11 +248,13 @@ export class CreatorScene extends Phaser.Scene {
     // PP / TT sliders (discrete 0..10) — extreme
     // NOTE: use getters so +/- always use current value (not captured initial)
     const makeSlider = (
+      control: 'pp' | 'tt',
       label: 'PP' | 'TT',
       getValue: () => number,
       setValue: (next: number) => void
     ) => {
-      this.add.text(width / 2 - 190, rowY, label, labelStyle).setOrigin(0, 0.5);
+      const labelText = this.add.text(width / 2 - 190, rowY, label, labelStyle).setOrigin(0, 0.5);
+      this.controlLabels.set(control, labelText);
 
       const minusX = width / 2 - 80;
       const plusX = width / 2 + 100;
@@ -277,9 +308,9 @@ export class CreatorScene extends Phaser.Scene {
       return dots;
     };
 
-    this.ppDots = makeSlider('PP', () => this.config.pp, (next) => { this.config.pp = next; });
+    this.ppDots = makeSlider('pp', 'PP', () => this.config.pp, (next) => { this.config.pp = next; });
     rowY += 28;
-    this.ttDots = makeSlider('TT', () => this.config.tt, (next) => { this.config.tt = next; });
+    this.ttDots = makeSlider('tt', 'TT', () => this.config.tt, (next) => { this.config.tt = next; });
 
     rowY += 34;
 
@@ -294,23 +325,57 @@ export class CreatorScene extends Phaser.Scene {
       fontFamily: '"Press Start 2P", monospace',
       color: '#111111',
     }).setOrigin(0.5);
+    const saveLabel = this.add.text(width / 2 + 170, btnY, 'ENTER GUARDAR', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#666666',
+    }).setOrigin(0, 0.5);
+    this.controlLabels.set('save', saveLabel);
 
     btn.on('pointerdown', () => {
-      if (typeof window !== 'undefined') {
-        const name = (inputEl.value || '').trim();
-        if (name) window.localStorage.setItem(USERNAME_KEY, name);
-        saveStoredAvatarConfig({
-          ...this.config,
-          avatarKind: this.selectedSeed,
-        });
-      }
-      this.cameras.main.fadeOut(250, 0, 0, 0);
-      this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-        this.scene.start('WorldScene');
-      });
+      this.commitAndEnter();
     });
 
+    this.add.text(width / 2 + 120, height - 28, 'ARRIBA/ABAJO SECCION · IZQ/DER CAMBIA · ENTER GUARDAR', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#666666',
+    }).setOrigin(0.5);
+
+    this.keyUp = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
+    this.keyDown = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
+    this.keyLeft = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
+    this.keyRight = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
+    this.keyEnter = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+    this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.refreshControlHighlights();
+
     this.cameras.main.fadeIn(250, 0, 0, 0);
+  }
+
+  update() {
+    if (this.isUsernameFocused()) return;
+
+    if (Phaser.Input.Keyboard.JustDown(this.keyUp)) {
+      this.activeControlIndex = Phaser.Math.Wrap(this.activeControlIndex - 1, 0, this.controlOrder.length);
+      this.refreshControlHighlights();
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.keyDown)) {
+      this.activeControlIndex = Phaser.Math.Wrap(this.activeControlIndex + 1, 0, this.controlOrder.length);
+      this.refreshControlHighlights();
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.keyLeft)) {
+      this.adjustActiveControl(-1);
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.keyRight)) {
+      this.adjustActiveControl(1);
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.keyEnter)) {
+      this.activateActiveControl();
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
+      this.commitAndEnter();
+    }
   }
 
   private refreshStyleButtons() {
@@ -328,16 +393,13 @@ export class CreatorScene extends Phaser.Scene {
 
   private refreshPreview() {
     this.preview.destroy();
-
-    const { width } = this.scale;
-    const panelY = 210;
-    this.preview = new AvatarRenderer(this, width / 2, panelY + 20, {
+    this.preview = new AvatarRenderer(this, this.previewX, this.previewY, {
       ...this.config,
       avatarKind: this.selectedSeed,
     });
   }
 
-  shutdown() {
+  private handleSceneShutdown() {
     this.usernameInput?.destroy();
   }
 
@@ -347,5 +409,91 @@ export class CreatorScene extends Phaser.Scene {
       b.rect.setStrokeStyle(1, active ? 0xF5C842 : 0x333333, 1);
       b.text.setColor(active ? '#F5C842' : '#CCCCCC');
     }
+  }
+
+  private refreshControlHighlights() {
+    const activeControl = this.controlOrder[this.activeControlIndex];
+    for (const [control, label] of this.controlLabels.entries()) {
+      const active = control === activeControl;
+      label.setColor(active ? '#F5C842' : '#888888');
+      if (control === 'save' && !active) {
+        label.setColor('#666666');
+      }
+    }
+  }
+
+  private adjustActiveControl(direction: -1 | 1) {
+    switch (this.controlOrder[this.activeControlIndex]) {
+      case 'seed':
+        this.selectedSeed = this.cycleInList(this.seedOptions, this.selectedSeed, direction);
+        this.refreshSeedButtons();
+        this.refreshPreview();
+        break;
+      case 'bodyColor':
+        this.config.bodyColor = this.cycleInList(this.bodyColorOptions, this.config.bodyColor, direction);
+        this.refreshPreview();
+        break;
+      case 'eyeColor':
+        this.config.eyeColor = this.cycleInList(this.eyeColorOptions, this.config.eyeColor, direction);
+        this.refreshPreview();
+        break;
+      case 'hairColor':
+        this.config.hairColor = this.cycleInList(this.hairColorOptions, this.config.hairColor, direction);
+        this.refreshPreview();
+        break;
+      case 'hairStyle':
+        this.config.hairStyle = this.cycleInList(this.hairStyleOptions, this.config.hairStyle, direction);
+        this.refreshStyleButtons();
+        this.refreshPreview();
+        break;
+      case 'pp':
+        this.config.pp = Phaser.Math.Clamp(this.config.pp + direction, 0, 10);
+        this.refreshSliders();
+        this.refreshPreview();
+        break;
+      case 'tt':
+        this.config.tt = Phaser.Math.Clamp(this.config.tt + direction, 0, 10);
+        this.refreshSliders();
+        this.refreshPreview();
+        break;
+      default:
+        break;
+    }
+  }
+
+  private activateActiveControl() {
+    if (this.controlOrder[this.activeControlIndex] === 'save') {
+      this.commitAndEnter();
+      return;
+    }
+    if (this.controlOrder[this.activeControlIndex] === 'seed') {
+      this.adjustActiveControl(1);
+    }
+  }
+
+  private commitAndEnter() {
+    if (typeof window !== 'undefined') {
+      const name = (this.usernameInputElement?.value || '').trim();
+      if (name) window.localStorage.setItem(USERNAME_KEY, name);
+      saveStoredAvatarConfig({
+        ...this.config,
+        avatarKind: this.selectedSeed,
+      });
+    }
+    this.cameras.main.fadeOut(250, 0, 0, 0);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      this.scene.start('WorldScene');
+    });
+  }
+
+  private cycleInList<T>(values: T[], current: T, direction: -1 | 1) {
+    const index = values.indexOf(current);
+    const nextIndex = Phaser.Math.Wrap((index >= 0 ? index : 0) + direction, 0, values.length);
+    return values[nextIndex];
+  }
+
+  private isUsernameFocused() {
+    if (typeof document === 'undefined' || !this.usernameInputElement) return false;
+    return document.activeElement === this.usernameInputElement;
   }
 }

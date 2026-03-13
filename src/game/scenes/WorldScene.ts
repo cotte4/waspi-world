@@ -58,7 +58,7 @@ type RemoteHitEvent = {
 const REMOTE_CHAT_MIN_MS = 1000;
 const REMOTE_MOVE_MIN_MS = 50;
 const REMOTE_HIT_MIN_MS = 120;
-const MAX_REMOTE_CHAT_DISTANCE = 420;
+const MAX_REMOTE_CHAT_DISTANCE = 2600;
 
 export class WorldScene extends Phaser.Scene {
   // Player
@@ -219,6 +219,7 @@ export class WorldScene extends Phaser.Scene {
       playerId: this.playerId,
       username: this.playerUsername,
     });
+    this.emitPresence();
 
     // Ambient NPC
     this.spawnAmbientNPCs();
@@ -420,10 +421,23 @@ export class WorldScene extends Phaser.Scene {
 
     // Center dashes
     const dashY = ZONES.STREET_Y + ZONES.STREET_H / 2;
-    g.fillStyle(0xFFFFFF, 0.12);
+    g.fillStyle(0xF5E6A8, 0.22);
     for (let dx = 0; dx < WORLD.WIDTH; dx += 90) {
       g.fillRect(dx, dashY - 2, 42, 3);
     }
+
+    // Crosswalks to help the street read around the venues
+    const crossings = [
+      BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2,
+      BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2,
+      BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2,
+    ];
+    g.fillStyle(0xD9DEE8, 0.18);
+    crossings.forEach((centerX) => {
+      for (let i = -3; i <= 3; i++) {
+        g.fillRect(centerX - 38 + i * 12, ZONES.NORTH_SIDEWALK_Y + 8, 8, ZONES.SOUTH_SIDEWALK_Y - ZONES.NORTH_SIDEWALK_Y - 16);
+      }
+    });
 
     // South sidewalk base
     g.fillStyle(COLORS.SIDEWALK);
@@ -456,6 +470,8 @@ export class WorldScene extends Phaser.Scene {
     const pw = 1000;
     const ph = 600;
     g.fillRect(px, py, pw, ph);
+    g.lineStyle(3, 0x25253A, 0.8);
+    g.strokeRect(px, py, pw, ph);
 
     // Sutil patrón cuadriculado en la plaza
     g.lineStyle(1, 0x1A1A24, 0.45);
@@ -477,6 +493,8 @@ export class WorldScene extends Phaser.Scene {
     g.fillCircle(fx, fy, 45);
     g.fillStyle(0x88CCFF, 0.5);
     g.fillCircle(fx, fy, 15); // water center
+    g.fillStyle(0x46B3FF, 0.08);
+    g.fillCircle(fx, fy, 130);
 
     // Fountain border
     g.lineStyle(3, 0x334455, 0.9);
@@ -1056,6 +1074,7 @@ export class WorldScene extends Phaser.Scene {
       if (next.equipped) {
         this.applyRemoteEquipped(next.player_id, next.equipped);
       }
+      this.emitPresence();
       this.broadcastSelfState('player:join');
       return;
     }
@@ -1075,6 +1094,7 @@ export class WorldScene extends Phaser.Scene {
     if (next.equipped) {
       this.applyRemoteEquipped(next.player_id, next.equipped);
     }
+    this.emitPresence();
   }
 
   private handleRemoteLeave(payload: unknown) {
@@ -1086,6 +1106,7 @@ export class WorldScene extends Phaser.Scene {
       rp.nameplate.destroy();
       this.remotePlayers.delete(playerId);
       this.chatSystem.clearBubble(playerId);
+      this.emitPresence();
     }
   }
 
@@ -1168,6 +1189,7 @@ export class WorldScene extends Phaser.Scene {
       avatarConfig: cfg,
       hitbox,
     });
+    this.emitPresence();
 
     nameplate.setInteractive({ useHandCursor: true });
     nameplate.on('pointerdown', () => {
@@ -1346,9 +1368,16 @@ export class WorldScene extends Phaser.Scene {
       }),
     }).catch(() => null);
 
-    if (!res?.ok) return null;
+    if (!res?.ok) return this.sanitizeChatFallback(message);
     const json = await res.json().catch(() => null) as { message?: string } | null;
-    return json?.message?.trim() || null;
+    return json?.message?.trim() || this.sanitizeChatFallback(message);
+  }
+
+  private sanitizeChatFallback(message: string) {
+    return message
+      .trim()
+      .replace(/\b(boludo|pelotudo|idiota|mierda|puta|puto)\b/gi, '***')
+      .slice(0, CHAT.MAX_CHARS);
   }
 
   private loadMutedPlayers() {
@@ -1550,6 +1579,17 @@ export class WorldScene extends Phaser.Scene {
     this.chatSystem?.destroy();
     this.bridgeCleanupFns.forEach((cleanup) => cleanup());
     this.bridgeCleanupFns = [];
+    eventBus.emit(EVENTS.PLAYER_PRESENCE, []);
+  }
+
+  private emitPresence() {
+    eventBus.emit(EVENTS.PLAYER_PRESENCE, [
+      { playerId: this.playerId, username: this.playerUsername },
+      ...Array.from(this.remotePlayers.entries()).map(([playerId, player]) => ({
+        playerId,
+        username: player.username,
+      })),
+    ]);
   }
 
   private allowRemoteEvent(cache: Map<string, number>, playerId: string, minMs: number) {
@@ -1657,4 +1697,6 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 }
+
+
 

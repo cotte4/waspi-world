@@ -30,6 +30,11 @@ interface PlayerInfo {
   username: string;
 }
 
+interface PresencePlayer {
+  playerId: string;
+  username: string;
+}
+
 type ShopTab = 'products' | 'tenks';
 
 interface ShopOpenPayload {
@@ -59,6 +64,7 @@ export default function PlayPage() {
   const [lastSent, setLastSent] = useState(0);
   const [playerInfo, setPlayerInfo] = useState<PlayerInfo | null>(null);
   const [connected, setConnected] = useState(false);
+  const [presencePlayers, setPresencePlayers] = useState<PresencePlayer[]>([]);
   const [playerState, setPlayerState] = useState<PlayerState | null>(null);
   const [tenks, setTenks] = useState<number | null>(null);
   const [inventoryOpen, setInventoryOpen] = useState(false);
@@ -73,6 +79,7 @@ export default function PlayPage() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authStatus, setAuthStatus] = useState('');
   const [authPanelOpen, setAuthPanelOpen] = useState(true);
+  const [uiNotice, setUiNotice] = useState('');
   const [shopOpen, setShopOpen] = useState(initialCheckout.open);
   const [shopTab, setShopTab] = useState<ShopTab>(initialCheckout.tab);
   const [shopItems, setShopItems] = useState<CatalogItem[]>([]);
@@ -134,8 +141,20 @@ export default function PlayPage() {
     });
 
     const unsubInfo = eventBus.on(EVENTS.PLAYER_INFO, (info: unknown) => {
-      setPlayerInfo(info as PlayerInfo);
+      const next = info as PlayerInfo;
+      setPlayerInfo(next);
+      setPresencePlayers((prev) => {
+        const filtered = prev.filter((player) => player.playerId !== next.playerId);
+        return [{ playerId: next.playerId, username: next.username }, ...filtered];
+      });
       setConnected(true);
+    });
+
+    const unsubPresence = eventBus.on(EVENTS.PLAYER_PRESENCE, (payload: unknown) => {
+      const players = Array.isArray(payload)
+        ? (payload as PresencePlayer[])
+        : [];
+      setPresencePlayers(players);
     });
 
     const unsubTenks = eventBus.on(EVENTS.TENKS_CHANGED, (payload: unknown) => {
@@ -178,7 +197,11 @@ export default function PlayPage() {
 
     const unsubPenalty = eventBus.on(EVENTS.PENALTY_RESULT, (payload: unknown) => {
       const result = payload as PenaltyResultPayload;
-      if (!result?.won || !tokenRef.current) return;
+      if (!result?.won) return;
+      if (!tokenRef.current) {
+        setUiNotice('Ganaste el minijuego. Inicia sesion para guardar el descuento.');
+        return;
+      }
 
       void (async () => {
         const res = await fetch('/api/minigames/penalty/reward', {
@@ -195,6 +218,7 @@ export default function PlayPage() {
 
         if (!res?.ok) {
           setShopStatus('Ganaste el minijuego, pero no pude guardar el premio todavia.');
+          setUiNotice('Ganaste el minijuego, pero el premio no se guardo todavia.');
           return;
         }
 
@@ -204,9 +228,8 @@ export default function PlayPage() {
         }
         if (json.reward?.code) {
           setDiscountCodeInput(json.reward.code as string);
-          setShopOpen(true);
-          setShopTab('products');
           setShopStatus(`Ganaste ${json.reward.percentOff}% OFF. Codigo: ${json.reward.code}`);
+          setUiNotice(`Premio guardado: ${json.reward.percentOff}% OFF · Codigo ${json.reward.code}`);
         }
       })();
     });
@@ -214,6 +237,7 @@ export default function PlayPage() {
     return () => {
       unsubChat();
       unsubInfo();
+      unsubPresence();
       unsubTenks();
       unsubScene();
       unsubInv();
@@ -224,6 +248,12 @@ export default function PlayPage() {
       unsubPenalty();
     };
   }, [applyPlayerState]);
+
+  useEffect(() => {
+    if (!uiNotice) return;
+    const timer = window.setTimeout(() => setUiNotice(''), 4200);
+    return () => window.clearTimeout(timer);
+  }, [uiNotice]);
 
   const hydratePlayerState = useCallback(async (session: Session | null) => {
     if (!session?.access_token) {
@@ -649,6 +679,57 @@ export default function PlayPage() {
         </div>
 
         <div
+          className="absolute top-12 left-2"
+          style={{
+            width: 172,
+            background: 'rgba(0,0,0,0.7)',
+            border: '1px solid rgba(57,255,20,0.22)',
+            padding: '6px 8px',
+            boxShadow: '0 10px 24px rgba(0,0,0,0.28)',
+          }}
+        >
+          <div
+            style={{
+              fontFamily: '"Press Start 2P", monospace',
+              fontSize: '7px',
+              color: '#39FF14',
+              marginBottom: 6,
+            }}
+          >
+            CONECTADOS {presencePlayers.length}
+          </div>
+          <div style={{ display: 'grid', gap: 4 }}>
+            {presencePlayers.slice(0, 6).map((player) => (
+              <div
+                key={player.playerId}
+                style={{
+                  fontFamily: '"Silkscreen", monospace',
+                  fontSize: '11px',
+                  color: player.playerId === playerInfo?.playerId ? '#F5C842' : 'rgba(255,255,255,0.8)',
+                  lineHeight: 1.1,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {player.playerId === playerInfo?.playerId ? 'TU ' : '• '} {player.username}
+              </div>
+            ))}
+            {presencePlayers.length === 0 && (
+              <div
+                style={{
+                  fontFamily: '"Silkscreen", monospace',
+                  fontSize: '11px',
+                  color: 'rgba(255,255,255,0.45)',
+                }}
+              >
+                Solo vos por ahora.
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div
           className="absolute top-2 right-2 pointer-events-none"
           style={{
             background: 'rgba(0,0,0,0.6)',
@@ -743,13 +824,15 @@ export default function PlayPage() {
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
-                  <input
-                    value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="email@waspi.world"
-                    autoComplete="email"
-                    style={textInputStyle}
-                  />
+              <input
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                placeholder="email@waspi.world"
+                autoComplete="email"
+                id="account-email"
+                name="email"
+                style={textInputStyle}
+              />
                   <button onClick={() => void sendMagicLink()} disabled={authBusy} style={authButtonStyle('#F5C842', '#0E0E14', authBusy)}>
                     {authBusy ? 'ENVIANDO...' : 'MAGIC LINK'}
                   </button>
@@ -1248,6 +1331,25 @@ export default function PlayPage() {
                 className="focus:border-[rgba(245,200,66,0.8)] transition-colors"
               />
             </div>
+          </div>
+        )}
+
+        {uiNotice && (
+          <div
+            className="absolute top-14 left-1/2 -translate-x-1/2 px-3 py-2"
+            style={{
+              background: 'rgba(0,0,0,0.82)',
+              border: '1px solid rgba(57,255,20,0.35)',
+              fontFamily: '"Press Start 2P", monospace',
+              fontSize: '8px',
+              color: '#39FF14',
+              boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
+              zIndex: 30,
+              maxWidth: isMobile ? '92%' : 420,
+              textAlign: 'center',
+            }}
+          >
+            {uiNotice}
           </div>
         )}
       </div>

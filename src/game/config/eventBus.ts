@@ -29,6 +29,7 @@ export const EVENTS = {
   SCENE_CHANGED: 'scene:changed',
   PLAYER_READY: 'player:ready',
   PLAYER_INFO: 'player:info',
+  PLAYER_PRESENCE: 'player:presence',
    TENKS_CHANGED: 'tenks:changed',
   INVENTORY_TOGGLE: 'inventory:toggle',
   INVENTORY_CHANGED: 'inventory:changed',

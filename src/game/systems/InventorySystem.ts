@@ -3,22 +3,37 @@ import { getItem } from '../config/catalog';
 import type { InventoryState } from '../../lib/playerState';
 
 const KEY = 'waspi_inventory_v1';
+const DEFAULT_UTILITY_ID = 'UTIL-GUN-01';
+
+function ensureDemoLoadout(state: InventoryState): InventoryState {
+  const owned = state.owned.includes(DEFAULT_UTILITY_ID)
+    ? state.owned
+    : [...state.owned, DEFAULT_UTILITY_ID];
+  const utility = Array.isArray(state.equipped.utility) ? state.equipped.utility : [];
+  return {
+    owned,
+    equipped: {
+      ...state.equipped,
+      utility: utility.length ? utility : [DEFAULT_UTILITY_ID],
+    },
+  };
+}
 
 function loadState(): InventoryState {
-  if (typeof window === 'undefined') return { owned: [], equipped: {} };
+  if (typeof window === 'undefined') return ensureDemoLoadout({ owned: [], equipped: {} });
   const raw = window.localStorage.getItem(KEY);
-  if (!raw) return { owned: [], equipped: {} };
+  if (!raw) return ensureDemoLoadout({ owned: [], equipped: {} });
   try {
     const parsed = JSON.parse(raw) as InventoryState;
     // Migrate old shapes
     const equipped = typeof parsed.equipped === 'object' && parsed.equipped ? parsed.equipped : {};
     if (!Array.isArray(equipped.utility)) equipped.utility = [];
-    return {
+    return ensureDemoLoadout({
       owned: Array.isArray(parsed.owned) ? parsed.owned : [],
       equipped,
-    };
+    });
   } catch {
-    return { owned: [], equipped: {} };
+    return ensureDemoLoadout({ owned: [], equipped: {} });
   }
 }
 
@@ -79,4 +94,3 @@ export function hasUtilityEquipped(id: string) {
   const s = loadState();
   return (s.equipped.utility ?? []).includes(id);
 }
-
