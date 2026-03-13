@@ -56,6 +56,7 @@ type RemoteHitEvent = {
 };
 
 type DummyState = {
+  label: string;
   nameplate: Phaser.GameObjects.Text;
   hpBar: Phaser.GameObjects.Graphics;
   hp: number;
@@ -65,6 +66,7 @@ type DummyState = {
   phase: number;
   respawnAt: number;
   alive: boolean;
+  tint: number;
 };
 
 const REMOTE_CHAT_MIN_MS = 1000;
@@ -320,7 +322,9 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private spawnTrainingDummy(x: number, y: number, index: number) {
-    const dummy = this.add.circle(x, y, 18, 0xFF5E5E, 0.7) as CombatDummy;
+    const tint = [0xFF5E5E, 0xFF8844, 0xFF4D8D, 0xFF6C3A][index % 4];
+    const label = `BOT_${index + 1}`;
+    const dummy = this.add.circle(x, y, 18, tint, 0.7) as CombatDummy;
     dummy.setDepth(30);
     dummy.setStrokeStyle(2, 0xFFFFFF, 0.2);
     this.physics.add.existing(dummy);
@@ -329,7 +333,7 @@ export class WorldScene extends Phaser.Scene {
     dummy.body.setAllowGravity(false);
     this.dummies.add(dummy);
 
-    const nameplate = this.add.text(x, y - 34, `BOT_${index + 1}`, {
+    const nameplate = this.add.text(x, y - 34, label, {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#FF8B8B',
@@ -339,6 +343,7 @@ export class WorldScene extends Phaser.Scene {
 
     const hpBar = this.add.graphics().setDepth(31);
     const state: DummyState = {
+      label,
       nameplate,
       hpBar,
       hp: 40,
@@ -348,6 +353,7 @@ export class WorldScene extends Phaser.Scene {
       phase: index * 1.4,
       respawnAt: 0,
       alive: true,
+      tint,
     };
     this.dummyStates.set(dummy, state);
     this.renderDummyState(dummy, state);
@@ -434,16 +440,63 @@ export class WorldScene extends Phaser.Scene {
         state.hp = state.maxHp;
         dummy.body.enable = true;
         dummy.setAlpha(0.7);
-        state.nameplate.setText('BOT');
+        dummy.setFillStyle(state.tint, 0.7);
+        state.nameplate.setText(state.label);
         state.nameplate.setColor('#FF8B8B');
       }
 
       state.phase += 0.018;
-      const driftX = Math.cos(state.phase) * 18;
-      const driftY = Math.sin(state.phase * 1.3) * 10;
-      dummy.setPosition(state.originX + driftX, state.originY + driftY);
+      let targetX = state.originX + Math.cos(state.phase) * 18;
+      let targetY = state.originY + Math.sin(state.phase * 1.3) * 10;
+
+      const distToPlayer = Phaser.Math.Distance.Between(dummy.x, dummy.y, this.px, this.py);
+      if (this.inTraining && distToPlayer < 280) {
+        const angleToPlayer = Phaser.Math.Angle.Between(dummy.x, dummy.y, this.px, this.py);
+        const approach = distToPlayer > 120 ? 1.6 : distToPlayer < 84 ? -1.3 : 0.35;
+        const strafe = distToPlayer < 200 ? Math.sin(this.time.now / 180 + state.phase) * 1.1 : 0;
+        const moveX = Math.cos(angleToPlayer) * approach + Math.cos(angleToPlayer + Math.PI / 2) * strafe;
+        const moveY = Math.sin(angleToPlayer) * approach + Math.sin(angleToPlayer + Math.PI / 2) * strafe;
+        targetX = dummy.x + moveX;
+        targetY = dummy.y + moveY;
+
+        if (distToPlayer < 38 && this.time.now - this.lastDamageAt > LOCAL_HIT_COOLDOWN_MS) {
+          this.applyLocalDamage(8, dummy.x, dummy.y);
+        }
+      }
+
+      targetX = Phaser.Math.Clamp(targetX, ZONES.TRAINING_X + 26, ZONES.TRAINING_X + ZONES.TRAINING_W - 26);
+      targetY = Phaser.Math.Clamp(targetY, ZONES.TRAINING_Y + 26, ZONES.TRAINING_Y + ZONES.TRAINING_H - 26);
+      dummy.setPosition(targetX, targetY);
       this.renderDummyState(dummy, state);
     }
+  }
+
+  private applyLocalDamage(dmg: number, sourceX: number, sourceY: number) {
+    this.lastDamageAt = this.time.now;
+    this.hp = Math.max(0, this.hp - dmg);
+    this.renderHpHud();
+
+    const flash = this.add.rectangle(400, 300, 800, 600, 0xFF0000, 0.08)
+      .setScrollFactor(0)
+      .setDepth(20000);
+    this.tweens.add({ targets: flash, alpha: 0, duration: 140, onComplete: () => flash.destroy() });
+
+    const pushAngle = Phaser.Math.Angle.Between(sourceX, sourceY, this.px, this.py);
+    this.px += Math.cos(pushAngle) * 20;
+    this.py += Math.sin(pushAngle) * 20;
+    this.playerBody.setPosition(this.px, this.py);
+    this.playerAvatar.setPosition(this.px, this.py);
+    this.playerNameplate.setPosition(this.px, this.py - 46);
+
+    if (this.hp > 0) return;
+
+    this.hp = 100;
+    this.renderHpHud();
+    this.px = PLAYER.SPAWN_X;
+    this.py = PLAYER.SPAWN_Y;
+    this.playerBody.setPosition(this.px, this.py);
+    this.playerAvatar.setPosition(this.px, this.py);
+    this.playerNameplate.setPosition(this.px, this.py - 46);
   }
 
   private setupCombat() {
@@ -1211,25 +1264,8 @@ export class WorldScene extends Phaser.Scene {
     if (this.time.now - this.lastDamageAt < LOCAL_HIT_COOLDOWN_MS) return;
     this.lastDamageAt = this.time.now;
     const dmg = Math.max(1, Math.min(40, Math.floor(next.dmg ?? 10)));
-    this.hp = Math.max(0, this.hp - dmg);
-    this.renderHpHud();
-
-    // hit feedback
-    const flash = this.add.rectangle(400, 300, 800, 600, 0xFF0000, 0.08)
-      .setScrollFactor(0)
-      .setDepth(20000);
-    this.tweens.add({ targets: flash, alpha: 0, duration: 140, onComplete: () => flash.destroy() });
-
-    if (this.hp <= 0) {
-      this.hp = 100;
-      this.renderHpHud();
-      // respawn at house spawn
-      this.px = PLAYER.SPAWN_X;
-      this.py = PLAYER.SPAWN_Y;
-      this.playerBody.setPosition(this.px, this.py);
-      this.playerAvatar.setPosition(this.px, this.py);
-      this.playerNameplate.setPosition(this.px, this.py - 46);
-    }
+    const source = this.remotePlayers.get(next.source_id);
+    this.applyLocalDamage(dmg, source?.x ?? this.px - 1, source?.y ?? this.py);
   }
 
   private handleRemoteJoin(payload: unknown) {
