@@ -372,9 +372,9 @@ export class CreatorScene extends Phaser.Scene {
     }
     ctx.putImageData(img, 0, 0);
     const textures = this.textures as Phaser.Textures.TextureManager;
-    textures
-      .addCanvas(outKey, canvas as HTMLCanvasElement)
-      .setFilter(Phaser.Textures.FilterMode.NEAREST);
+    const texture = textures.addCanvas(outKey, canvas as HTMLCanvasElement);
+    if (!texture) return;
+    texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
   }
 }
 

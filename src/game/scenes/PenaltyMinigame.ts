@@ -17,7 +17,7 @@ export class PenaltyMinigame extends Phaser.Scene {
   private phase: 'aim' | 'power' | 'anim' | 'done' = 'aim';
 
   private goalie!: Phaser.GameObjects.Rectangle;
-  private ball!: Phaser.GameObjects.Circle;
+  private ball!: Phaser.GameObjects.Arc;
   private aimMarker!: Phaser.GameObjects.Rectangle;
   private powerMarker!: Phaser.GameObjects.Rectangle;
   private hud!: Phaser.GameObjects.Text;
