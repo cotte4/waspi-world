@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { addTenks } from '../systems/TenksSystem';
-import { announceScene } from '../systems/SceneUi';
+import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 
 type PenaltyPhase = 'aiming' | 'shooting' | 'result' | 'done' | 'exiting';
@@ -41,8 +41,24 @@ export class PenaltyMinigame extends Phaser.Scene {
     super({ key: 'PenaltyMinigame' });
   }
 
+  private resetSceneState() {
+    this.isFinished = false;
+    this.goals = 0;
+    this.shotsTaken = 0;
+    this.phase = 'aiming';
+    this.aimX = 0;
+    this.aimDir = 1;
+    this.goalieTargetX = 0;
+    this.resultTimerMs = 0;
+    this.doneTimerMs = 0;
+    this.resultText = '';
+    this.resultColor = '#FFFFFF';
+  }
+
   create() {
     const { width, height } = this.scale;
+    this.resetSceneState();
+    this.input.enabled = true;
     announceScene(this);
 
     this.goalX = width / 2;
@@ -358,7 +374,6 @@ export class PenaltyMinigame extends Phaser.Scene {
     if (this.isFinished) return;
     this.isFinished = true;
     this.phase = 'exiting';
-    this.input.enabled = false;
 
     eventBus.emit(EVENTS.PENALTY_RESULT, {
       won,
@@ -366,16 +381,13 @@ export class PenaltyMinigame extends Phaser.Scene {
       shots: this.shotsTaken,
     });
 
-    this.cameras.main.fadeOut(250, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('ArcadeInterior', {
-        penaltyCooldownMs: 1200,
-        penaltyReward: {
-          won,
-          goals: this.goals,
-          shots: this.shotsTaken,
-        },
-      });
+    transitionToScene(this, 'ArcadeInterior', {
+      penaltyCooldownMs: 1200,
+      penaltyReward: {
+        won,
+        goals: this.goals,
+        shots: this.shotsTaken,
+      },
     });
   }
 

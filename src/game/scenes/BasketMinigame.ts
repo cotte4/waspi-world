@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { addTenks, initTenks } from '../systems/TenksSystem';
-import { announceScene } from '../systems/SceneUi';
+import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
 import { calculateBasketReward } from '../../lib/basketRewards';
@@ -59,8 +59,35 @@ export class BasketMinigame extends Phaser.Scene {
     super({ key: 'BasketMinigame' });
   }
 
+  private resetSceneState() {
+    this.phase = 'aiming';
+    this.isFinished = false;
+    this.roundTimerMs = ROUND_MS;
+    this.resultTimerMs = 0;
+    this.cooldownMs = 0;
+    this.score = 0;
+    this.shotsTaken = 0;
+    this.streak = 0;
+    this.currentPower = 0.5;
+    this.powerDir = 1;
+    this.currentAngle = -88;
+    this.angleDir = 1;
+    this.hoopOffset = 0;
+    this.hoopDir = 1;
+    this.lastResult = '';
+    this.lastResultColor = '#FFFFFF';
+    this.grantedRewardTenks = 0;
+    this.rewardPending = false;
+    this.rewardResolved = false;
+    this.rewardStatus = 'local';
+    this.rewardRunId = '';
+    this.rewardRunPromise = null;
+  }
+
   create() {
     const { width, height } = this.scale;
+    this.resetSceneState();
+    this.input.enabled = true;
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
 
@@ -463,19 +490,14 @@ export class BasketMinigame extends Phaser.Scene {
     if (this.rewardPending) return;
     this.isFinished = true;
     this.phase = 'exiting';
-    this.input.enabled = false;
-
-    this.cameras.main.fadeOut(250, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('ArcadeInterior', {
-        basketCooldownMs: 1200,
-        basketReward: {
-          score: this.score,
-          shots: this.shotsTaken,
-          tenksEarned: this.grantedRewardTenks,
-          status: this.rewardStatus,
-        },
-      });
+    transitionToScene(this, 'ArcadeInterior', {
+      basketCooldownMs: 1200,
+      basketReward: {
+        score: this.score,
+        shots: this.shotsTaken,
+        tenksEarned: this.grantedRewardTenks,
+        status: this.rewardStatus,
+      },
     });
   }
 
