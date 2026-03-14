@@ -44,7 +44,11 @@ const PACK_POS = { x: 1278, y: 610 } as const;
 const EXIT_PAD = { x: 182, y: 878, radius: 42 } as const;
 const DEPTHS_PAD = { x: 1586, y: 918, radius: 46 } as const;
 const PLAYER_RETURN = { x: 1600, y: 1540 } as const;
-const WALL_THICKNESS = 36;
+// Arena visual bounds: (60, 120) → (1760, 1100). Player boundary = arena edge + radius.
+const ARENA_MIN_X = 60;
+const ARENA_MIN_Y = 120;
+const ARENA_MAX_X = 1760;
+const ARENA_MAX_Y = 1100;
 
 type ZombiesSceneInitData = {
   returnScene?: string;
@@ -302,6 +306,9 @@ type SharedRunInteractPayload = {
   sectionId?: ZombiesSectionId;
   nodeId?: string;
   weaponId?: ZombiesWeaponId;
+  // Sender's position at the moment of interaction — avoids relying on stale sharedRunPlayers
+  px?: number;
+  py?: number;
 };
 
 type SharedRunWeaponGrantPayload = {
@@ -2265,7 +2272,7 @@ export class ZombiesScene extends Phaser.Scene {
     }
     if (option.kind === 'door' && option.sectionId) {
       if (this.isSharedCoopEnabled() && !this.isSharedRunHost()) {
-        this.broadcastSharedInteract({ player_id: this.playerId, kind: 'door', sectionId: option.sectionId });
+        this.broadcastSharedInteract({ player_id: this.playerId, kind: 'door', sectionId: option.sectionId, px: this.px, py: this.py });
         return;
       }
       this.tryUnlockDoor(option.sectionId);
@@ -2273,7 +2280,7 @@ export class ZombiesScene extends Phaser.Scene {
     }
     if (option.kind === 'box') {
       if (this.isSharedCoopEnabled() && !this.isSharedRunHost()) {
-        this.broadcastSharedInteract({ player_id: this.playerId, kind: 'box' });
+        this.broadcastSharedInteract({ player_id: this.playerId, kind: 'box', px: this.px, py: this.py });
         return;
       }
       this.tryRollMysteryBox();
@@ -2281,7 +2288,7 @@ export class ZombiesScene extends Phaser.Scene {
     }
     if (option.kind === 'upgrade') {
       if (this.isSharedCoopEnabled() && !this.isSharedRunHost()) {
-        this.broadcastSharedInteract({ player_id: this.playerId, kind: 'upgrade', weaponId: this.currentWeapon });
+        this.broadcastSharedInteract({ player_id: this.playerId, kind: 'upgrade', weaponId: this.currentWeapon, px: this.px, py: this.py });
         return;
       }
       this.tryUpgradeCurrentWeapon();
@@ -2793,7 +2800,7 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private isBlocked(x: number, y: number, radius: number) {
-    if (x - radius < WALL_THICKNESS || y - radius < WALL_THICKNESS || x + radius > ZOMBIES_WORLD.WIDTH - WALL_THICKNESS || y + radius > ZOMBIES_WORLD.HEIGHT - WALL_THICKNESS) {
+    if (x - radius < ARENA_MIN_X || y - radius < ARENA_MIN_Y || x + radius > ARENA_MAX_X || y + radius > ARENA_MAX_Y) {
       return true;
     }
 
@@ -3322,11 +3329,15 @@ export class ZombiesScene extends Phaser.Scene {
     const actor = this.sharedRunPlayers.get(request.player_id);
     if (!actor || !actor.alive) return;
 
+    // Prefer position from payload (fresh) over stored position (up to 66ms stale)
+    const ax = request.px ?? actor.x;
+    const ay = request.py ?? actor.y;
+
     if (request.kind === 'door' && request.sectionId) {
       const door = this.doors.get(request.sectionId);
       if (!door?.rect || door.unlocked) return;
       const expandedDoor = new Phaser.Geom.Rectangle(door.rect.x - 35, door.rect.y - 35, door.rect.width + 70, door.rect.height + 70);
-      if (!Phaser.Geom.Rectangle.Contains(expandedDoor, actor.x, actor.y)) return;
+      if (!Phaser.Geom.Rectangle.Contains(expandedDoor, ax, ay)) return;
       this.tryUnlockDoor(request.sectionId);
       this.lastSharedSnapshotSentAt = 0;
       return;
@@ -3334,20 +3345,20 @@ export class ZombiesScene extends Phaser.Scene {
 
     if (request.kind === 'repair' && request.nodeId) {
       const node = this.spawnNodes.get(request.nodeId);
-      if (!node || Phaser.Math.Distance.Between(actor.x, actor.y, node.x, node.y) > 78) return;
+      if (!node || Phaser.Math.Distance.Between(ax, ay, node.x, node.y) > 78) return;
       this.tryRepairBarricade(request.nodeId);
       this.lastSharedSnapshotSentAt = 0;
       return;
     }
 
     if (request.kind === 'box') {
-      if (Phaser.Math.Distance.Between(actor.x, actor.y, BOX_POS.x, BOX_POS.y) > 74) return;
+      if (Phaser.Math.Distance.Between(ax, ay, BOX_POS.x, BOX_POS.y) > 74) return;
       this.rollSharedMysteryBoxForPlayer(request.player_id);
       return;
     }
 
     if (request.kind === 'upgrade' && request.weaponId) {
-      if (Phaser.Math.Distance.Between(actor.x, actor.y, PACK_POS.x, PACK_POS.y) > 76) return;
+      if (Phaser.Math.Distance.Between(ax, ay, PACK_POS.x, PACK_POS.y) > 76) return;
       this.upgradeSharedWeaponForPlayer(request.player_id, request.weaponId);
     }
   }
