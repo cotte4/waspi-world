@@ -66,6 +66,9 @@ type SpawnNode = {
 type ZombieState = {
   id: string;
   type: ZombieType;
+  assetFolder: string;
+  displayLabel: string;
+  isBoss: boolean;
   container: Phaser.GameObjects.Container;
   body: Phaser.GameObjects.Sprite;
   label: Phaser.GameObjects.Text;
@@ -136,6 +139,9 @@ export class ZombiesScene extends Phaser.Scene {
   private spawnedThisRound: number = 0;
   private nextSpawnAt: number = 0;
   private roundBreakUntil: number = 0;
+  private bossRoundActive = false;
+  private bossSpawnedThisRound = false;
+  private bossAlive = false;
   private gameOver = false;
   private currentWeapon: ZombiesWeaponId = 'pistol';
   private weaponInventory!: WeaponInventory;
@@ -153,6 +159,9 @@ export class ZombiesScene extends Phaser.Scene {
   private doors = new Map<ZombiesSectionId, DoorState>();
   private mysteryBoxCooldownUntil: number = 0;
   private instaKillUntil: number = 0;
+  private audioContext?: AudioContext;
+  private lastSpawnSfxAt = 0;
+  private lastStompSfxAt = 0;
   private activePrompt?: Phaser.GameObjects.Text;
   private promptGlow?: Phaser.GameObjects.Graphics;
   private roundText?: Phaser.GameObjects.Text;
@@ -200,6 +209,9 @@ export class ZombiesScene extends Phaser.Scene {
     this.spawnedThisRound = 0;
     this.nextSpawnAt = 0;
     this.roundBreakUntil = 0;
+    this.bossRoundActive = false;
+    this.bossSpawnedThisRound = false;
+    this.bossAlive = false;
     this.gameOver = false;
     this.zombies.clear();
     this.zombieIdSeq = 0;
@@ -210,6 +222,8 @@ export class ZombiesScene extends Phaser.Scene {
     this.doors.clear();
     this.mysteryBoxCooldownUntil = 0;
     this.instaKillUntil = 0;
+    this.lastSpawnSfxAt = 0;
+    this.lastStompSfxAt = 0;
     this.lastShotAt = 0;
     this.reloadEndsAt = 0;
     this.lastDamageAt = 0;
@@ -294,6 +308,79 @@ export class ZombiesScene extends Phaser.Scene {
   private getZombieTextureKey(type: ZombieType, state: Exclude<ZombieAnimState, 'spawn'>) {
     const folder = ZOMBIE_TYPES[type].folder;
     return `zombie_${folder}_${state}`;
+  }
+
+  private getSpawnSectionsForRound() {
+    const unlocked = this.getUnlockedSections();
+    const available = new Set<ZombiesSectionId>(['start']);
+    if (this.round >= 3) available.add('yard');
+    if (this.round >= 6) available.add('workshop');
+    if (this.round >= 9) available.add('street');
+    if (this.bossRoundActive) {
+      available.add('workshop');
+      available.add('street');
+    }
+    const unlockedIds = new Set(unlocked.map((section) => section.id));
+    const sections = unlocked.filter((section) => available.has(section.id) && unlockedIds.has(section.id));
+    return sections.length ? sections : unlocked.filter((section) => section.id === 'start');
+  }
+
+  private getSectionSpawnWeight(sectionId: ZombiesSectionId) {
+    if (this.bossRoundActive) {
+      if (sectionId === 'street') return 5;
+      if (sectionId === 'workshop') return 4;
+      if (sectionId === 'yard') return 2;
+      return 1;
+    }
+    if (this.round < 3) return sectionId === 'start' ? 5 : 0;
+    if (this.round < 6) return sectionId === 'yard' ? 4 : sectionId === 'start' ? 2 : 0;
+    if (this.round < 9) return sectionId === 'workshop' ? 4 : sectionId === 'yard' ? 3 : sectionId === 'start' ? 1 : 0;
+    return sectionId === 'street' ? 5 : sectionId === 'workshop' ? 3 : sectionId === 'yard' ? 2 : 1;
+  }
+
+  private ensureAudioContext() {
+    if (this.audioContext) return this.audioContext;
+    try {
+      const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtor) return undefined;
+      this.audioContext = new AudioCtor();
+      return this.audioContext;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private playZombiesSfx(kind: 'round_start' | 'boss_round' | 'spawn' | 'stomp' | 'breach') {
+    try {
+      const ctx = this.ensureAudioContext();
+      if (!ctx) return;
+      if (ctx.state === 'suspended') {
+        void ctx.resume().catch(() => undefined);
+      }
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      const now = ctx.currentTime;
+      const settings = {
+        round_start: { freq: 520, freq2: 720, duration: 0.12, volume: 0.018, type: 'square' as OscillatorType },
+        boss_round: { freq: 220, freq2: 140, duration: 0.22, volume: 0.03, type: 'sawtooth' as OscillatorType },
+        spawn: { freq: 180, freq2: 140, duration: 0.08, volume: 0.012, type: 'triangle' as OscillatorType },
+        stomp: { freq: 90, freq2: 70, duration: 0.06, volume: 0.014, type: 'square' as OscillatorType },
+        breach: { freq: 150, freq2: 110, duration: 0.12, volume: 0.02, type: 'sawtooth' as OscillatorType },
+      }[kind];
+
+      osc.type = settings.type;
+      osc.frequency.setValueAtTime(settings.freq, now);
+      osc.frequency.exponentialRampToValueAtTime(settings.freq2, now + settings.duration);
+      gain.gain.setValueAtTime(settings.volume, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + settings.duration);
+      osc.start(now);
+      osc.stop(now + settings.duration);
+    } catch {
+      // Audio is intentionally best-effort only.
+    }
   }
 
   private buildArena() {
@@ -477,6 +564,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.keySpace = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
     this.pointerDownHandler = (pointer: Phaser.Input.Pointer) => {
+      this.ensureAudioContext();
       if (this.gameOver) return;
       this.tryShoot(pointer.worldX, pointer.worldY);
     };
@@ -605,7 +693,8 @@ export class ZombiesScene extends Phaser.Scene {
       this.gameOver ? 'GAME OVER' : this.instaKillUntil > this.time.now ? `INSTA ${Math.ceil((this.instaKillUntil - this.time.now) / 1000)}s` : this.reloadEndsAt > this.time.now ? 'RECARGANDO' : 'EN PIE',
       `ZOMBIES ${this.countAliveZombies()}/${this.roundTarget}`,
       `SPAWN ${this.spawnedThisRound}`,
-    ].join('\n'));
+      this.bossAlive ? 'BOSS ACTIVE' : this.bossRoundActive && !this.bossSpawnedThisRound ? 'BOSS INCOMING' : '',
+    ].filter(Boolean).join('\n'));
     this.inventoryText?.setText(`ARMAS ${this.weaponOrder.map((id) => id === this.currentWeapon ? `[${ZOMBIES_WEAPONS[id].label}]` : ZOMBIES_WEAPONS[id].label).join('  ')}`);
 
     if (this.reticle) {
@@ -641,8 +730,16 @@ export class ZombiesScene extends Phaser.Scene {
     this.spawnedThisRound = 0;
     this.nextSpawnAt = this.time.now + getRoundWarmupMs(this.round);
     this.roundBreakUntil = 0;
-    this.showNotice(`ROUND ${this.round}`, '#FFB36A');
+    this.bossRoundActive = this.isBossRound(this.round);
+    this.bossSpawnedThisRound = false;
+    this.bossAlive = false;
+    this.showNotice(this.bossRoundActive ? `BOSS ROUND ${this.round}` : `ROUND ${this.round}`, this.bossRoundActive ? '#FF6A6A' : '#FFB36A');
+    this.playZombiesSfx(this.bossRoundActive ? 'boss_round' : 'round_start');
     this.renderHud();
+  }
+
+  private isBossRound(round: number) {
+    return round >= 10 && round % 10 === 0;
   }
 
   update(_time: number, delta: number) {
@@ -843,7 +940,16 @@ export class ZombiesScene extends Phaser.Scene {
       return;
     }
 
-    if (this.countAliveZombies() === 0 && this.roundBreakUntil === 0) {
+    if (this.bossRoundActive && !this.bossSpawnedThisRound && !this.bossAlive && this.countAliveZombies() < concurrentCap) {
+      const spawnedBoss = this.spawnBossZombie();
+      if (spawnedBoss) {
+        this.bossSpawnedThisRound = true;
+        this.bossAlive = true;
+      }
+      return;
+    }
+
+    if (this.countAliveZombies() === 0 && !this.bossAlive && this.roundBreakUntil === 0) {
       this.roundBreakUntil = this.time.now + ZOMBIES_POINTS.roundBreakMs;
       this.showNotice(`LIMPIASTE LA RONDA ${this.round}`, '#9EFFB7');
     }
@@ -864,6 +970,11 @@ export class ZombiesScene extends Phaser.Scene {
   private pickZombieType(): ZombieType {
     const eligible = getEligibleZombieTypes(this.round);
     const roll = Phaser.Math.Between(0, 99);
+    if (this.bossRoundActive) {
+      if (roll > 62) return 'brute';
+      if (roll > 28) return 'runner';
+      return 'walker';
+    }
     if (this.round >= 6 && roll > 78) return 'brute';
     if (this.round >= 3 && roll > 52) return 'runner';
     return eligible.some((z) => z.type === 'walker') ? 'walker' : eligible[0].type;
@@ -874,11 +985,13 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private getAvailableSpawnNodes() {
-    const unlockedSectionIds = new Set(this.getUnlockedSections().map((section) => section.id));
-    const nodes = [...this.spawnNodes.values()].filter((node) => !node.occupiedBy && unlockedSectionIds.has(node.sectionId));
+    const directedSectionIds = new Set(this.getSpawnSectionsForRound().map((section) => section.id));
+    const nodes = [...this.spawnNodes.values()].filter((node) => !node.occupiedBy && directedSectionIds.has(node.sectionId));
     const distant = nodes.filter((node) => Phaser.Math.Distance.Between(this.px, this.py, node.x, node.y) >= 240);
     const pool = distant.length ? distant : nodes;
     return pool.sort((a, b) => {
+      const weightDiff = this.getSectionSpawnWeight(b.sectionId) - this.getSectionSpawnWeight(a.sectionId);
+      if (weightDiff !== 0) return weightDiff;
       if (a.boardHealth !== b.boardHealth) return a.boardHealth - b.boardHealth;
       return a.lastUsedAt - b.lastUsedAt;
     });
@@ -894,23 +1007,78 @@ export class ZombiesScene extends Phaser.Scene {
     const node = Phaser.Utils.Array.GetRandom(filtered.length ? filtered : candidates);
     const type = this.pickZombieType();
     const config = ZOMBIE_TYPES[type];
-    const hp = getZombieHpForRound(config.baseHp, this.round);
-    const speed = getZombieSpeedForRound(config.speed, this.round);
-    const radius = type === 'brute' ? 22 : type === 'runner' ? 15 : 18;
-    const breachMs = getZombieBreachMs(this.round, type);
+    return this.spawnConfiguredZombie(node, {
+      type,
+      assetFolder: config.folder,
+      displayLabel: config.label,
+      hp: getZombieHpForRound(config.baseHp, this.round),
+      speed: getZombieSpeedForRound(config.speed, this.round),
+      damage: config.damage,
+      attackRange: config.attackRange,
+      attackCooldownMs: config.attackCooldownMs,
+      hitReward: config.hitReward,
+      killReward: config.killReward,
+      radius: type === 'brute' ? 22 : type === 'runner' ? 15 : 18,
+      breachMs: getZombieBreachMs(this.round, type),
+      isBoss: false,
+      noticeColor: '#FF8B3D',
+    });
+  }
 
-    const shadow = this.add.ellipse(node.x, node.y + radius + 8, radius + 14, 14, 0x000000, 0.28);
-    const fallbackTexture = this.getZombieFallbackTexture(type);
-    const idleTexture = this.getZombieTextureKey(type, 'idle');
+  private spawnBossZombie() {
+    const candidates = this.getAvailableSpawnNodes().filter((node) => node.sectionId === 'street' || node.sectionId === 'workshop');
+    if (!candidates.length) return false;
+    const node = Phaser.Utils.Array.GetRandom(candidates);
+    const hp = Math.round(getZombieHpForRound(420, this.round) * 1.35);
+    return this.spawnConfiguredZombie(node, {
+      type: 'brute',
+      assetFolder: 'boss',
+      displayLabel: 'BOSS',
+      hp,
+      speed: getZombieSpeedForRound(0.55, this.round),
+      damage: 32,
+      attackRange: 36,
+      attackCooldownMs: 900,
+      hitReward: 25,
+      killReward: 420,
+      radius: 28,
+      breachMs: Math.max(700, getZombieBreachMs(this.round, 'brute') + 500),
+      isBoss: true,
+      noticeColor: '#FF3344',
+    });
+  }
+
+  private spawnConfiguredZombie(
+    node: SpawnNode,
+    config: {
+      type: ZombieType;
+      assetFolder: string;
+      displayLabel: string;
+      hp: number;
+      speed: number;
+      damage: number;
+      attackRange: number;
+      attackCooldownMs: number;
+      hitReward: number;
+      killReward: number;
+      radius: number;
+      breachMs: number;
+      isBoss: boolean;
+      noticeColor: string;
+    },
+  ) {
+    const shadow = this.add.ellipse(node.x, node.y + config.radius + 8, config.radius + 14, 14, 0x000000, 0.28);
+    const fallbackTexture = config.isBoss ? 'zombie_fallback_boss' : this.getZombieFallbackTexture(config.type);
+    const idleTexture = `zombie_${config.assetFolder}_idle`;
     const body = this.add.sprite(0, 0, this.textures.exists(idleTexture) ? idleTexture : fallbackTexture, 0);
     body.setOrigin(0.5, 0.7);
-    body.setScale(type === 'brute' ? 1.15 : type === 'runner' ? 0.95 : 1);
-    const hpBg = this.add.rectangle(0, -radius - 14, radius * 2, 4, 0x000000, 0.9);
-    const hpFill = this.add.rectangle(-radius, -radius - 14, radius * 2, 4, 0x39FF14, 0.95).setOrigin(0, 0.5);
-    const label = this.add.text(0, -radius - 26, config.label, {
+    body.setScale(config.isBoss ? 1.18 : config.type === 'brute' ? 1.15 : config.type === 'runner' ? 0.95 : 1);
+    const hpBg = this.add.rectangle(0, -config.radius - 14, config.radius * 2, 4, 0x000000, 0.9);
+    const hpFill = this.add.rectangle(-config.radius, -config.radius - 14, config.radius * 2, 4, 0x39FF14, 0.95).setOrigin(0, 0.5);
+    const label = this.add.text(0, -config.radius - 26, config.displayLabel, {
       fontSize: '6px',
       fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
+      color: config.isBoss ? '#FF6A6A' : '#F5C842',
     }).setOrigin(0.5);
 
     const container = this.add.container(node.x, node.y, [body, hpBg, hpFill, label]);
@@ -919,7 +1087,10 @@ export class ZombiesScene extends Phaser.Scene {
 
     const zombie: ZombieState = {
       id: `z_${this.zombieIdSeq += 1}`,
-      type,
+      type: config.type,
+      assetFolder: config.assetFolder,
+      displayLabel: config.displayLabel,
+      isBoss: config.isBoss,
       container,
       body,
       label,
@@ -928,21 +1099,21 @@ export class ZombiesScene extends Phaser.Scene {
       shadow,
       x: node.x,
       y: node.y,
-      hp,
-      maxHp: hp,
-      speed,
+      hp: config.hp,
+      maxHp: config.hp,
+      speed: config.speed,
       damage: config.damage,
       attackRange: config.attackRange,
       attackCooldownMs: config.attackCooldownMs,
       hitReward: config.hitReward,
       killReward: config.killReward,
-      radius,
+      radius: config.radius,
       state: 'walk',
       phase: Phaser.Math.FloatBetween(0, Math.PI * 2),
       alive: true,
       lastAttackAt: 0,
       spawnNodeId: node.id,
-      breachEndsAt: this.time.now + breachMs,
+      breachEndsAt: this.time.now + config.breachMs,
       lastStompAt: this.time.now,
       lastAnimatedState: undefined,
     };
@@ -951,7 +1122,8 @@ export class ZombiesScene extends Phaser.Scene {
     node.lastUsedAt = this.time.now;
     this.refreshSpawnNodeVisual(node, 0, true);
     this.zombies.set(zombie.id, zombie);
-    this.showNotice(`BREACH ${config.label}`, '#FF8B3D');
+    this.showNotice(`BREACH ${config.displayLabel}`, config.noticeColor);
+    this.playZombiesSfx('spawn');
     return true;
   }
 
@@ -974,6 +1146,10 @@ export class ZombiesScene extends Phaser.Scene {
               duration: 120,
               onComplete: () => stompFx.destroy(),
             });
+            if (this.time.now - this.lastStompSfxAt > 180) {
+              this.lastStompSfxAt = this.time.now;
+              this.playZombiesSfx('stomp');
+            }
           }
           zombie.container.setPosition(node.x, node.y + Math.sin(this.time.now / 90 + zombie.phase) * 2);
           zombie.shadow.setPosition(node.x, node.y + zombie.radius + 8);
@@ -984,6 +1160,7 @@ export class ZombiesScene extends Phaser.Scene {
           if (node) {
             node.boardHealth = 0;
           }
+          this.playZombiesSfx('breach');
           this.releaseSpawnNode(zombie, false);
         }
         continue;
@@ -1070,12 +1247,12 @@ export class ZombiesScene extends Phaser.Scene {
 
     const animState = state === 'spawn' ? 'attack' : state;
     if (zombie.lastAnimatedState !== animState) {
-      const textureKey = this.getZombieTextureKey(zombie.type, animState);
-      const fallbackTexture = this.getZombieFallbackTexture(zombie.type);
+      const textureKey = `zombie_${zombie.assetFolder}_${animState}`;
+      const fallbackTexture = zombie.isBoss ? 'zombie_fallback_boss' : this.getZombieFallbackTexture(zombie.type);
       safePlaySpriteAnimation(
         this,
         zombie.body,
-        `zs_${ZOMBIE_TYPES[zombie.type].folder}_${animState}`,
+        `zs_${zombie.assetFolder}_${animState}`,
         textureKey,
         fallbackTexture,
       );
@@ -1094,10 +1271,14 @@ export class ZombiesScene extends Phaser.Scene {
 
     zombie.alive = false;
     this.releaseSpawnNode(zombie, true);
+    if (zombie.isBoss) {
+      this.bossAlive = false;
+      this.playZombiesSfx('boss_round');
+    }
     this.points += zombie.killReward;
     zombie.container.setAlpha(0);
     zombie.shadow.setAlpha(0);
-    this.showFloatingText(`+${zombie.killReward} ${ZOMBIE_TYPES[zombie.type].label}`, zombie.x, zombie.y - 34, '#9EFFB7');
+    this.showFloatingText(`+${zombie.killReward} ${zombie.displayLabel}`, zombie.x, zombie.y - 34, '#9EFFB7');
     this.tryDropPickup(zombie.x, zombie.y);
     const burst = this.add.circle(zombie.x, zombie.y - 8, zombie.radius + 8, 0xFF6A6A, 0.26).setDepth(80);
     this.tweens.add({ targets: burst, alpha: 0, scale: 1.9, duration: 220, onComplete: () => burst.destroy() });
@@ -1453,6 +1634,10 @@ export class ZombiesScene extends Phaser.Scene {
     if (this.pointerDownHandler) {
       this.input.off('pointerdown', this.pointerDownHandler);
       this.pointerDownHandler = undefined;
+    }
+    if (this.audioContext) {
+      void this.audioContext.close().catch(() => undefined);
+      this.audioContext = undefined;
     }
   }
 }
