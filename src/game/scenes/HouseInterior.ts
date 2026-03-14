@@ -159,9 +159,9 @@ export class HouseInterior extends Phaser.Scene {
     });
   }
 
-  update() {
+  update(_time?: number, delta = 16.6) {
     if (this.inTransition) return;
-    this.handleMovement();
+    this.handleMovement(delta);
     this.room?.update();
     if (this.controls.isActionJustDown('interact')) {
       this.handleInteraction();
@@ -176,17 +176,11 @@ export class HouseInterior extends Phaser.Scene {
     }
   }
 
-  private handleMovement() {
-    const speed = 180 / 60;
-    let { dx, dy } = this.controls.readMovement();
+  private handleMovement(delta: number) {
+    const { dx, dy, stepX, stepY } = this.controls.readMovementStep(delta, 180);
 
-    if (dx !== 0 && dy !== 0) {
-      dx *= 0.707;
-      dy *= 0.707;
-    }
-
-    this.px = Phaser.Math.Clamp(this.px + dx * speed * 16.6, this.layout.roomX + 24, this.layout.roomX + this.layout.roomW - 24);
-    this.py = Phaser.Math.Clamp(this.py + dy * speed * 16.6, this.layout.roomY + 84, this.layout.roomY + this.layout.roomH - 12);
+    this.px = Phaser.Math.Clamp(this.px + stepX, this.layout.roomX + 24, this.layout.roomX + this.layout.roomW - 24);
+    this.py = Phaser.Math.Clamp(this.py + stepY, this.layout.roomY + 84, this.layout.roomY + this.layout.roomH - 12);
 
     this.player.update(dx !== 0 || dy !== 0, dx, dy);
     this.player.setPosition(this.px, this.py);

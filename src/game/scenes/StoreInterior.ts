@@ -564,7 +564,7 @@ export class StoreInterior extends Phaser.Scene {
     });
   }
 
-  update() {
+  update(_time?: number, delta = 16.6) {
     if (this.inTransition) return;
     this.syncPosition();
     this.updateRemotePlayers();
@@ -578,7 +578,7 @@ export class StoreInterior extends Phaser.Scene {
     }
 
     if (!this.dialog.isActive()) {
-      this.handleMovement();
+      this.handleMovement(delta);
     }
 
     if (this.controls.isActionJustDown('back')) {
@@ -640,14 +640,8 @@ export class StoreInterior extends Phaser.Scene {
     });
   }
 
-  private handleMovement() {
-    const speed = 180 / 60;
-    let { dx, dy } = this.controls.readMovement(true);
-
-    if (dx !== 0 && dy !== 0) {
-      dx *= 0.707;
-      dy *= 0.707;
-    }
+  private handleMovement(delta: number) {
+    const { dx, dy, stepX, stepY } = this.controls.readMovementStep(delta, 180, true);
 
     const { width, height } = this.scale;
     const roomW = 640;
@@ -655,8 +649,8 @@ export class StoreInterior extends Phaser.Scene {
     const roomX = (width - roomW) / 2 + 20;
     const roomY = (height - roomH) / 2 + 20;
 
-    this.px = Phaser.Math.Clamp(this.px + dx * speed * 16.6, roomX, roomX + roomW - 40);
-    this.py = Phaser.Math.Clamp(this.py + dy * speed * 16.6, roomY + 40, roomY + roomH - 10);
+    this.px = Phaser.Math.Clamp(this.px + stepX, roomX, roomX + roomW - 40);
+    this.py = Phaser.Math.Clamp(this.py + stepY, roomY + 40, roomY + roomH - 10);
 
     this.player.update(dx !== 0 || dy !== 0, dx, dy);
     this.player.setPosition(this.px, this.py);

@@ -29,6 +29,7 @@ export const COLORS = {
   BUILDING_ARCADE: 0x14142a,
   BUILDING_STORE: 0x181820,
   BUILDING_CAFE: 0x1a0e0a,
+  BUILDING_CASINO: 0x08001a,
   BUILDING_HOUSE: 0x18181f,
   ROOF_DARK: 0x0b0b14,
   WINDOW_COOL: 0x3c6cff,
@@ -91,6 +92,12 @@ export const BUILDINGS = {
     y: 310,
     w: 420,
     h: 230,
+  },
+  CASINO: {
+    x: 2600,
+    y: 305,
+    w: 460,
+    h: 255,
   },
   HOUSE: {
     x: 260,

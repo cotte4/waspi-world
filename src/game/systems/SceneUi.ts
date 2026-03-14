@@ -1,5 +1,9 @@
 import Phaser from 'phaser';
 import { eventBus, EVENTS } from '../config/eventBus';
+import { safeSceneDelayedCall } from './AnimationSafety';
+import { clearVirtualJoystickState } from './ControlSettings';
+
+const transitioningScenes = new WeakSet<Phaser.Scene>();
 
 export function announceScene(scene: Phaser.Scene) {
   eventBus.emit(EVENTS.SCENE_CHANGED, scene.scene.key);
@@ -84,13 +88,36 @@ export function transitionToScene(
   data: Record<string, unknown> = {},
   duration = 250,
 ) {
+  if (transitioningScenes.has(scene)) return;
+  transitioningScenes.add(scene);
   const camera = scene.cameras.main;
+  let finished = false;
+  const finalize = () => {
+    if (finished) return;
+    finished = true;
+    transitioningScenes.delete(scene);
+    try {
+      if (!scene.scene || scene.sys?.isActive?.() === false) return;
+      camera.resetFX();
+      camera.setAlpha(1);
+      scene.scene.start(targetKey, data);
+    } catch (error) {
+      console.error(`[Waspi] Failed to transition to ${targetKey}.`, error);
+    }
+  };
+
   scene.input.enabled = false;
+  if (scene.input.keyboard) {
+    scene.input.keyboard.enabled = false;
+  }
+  clearVirtualJoystickState();
   camera.resetFX();
   camera.setAlpha(1);
   camera.fadeOut(duration, 0, 0, 0);
-  camera.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-    scene.scene.start(targetKey, data);
+  camera.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, finalize);
+  safeSceneDelayedCall(scene, duration + 100, finalize, `transition fallback:${targetKey}`);
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+    transitioningScenes.delete(scene);
   });
 }
 

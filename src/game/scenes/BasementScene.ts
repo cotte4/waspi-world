@@ -134,18 +134,12 @@ export class BasementScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number) {
-    const speed = 520 * (delta / 1000);
-    let { dx, dy } = this.controls.readMovement();
-
-    if (dx !== 0 && dy !== 0) {
-      dx *= 0.707;
-      dy *= 0.707;
-    }
+    const { dx, dy, stepX, stepY } = this.controls.readMovementStep(delta, 220);
 
     if (dx !== 0 || dy !== 0) {
       const cam = this.cameras.main;
-      cam.scrollX = Phaser.Math.Clamp(cam.scrollX + dx * speed, 0, SCENE_W - cam.width / cam.zoom);
-      cam.scrollY = Phaser.Math.Clamp(cam.scrollY + dy * speed, 0, SCENE_H - cam.height / cam.zoom);
+      cam.scrollX = Phaser.Math.Clamp(cam.scrollX + stepX, 0, SCENE_W - cam.width / cam.zoom);
+      cam.scrollY = Phaser.Math.Clamp(cam.scrollY + stepY, 0, SCENE_H - cam.height / cam.zoom);
     }
 
     this.updateInteractionUi();

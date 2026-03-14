@@ -12,9 +12,12 @@ import { addXpToProgression, getMaxProgressionLevel, loadProgressionState, saveP
 import { loadCombatStats, saveCombatStats, type CombatStats } from '../systems/CombatStats';
 import {
   ensureFallbackRectTexture,
+  isLiveGameObject,
   safeBindAnimationComplete,
   safeCreateSpritesheetAnimation,
+  safeDestroyGameObject,
   safePlaySpriteAnimation,
+  safeSceneDelayedCall,
   safeSetSpriteTexture,
   safeWithLiveSprite,
 } from '../systems/AnimationSafety';
@@ -1047,10 +1050,16 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private renderDummyState(dummy: CombatDummy, state: DummyState) {
+    if (!isLiveGameObject(dummy) || !state.nameplate?.scene || !state.hpBar?.scene) return;
     const nameplateOffset = state.archetype === 'boss' ? -76 : state.archetype === 'tank' ? -58 : -42;
     state.nameplate.setPosition(dummy.x, dummy.y + nameplateOffset);
     state.sprite?.setPosition(dummy.x, dummy.y);
-    state.hpBar.clear();
+    try {
+      state.hpBar.clear();
+    } catch (error) {
+      console.error('[Waspi] Failed to clear dummy hp bar safely.', error);
+      return;
+    }
     if (!state.alive) return;
 
     const width = state.archetype === 'tank' ? 52 : 42;
@@ -1064,19 +1073,24 @@ export class WorldScene extends Phaser.Scene {
 
   private damageDummy(dummy: CombatDummy, damage: number, knockback: number) {
     const state = this.dummyStates.get(dummy);
-    if (!state || !state.alive) return;
+    if (!state || !state.alive || !isLiveGameObject(dummy) || !dummy.body) return;
 
     this.ensureAudioReady();
     this.playCombatTone(state.isBoss ? 220 : 260, 0.045, 'triangle', 0.05);
     state.hp = Math.max(0, state.hp - damage);
     const pushAngle = Phaser.Math.Angle.Between(this.px, this.py, dummy.x, dummy.y);
-    dummy.setPosition(
-      Phaser.Math.Clamp(dummy.x + Math.cos(pushAngle) * knockback, ZONES.TRAINING_X + 26, ZONES.TRAINING_X + ZONES.TRAINING_W - 26),
-      Phaser.Math.Clamp(dummy.y + Math.sin(pushAngle) * knockback, ZONES.TRAINING_Y + 26, ZONES.TRAINING_Y + ZONES.TRAINING_H - 26),
-    );
+    try {
+      dummy.setPosition(
+        Phaser.Math.Clamp(dummy.x + Math.cos(pushAngle) * knockback, ZONES.TRAINING_X + 26, ZONES.TRAINING_X + ZONES.TRAINING_W - 26),
+        Phaser.Math.Clamp(dummy.y + Math.sin(pushAngle) * knockback, ZONES.TRAINING_Y + 26, ZONES.TRAINING_Y + ZONES.TRAINING_H - 26),
+      );
+    } catch (error) {
+      console.error('[Waspi] Failed to reposition combat dummy safely.', error);
+      return;
+    }
     const flash = this.add.circle(dummy.x, dummy.y, 20, 0xFF4444, 0.24);
     flash.setDepth(5000);
-    this.tweens.add({ targets: flash, alpha: 0, scale: 1.8, duration: 180, onComplete: () => flash.destroy() });
+    this.tweens.add({ targets: flash, alpha: 0, scale: 1.8, duration: 180, onComplete: () => safeDestroyGameObject(flash) });
 
     const hitNumber = this.add.text(dummy.x, dummy.y - 8, `-${damage}`, {
       fontSize: '8px',
@@ -1091,7 +1105,7 @@ export class WorldScene extends Phaser.Scene {
       alpha: { from: 1, to: 0 },
       duration: 420,
       ease: 'Sine.easeOut',
-      onComplete: () => hitNumber.destroy(),
+      onComplete: () => safeDestroyGameObject(hitNumber),
     });
 
     state.sprite?.setState('hurt');
@@ -1145,7 +1159,7 @@ export class WorldScene extends Phaser.Scene {
       scale: { from: 1, to: 1.3 },
       duration: 520,
       ease: 'Sine.easeOut',
-      onComplete: () => burst.destroy(),
+      onComplete: () => safeDestroyGameObject(burst),
     });
 
     for (let i = 0; i < 6; i++) {
@@ -1160,7 +1174,7 @@ export class WorldScene extends Phaser.Scene {
         scale: { from: 1, to: 0.4 },
         duration: 380,
         ease: 'Quad.easeOut',
-        onComplete: () => shard.destroy(),
+        onComplete: () => safeDestroyGameObject(shard),
       });
     }
     this.renderBossHud();
@@ -1168,7 +1182,7 @@ export class WorldScene extends Phaser.Scene {
 
   private updateDummies() {
     for (const [dummy, state] of this.dummyStates) {
-      if (!dummy.active || !dummy.body) continue;
+      if (!isLiveGameObject(dummy) || !dummy.body) continue;
       if (!state.alive) {
         if (this.time.now < state.respawnAt) continue;
         state.alive = true;
@@ -1187,7 +1201,7 @@ export class WorldScene extends Phaser.Scene {
           alpha: { from: 0.8, to: 0 },
           duration: 420,
           ease: 'Sine.easeOut',
-          onComplete: () => ring.destroy(),
+          onComplete: () => safeDestroyGameObject(ring),
         });
         if (state.isBoss) {
           this.showArenaNotice('BOSS RESPAWN', '#3DD6FF');
@@ -1287,7 +1301,7 @@ export class WorldScene extends Phaser.Scene {
       onComplete: () => tracer.destroy(),
     });
 
-    this.time.delayedCall(1400, () => this.destroyArcadeObject(bullet));
+    safeSceneDelayedCall(this, 1400, () => this.destroyArcadeObject(bullet), 'enemy bullet cleanup');
   }
 
   private ensureAudioReady() {
@@ -2205,6 +2219,8 @@ export class WorldScene extends Phaser.Scene {
     this.drawStoreBuilding();
     // CAFÉ
     this.drawCafeBuilding();
+    // CASINO
+    this.drawCasinoBuilding();
   }
 
   private drawArcadeBuilding() {
@@ -2455,6 +2471,172 @@ export class WorldScene extends Phaser.Scene {
 
     // ── Warm ambient ─────────────────────────────────────────
     g.fillStyle(ORANGE, 0.022);
+    g.fillRect(x, y, w, h);
+  }
+
+  private drawCasinoBuilding() {
+    const { x, y, w, h } = BUILDINGS.CASINO;
+    const g = this.add.graphics().setDepth(2);
+    const GOLD   = COLORS.GOLD;
+    const PURPLE = 0x6B21A8;
+    const cx = x + w / 2;
+
+    // ── Facade base ─────────────────────────────────────────
+    g.fillStyle(COLORS.BUILDING_CASINO);
+    g.fillRect(x, y, w, h);
+    // Subtle vertical texture
+    for (let vx = x + 14; vx < x + w; vx += 14) {
+      g.lineStyle(1, 0x0e0028, 0.45);
+      g.lineBetween(vx, y, vx, y + h);
+    }
+
+    // ── Roof / cornice ───────────────────────────────────────
+    g.fillStyle(COLORS.ROOF_DARK);
+    g.fillRect(x - 10, y, w + 20, 26);
+    g.fillStyle(0x060010);
+    g.fillRect(x - 10, y + 24, w + 20, 5);
+    g.lineStyle(2, GOLD, 0.5);
+    g.lineBetween(x - 10, y + 26, x + w + 10, y + 26);
+
+    // ── Marquee lights along roofline ────────────────────────
+    const marqueeColors = [GOLD, 0xFF3A3A, 0x22CC88, GOLD, 0x8B5CF6, 0xFF3A3A, GOLD];
+    for (let mi = 0; mi < 20; mi++) {
+      const lx = x + 10 + mi * (w / 20);
+      const col = marqueeColors[mi % marqueeColors.length];
+      g.fillStyle(col, 0.85);
+      g.fillCircle(lx, y + 20, 3);
+    }
+    // Marquee tween (handled via separate graphics for animation)
+    const marqueeG = this.add.graphics().setDepth(3);
+    let marqueePhase = 0;
+    this.time.addEvent({
+      delay: 200,
+      repeat: -1,
+      callback: () => {
+        marqueeG.clear();
+        for (let mi = 0; mi < 20; mi++) {
+          const lx = x + 10 + mi * (w / 20);
+          if ((mi + marqueePhase) % 3 === 0) {
+            marqueeG.fillStyle(GOLD, 0.9);
+            marqueeG.fillCircle(lx, y + 20, 3.5);
+          }
+        }
+        marqueePhase = (marqueePhase + 1) % 3;
+      },
+    });
+
+    // ── Neon CASINO sign ─────────────────────────────────────
+    const sigW = 148, sigH = 22, sigX = cx - sigW / 2, sigY = y + 3;
+    g.fillStyle(0x060210);
+    g.fillRect(sigX, sigY, sigW, sigH);
+    g.lineStyle(2, GOLD, 0.95);
+    g.strokeRect(sigX, sigY, sigW, sigH);
+    g.fillStyle(GOLD, 0.1);
+    g.fillRect(sigX - 4, sigY - 2, sigW + 8, sigH + 4);
+
+    const casinoSign = this.add.text(cx, sigY + sigH / 2, '♠  CASINO  ♠', {
+      fontSize: '10px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(3);
+    // Colour-cycle tween on sign
+    let signHue = 0;
+    this.time.addEvent({
+      delay: 120,
+      repeat: -1,
+      callback: () => {
+        signHue = (signHue + 6) % 360;
+        const hsvColor = Phaser.Display.Color.HSVToRGB(signHue / 360, 1, 1) as Phaser.Types.Display.ColorObject;
+        casinoSign.setColor(Phaser.Display.Color.RGBToString(hsvColor.r, hsvColor.g, hsvColor.b));
+      },
+    });
+    this.tweens.add({
+      targets: casinoSign,
+      alpha: { from: 1, to: 0.6 },
+      duration: 900,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    // ── Windows (2 upper arched, 2 lower arched) ────────────
+    [[x + 30, y + 34], [x + 180, y + 34], [x + 260, y + 34], [x + 360, y + 34]].forEach(([wx, wy]) => {
+      const ww = 58, wh = 64;
+      g.fillStyle(PURPLE, 0.15);
+      g.fillRect(wx, wy, ww, wh);
+      g.lineStyle(2, PURPLE, 0.65);
+      g.strokeRect(wx, wy, ww, wh);
+      g.lineStyle(1, GOLD, 0.2);
+      g.lineBetween(wx + ww / 2, wy + 2, wx + ww / 2, wy + wh - 2);
+      g.lineBetween(wx + 2, wy + wh / 2, wx + ww - 2, wy + wh / 2);
+    });
+    [[x + 30, y + 122], [x + 360, y + 122]].forEach(([wx, wy]) => {
+      const ww = 58, wh = 54;
+      g.fillStyle(PURPLE, 0.12);
+      g.fillRect(wx, wy, ww, wh);
+      g.lineStyle(2, PURPLE, 0.55);
+      g.strokeRect(wx, wy, ww, wh);
+    });
+
+    // ── Gold column decorations ──────────────────────────────
+    [x + 20, x + w - 20].forEach((colX) => {
+      g.fillStyle(0x2a1a08);
+      g.fillRect(colX - 5, y + 26, 10, h - 26);
+      g.lineStyle(1, GOLD, 0.55);
+      g.strokeRect(colX - 5, y + 26, 10, h - 26);
+      g.fillStyle(GOLD, 0.7);
+      g.fillRect(colX - 7, y + 26, 14, 6);
+      g.fillRect(colX - 7, y + h - 6, 14, 6);
+    });
+
+    // ── Entrance (wide double doors) ─────────────────────────
+    const dX = cx - 40, dY = y + h - 82, dW = 80, dH = 82;
+    g.fillStyle(0x040008);
+    g.fillRect(dX, dY, dW, dH);
+    g.lineStyle(2, GOLD, 0.9);
+    g.strokeRect(dX, dY, dW, dH);
+    g.lineStyle(1, GOLD, 0.4);
+    g.lineBetween(cx, dY + 4, cx, dY + dH);
+    // Arch top
+    g.fillStyle(GOLD, 0.12);
+    g.fillRect(dX, dY, dW, 18);
+    // Door handles
+    g.fillStyle(GOLD, 0.9);
+    g.fillRect(cx - 12, dY + dH / 2 - 3, 4, 7);
+    g.fillRect(cx + 8, dY + dH / 2 - 3, 4, 7);
+    // "OPEN 24/7" mini sign above door
+    this.add.text(cx, dY - 10, '★ OPEN 24/7 ★', {
+      fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#F5C842',
+    }).setOrigin(0.5).setDepth(3);
+    // Glow
+    g.fillStyle(GOLD, 0.04);
+    g.fillRect(dX - 16, dY, dW + 32, dH);
+
+    // ── Gold/purple awning ───────────────────────────────────
+    const awX = cx - 52, awY = y + h - 94, awW = 104, awH = 12;
+    for (let ai = 0; ai < 8; ai++) {
+      g.fillStyle(ai % 2 === 0 ? GOLD : 0x2a0060, 0.88);
+      g.fillRect(awX + ai * Math.ceil(awW / 8), awY, Math.ceil(awW / 8), awH);
+    }
+    g.lineStyle(1, GOLD, 0.7);
+    g.strokeRect(awX, awY, awW, awH);
+    for (let fi = 0; fi < 9; fi++) {
+      g.lineStyle(1, GOLD, 0.4);
+      g.lineBetween(awX + fi * Math.ceil(awW / 9), awY + awH, awX + fi * Math.ceil(awW / 9), awY + awH + 6);
+    }
+
+    // ── Card suit symbols on facade ──────────────────────────
+    ['♠', '♥', '♣', '♦'].forEach((suit, i) => {
+      this.add.text(x + 110 + i * 60, y + 152, suit, {
+        fontSize: '18px', fontFamily: 'serif',
+        color: i % 2 === 0 ? '#3a2a6a' : '#5a1a1a',
+      }).setOrigin(0.5).setDepth(3);
+    });
+
+    // ── Warm gold ambient ────────────────────────────────────
+    g.fillStyle(GOLD, 0.018);
     g.fillRect(x, y, w, h);
   }
 
@@ -3115,11 +3297,11 @@ export class WorldScene extends Phaser.Scene {
     if (!obj || typeof obj !== 'object') return;
 
     if ('gameObject' in obj && obj.gameObject && typeof obj.gameObject === 'object') {
-      (obj.gameObject as ArcadeObject).destroy();
+      safeDestroyGameObject(obj.gameObject as ArcadeObject);
       return;
     }
     if ('destroy' in obj && typeof obj.destroy === 'function') {
-      (obj as ArcadeObject).destroy();
+      safeDestroyGameObject(obj as ArcadeObject);
     }
   }
 
@@ -3578,6 +3760,8 @@ export class WorldScene extends Phaser.Scene {
     const arcadeDoorX = BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2;
     const storeDoorX = BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2;
     const cafeDoorX = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
+    const casinoDoorX = BUILDINGS.CASINO.x + BUILDINGS.CASINO.w / 2;
+    const nearCasino = Math.abs(this.px - casinoDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearVecindad = this.px < 220 && this.py > ZONES.SOUTH_SIDEWALK_Y - 30 && this.py < ZONES.PLAZA_Y + 120;
     const nearPvpBooth = this.px >= 900 && this.px <= 1080 && this.py >= ZONES.PLAZA_Y + 420 && this.py <= ZONES.PLAZA_Y + 550;
     const basementDoorX = BUILDINGS.HOUSE.x + BUILDINGS.HOUSE.w / 2;
@@ -3606,6 +3790,9 @@ export class WorldScene extends Phaser.Scene {
     }
     if (nearCafe) {
       return { x: cafeDoorX, y: BUILDINGS.CAFE.y + BUILDINGS.CAFE.h - 28, w: 110, h: 76, label: 'SPACE ENTRAR CAFE', color: 0xFF8B3D, sceneKey: 'CafeInterior' };
+    }
+    if (nearCasino) {
+      return { x: casinoDoorX, y: BUILDINGS.CASINO.y + BUILDINGS.CASINO.h - 28, w: 120, h: 80, label: 'SPACE ENTRAR CASINO', color: 0xF5C842, sceneKey: 'CasinoInterior' };
     }
     return null;
   }
