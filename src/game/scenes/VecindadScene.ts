@@ -723,7 +723,7 @@ export class VecindadScene extends Phaser.Scene {
     this.px = Phaser.Math.Clamp(this.px + dx * speed, 84, VECINDAD_MAP.WIDTH - 84);
     this.py = Phaser.Math.Clamp(this.py + dy * speed, 84, VECINDAD_MAP.HEIGHT - 84);
 
-    this.player.update(dx !== 0 || dy !== 0, dx);
+    this.player.update(dx !== 0 || dy !== 0, dx, dy);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(50 + Math.floor(this.py / 10));
     this.lastMoveDx = dx;

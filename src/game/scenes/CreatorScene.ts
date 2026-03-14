@@ -11,7 +11,7 @@ import { announceScene, transitionToScene } from '../systems/SceneUi';
 
 const USERNAME_KEY = 'waspi_username';
 type CreatorControl = 'seed' | 'bodyColor' | 'eyeColor' | 'hairColor' | 'hairStyle' | 'pp' | 'tt' | 'save';
-type SeedId = 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha';
+type SeedId = 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha' | 'trap_a' | 'trap_b' | 'trap_c' | 'trap_d';
 
 export class CreatorScene extends Phaser.Scene {
   private preview!: AvatarRenderer;
@@ -38,7 +38,7 @@ export class CreatorScene extends Phaser.Scene {
   private readonly bodyColorOptions = [0xF5D5A4, 0xE6B98A, 0xD89B73, 0xBF7B4E, 0x9B5A3A, 0x7A412A];
   private readonly eyeColorOptions = [0x222222, 0x3B82F6, 0x22C55E, 0xA855F7, 0xDC2626, 0xFACC15];
   private readonly hairColorOptions = [0x1F130A, 0x8B5A2B, 0xF97316, 0xEF4444, 0xFFFFFF, 0xEC4899];
-  private readonly seedOptions: SeedId[] = ['procedural', 'gengar', 'buho', 'piplup', 'chacha'];
+  private readonly seedOptions: SeedId[] = ['procedural', 'gengar', 'buho', 'piplup', 'chacha', 'trap_a', 'trap_b', 'trap_c', 'trap_d'];
   private readonly hairStyleOptions: HairStyle[] = ['SPI', 'FLA', 'MOH', 'X'];
 
   constructor() {
@@ -145,6 +145,10 @@ export class CreatorScene extends Phaser.Scene {
       { id: 'buho', label: 'BUH' },
       { id: 'piplup', label: 'PIP' },
       { id: 'chacha', label: 'CHA' },
+      { id: 'trap_a', label: 'TRA' },
+      { id: 'trap_b', label: 'TRB' },
+      { id: 'trap_c', label: 'TRC' },
+      { id: 'trap_d', label: 'TRD' },
     ];
 
     const seedBaseX = leftCard.x + 64;
@@ -530,6 +534,14 @@ export class CreatorScene extends Phaser.Scene {
         return 'PIP';
       case 'chacha':
         return 'CHA';
+      case 'trap_a':
+        return 'TRA';
+      case 'trap_b':
+        return 'TRB';
+      case 'trap_c':
+        return 'TRC';
+      case 'trap_d':
+        return 'TRD';
       default:
         return 'PROC';
     }

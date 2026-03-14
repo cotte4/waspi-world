@@ -84,6 +84,31 @@ export class BootScene extends Phaser.Scene {
     this.load.spritesheet('weapon_shotgun_idle', '/assets/sprites/guns/03_shotgun/idle_strip.png', { frameWidth: 64, frameHeight: 64 });
     this.load.spritesheet('weapon_shotgun_shoot', '/assets/sprites/guns/03_shotgun/shoot_strip.png', { frameWidth: 64, frameHeight: 64 });
 
+    const CHARACTER_FOLDERS: Record<string, string> = {
+      trap_a: 'trap_A',
+      trap_b: 'trap_B',
+      trap_c: 'trap_C',
+      trap_d: 'trap_D',
+    };
+    const CHARACTER_STATES: Record<string, { file: string; frameWidth: number; frameHeight: number }> = {
+      idle: { file: 'idle_strip.png', frameWidth: 64, frameHeight: 64 },
+      walk_down: { file: 'walk_down_strip.png', frameWidth: 64, frameHeight: 64 },
+      walk_side: { file: 'walk_side_strip.png', frameWidth: 64, frameHeight: 64 },
+      walk_up: { file: 'walk_up_strip.png', frameWidth: 64, frameHeight: 64 },
+      shoot: { file: 'shoot_strip.png', frameWidth: 64, frameHeight: 64 },
+      hurt: { file: 'hurt_strip.png', frameWidth: 64, frameHeight: 64 },
+      death: { file: 'death_strip.png', frameWidth: 64, frameHeight: 64 },
+    };
+    for (const [kind, folder] of Object.entries(CHARACTER_FOLDERS)) {
+      for (const [state, meta] of Object.entries(CHARACTER_STATES)) {
+        this.load.spritesheet(
+          `character_${kind}_${state}`,
+          `/assets/sprites/character/player/${folder}/${meta.file}`,
+          { frameWidth: meta.frameWidth, frameHeight: meta.frameHeight },
+        );
+      }
+    }
+
     // Zombie enemy spritesheets
     const ZOMBIE_FRAME_SIZE: Record<string, number> = { rusher: 64, shooter: 64, tank: 96, boss: 128 };
     const ZOMBIE_ANIMS: Record<string, string[]> = {

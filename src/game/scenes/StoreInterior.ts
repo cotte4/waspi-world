@@ -316,7 +316,7 @@ export class StoreInterior extends Phaser.Scene {
     this.px = Phaser.Math.Clamp(this.px + dx * speed * 16.6, roomX, roomX + roomW - 40);
     this.py = Phaser.Math.Clamp(this.py + dy * speed * 16.6, roomY + 40, roomY + roomH - 10);
 
-    this.player.update(dx !== 0 || dy !== 0, dx);
+    this.player.update(dx !== 0 || dy !== 0, dx, dy);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(10 + Math.floor(this.py / 10));
     this.localNameplate?.setPosition(this.px, this.py - 44);

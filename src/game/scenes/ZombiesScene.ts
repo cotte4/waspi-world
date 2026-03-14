@@ -165,6 +165,7 @@ export class ZombiesScene extends Phaser.Scene {
   private lastShotAt: number = 0;
   private reloadEndsAt: number = 0;
   private lastIsMoving = false;
+  private lastMoveDy = 0;
   private lastDamageAt: number = 0;
   private zombies = new Map<string, ZombieState>();
   private zombieIdSeq = 0;
@@ -257,6 +258,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.lastStompSfxAt = 0;
     this.lastShotAt = 0;
     this.reloadEndsAt = 0;
+    this.lastMoveDy = 0;
     this.lastDamageAt = 0;
     this.px = ZOMBIES_PLAYER.startX;
     this.py = ZOMBIES_PLAYER.startY;
@@ -855,7 +857,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.updatePickups();
     this.handleContextInteraction();
     this.updatePromptHud(this.getNearbyInteraction());
-    this.player.update(this.lastIsMoving, this.input.activePointer.worldX - this.px);
+    this.player.update(this.lastIsMoving, this.input.activePointer.worldX - this.px, this.lastMoveDy);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(Math.floor(this.py / 10));
     this.playerName.setPosition(this.px, this.py - 44);
@@ -881,6 +883,7 @@ export class ZombiesScene extends Phaser.Scene {
     const nextY = this.py + dy * speed * this.game.loop.delta / 1000;
     const moved = this.tryMovePlayer(nextX, nextY);
     this.lastIsMoving = moved;
+    this.lastMoveDy = moved ? dy : 0;
   }
 
   private tryMovePlayer(nextX: number, nextY: number) {

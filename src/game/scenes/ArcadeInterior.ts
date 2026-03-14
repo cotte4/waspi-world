@@ -372,7 +372,7 @@ export class ArcadeInterior extends Phaser.Scene {
     this.px = Phaser.Math.Clamp(this.px + dx * speed, this.roomBounds.left, this.roomBounds.right);
     this.py = Phaser.Math.Clamp(this.py + dy * speed, this.roomBounds.top, this.roomBounds.bottom);
 
-    this.player.update(dx !== 0 || dy !== 0, dx);
+    this.player.update(dx !== 0 || dy !== 0, dx, dy);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(10 + Math.floor(this.py / 10));
     this.lastMoveDx = dx;

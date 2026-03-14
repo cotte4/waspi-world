@@ -173,7 +173,7 @@ export class HouseInterior extends Phaser.Scene {
     this.px = Phaser.Math.Clamp(this.px + dx * speed * 16.6, this.layout.roomX + 24, this.layout.roomX + this.layout.roomW - 24);
     this.py = Phaser.Math.Clamp(this.py + dy * speed * 16.6, this.layout.roomY + 84, this.layout.roomY + this.layout.roomH - 12);
 
-    this.player.update(dx !== 0 || dy !== 0, dx);
+    this.player.update(dx !== 0 || dy !== 0, dx, dy);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(10 + Math.floor(this.py / 10));
     this.lastMoveDx = dx;

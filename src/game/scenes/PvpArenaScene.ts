@@ -519,7 +519,7 @@ export class PvpArenaScene extends Phaser.Scene {
     this.py = nextY;
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(20 + Math.floor(this.py / 10));
-    this.player.update(true, mx);
+      this.player.update(true, mx, my);
     this.playerNameplate.setPosition(this.px, this.py - 46);
   }
 

@@ -2545,7 +2545,7 @@ export class WorldScene extends Phaser.Scene {
     this.px = finalX;
     this.py = finalY;
 
-    this.playerAvatar.update(isMoving, dx);
+    this.playerAvatar.update(isMoving, dx, dy);
     this.playerAvatar.setPosition(this.px, this.py);
     this.playerAvatar.setDepth(Math.floor(this.py / 10));
 
