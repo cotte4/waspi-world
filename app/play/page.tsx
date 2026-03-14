@@ -1525,15 +1525,16 @@ export default function PlayPage() {
           className="absolute right-2 top-28"
           style={{
             fontFamily: '"Press Start 2P", monospace',
-            fontSize: '8px',
-            padding: '8px 10px',
+            fontSize: '13px',
+            padding: '6px 9px',
             background: 'rgba(255,255,255,0.08)',
             color: '#FFFFFF',
             border: '1px solid rgba(255,255,255,0.15)',
             cursor: 'pointer',
+            lineHeight: 1,
           }}
         >
-          A/V
+          ⚙
         </button>
 
         <button
@@ -2080,24 +2081,48 @@ export default function PlayPage() {
         )}
 
         {settingsOpen && (
-          <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }}>
+          <div
+            className="ww-overlay absolute inset-0 flex items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.55)' }}
+            onClick={(e) => { if (e.target === e.currentTarget) closeSettings(); }}
+          >
             <div
-              className="ww-modal p-4"
+              className="ww-modal flex flex-col"
               style={{
-                width: isMobile ? '94%' : 420,
+                width: isMobile ? '94%' : 640,
+                maxHeight: isMobile ? '88%' : 520,
                 background: 'rgba(10,10,18,0.96)',
                 border: '1px solid rgba(245,200,66,0.35)',
                 boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
+                overflow: 'hidden',
               }}
             >
-              <div className="flex items-center justify-between mb-3" style={{ fontFamily: '"Press Start 2P", monospace', color: '#F5C842', fontSize: '10px' }}>
+              <div
+                className="flex items-center justify-between"
+                style={{
+                  padding: '16px 16px 10px',
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                  fontFamily: '"Press Start 2P", monospace',
+                  color: '#F5C842',
+                  fontSize: '10px',
+                  flexShrink: 0,
+                }}
+              >
                 <span>SETTINGS</span>
-                <button onClick={closeSettings} style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: '#999999' }}>
-                  X
+                <button onClick={closeSettings} style={modalCloseButtonStyle()}>
+                  CERRAR
                 </button>
               </div>
 
-              <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
+              <div
+                style={{
+                  overflowY: 'auto',
+                  padding: '12px 16px 16px',
+                  fontFamily: '"Silkscreen", monospace',
+                  color: 'rgba(255,255,255,0.9)',
+                  fontSize: '14px',
+                }}
+              >
                 <div className="flex items-center justify-between py-2">
                   <div>
                     <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>AUDIO</div>
@@ -2450,6 +2475,19 @@ function tabButtonStyle(active: boolean) {
     color: active ? '#0E0E14' : '#FFFFFF',
     border: active ? 'none' : '1px solid rgba(255,255,255,0.15)',
     cursor: 'pointer',
+  } as const;
+}
+
+function modalCloseButtonStyle() {
+  return {
+    fontFamily: '"Press Start 2P", monospace',
+    fontSize: '8px',
+    padding: '8px 10px',
+    color: '#FFFFFF',
+    background: 'rgba(255,255,255,0.08)',
+    border: '1px solid rgba(255,255,255,0.15)',
+    cursor: 'pointer',
+    flexShrink: 0,
   } as const;
 }
 

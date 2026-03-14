@@ -1,5 +1,6 @@
 import type { AvatarConfig } from '../game/systems/AvatarRenderer';
 import { getItem } from '../game/config/catalog';
+import { normalizeVecindadBuildStage } from './vecindad';
 
 const DEFAULT_UTILITY_ID = 'UTIL-GUN-01';
 export const VECINDAD_DEED_ITEM_ID = 'UTIL-DEED-01';
@@ -25,6 +26,7 @@ export type PlayerState = {
   avatar: AvatarConfig;
   mutedPlayers?: string[];
   vecindad: VecindadState;
+  progression?: { kills: number; xp: number };
 };
 
 export const DEFAULT_PLAYER_STATE: PlayerState = {
@@ -70,8 +72,17 @@ export function normalizePlayerState(input: unknown): PlayerState {
   const ownedWithDefaults = owned.includes(DEFAULT_UTILITY_ID) ? owned : [...owned, DEFAULT_UTILITY_ID];
   const utilityWithDefaults = utility.length ? utility : [DEFAULT_UTILITY_ID];
 
+  const progRaw = state.progression;
+  const progression: PlayerState['progression'] =
+    progRaw && typeof progRaw === 'object'
+      ? {
+          kills: typeof progRaw.kills === 'number' ? Math.max(0, Math.floor(progRaw.kills)) : 0,
+          xp: typeof progRaw.xp === 'number' ? Math.max(0, Math.floor(progRaw.xp)) : 0,
+        }
+      : undefined;
+
   return {
-    tenks: typeof state.tenks === 'number' ? state.tenks : DEFAULT_PLAYER_STATE.tenks,
+    tenks: typeof state.tenks === 'number' ? Math.max(0, Math.floor(state.tenks)) : DEFAULT_PLAYER_STATE.tenks,
     inventory: {
       owned: ownedWithDefaults,
       equipped: {
@@ -92,15 +103,17 @@ export function normalizePlayerState(input: unknown): PlayerState {
         state.vecindad && typeof state.vecindad === 'object' && typeof state.vecindad.ownedParcelId === 'string'
           ? state.vecindad.ownedParcelId
           : undefined,
-      buildStage:
+      buildStage: normalizeVecindadBuildStage(
         state.vecindad && typeof state.vecindad === 'object' && typeof state.vecindad.buildStage === 'number'
           ? state.vecindad.buildStage
-          : DEFAULT_PLAYER_STATE.vecindad.buildStage,
+          : DEFAULT_PLAYER_STATE.vecindad.buildStage
+      ),
       materials:
         state.vecindad && typeof state.vecindad === 'object' && typeof state.vecindad.materials === 'number'
-          ? state.vecindad.materials
+          ? Math.max(0, Math.floor(state.vecindad.materials))
           : DEFAULT_PLAYER_STATE.vecindad.materials,
     },
+    progression,
   };
 }
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getAuthenticatedUser, hasServiceRole, isServerSupabaseConfigured } from '@/src/lib/supabaseServer';
-import { cancelPvpStake, reportPvpLoss, reservePvpStake, settlePvpMatch } from '@/src/lib/pvpMatchServer';
+import { cancelPvpStake, reportPvpLoss, reservePvpStake, settlePvpForfeit, settlePvpMatch } from '@/src/lib/pvpMatchServer';
 
 type ReserveBody = {
   action: 'reserve';
@@ -16,6 +16,13 @@ type CancelBody = {
 
 type SettleBody = {
   action: 'settle';
+  matchId?: string;
+  winnerId?: string;
+  loserId?: string;
+};
+
+type SettleForfeitBody = {
+  action: 'settle_forfeit';
   matchId?: string;
   winnerId?: string;
   loserId?: string;
@@ -45,7 +52,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Admin client unavailable.' }, { status: 500 });
   }
 
-  const body = await request.json().catch(() => null) as (ReserveBody | CancelBody | SettleBody | ReportLossBody | null);
+  const body = await request.json().catch(() => null) as (
+    ReserveBody | CancelBody | SettleBody | SettleForfeitBody | ReportLossBody | null
+  );
   if (!body?.action) {
     return NextResponse.json({ error: 'Missing action.' }, { status: 400 });
   }
@@ -95,6 +104,21 @@ export async function POST(request: NextRequest) {
         caller: user,
         matchId: body.matchId,
         winnerId: body.winnerId,
+      });
+
+      return NextResponse.json(result);
+    }
+
+    if (body.action === 'settle_forfeit') {
+      if (!body.matchId || !body.winnerId || !body.loserId) {
+        return NextResponse.json({ error: 'Missing forfeit payload.' }, { status: 400 });
+      }
+
+      const result = await settlePvpForfeit(admin, {
+        caller: user,
+        matchId: body.matchId,
+        winnerId: body.winnerId,
+        loserId: body.loserId,
       });
 
       return NextResponse.json(result);

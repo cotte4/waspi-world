@@ -27,10 +27,34 @@ export const VECINDAD_MAP = {
 
 export const BUILD_STAGE_COSTS = [0, 40, 90, 160] as const;
 
+export function normalizeVecindadBuildStage(stage: number | null | undefined) {
+  if (typeof stage !== 'number' || !Number.isFinite(stage)) return 0;
+  return Math.min(MAX_VECINDAD_STAGE, Math.max(0, Math.floor(stage)));
+}
+
 export function getBuildCost(stage: number) {
-  if (stage <= 0) return BUILD_STAGE_COSTS[1];
-  if (stage >= MAX_VECINDAD_STAGE) return 0;
-  return BUILD_STAGE_COSTS[stage];
+  const normalizedStage = normalizeVecindadBuildStage(stage);
+  if (normalizedStage <= 0) return BUILD_STAGE_COSTS[1];
+  if (normalizedStage >= MAX_VECINDAD_STAGE) return 0;
+  return BUILD_STAGE_COSTS[normalizedStage];
+}
+
+export function getNextVecindadBuildCost(stage: number | null | undefined) {
+  const normalizedStage = normalizeVecindadBuildStage(stage);
+  if (normalizedStage >= MAX_VECINDAD_STAGE) return 0;
+  return getBuildCost(normalizedStage);
+}
+
+export function getNextVecindadBuildStage(stage: number | null | undefined) {
+  return Math.min(MAX_VECINDAD_STAGE, normalizeVecindadBuildStage(stage) + 1);
+}
+
+export function hasBuiltVecindadHouse(stage: number | null | undefined) {
+  return normalizeVecindadBuildStage(stage) > 0;
+}
+
+export function getHouseInteriorStage(stage: number | null | undefined) {
+  return Math.max(1, normalizeVecindadBuildStage(stage));
 }
 
 export const VECINDAD_PARCELS: VecindadParcelConfig[] = [

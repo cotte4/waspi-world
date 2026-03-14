@@ -3,7 +3,7 @@ import { createSupabaseAdminClient, getAuthenticatedUser, hasServiceRole, isServ
 import { grantInventoryItem, normalizePlayerState, syncVecindadDeed, VECINDAD_DEED_ITEM_ID, type PlayerState } from '@/src/lib/playerState';
 import { ensurePlayerRow } from '@/src/lib/commercePersistence';
 import { createVecindadParcel, deleteVecindadParcel, getParcelOccupant, getUserVecindadParcel, listVecindadParcels, loadPlayerUsername, mergePlayerWithVecindad, persistPlayerMetadata, updateVecindadParcelBuildStage } from '@/src/lib/vecindadPersistence';
-import { getBuildCost, getParcelById, MAX_VECINDAD_STAGE } from '@/src/lib/vecindad';
+import { getNextVecindadBuildCost, getNextVecindadBuildStage, getParcelById, MAX_VECINDAD_STAGE, normalizeVecindadBuildStage } from '@/src/lib/vecindad';
 
 const PLAYER_METADATA_KEY = 'waspiPlayer';
 
@@ -64,6 +64,7 @@ export async function POST(request: NextRequest) {
 
   try {
     await ensurePlayerRow(admin, user, player);
+    player = await mergePlayerWithVecindad(admin, user.id, player);
 
     if (body.action === 'buy') {
       const parcel = getParcelById(body.parcelId);
@@ -93,7 +94,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: `Necesitas ${parcel.cost} TENKS para comprar esta parcela.` }, { status: 400 });
       }
 
-      const nextBuildStage = myParcel?.buildStage ?? player.vecindad.buildStage ?? 0;
+      const nextBuildStage = normalizeVecindadBuildStage(myParcel?.buildStage ?? player.vecindad.buildStage ?? 0);
       player = syncVecindadDeed({
         ...player,
         tenks: Math.max(0, player.tenks - parcel.cost),
@@ -141,17 +142,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Primero necesitas comprar una parcela.' }, { status: 400 });
     }
 
-    const currentStage = myParcel.buildStage;
+    const currentStage = normalizeVecindadBuildStage(myParcel.buildStage);
     if (currentStage >= MAX_VECINDAD_STAGE) {
       return NextResponse.json({ error: 'Tu casa ya esta al maximo.' }, { status: 400 });
     }
 
-    const materialCost = getBuildCost(currentStage);
+    const materialCost = getNextVecindadBuildCost(currentStage);
     if (player.vecindad.materials < materialCost) {
       return NextResponse.json({ error: `Necesitas ${materialCost} materiales para seguir construyendo.` }, { status: 400 });
     }
 
-    const nextStage = currentStage + 1;
+    const nextStage = getNextVecindadBuildStage(currentStage);
     player = {
       ...player,
       vecindad: {

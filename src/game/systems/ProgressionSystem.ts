@@ -91,3 +91,9 @@ export function saveProgressionState(state: ProgressionState) {
 export function addXpToProgression(state: ProgressionState, xpGained: number) {
   return getProgressionForTotals(state.kills + 1, state.xp + clampXp(xpGained));
 }
+
+export function initProgressionState(kills: number, xp: number): ProgressionState {
+  const state = getProgressionForTotals(kills, xp);
+  saveProgressionState(state);
+  return state;
+}

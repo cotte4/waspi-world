@@ -34,8 +34,9 @@ export function spendTenks(amount: number, reason: string): boolean {
   return true;
 }
 
-export function initTenks(initial: number) {
-  balance = readStoredBalance() ?? initial;
+export function initTenks(initial: number, options?: { preferStored?: boolean }) {
+  const preferStored = options?.preferStored ?? true;
+  balance = preferStored ? (readStoredBalance() ?? initial) : initial;
   persistBalance();
   eventBus.emit(EVENTS.TENKS_CHANGED, { balance, delta: 0, reason: 'init' });
 }

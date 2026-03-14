@@ -54,4 +54,8 @@ export const EVENTS = {
   VECINDAD_UPDATE_REQUEST: 'vecindad:update:request',
   UI_NOTICE: 'ui:notice',
   SAFE_RESET_TO_PLAZA: 'scene:safe-reset-to-plaza',
+  STATS_ZOMBIE_KILL: 'stats:zombie:kill',
+  STATS_PVP_RESULT: 'stats:pvp:result',
+  STATS_BASKET_GAME: 'stats:basket:game',
+  OPEN_STATS: 'stats:open',
 } as const;
