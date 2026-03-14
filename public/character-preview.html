@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Waspi Characters</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0E0E14; font-family: 'Press Start 2P', 'Courier New', monospace; color: #F5C842; display: flex; flex-direction: column; align-items: center; padding: 40px 20px; min-height: 100vh; }
+    h1 { font-size: 14px; letter-spacing: 4px; margin-bottom: 6px; }
+    p  { font-size: 7px; color: #555; margin-bottom: 48px; letter-spacing: 3px; }
+    .grid { display: flex; gap: 28px; flex-wrap: wrap; justify-content: center; }
+    .card { display: flex; flex-direction: column; align-items: center; gap: 14px; background: #13131C; border: 2px solid #1e1e2e; border-radius: 8px; padding: 24px 20px; cursor: pointer; transition: all 0.15s; width: 180px; }
+    .card:hover { border-color: #F5C842; transform: translateY(-6px); box-shadow: 0 12px 40px rgba(245,200,66,0.18); }
+    .card.selected { border-color: #F5C842; box-shadow: 0 0 0 3px #F5C842, 0 12px 40px rgba(245,200,66,0.25); }
+    .sprite-wrap { background: #0a0a10; border-radius: 6px; padding: 10px; display: flex; align-items: center; justify-content: center; width: 120px; height: 120px; }
+    .sprite-wrap img { width: 100px; height: 100px; image-rendering: pixelated; }
+    .label { font-size: 10px; letter-spacing: 3px; color: #F5C842; }
+    .vibe { font-size: 7px; color: #888; text-align: center; line-height: 2; letter-spacing: 1px; text-transform: uppercase; }
+    .badge { font-size: 7px; background: #F5C842; color: #0E0E14; padding: 3px 10px; border-radius: 3px; letter-spacing: 2px; display: none; margin-top: 4px; }
+    .card.selected .badge { display: block; }
+  </style>
+</head>
+<body>
+  <h1>WASPI WORLD</h1>
+  <p>SELECT YOUR CHARACTER</p>
+
+  <div class="grid">
+    <div class="card" onclick="select(this)">
+      <div class="sprite-wrap">
+        <img src="/assets/sprites/character/player/base_models/trap_A.png" />
+      </div>
+      <div class="label">THE OG</div>
+      <div class="vibe">do-rag · grillz<br>unbothered energy</div>
+      <div class="badge">SELECTED</div>
+    </div>
+    <div class="card" onclick="select(this)">
+      <div class="sprite-wrap">
+        <img src="/assets/sprites/character/player/base_models/trap_B.png" />
+      </div>
+      <div class="label">THE GHOST</div>
+      <div class="vibe">fitted low · tear drop<br>woke up like this</div>
+      <div class="badge">SELECTED</div>
+    </div>
+    <div class="card" onclick="select(this)">
+      <div class="sprite-wrap">
+        <img src="/assets/sprites/character/player/base_models/trap_C.png" />
+      </div>
+      <div class="label">THE PLUG</div>
+      <div class="vibe">dreads · gold tooth<br>always scheming</div>
+      <div class="badge">SELECTED</div>
+    </div>
+    <div class="card" onclick="select(this)">
+      <div class="sprite-wrap">
+        <img src="/assets/sprites/character/player/base_models/trap_D.png" />
+      </div>
+      <div class="label">THE WAVE</div>
+      <div class="vibe">twists · nose ring<br>soundcloud energy</div>
+      <div class="badge">SELECTED</div>
+    </div>
+  </div>
+
+  <script>
+    function select(card) {
+      document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+    }
+  </script>
+</body>
+</html>
