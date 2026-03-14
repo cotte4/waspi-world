@@ -15,6 +15,7 @@ import {
 } from '../systems/AnimationSafety';
 import { SceneControls } from '../systems/SceneControls';
 import { eventBus, EVENTS } from '../config/eventBus';
+import { getInventory } from '../systems/InventorySystem';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
 import { supabase, isConfigured } from '../../lib/supabase';
 import {
@@ -438,8 +439,9 @@ export class ZombiesScene extends Phaser.Scene {
     this.avatarConfig = loadStoredAvatarConfig();
     this.chatSystem = new ChatSystem(this);
     this.weaponInventory = this.createWeaponInventory();
-    this.weaponOrder = ['pistol'];
-    this.currentWeapon = 'pistol';
+    this.applyArmsDelaerLoadout();
+    this.weaponOrder = ['pistol', ...(['shotgun', 'smg', 'rifle', 'raygun'] as ZombiesWeaponId[]).filter(id => this.weaponInventory[id].owned)];
+    this.currentWeapon = this.weaponOrder[this.weaponOrder.length - 1];
     this.points = ZOMBIES_POINTS.start;
     this.hp = ZOMBIES_PLAYER.maxHp;
     this.round = 0;
@@ -507,12 +509,34 @@ export class ZombiesScene extends Phaser.Scene {
 
   private createWeaponInventory(): WeaponInventory {
     return {
-      pistol: { owned: true, ammoInMag: ZOMBIES_WEAPONS.pistol.magazineSize, reserveAmmo: ZOMBIES_WEAPONS.pistol.reserveAmmo, upgraded: false },
+      pistol:  { owned: true,  ammoInMag: ZOMBIES_WEAPONS.pistol.magazineSize,  reserveAmmo: ZOMBIES_WEAPONS.pistol.reserveAmmo,  upgraded: false },
       shotgun: { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
-      smg: { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
-      rifle: { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
-      raygun: { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
+      smg:     { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
+      rifle:   { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
+      raygun:  { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
     };
+  }
+
+  // Maps catalog utility items to zombies starting weapons
+  private applyArmsDelaerLoadout() {
+    const owned = getInventory().owned;
+    const grants: Array<[string, ZombiesWeaponId]> = [
+      ['UTIL-GUN-SHOT-01', 'shotgun'],
+      ['UTIL-GUN-SMG-01',  'smg'],
+      ['UTIL-GUN-RIFL-01', 'rifle'],
+      ['UTIL-GUN-GOLD-01', 'raygun'],
+    ];
+    for (const [itemId, weaponId] of grants) {
+      if (owned.includes(itemId)) {
+        const stats = ZOMBIES_WEAPONS[weaponId];
+        this.weaponInventory[weaponId] = {
+          owned: true,
+          ammoInMag: stats.magazineSize,
+          reserveAmmo: stats.reserveAmmo,
+          upgraded: false,
+        };
+      }
+    }
   }
 
   private setupZombieAnimations() {

@@ -16,8 +16,12 @@ export type CatalogItem = {
 
 // MVP virtual catalog (TENKS-only for now)
 export const CATALOG: CatalogItem[] = [
-  // Cotte Shop utilities (requested: cost 5k)
-  { id: 'UTIL-GUN-01', name: 'GUN', slot: 'utility', category: 'accessory', virtualType: 'accessory', description: 'Utilidad cosmetica para disparar.', priceTenks: 5000 },
+  // Arms Dealer weapons — unlock weapon in WorldScene + start with it in Zombies
+  { id: 'UTIL-GUN-01',     name: 'PISTOLA 9MM',   slot: 'utility', category: 'accessory', virtualType: 'accessory', description: 'La base. Ya la tenés.', priceTenks: 5000 },
+  { id: 'UTIL-GUN-SHOT-01', name: 'ESCOPETA 12G', slot: 'utility', category: 'accessory', virtualType: 'accessory', description: 'Desbloquea shotgun en el mundo + zombies.', priceTenks: 11000 },
+  { id: 'UTIL-GUN-SMG-01',  name: 'BUZZ SMG',     slot: 'utility', category: 'accessory', virtualType: 'accessory', description: 'Full auto. Empezás zombies con el SMG.', priceTenks: 14000 },
+  { id: 'UTIL-GUN-RIFL-01', name: 'RANGER RIFLE', slot: 'utility', category: 'accessory', virtualType: 'accessory', description: 'Larga distancia. Empezás zombies con rifle.', priceTenks: 21000 },
+  { id: 'UTIL-GUN-GOLD-01', name: 'RAY-X',        slot: 'utility', category: 'accessory', virtualType: 'accessory', description: 'El cañón. Desbloquea RAY-X desde ronda 1.', priceTenks: 42000, isLimited: true },
   { id: 'UTIL-BALL-01', name: 'FOOTBALL', slot: 'utility', category: 'accessory', virtualType: 'accessory', description: 'Pelota cosmetica con bote.', priceTenks: 5000 },
   { id: 'UTIL-DEED-01', name: 'ESCRITURA', slot: 'utility', category: 'accessory', virtualType: 'accessory', description: 'Escritura oficial de tu parcela en La Vecindad.', priceTenks: 0, autoEquip: false },
 

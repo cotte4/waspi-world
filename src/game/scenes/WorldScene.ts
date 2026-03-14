@@ -4,8 +4,10 @@ import { ChatSystem } from '../systems/ChatSystem';
 import { WORLD, PLAYER, COLORS, ZONES, BUILDINGS, CHAT, SAFE_PLAZA_RETURN } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
-import { addTenks, initTenks } from '../systems/TenksSystem';
-import { getEquippedColors, hasUtilityEquipped } from '../systems/InventorySystem';
+import { addTenks, initTenks, getTenksBalance } from '../systems/TenksSystem';
+import { getEquippedColors, hasUtilityEquipped, ownItem, equipItem, getInventory, replaceInventory } from '../systems/InventorySystem';
+import { DialogSystem } from '../systems/DialogSystem';
+import { CATALOG } from '../config/catalog';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
 import { loadHudSettings, type HudSettings } from '../systems/HudSettings';
 import { addXpToProgression, getMaxProgressionLevel, loadProgressionState, saveProgressionState, type ProgressionState } from '../systems/ProgressionSystem';
@@ -175,6 +177,7 @@ type InteractionTarget = {
   label: string;
   color: number;
   sceneKey?: string;
+  npcKey?: string;
 };
 
 const REMOTE_CHAT_MIN_MS = 1000;
@@ -396,6 +399,12 @@ export class WorldScene extends Phaser.Scene {
   private interactionHighlight?: Phaser.GameObjects.Graphics;
   private runtimeFailures = new Set<string>();
 
+  // Gun Dealer NPC
+  private gunDealerAvatar: AvatarRenderer | null = null;
+  private gunShopPanel: Phaser.GameObjects.Container | null = null;
+  private gunDealerDialog: DialogSystem | null = null;
+  private gunShopOpen = false;
+
   constructor() {
     super({ key: 'WorldScene' });
   }
@@ -583,6 +592,7 @@ export class WorldScene extends Phaser.Scene {
 
     // Ambient NPC
     this.runBootStep('ambient npcs', () => this.spawnAmbientNPCs());
+    this.runBootStep('gun dealer npc', () => this.spawnGunDealerNPC());
 
     // HP/Combat/Utilities
     this.runBootStep('hp hud', () => this.setupHpHud());
@@ -863,11 +873,12 @@ export class WorldScene extends Phaser.Scene {
 
   private switchWeapon(nextWeapon?: WeaponMode) {
     if (!this.gunEnabled) return;
-    if (nextWeapon) {
-      this.currentWeapon = nextWeapon;
-    } else {
-      this.currentWeapon = this.currentWeapon === 'pistol' ? 'shotgun' : 'pistol';
+    const target = nextWeapon ?? (this.currentWeapon === 'pistol' ? 'shotgun' : 'pistol');
+    if (target === 'shotgun' && !this.hasShotgunUnlocked()) {
+      eventBus.emit(EVENTS.UI_NOTICE, 'Comprá la ESCOPETA 12G al Arms Dealer para desbloquear.');
+      return;
     }
+    this.currentWeapon = target;
     this.syncWeaponVisual();
     this.renderCombatHud();
     this.broadcastSelfState('player:update');
@@ -1598,9 +1609,20 @@ export class WorldScene extends Phaser.Scene {
     return Math.abs(-dx * Math.sin(angle) + dy * Math.cos(angle));
   }
 
+  private hasShotgunUnlocked(): boolean {
+    return (
+      hasUtilityEquipped('UTIL-GUN-SHOT-01') ||
+      hasUtilityEquipped('UTIL-GUN-GOLD-01')
+    );
+  }
+
   private refreshUtilitiesFromInventory() {
     this.gunEnabled = true;
     this.ballEnabled = hasUtilityEquipped('UTIL-BALL-01');
+    // If player switched to shotgun but no longer owns the unlock, revert to pistol
+    if (this.currentWeapon === 'shotgun' && !this.hasShotgunUnlocked()) {
+      this.currentWeapon = 'pistol';
+    }
     this.renderCombatHud();
     this.syncWeaponVisual();
 
@@ -2832,6 +2854,277 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
+  // ─── Gun Dealer NPC ──────────────────────────────────────────────────────────
+
+  private spawnGunDealerNPC() {
+    const x = 1100;
+    const y = 870;
+    const cfg: AvatarConfig = {
+      bodyColor: 0xC17A4A,
+      hairColor: 0x000000,
+      topColor: 0x1a1a2e,
+      bottomColor: 0x0d0d1a,
+    };
+    this.gunDealerAvatar = this.createSafeAvatarRenderer(x, y, cfg, 'gun-dealer');
+    this.gunDealerAvatar.setDepth(Math.floor(y / 10));
+
+    // Subtle idle sway
+    this.tweens.add({
+      targets: this.gunDealerAvatar.getContainer(),
+      y: y + 4,
+      duration: 2200,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+      onUpdate: () => this.gunDealerAvatar?.update(false, 0),
+    });
+
+    // Nameplate
+    this.add.text(x, y - 52, 'ARMS DEALER', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FF6B35',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(9000);
+  }
+
+  private openGunDealerDialog() {
+    if (this.gunShopOpen) return;
+    this.inputBlocked = true;
+    this.gunDealerDialog = new DialogSystem(this);
+    const lines = [
+      'DEALER: Psst... Buscás algo serio?',
+      'DEALER: Tengo fierros de primera. Pagás en TENKS.',
+      'DEALER: Nada de preguntas, nada de problemas.',
+    ];
+    this.gunDealerDialog.start(lines, {}, () => {
+      this.gunDealerDialog = null;
+      this.openGunShopPanel();
+    });
+  }
+
+  private openGunShopPanel() {
+    if (this.gunShopOpen) return;
+    this.gunShopOpen = true;
+    this.inputBlocked = true;
+
+    const cam = this.cameras.main;
+    const cx = cam.width / 2;
+    const cy = cam.height / 2;
+    const pw = 580;
+    const ph = 380;
+    const px = cx - pw / 2;
+    const py = cy - ph / 2;
+
+    const container = this.add.container(0, 0).setScrollFactor(0).setDepth(11000);
+    this.gunShopPanel = container;
+
+    // Full-screen dark overlay
+    const overlay = this.add.rectangle(cx, cy, cam.width, cam.height, 0x000000, 0.72).setScrollFactor(0);
+    container.add(overlay);
+
+    // Panel background
+    const bg = this.add.graphics().setScrollFactor(0);
+    bg.fillStyle(0x0d0d1a, 0.98);
+    bg.fillRoundedRect(px, py, pw, ph, 12);
+    bg.lineStyle(2, 0xFF6B35, 1);
+    bg.strokeRoundedRect(px, py, pw, ph, 12);
+    container.add(bg);
+
+    // Title
+    const title = this.add.text(cx, py + 24, 'ARMS DEALER', {
+      fontSize: '12px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FF6B35',
+    }).setOrigin(0.5, 0.5).setScrollFactor(0);
+    container.add(title);
+
+    // Subtitle / balance
+    const balance = getTenksBalance();
+    const balText = this.add.text(cx, py + 46, `TENKS: ${balance.toLocaleString('es-AR')}`, {
+      fontSize: '8px',
+      fontFamily: '"Silkscreen", monospace',
+      color: '#F5C842',
+    }).setOrigin(0.5, 0.5).setScrollFactor(0);
+    container.add(balText);
+
+    // Divider
+    const div = this.add.graphics().setScrollFactor(0);
+    div.lineStyle(1, 0xFF6B35, 0.4);
+    div.lineBetween(px + 20, py + 60, px + pw - 20, py + 60);
+    container.add(div);
+
+    // Gun items from catalog
+    const gunItems = CATALOG.filter(i => i.id.startsWith('UTIL-GUN'));
+    gunItems.forEach((item, idx) => {
+      const rowY = py + 80 + idx * 72;
+      this.buildGunShopRow(container, px, rowY, pw, item, balText);
+    });
+
+    // Close button
+    const closeBtn = this.add.text(px + pw - 16, py + 14, '✕', {
+      fontSize: '14px',
+      fontFamily: '"Silkscreen", monospace',
+      color: '#FF4455',
+    }).setOrigin(1, 0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
+    closeBtn.on('pointerdown', () => this.closeGunShopPanel());
+    closeBtn.on('pointerover', () => closeBtn.setColor('#FF8888'));
+    closeBtn.on('pointerout', () => closeBtn.setColor('#FF4455'));
+    container.add(closeBtn);
+
+    // Also close on SPACE/ESC (next press)
+    const escKey = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    if (escKey) {
+      escKey.once('down', () => this.closeGunShopPanel());
+    }
+  }
+
+  private buildGunShopRow(
+    container: Phaser.GameObjects.Container,
+    panelX: number,
+    rowY: number,
+    panelW: number,
+    item: (typeof CATALOG)[0],
+    balText: Phaser.GameObjects.Text,
+  ) {
+    const owned = getInventory().owned.includes(item.id);
+
+    // Row bg
+    const rowBg = this.add.graphics().setScrollFactor(0);
+    rowBg.fillStyle(0x1a1a2e, owned ? 0.4 : 0.7);
+    rowBg.fillRoundedRect(panelX + 16, rowY, panelW - 32, 60, 6);
+    rowBg.lineStyle(1, owned ? 0x39FF14 : 0xFF6B35, 0.5);
+    rowBg.strokeRoundedRect(panelX + 16, rowY, panelW - 32, 60, 6);
+    container.add(rowBg);
+
+    // Item name
+    const nameText = this.add.text(panelX + 32, rowY + 14, item.name + (item.isLimited ? ' ★' : ''), {
+      fontSize: '9px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: item.isLimited ? '#F5C842' : '#FFFFFF',
+    }).setScrollFactor(0);
+    container.add(nameText);
+
+    // Description
+    const descText = this.add.text(panelX + 32, rowY + 30, item.description ?? '', {
+      fontSize: '7px',
+      fontFamily: '"Silkscreen", monospace',
+      color: '#9999BB',
+    }).setScrollFactor(0);
+    container.add(descText);
+
+    // Price
+    const priceText = this.add.text(panelX + panelW - 160, rowY + 20, `${item.priceTenks.toLocaleString('es-AR')} T`, {
+      fontSize: '9px',
+      fontFamily: '"Silkscreen", monospace',
+      color: '#F5C842',
+    }).setOrigin(0, 0.5).setScrollFactor(0);
+    container.add(priceText);
+
+    if (owned) {
+      const ownedLabel = this.add.text(panelX + panelW - 50, rowY + 30, 'OWNED', {
+        fontSize: '7px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#39FF14',
+      }).setOrigin(0.5, 0.5).setScrollFactor(0);
+      container.add(ownedLabel);
+    } else {
+      const buyBtn = this.add.text(panelX + panelW - 50, rowY + 30, 'COMPRAR', {
+        fontSize: '7px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#FF6B35',
+        backgroundColor: '#1a0a00',
+        padding: { x: 6, y: 4 },
+      }).setOrigin(0.5, 0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
+
+      buyBtn.on('pointerover', () => buyBtn.setColor('#FFAA77'));
+      buyBtn.on('pointerout', () => buyBtn.setColor('#FF6B35'));
+      buyBtn.on('pointerdown', () => {
+        buyBtn.setText('...').setColor('#888888').disableInteractive();
+        this.buyGunItem(item.id, item.priceTenks).then(result => {
+          if (!isLiveGameObject(buyBtn)) return;
+          if (result.success) {
+            buyBtn.setText('✓ LISTO').setColor('#39FF14');
+            rowBg.clear();
+            rowBg.fillStyle(0x1a1a2e, 0.4);
+            rowBg.fillRoundedRect(panelX + 16, rowY, panelW - 32, 60, 6);
+            rowBg.lineStyle(1, 0x39FF14, 0.5);
+            rowBg.strokeRoundedRect(panelX + 16, rowY, panelW - 32, 60, 6);
+            // Update balance display
+            balText.setText(`TENKS: ${getTenksBalance().toLocaleString('es-AR')}`);
+          } else {
+            buyBtn.setText('ERROR').setColor('#FF4455');
+            eventBus.emit(EVENTS.UI_NOTICE, result.message);
+            this.time.delayedCall(1500, () => {
+              if (!isLiveGameObject(buyBtn)) return;
+              buyBtn.setText('COMPRAR').setColor('#FF6B35').setInteractive({ useHandCursor: true });
+            });
+          }
+        });
+      });
+      container.add(buyBtn);
+    }
+  }
+
+  private closeGunShopPanel() {
+    if (!this.gunShopOpen) return;
+    this.gunShopPanel?.destroy(true);
+    this.gunShopPanel = null;
+    this.gunShopOpen = false;
+    this.inputBlocked = false;
+  }
+
+  private async buyGunItem(itemId: string, priceTenks: number): Promise<{ success: boolean; message: string }> {
+    const balance = getTenksBalance();
+    if (balance < priceTenks) {
+      return { success: false, message: `Necesitás ${priceTenks.toLocaleString('es-AR')} TENKS.` };
+    }
+
+    if (!supabase || !isConfigured) {
+      // Dev/offline mode: grant + equip locally
+      ownItem(itemId);
+      equipItem(itemId); // emits AVATAR_SET → refreshUtilitiesFromInventory
+      addTenks(-priceTenks, `gun_shop_${itemId.toLowerCase()}`);
+      return { success: true, message: `${itemId} equipado (modo offline).` };
+    }
+
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) {
+      return { success: false, message: 'Tenés que estar logueado para comprar.' };
+    }
+
+    const res = await fetch('/api/shop/buy', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ itemId }),
+    }).catch(() => null);
+
+    if (!res?.ok) {
+      const err = await res?.json().catch(() => null) as { error?: string } | null;
+      return { success: false, message: err?.error ?? 'Error al comprar. Intentá de nuevo.' };
+    }
+
+    const result = await res.json() as { player?: { tenks?: number; inventory?: { owned: string[]; equipped: Record<string, unknown> } }; notice?: string };
+
+    // Sync full inventory from server if available, otherwise grant+equip locally
+    if (result.player?.inventory) {
+      replaceInventory(result.player.inventory as Parameters<typeof replaceInventory>[0]);
+    } else {
+      ownItem(itemId);
+    }
+    // Always equip utility items so they take effect immediately
+    equipItem(itemId); // emits AVATAR_SET → triggers refreshUtilitiesFromInventory in WorldScene
+    if (typeof result.player?.tenks === 'number') {
+      initTenks(result.player.tenks, { preferStored: false });
+    }
+    return { success: true, message: result.notice ?? `${itemId} comprado!` };
+  }
+
   // ─── Player & Input ──────────────────────────────────────────────────────────
 
   private handleMovement(delta: number) {
@@ -3795,6 +4088,14 @@ export class WorldScene extends Phaser.Scene {
     if (nearCasino) {
       return { x: casinoDoorX, y: BUILDINGS.CASINO.y + BUILDINGS.CASINO.h - 28, w: 120, h: 80, label: 'SPACE ENTRAR CASINO', color: 0xF5C842, sceneKey: 'CasinoInterior' };
     }
+
+    const GUN_DEALER_X = 1100;
+    const GUN_DEALER_Y = 870;
+    const nearGunDealer = Math.abs(this.px - GUN_DEALER_X) < 80 && Math.abs(this.py - GUN_DEALER_Y) < 80;
+    if (nearGunDealer && !this.gunShopOpen) {
+      return { x: GUN_DEALER_X, y: GUN_DEALER_Y - 30, w: 160, h: 70, label: 'SPACE HABLAR CON DEALER', color: 0xFF6B35, npcKey: 'gunDealer' };
+    }
+
     return null;
   }
 
@@ -3824,9 +4125,25 @@ export class WorldScene extends Phaser.Scene {
     if (this.inTransition) return;
     if (!this.controls.isActionJustDown('interact')) return;
 
+    // Advance gun dealer dialog if active
+    if (this.gunDealerDialog?.isActive()) {
+      this.gunDealerDialog.advance();
+      return;
+    }
+
+    // Close gun shop on SPACE if open
+    if (this.gunShopOpen) {
+      this.closeGunShopPanel();
+      return;
+    }
+
     const target = this.getInteractionTarget();
     if (target?.sceneKey) {
       this.transitionToScene(target.sceneKey);
+      return;
+    }
+    if (target?.npcKey === 'gunDealer') {
+      this.openGunDealerDialog();
     }
   }
 
