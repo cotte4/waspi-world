@@ -407,7 +407,6 @@ export class WorldScene extends Phaser.Scene {
   private gunShopOpen = false;
 
   // COTTENKS NPC
-  private cottenksAvatar: AvatarRenderer | null = null;
   private cottenksDialog: BranchedDialog | null = null;
 
   constructor() {
@@ -2918,32 +2917,29 @@ export class WorldScene extends Phaser.Scene {
     const x = 1615;
     const y = 558;
 
-    const cfg: AvatarConfig = {
-      bodyColor: 0xC07A50,    // warm tan skin
-      hairColor: 0x3D0D8C,    // deep purple (Vegeta-style)
-      hairStyle: 'SPI',
-      eyeColor: 0x111111,
-      topColor: 0xF5F5F5,     // white tee
-      bottomColor: 0x111111,  // black cargo pants
-      tt: 6,
-    };
+    // Use the real COTTENKS illustration instead of procedural avatar
+    const sprite = this.add.image(x, y, 'cottenks');
 
-    this.cottenksAvatar = this.createSafeAvatarRenderer(x, y, cfg, 'cottenks');
-    this.cottenksAvatar.setDepth(Math.floor(y / 10));
+    // Scale to ~90px tall to match world NPC proportions
+    const targetH = 90;
+    const scale = targetH / sprite.height;
+    sprite.setScale(scale);
+    sprite.setOrigin(0.5, 1); // anchor at feet
+    sprite.setDepth(Math.floor(y / 10));
 
     // Idle breathing sway
     this.tweens.add({
-      targets: this.cottenksAvatar.getContainer(),
-      y: y + 5,
+      targets: sprite,
+      y: y + 4,
+      scaleY: scale * 0.97,
       duration: 1800,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
-      onUpdate: () => this.cottenksAvatar?.update(false, 0),
     });
 
-    // Nameplate — gold, Press Start 2P
-    this.add.text(x, y - 58, 'COTTENKS', {
+    // Nameplate
+    this.add.text(x, y - 98, 'COTTENKS', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842',
@@ -2951,8 +2947,8 @@ export class WorldScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5, 1).setDepth(9000);
 
-    // Small subtitle
-    this.add.text(x, y - 46, 'the og', {
+    // Subtitle
+    this.add.text(x, y - 86, 'the og', {
       fontSize: '6px',
       fontFamily: '"Silkscreen", monospace',
       color: '#AAAAAA',
