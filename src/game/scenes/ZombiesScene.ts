@@ -25,6 +25,7 @@ import {
 } from '../config/zombies';
 
 const BOX_POS = { x: 435, y: 698 } as const;
+const PACK_POS = { x: 1278, y: 610 } as const;
 const EXIT_PAD = { x: 182, y: 878, radius: 42 } as const;
 const PLAYER_RETURN = { x: 1600, y: 1540 } as const;
 const WALL_THICKNESS = 36;
@@ -113,10 +114,24 @@ type WeaponInventory = Record<ZombiesWeaponId, {
   owned: boolean;
   ammoInMag: number;
   reserveAmmo: number;
+  upgraded: boolean;
 }>;
 
+type ZombieProjectile = {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  damage: number;
+  radius: number;
+  body: Phaser.GameObjects.Arc;
+  glow: Phaser.GameObjects.Ellipse;
+  expiresAt: number;
+};
+
 type InteractionOption = {
-  kind: 'exit' | 'door' | 'box' | 'repair';
+  kind: 'exit' | 'door' | 'box' | 'repair' | 'upgrade';
   x: number;
   y: number;
   radius: number;
@@ -152,14 +167,20 @@ export class ZombiesScene extends Phaser.Scene {
   private lastDamageAt: number = 0;
   private zombies = new Map<string, ZombieState>();
   private zombieIdSeq = 0;
+  private zombieProjectileSeq = 0;
   private pickupIdSeq = 0;
   private obstacles: ObstacleRect[] = [];
   private spawnNodes = new Map<string, SpawnNode>();
   private pickups = new Map<string, PickupState>();
+  private zombieProjectiles = new Map<string, ZombieProjectile>();
   private doors = new Map<ZombiesSectionId, DoorState>();
   private mysteryBoxCooldownUntil: number = 0;
   private instaKillUntil: number = 0;
   private doublePointsUntil: number = 0;
+  private boxRollingUntil = 0;
+  private boxPreviewText?: Phaser.GameObjects.Text;
+  private packPad?: Phaser.GameObjects.Rectangle;
+  private packLabel?: Phaser.GameObjects.Text;
   private audioContext?: AudioContext;
   private lastSpawnSfxAt = 0;
   private lastStompSfxAt = 0;
@@ -217,6 +238,8 @@ export class ZombiesScene extends Phaser.Scene {
     this.gameOver = false;
     this.zombies.clear();
     this.zombieIdSeq = 0;
+    this.zombieProjectiles.clear();
+    this.zombieProjectileSeq = 0;
     this.pickups.clear();
     this.pickupIdSeq = 0;
     this.obstacles = [];
@@ -225,6 +248,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.mysteryBoxCooldownUntil = 0;
     this.instaKillUntil = 0;
     this.doublePointsUntil = 0;
+    this.boxRollingUntil = 0;
     this.lastSpawnSfxAt = 0;
     this.lastStompSfxAt = 0;
     this.lastShotAt = 0;
@@ -256,11 +280,11 @@ export class ZombiesScene extends Phaser.Scene {
 
   private createWeaponInventory(): WeaponInventory {
     return {
-      pistol: { owned: true, ammoInMag: ZOMBIES_WEAPONS.pistol.magazineSize, reserveAmmo: ZOMBIES_WEAPONS.pistol.reserveAmmo },
-      shotgun: { owned: false, ammoInMag: 0, reserveAmmo: 0 },
-      smg: { owned: false, ammoInMag: 0, reserveAmmo: 0 },
-      rifle: { owned: false, ammoInMag: 0, reserveAmmo: 0 },
-      raygun: { owned: false, ammoInMag: 0, reserveAmmo: 0 },
+      pistol: { owned: true, ammoInMag: ZOMBIES_WEAPONS.pistol.magazineSize, reserveAmmo: ZOMBIES_WEAPONS.pistol.reserveAmmo, upgraded: false },
+      shotgun: { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
+      smg: { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
+      rifle: { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
+      raygun: { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
     };
   }
 
@@ -692,10 +716,37 @@ export class ZombiesScene extends Phaser.Scene {
       duration: 850,
       ease: 'Sine.easeInOut',
     });
+    this.boxPreviewText = this.add.text(BOX_POS.x, BOX_POS.y + 60, '', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FFD36A',
+      stroke: '#000000',
+      strokeThickness: 3,
+      align: 'center',
+    }).setOrigin(0.5).setDepth(23).setAlpha(0);
+
+    this.packPad = this.add.rectangle(PACK_POS.x, PACK_POS.y + 8, 92, 64, 0x1b3142, 0.92).setDepth(21);
+    this.packPad.setStrokeStyle(2, 0x46B3FF, 0.72);
+    this.packLabel = this.add.text(PACK_POS.x, PACK_POS.y - 26, 'PACK-A-PUNCH', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#7CC9FF',
+      stroke: '#000000',
+      strokeThickness: 3,
+      align: 'center',
+    }).setOrigin(0.5).setDepth(22);
+    this.add.text(PACK_POS.x, PACK_POS.y + 38, 'POWER YOUR GUN', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#B7D8FF',
+      stroke: '#000000',
+      strokeThickness: 2,
+      align: 'center',
+    }).setOrigin(0.5).setDepth(22);
   }
 
   private renderHud() {
-    const weapon = ZOMBIES_WEAPONS[this.currentWeapon];
+    const weapon = this.getWeaponStats(this.currentWeapon);
     const ammo = this.weaponInventory[this.currentWeapon];
     const timedBuffs = [
       this.doublePointsUntil > this.time.now ? `2X ${Math.ceil((this.doublePointsUntil - this.time.now) / 1000)}s` : '',
@@ -704,14 +755,17 @@ export class ZombiesScene extends Phaser.Scene {
     this.roundText?.setText(`ROUND ${this.round}`);
     this.pointsText?.setText(`PTS ${this.points}`);
     this.hpText?.setText(`HP ${Math.max(0, Math.round(this.hp))}`);
-    this.ammoText?.setText(`${weapon.label}\n${ammo.ammoInMag}/${ammo.reserveAmmo}`);
+    this.ammoText?.setText(`${weapon.displayLabel}\n${ammo.ammoInMag}/${ammo.reserveAmmo}`);
     this.statusText?.setText([
-      this.gameOver ? 'GAME OVER' : timedBuffs || (this.reloadEndsAt > this.time.now ? 'RECARGANDO' : 'EN PIE'),
+      this.gameOver ? 'GAME OVER' : timedBuffs || (this.boxRollingUntil > this.time.now ? 'BOX GIRANDO' : this.reloadEndsAt > this.time.now ? 'RECARGANDO' : 'EN PIE'),
       `ZOMBIES ${this.countAliveZombies()}/${this.roundTarget}`,
       `SPAWN ${this.spawnedThisRound}`,
       this.bossAlive ? 'BOSS ACTIVE' : this.bossRoundActive && !this.bossSpawnedThisRound ? 'BOSS INCOMING' : '',
     ].filter(Boolean).join('\n'));
-    this.inventoryText?.setText(`ARMAS ${this.weaponOrder.map((id) => id === this.currentWeapon ? `[${ZOMBIES_WEAPONS[id].label}]` : ZOMBIES_WEAPONS[id].label).join('  ')}`);
+    this.inventoryText?.setText(`ARMAS ${this.weaponOrder.map((id) => {
+      const label = this.getWeaponStats(id).displayLabel;
+      return id === this.currentWeapon ? `[${label}]` : label;
+    }).join('  ')}`);
 
     if (this.reticle) {
       this.reticle.clear();
@@ -781,6 +835,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.handleCombatInput();
     this.handleRoundFlow();
     this.updateZombies(delta);
+    this.updateZombieProjectiles(delta);
     this.updatePickups();
     this.handleContextInteraction();
     this.updatePromptHud(this.getNearbyInteraction());
@@ -828,6 +883,7 @@ export class ZombiesScene extends Phaser.Scene {
 
   private handleCombatInput() {
     if (this.reloadEndsAt > this.time.now) return;
+    if (this.boxRollingUntil > this.time.now) return;
 
     if (Phaser.Input.Keyboard.JustDown(this.keyQ)) {
       this.cycleWeapon();
@@ -846,7 +902,7 @@ export class ZombiesScene extends Phaser.Scene {
     for (const [key, weaponId] of directKeys) {
       if (Phaser.Input.Keyboard.JustDown(key) && this.weaponInventory[weaponId].owned) {
         this.currentWeapon = weaponId;
-        this.showNotice(`ARMADO ${ZOMBIES_WEAPONS[weaponId].label}`, '#7CC9FF');
+        this.showNotice(`ARMADO ${this.getWeaponStats(weaponId).displayLabel}`, '#7CC9FF');
       }
     }
   }
@@ -854,8 +910,9 @@ export class ZombiesScene extends Phaser.Scene {
   private tryShoot(targetX: number, targetY: number) {
     if (this.gameOver) return;
     if (this.reloadEndsAt > this.time.now) return;
+    if (this.boxRollingUntil > this.time.now) return;
 
-    const weapon = ZOMBIES_WEAPONS[this.currentWeapon];
+    const weapon = this.getWeaponStats(this.currentWeapon);
     const ammo = this.weaponInventory[this.currentWeapon];
     if (this.time.now - this.lastShotAt < weapon.fireDelayMs) return;
     if (ammo.ammoInMag <= 0) {
@@ -885,16 +942,16 @@ export class ZombiesScene extends Phaser.Scene {
 
   private tryReload() {
     const ammo = this.weaponInventory[this.currentWeapon];
-    const weapon = ZOMBIES_WEAPONS[this.currentWeapon];
+    const weapon = this.getWeaponStats(this.currentWeapon);
     if (this.reloadEndsAt > this.time.now) return;
     if (ammo.reserveAmmo <= 0 || ammo.ammoInMag >= weapon.magazineSize) return;
 
     const reloadingWeaponId = this.currentWeapon;
     this.reloadEndsAt = this.time.now + weapon.reloadMs;
-    this.showNotice(`RECARGANDO ${weapon.label}`, '#9EFFB7');
+    this.showNotice(`RECARGANDO ${weapon.displayLabel}`, '#9EFFB7');
     this.time.delayedCall(weapon.reloadMs, () => {
       const currentAmmo = this.weaponInventory[reloadingWeaponId];
-      const currentWeapon = ZOMBIES_WEAPONS[reloadingWeaponId];
+      const currentWeapon = this.getWeaponStats(reloadingWeaponId);
       const needed = currentWeapon.magazineSize - currentAmmo.ammoInMag;
       const moved = Math.min(needed, currentAmmo.reserveAmmo);
       currentAmmo.ammoInMag += moved;
@@ -910,7 +967,7 @@ export class ZombiesScene extends Phaser.Scene {
     const index = available.indexOf(this.currentWeapon);
     const next = available[(index + 1) % available.length];
     this.currentWeapon = next;
-    this.showNotice(`ARMADO ${ZOMBIES_WEAPONS[next].label}`, '#7CC9FF');
+    this.showNotice(`ARMADO ${this.getWeaponStats(next).displayLabel}`, '#7CC9FF');
   }
 
   private drawShotFx(endX: number, endY: number, color: number) {
@@ -989,6 +1046,35 @@ export class ZombiesScene extends Phaser.Scene {
 
   private getPointsMultiplier() {
     return this.doublePointsUntil > this.time.now ? 2 : 1;
+  }
+
+  private getWeaponState(weaponId: ZombiesWeaponId) {
+    return this.weaponInventory[weaponId];
+  }
+
+  private getWeaponStats(weaponId: ZombiesWeaponId) {
+    const base = ZOMBIES_WEAPONS[weaponId];
+    const state = this.getWeaponState(weaponId);
+    if (!state.upgraded) {
+      return {
+        ...base,
+        displayLabel: base.label,
+      };
+    }
+
+    return {
+      ...base,
+      damage: Math.round(base.damage * (weaponId === 'raygun' ? 1.3 : 1.5)),
+      fireDelayMs: Math.max(weaponId === 'smg' ? 70 : 90, Math.round(base.fireDelayMs * 0.82)),
+      magazineSize: Math.round(base.magazineSize * (weaponId === 'shotgun' ? 1.5 : 1.4)),
+      reserveAmmo: Math.round(base.reserveAmmo * 1.25),
+      reloadMs: Math.max(850, Math.round(base.reloadMs * 0.84)),
+      displayLabel: `${base.label}+`,
+    };
+  }
+
+  private getPackCost(weaponId: ZombiesWeaponId) {
+    return weaponId === 'raygun' ? 4200 : 2500;
   }
 
   private pickZombieType(): ZombieType {
@@ -1213,14 +1299,31 @@ export class ZombiesScene extends Phaser.Scene {
       const ny = dy / dist;
 
       if (dist > zombie.attackRange + 2) {
-        const lateral = Math.sin(this.time.now / 320 + zombie.phase) * (zombie.type === 'runner' ? 0.42 : zombie.type === 'brute' ? 0.08 : 0.22);
-        const moveX = (nx - ny * lateral) * zombie.speed * 60 * dt;
-        const moveY = (ny + nx * lateral) * zombie.speed * 60 * dt;
-        const nextX = zombie.x + moveX;
-        const nextY = zombie.y + moveY;
-        if (!this.isBlocked(nextX, zombie.y, zombie.radius)) zombie.x = nextX;
-        if (!this.isBlocked(zombie.x, nextY, zombie.radius)) zombie.y = nextY;
-        zombie.state = 'walk';
+        const canShoot = zombie.assetFolder === 'shooter'
+          && dist >= 160
+          && dist <= 340
+          && !this.isLineBlocked(zombie.x, zombie.y, this.px, this.py);
+        if (canShoot) {
+          zombie.state = 'attack';
+          const lateral = Math.sin(this.time.now / 360 + zombie.phase) * 0.3;
+          const orbitX = zombie.x + (-ny * lateral) * zombie.speed * 42 * dt;
+          const orbitY = zombie.y + (nx * lateral) * zombie.speed * 42 * dt;
+          if (!this.isBlocked(orbitX, zombie.y, zombie.radius)) zombie.x = orbitX;
+          if (!this.isBlocked(zombie.x, orbitY, zombie.radius)) zombie.y = orbitY;
+          if (this.time.now - zombie.lastAttackAt >= zombie.attackCooldownMs) {
+            zombie.lastAttackAt = this.time.now;
+            this.spawnZombieProjectile(zombie);
+          }
+        } else {
+          const lateral = Math.sin(this.time.now / 320 + zombie.phase) * (zombie.type === 'runner' ? 0.42 : zombie.type === 'brute' ? 0.08 : 0.22);
+          const moveX = (nx - ny * lateral) * zombie.speed * 60 * dt;
+          const moveY = (ny + nx * lateral) * zombie.speed * 60 * dt;
+          const nextX = zombie.x + moveX;
+          const nextY = zombie.y + moveY;
+          if (!this.isBlocked(nextX, zombie.y, zombie.radius)) zombie.x = nextX;
+          if (!this.isBlocked(zombie.x, nextY, zombie.radius)) zombie.y = nextY;
+          zombie.state = 'walk';
+        }
       } else {
         zombie.state = 'attack';
         if (this.time.now - zombie.lastAttackAt >= zombie.attackCooldownMs) {
@@ -1236,6 +1339,64 @@ export class ZombiesScene extends Phaser.Scene {
       this.renderZombieHp(zombie);
       this.setZombieState(zombie, zombie.state);
     }
+  }
+
+  private spawnZombieProjectile(zombie: ZombieState) {
+    const angle = Phaser.Math.Angle.Between(zombie.x, zombie.y - 10, this.px, this.py - 6);
+    const speed = zombie.isBoss ? 260 : 220;
+    const radius = zombie.isBoss ? 7 : 5;
+    const id = `zp_${++this.zombieProjectileSeq}`;
+    const glowColor = zombie.isBoss ? 0xFF5C7A : 0x9BFF4F;
+    const glow = this.add.ellipse(zombie.x, zombie.y - 10, radius * 4.5, radius * 2.8, glowColor, 0.18).setDepth(154);
+    glow.setStrokeStyle(1, glowColor, 0.45);
+    const body = this.add.circle(zombie.x, zombie.y - 10, radius, glowColor, 0.92).setDepth(155);
+    this.zombieProjectiles.set(id, {
+      id,
+      x: zombie.x,
+      y: zombie.y - 10,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      damage: zombie.isBoss ? Math.round(zombie.damage * 0.8) : Math.max(8, Math.round(zombie.damage * 0.7)),
+      radius,
+      body,
+      glow,
+      expiresAt: this.time.now + 2400,
+    });
+  }
+
+  private updateZombieProjectiles(delta: number) {
+    const dt = delta / 1000;
+    for (const projectile of [...this.zombieProjectiles.values()]) {
+      projectile.x += projectile.vx * dt;
+      projectile.y += projectile.vy * dt;
+      projectile.body.setPosition(projectile.x, projectile.y);
+      projectile.glow.setPosition(projectile.x, projectile.y);
+
+      if (
+        projectile.x < 0
+        || projectile.y < 0
+        || projectile.x > ZOMBIES_WORLD.WIDTH
+        || projectile.y > ZOMBIES_WORLD.HEIGHT
+        || this.time.now >= projectile.expiresAt
+        || this.isBlocked(projectile.x, projectile.y, projectile.radius)
+      ) {
+        this.destroyZombieProjectile(projectile.id);
+        continue;
+      }
+
+      if (Phaser.Math.Distance.Between(projectile.x, projectile.y, this.px, this.py) <= projectile.radius + ZOMBIES_PLAYER.radius) {
+        this.applyPlayerDamage(projectile.damage);
+        this.destroyZombieProjectile(projectile.id);
+      }
+    }
+  }
+
+  private destroyZombieProjectile(id: string) {
+    const projectile = this.zombieProjectiles.get(id);
+    if (!projectile) return;
+    projectile.body.destroy();
+    projectile.glow.destroy();
+    this.zombieProjectiles.delete(id);
   }
 
   private releaseSpawnNode(zombie: ZombieState, resetBoards: boolean) {
@@ -1379,6 +1540,10 @@ export class ZombiesScene extends Phaser.Scene {
       this.tryRollMysteryBox();
       return;
     }
+    if (option.kind === 'upgrade') {
+      this.tryUpgradeCurrentWeapon();
+      return;
+    }
     if (option.kind === 'repair' && option.nodeId) {
       this.tryRepairBarricade(option.nodeId);
     }
@@ -1399,8 +1564,28 @@ export class ZombiesScene extends Phaser.Scene {
         x: BOX_POS.x,
         y: BOX_POS.y + 8,
         radius: 56,
-        label: cooldown > 0 ? `BOX RECARGA ${cooldown}s` : `E MYSTERY BOX ${ZOMBIES_POINTS.mysteryBoxCost} PTS`,
+        label: this.boxRollingUntil > this.time.now
+          ? 'BOX GIRANDO...'
+          : cooldown > 0
+            ? `BOX RECARGA ${cooldown}s`
+            : `E MYSTERY BOX ${ZOMBIES_POINTS.mysteryBoxCost} PTS`,
         color: 0xFF7CCE,
+      });
+    }
+
+    const workshopUnlocked = this.doors.get('workshop')?.unlocked ?? false;
+    if (workshopUnlocked && Phaser.Math.Distance.Between(this.px, this.py, PACK_POS.x, PACK_POS.y) <= 76) {
+      const weaponState = this.weaponInventory[this.currentWeapon];
+      const weaponStats = this.getWeaponStats(this.currentWeapon);
+      options.push({
+        kind: 'upgrade',
+        x: PACK_POS.x,
+        y: PACK_POS.y,
+        radius: 58,
+        label: weaponState.upgraded
+          ? `${weaponStats.displayLabel} AL MAX`
+          : `E PACK ${weaponStats.displayLabel} ${this.getPackCost(this.currentWeapon)} PTS`,
+        color: 0x46B3FF,
       });
     }
 
@@ -1482,8 +1667,12 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private tryRollMysteryBox() {
-    if (this.time.now < this.mysteryBoxCooldownUntil) {
+    if (this.boxRollingUntil > this.time.now) {
       this.showNotice('LA BOX ESTA GIRANDO', '#FF7CCE');
+      return;
+    }
+    if (this.time.now < this.mysteryBoxCooldownUntil) {
+      this.showNotice('LA BOX RECARGA', '#FF7CCE');
       return;
     }
     if (this.points < ZOMBIES_POINTS.mysteryBoxCost) {
@@ -1492,19 +1681,70 @@ export class ZombiesScene extends Phaser.Scene {
     }
 
     this.points -= ZOMBIES_POINTS.mysteryBoxCost;
-    this.mysteryBoxCooldownUntil = this.time.now + 2200;
+    this.mysteryBoxCooldownUntil = this.time.now + 3200;
+    this.boxRollingUntil = this.time.now + 1400;
+    this.boxPreviewText?.setAlpha(1);
+    this.boxPreviewText?.setColor('#FFD36A');
+    this.boxPreviewText?.setText('ROLLING...');
     const weaponId = this.rollMysteryWeapon();
-    const ammo = this.weaponInventory[weaponId];
-    const config = ZOMBIES_WEAPONS[weaponId];
-    const firstTime = !ammo.owned;
-    ammo.owned = true;
-    ammo.ammoInMag = config.magazineSize;
-    ammo.reserveAmmo = Math.max(ammo.reserveAmmo, config.reserveAmmo);
-    if (!this.weaponOrder.includes(weaponId)) {
-      this.weaponOrder.push(weaponId);
+    const previewPool = Object.values(ZOMBIES_WEAPONS).filter((weapon) => weapon.mysteryWeight > 0);
+    const steps = 9;
+    for (let i = 0; i < steps; i += 1) {
+      this.time.delayedCall(90 + i * 90, () => {
+        if (!this.boxPreviewText || this.boxRollingUntil <= this.time.now) return;
+        const preview = i === steps - 1 ? ZOMBIES_WEAPONS[weaponId] : Phaser.Utils.Array.GetRandom(previewPool);
+        this.boxPreviewText.setText(preview.label);
+        this.boxPreviewText.setColor(i === steps - 1 ? '#9EFFB7' : '#FFD36A');
+      });
     }
-    this.currentWeapon = weaponId;
-    this.showNotice(firstTime ? `BOX: ${config.label}` : `BOX REFILL ${config.label}`, '#FF7CCE');
+    this.time.delayedCall(1450, () => {
+      this.boxRollingUntil = 0;
+      const ammo = this.weaponInventory[weaponId];
+      const config = this.getWeaponStats(weaponId);
+      const firstTime = !ammo.owned;
+      ammo.owned = true;
+      ammo.ammoInMag = config.magazineSize;
+      ammo.reserveAmmo = Math.max(ammo.reserveAmmo, config.reserveAmmo);
+      if (!this.weaponOrder.includes(weaponId)) {
+        this.weaponOrder.push(weaponId);
+      }
+      this.currentWeapon = weaponId;
+      if (this.boxPreviewText) {
+        this.boxPreviewText.setText(config.displayLabel);
+        this.tweens.add({
+          targets: this.boxPreviewText,
+          alpha: { from: 1, to: 0 },
+          duration: 800,
+          ease: 'Sine.easeOut',
+        });
+      }
+      this.showNotice(firstTime ? `BOX: ${config.displayLabel}` : `BOX REFILL ${config.displayLabel}`, '#FF7CCE');
+    });
+  }
+
+  private tryUpgradeCurrentWeapon() {
+    const ammo = this.weaponInventory[this.currentWeapon];
+    if (!ammo.owned) {
+      this.showNotice('NO TENES ESA ARMA', '#FF6A6A');
+      return;
+    }
+    if (ammo.upgraded) {
+      this.showNotice('ARMA YA POTENCIADA', '#7CC9FF');
+      return;
+    }
+    const cost = this.getPackCost(this.currentWeapon);
+    if (this.points < cost) {
+      this.showNotice('NO ALCANZAN LOS PTS', '#FF6A6A');
+      return;
+    }
+
+    this.points -= cost;
+    ammo.upgraded = true;
+    const upgraded = this.getWeaponStats(this.currentWeapon);
+    ammo.ammoInMag = upgraded.magazineSize;
+    ammo.reserveAmmo = Math.max(ammo.reserveAmmo, upgraded.reserveAmmo);
+    this.showNotice(`PACKED ${upgraded.displayLabel}`, '#46B3FF');
+    this.cameras.main.flash(120, 30, 120, 255, false);
   }
 
   private tryRepairBarricade(nodeId: string) {
@@ -1627,7 +1867,7 @@ export class ZombiesScene extends Phaser.Scene {
   private collectPickup(pickup: PickupState) {
     if (pickup.kind === 'max_ammo') {
       for (const weaponId of this.weaponOrder) {
-        const weapon = ZOMBIES_WEAPONS[weaponId];
+        const weapon = this.getWeaponStats(weaponId);
         const ammo = this.weaponInventory[weaponId];
         ammo.ammoInMag = weapon.magazineSize;
         ammo.reserveAmmo = Math.max(ammo.reserveAmmo, weapon.reserveAmmo);
