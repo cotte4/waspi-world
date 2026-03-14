@@ -13,18 +13,18 @@ interface Station { id: StationId; label: string; cx: number; cy: number; trigge
 type CasinoOverlayMode = 'slots' | 'roulette' | 'blackjack' | 'poker' | null;
 type BlackjackPhase = 'bet' | 'player' | 'dealer' | 'result';
 type RouletteBetKind = 'red' | 'black' | 'even' | 'odd' | 'lucky7';
-type PokerPhase = 'bet' | 'draw' | 'result';
 interface SlotsState { betIndex: number; reels: string[]; resultText: string; spinning: boolean; spinToken: number; }
 interface BlackjackState { phase: BlackjackPhase; betIndex: number; playerCards: number[]; dealerCards: number[]; dealerHidden: boolean; actionIndex: number; resultText: string; currentBet: number; deck: number[]; settled: boolean; handToken: number; }
 interface RouletteState { betIndex: number; optionIndex: number; resultText: string; spinning: boolean; spinToken: number; lastNumber: number | null; lastColor: 'red' | 'black' | 'green' | null; }
-interface PokerState { phase: PokerPhase; betIndex: number; cards: number[]; holds: boolean[]; cursorIndex: number; resultText: string; currentBet: number; deck: number[]; payout: number; }
 interface RouletteBetOption { id: RouletteBetKind; label: string; payout: number; color: string; }
 interface PokerResult { label: string; payoutMultiplier: number; }
+type HoldemPhase = 'ante' | 'preflop' | 'flop' | 'river' | 'showdown';
+interface HoldemState { phase: HoldemPhase; anteIndex: number; playerHole: number[]; cpuHole: number[]; community: number[]; pot: number; playerPaid: number; deck: number[]; resultText: string; actionIndex: number; cpuLastAction: string; handToken: number; }
 
 const SLOT_BETS = [100, 250, 500, 1000] as const;
 const ROULETTE_BETS = [100, 250, 500, 1000] as const;
 const BLACKJACK_BETS = [100, 250, 500, 1000] as const;
-const POKER_BETS = [100, 250, 500, 1000] as const;
+const HOLDEM_ANTES = [100, 250, 500, 1000] as const;
 const SLOT_SYMBOLS = ['7', 'BAR', 'WASP', 'STAR', 'BELL'] as const;
 const BLACKJACK_ACTIONS = ['HIT', 'STAND'] as const;
 const ROULETTE_OPTIONS: RouletteBetOption[] = [
@@ -69,7 +69,7 @@ export class CasinoInterior extends Phaser.Scene {
   private slotsState: SlotsState = { betIndex: 0, reels: ['7', '7', '7'], resultText: 'ELEGI UNA APUESTA Y GIRA.', spinning: false, spinToken: 0 };
   private rouletteState: RouletteState = { betIndex: 0, optionIndex: 0, resultText: 'ELEGI UNA APUESTA Y DALE AL GIRO.', spinning: false, spinToken: 0, lastNumber: null, lastColor: null };
   private blackjackState: BlackjackState = { phase: 'bet', betIndex: 0, playerCards: [], dealerCards: [], dealerHidden: true, actionIndex: 0, resultText: 'ELEGI UNA APUESTA Y REPARTE.', currentBet: 0, deck: [], settled: false, handToken: 0 };
-  private pokerState: PokerState = { phase: 'bet', betIndex: 0, cards: [], holds: [false, false, false, false, false], cursorIndex: 0, resultText: 'ELEGI UNA APUESTA Y REPARTE.', currentBet: 0, deck: [], payout: 0 };
+  private holdemState: HoldemState = { phase: 'ante', anteIndex: 1, playerHole: [], cpuHole: [], community: [], pot: 0, playerPaid: 0, deck: [], resultText: 'ELEGÍ TU ANTE Y REPARTÍ.', actionIndex: 1, cpuLastAction: '', handToken: 0 };
   private casinoVisuals: Phaser.GameObjects.GameObject[] = [];
   private casinoTweens: Phaser.Tweens.Tween[] = [];
   private rouletteWheelTween?: Phaser.Tweens.Tween;
@@ -359,17 +359,7 @@ export class CasinoInterior extends Phaser.Scene {
 
   private openPoker() {
     this.overlayMode = 'poker';
-    this.pokerState = {
-      phase: 'bet',
-      betIndex: this.pokerState.betIndex,
-      cards: [],
-      holds: [false, false, false, false, false],
-      cursorIndex: 0,
-      resultText: 'ELEGI UNA APUESTA Y REPARTE.',
-      currentBet: 0,
-      deck: [],
-      payout: 0,
-    };
+    this.holdemState = { phase: 'ante', anteIndex: this.holdemState.anteIndex, playerHole: [], cpuHole: [], community: [], pot: 0, playerPaid: 0, deck: [], resultText: 'ELEGÍ TU ANTE Y REPARTÍ.', actionIndex: 1, cpuLastAction: '', handToken: this.holdemState.handToken };
     this.setOverlayVisible(true);
     this.redrawOverlay();
     this.hideStationUi();
@@ -782,64 +772,175 @@ export class CasinoInterior extends Phaser.Scene {
   }
 
   private handlePokerInput() {
-    if (this.pokerState.phase === 'bet') {
-      if (this.controls.isMovementDirectionJustDown('left')) { this.pokerState.betIndex = (this.pokerState.betIndex + POKER_BETS.length - 1) % POKER_BETS.length; this.redrawOverlay(); }
-      if (this.controls.isMovementDirectionJustDown('right')) { this.pokerState.betIndex = (this.pokerState.betIndex + 1) % POKER_BETS.length; this.redrawOverlay(); }
-      if (this.controls.isActionJustDown('interact')) this.startPokerHand();
+    const { phase } = this.holdemState;
+    if (phase === 'ante') {
+      if (this.controls.isMovementDirectionJustDown('left')) { this.holdemState.anteIndex = (this.holdemState.anteIndex + HOLDEM_ANTES.length - 1) % HOLDEM_ANTES.length; this.redrawOverlay(); }
+      if (this.controls.isMovementDirectionJustDown('right')) { this.holdemState.anteIndex = (this.holdemState.anteIndex + 1) % HOLDEM_ANTES.length; this.redrawOverlay(); }
+      if (this.controls.isActionJustDown('interact')) this.startHoldemHand();
       return;
     }
-    if (this.pokerState.phase === 'draw') {
-      if (this.controls.isMovementDirectionJustDown('left')) { this.pokerState.cursorIndex = (this.pokerState.cursorIndex + 4) % 5; this.redrawOverlay(); }
-      if (this.controls.isMovementDirectionJustDown('right')) { this.pokerState.cursorIndex = (this.pokerState.cursorIndex + 1) % 5; this.redrawOverlay(); }
-      if (this.controls.isMovementDirectionJustDown('up') || this.controls.isMovementDirectionJustDown('down')) {
-        this.pokerState.holds[this.pokerState.cursorIndex] = !this.pokerState.holds[this.pokerState.cursorIndex];
-        this.redrawOverlay();
+    if (phase === 'preflop' || phase === 'flop' || phase === 'river') {
+      if (this.controls.isMovementDirectionJustDown('left')) { this.holdemState.actionIndex = (this.holdemState.actionIndex + 2) % 3; this.redrawOverlay(); }
+      if (this.controls.isMovementDirectionJustDown('right')) { this.holdemState.actionIndex = (this.holdemState.actionIndex + 1) % 3; this.redrawOverlay(); }
+      if (this.controls.isActionJustDown('interact')) {
+        const actions: Array<'fold' | 'check' | 'raise'> = ['fold', 'check', 'raise'];
+        this.holdemPlayerAction(actions[this.holdemState.actionIndex]);
       }
-      if (this.controls.isActionJustDown('interact')) this.finalizePokerDraw();
       return;
     }
-    if (this.pokerState.phase === 'result' && this.controls.isActionJustDown('interact')) this.openPoker();
+    if (phase === 'showdown' && this.controls.isActionJustDown('interact')) this.openPoker();
   }
 
-  private startPokerHand() {
-    const bet = POKER_BETS[this.pokerState.betIndex];
-    if (!spendTenks(bet, 'casino_poker_bet')) {
-      this.pokerState.resultText = 'NO TENES TENKS SUFICIENTES.';
+  private startHoldemHand() {
+    const ante = HOLDEM_ANTES[this.holdemState.anteIndex];
+    if (!spendTenks(ante, 'casino_holdem_ante')) {
+      this.holdemState.resultText = 'NO TENÉS TENKS SUFICIENTES.';
       this.redrawOverlay();
-      this.showToast('NO ALCANZA PARA JUGAR.');
+      this.showToast('SIN TENKS PARA EL ANTE');
       return;
     }
     const deck = this.createPokerDeck();
-    const cards = Array.from({ length: 5 }, () => deck.pop() ?? 0);
-    this.pokerState.phase = 'draw';
-    this.pokerState.currentBet = bet;
-    this.pokerState.cards = cards;
-    this.pokerState.deck = deck;
-    this.pokerState.holds = [false, false, false, false, false];
-    this.pokerState.cursorIndex = 0;
-    this.pokerState.payout = 0;
-    this.pokerState.resultText = 'MARCA HOLD CON ^/v Y DALE INTERACT PARA ROBAR.';
+    const playerHole = [deck.pop()!, deck.pop()!];
+    const cpuHole = [deck.pop()!, deck.pop()!];
+    this.holdemState = { ...this.holdemState, phase: 'preflop', playerHole, cpuHole, community: [], pot: ante * 2, playerPaid: ante, deck, resultText: 'TU TURNO — ELEGÍ UNA ACCIÓN.', actionIndex: 1, cpuLastAction: 'ENTRA', handToken: this.holdemState.handToken + 1 };
     this.redrawOverlay();
   }
 
-  private finalizePokerDraw() {
-    for (let index = 0; index < this.pokerState.cards.length; index += 1) {
-      if (!this.pokerState.holds[index]) {
-        this.pokerState.cards[index] = this.drawPokerCard();
+  private holdemPlayerAction(action: 'fold' | 'check' | 'raise') {
+    if (action === 'fold') {
+      this.holdemState.phase = 'showdown';
+      this.holdemState.resultText = `TE FUISTE. PERDÉS ${this.holdemState.playerPaid} TENKS.`;
+      this.holdemState.cpuLastAction = 'GANA';
+      this.showToast('FOLD');
+      this.redrawOverlay();
+      return;
+    }
+    if (action === 'raise') {
+      const ante = HOLDEM_ANTES[this.holdemState.anteIndex];
+      if (!spendTenks(ante, 'casino_holdem_raise')) {
+        this.holdemState.resultText = 'NO TENÉS TENKS PARA SUBIR.';
+        this.redrawOverlay();
+        return;
+      }
+      this.holdemState.playerPaid += ante;
+      this.holdemState.pot += ante * 2;
+      const cpuFolds = this.cpuDecideOnRaise();
+      this.holdemState.cpuLastAction = cpuFolds ? 'FOLD' : 'CALL';
+      if (cpuFolds) {
+        addTenks(this.holdemState.pot, 'casino_holdem_win');
+        this.holdemState.phase = 'showdown';
+        this.holdemState.resultText = `CPU FOLDEA. GANÁS ${this.holdemState.pot} TENKS!`;
+        this.showToast(`+${this.holdemState.pot} TENKS`);
+        this.redrawOverlay();
+        return;
+      }
+    } else {
+      this.holdemState.cpuLastAction = 'CHECK';
+    }
+    this.advanceHoldemPhase();
+  }
+
+  private cpuDecideOnRaise(): boolean {
+    const { cpuHole, community, phase } = this.holdemState;
+    const strength = this.bestAvailableHand(cpuHole, community).payoutMultiplier;
+    if (phase === 'river') return strength === 0 && Phaser.Math.Between(0, 2) > 0;
+    return Phaser.Math.Between(0, 5) === 0;
+  }
+
+  private advanceHoldemPhase() {
+    const { phase, deck } = this.holdemState;
+    if (phase === 'preflop') {
+      this.holdemState.community = [deck.pop()!, deck.pop()!, deck.pop()!];
+      this.holdemState.phase = 'flop';
+      this.holdemState.resultText = 'FLOP — ELEGÍ UNA ACCIÓN.';
+    } else if (phase === 'flop') {
+      this.holdemState.community.push(deck.pop()!, deck.pop()!);
+      this.holdemState.phase = 'river';
+      this.holdemState.resultText = 'RIVER — ÚLTIMA RONDA.';
+    } else if (phase === 'river') {
+      this.resolveShowdown();
+      return;
+    }
+    this.holdemState.actionIndex = 1;
+    this.redrawOverlay();
+  }
+
+  private resolveShowdown() {
+    const { playerHole, cpuHole, community, pot, playerPaid } = this.holdemState;
+    const playerBest = this.bestAvailableHand(playerHole, community);
+    const cpuBest = this.bestAvailableHand(cpuHole, community);
+    const cmp = playerBest.payoutMultiplier - cpuBest.payoutMultiplier;
+    this.holdemState.phase = 'showdown';
+    if (cmp > 0) {
+      addTenks(pot, 'casino_holdem_win');
+      this.holdemState.resultText = `GANASTE CON ${playerBest.label}! +${pot} TENKS`;
+      this.showToast(`+${pot} TENKS`);
+    } else if (cmp < 0) {
+      this.holdemState.resultText = `CPU GANA CON ${cpuBest.label}. PERDÉS ${playerPaid} T.`;
+      this.showToast('LA CASA GANA');
+    } else {
+      addTenks(playerPaid, 'casino_holdem_tie');
+      this.holdemState.resultText = `EMPATE. TE DEVUELVEN ${playerPaid} TENKS.`;
+      this.showToast('EMPATE');
+    }
+    this.redrawOverlay();
+  }
+
+  private bestAvailableHand(hole: number[], community: number[]): PokerResult {
+    const all = [...hole, ...community];
+    if (all.length < 2) return { label: 'SIN CARTAS', payoutMultiplier: 0 };
+    if (all.length <= 4) {
+      const ranks = all.map((c) => ((c - 1) % 13) + 1);
+      const counts = new Map<number, number>();
+      ranks.forEach((r) => counts.set(r, (counts.get(r) ?? 0) + 1));
+      const groups = [...counts.values()].sort((a, b) => b - a);
+      const pairRank = [...counts.entries()].find(([, c]) => c === 2)?.[0] ?? 0;
+      if (groups[0] === 3) return { label: 'TRIO', payoutMultiplier: 4 };
+      if (groups[0] === 2 && groups[1] === 2) return { label: 'DOBLE PAREJA', payoutMultiplier: 3 };
+      if (groups[0] === 2 && (pairRank === 1 || pairRank >= 11)) return { label: 'JACKS O MEJOR', payoutMultiplier: 2 };
+      if (groups[0] === 2) return { label: 'PAR', payoutMultiplier: 0 };
+      return { label: 'CARTA ALTA', payoutMultiplier: 0 };
+    }
+    if (all.length === 5) return this.evaluatePokerHand(all);
+    let best: PokerResult = { label: 'NADA', payoutMultiplier: 0 };
+    for (let i = 0; i < all.length - 1; i += 1) {
+      for (let j = i + 1; j < all.length; j += 1) {
+        const hand5 = all.filter((_, k) => k !== i && k !== j);
+        if (hand5.length !== 5) continue;
+        const res = this.evaluatePokerHand(hand5);
+        if (res.payoutMultiplier > best.payoutMultiplier) best = res;
       }
     }
-    const result = this.evaluatePokerHand(this.pokerState.cards);
-    const payout = result.payoutMultiplier > 0 ? this.pokerState.currentBet * result.payoutMultiplier : 0;
-    if (payout > 0) {
-      addTenks(payout, 'casino_poker_payout');
-      this.showToast(`+${payout} TENKS`);
-    } else {
-      this.showToast('MANO PERDEDORA');
+    return best;
+  }
+
+  // ─── Reusable card drawing helper ───────────────────────────────────────
+  private drawCard(x: number, y: number, card: number | null, faceDown: boolean, border: 'none' | 'gold' | 'purple' | 'green' = 'none', w = 40, h = 57) {
+    const g = this.addV(this.add.graphics().setDepth(33));
+    g.fillStyle(0x000000, 0.3); g.fillRoundedRect(x + 2, y + 2, w, h, 4);
+    if (faceDown || card === null) {
+      g.fillStyle(0x1a0a40); g.fillRoundedRect(x, y, w, h, 4);
+      g.lineStyle(1, 0x3a2a60, 0.8); g.strokeRoundedRect(x, y, w, h, 4);
+      g.lineStyle(1, 0x2a1a50, 0.4);
+      for (let lx = x + 5; lx < x + w - 3; lx += 5) g.lineBetween(lx, y + 3, lx, y + h - 3);
+      return;
     }
-    this.pokerState.phase = 'result';
-    this.pokerState.payout = payout;
-    this.pokerState.resultText = payout > 0 ? `${result.label}. COBRAS ${payout} TENKS.` : `${result.label}. NO HAY PAGO.`;
-    this.redrawOverlay();
+    const rank = ((card - 1) % 13) + 1;
+    const suitIdx = Math.floor((card - 1) / 13);
+    const rl = rank === 1 ? 'A' : rank === 11 ? 'J' : rank === 12 ? 'Q' : rank === 13 ? 'K' : String(rank);
+    const ss = ['♠', '♥', '♦', '♣'][suitIdx] ?? '♠';
+    const isRed = suitIdx === 1 || suitIdx === 2;
+    const tc = isRed ? '#c0392b' : '#111111';
+    g.fillStyle(0xfaf8f2); g.fillRoundedRect(x, y, w, h, 4);
+    if (border === 'gold') { g.lineStyle(2, 0xF5C842, 1); }
+    else if (border === 'purple') { g.lineStyle(2, 0x8B5CF6, 1); }
+    else if (border === 'green') { g.lineStyle(2, 0x22CC88, 1); }
+    else { g.lineStyle(1, 0xc8c4b8, 1); }
+    g.strokeRoundedRect(x, y, w, h, 4);
+    this.addV(this.add.text(x + 4, y + 3, rl, { fontSize: '7px', fontFamily: '"Press Start 2P", monospace', color: tc }).setDepth(34));
+    this.addV(this.add.text(x + 4, y + 14, ss, { fontSize: '7px', fontFamily: 'serif', color: tc }).setDepth(34));
+    this.addV(this.add.text(x + w / 2, y + h / 2 - 1, ss, { fontSize: '18px', fontFamily: 'serif', color: tc }).setOrigin(0.5).setDepth(34));
+    this.addV(this.add.text(x + w - 4, y + h - 3, rl, { fontSize: '7px', fontFamily: '"Press Start 2P", monospace', color: tc }).setOrigin(1, 1).setDepth(34));
   }
 
   private renderPokerOverlay() {
@@ -847,100 +948,105 @@ export class CasinoInterior extends Phaser.Scene {
     const cx = this.scale.width / 2;
     const cy = this.roomY + this.roomH / 2;
     const balance = getTenksBalance();
-    const { phase, betIndex, cards, holds, cursorIndex, resultText } = this.pokerState;
+    const { phase, anteIndex, playerHole, cpuHole, community, pot, resultText, actionIndex, cpuLastAction } = this.holdemState;
 
-    // Reposition persistent text elements for this layout
-    this.overlayAccent.setPosition(cx, cy - 122).setText(`SALDO: ${balance} T`).setVisible(true);
-    this.overlayTitle.setPosition(cx, cy - 104).setText('VIDEO POKER').setVisible(true);
+    // ── Header ──
+    this.overlayAccent.setPosition(cx + 180, cy - 128).setText(`SALDO: ${balance} T`).setVisible(true);
+    this.overlayTitle.setPosition(cx - 150, cy - 128).setText('POKER').setVisible(true);
     this.overlayBody.setVisible(false);
 
-    const CARD_W = 46; const CARD_H = 66; const CARD_GAP = 10;
-    const totalW = 5 * CARD_W + 4 * CARD_GAP;
-    const cardsX = cx - totalW / 2;
-    const cardsY = cy - 68;
+    // Pot display
+    this.addV(this.add.text(cx, cy - 128, `POT: ${pot} T`, { fontSize: '9px', fontFamily: '"Press Start 2P", monospace', color: 0xF5C842 < 1 ? '#F5C842' : '#F5C842', align: 'center' }).setOrigin(0.5).setDepth(34));
 
-    for (let i = 0; i < 5; i++) {
-      const x = cardsX + i * (CARD_W + CARD_GAP);
-      const card = cards[i];
-
-      if (!card) {
-        // Empty placeholder
-        const g = this.addV(this.add.graphics().setDepth(33));
-        g.fillStyle(0x100820, 0.7); g.fillRoundedRect(x, cardsY, CARD_W, CARD_H, 5);
-        g.lineStyle(1, 0x3a2a50, 0.8); g.strokeRoundedRect(x, cardsY, CARD_W, CARD_H, 5);
-        this.addV(this.add.text(x + CARD_W / 2, cardsY + CARD_H / 2, '?', { fontSize: '18px', fontFamily: 'serif', color: '#2a1a40' }).setOrigin(0.5).setDepth(34));
-        continue;
-      }
-
-      const rank = ((card - 1) % 13) + 1;
-      const suitIdx = Math.floor((card - 1) / 13);
-      const rankLabel = rank === 1 ? 'A' : rank === 11 ? 'J' : rank === 12 ? 'Q' : rank === 13 ? 'K' : String(rank);
-      const suitSymbol = ['♠', '♥', '♦', '♣'][suitIdx] ?? '♠';
-      const isRed = suitIdx === 1 || suitIdx === 2;
-      const textColor = isRed ? '#c0392b' : '#111111';
-      const isHeld = holds[i];
-      const isCursor = phase === 'draw' && i === cursorIndex;
-
-      // Card shadow
-      const g = this.addV(this.add.graphics().setDepth(33));
-      g.fillStyle(0x000000, 0.35); g.fillRoundedRect(x + 2, cardsY + 3, CARD_W, CARD_H, 5);
-      // Card body
-      g.fillStyle(0xfaf8f2); g.fillRoundedRect(x, cardsY, CARD_W, CARD_H, 5);
-      // Border
-      if (isHeld) { g.lineStyle(2, 0xF5C842, 1); }
-      else if (isCursor) { g.lineStyle(2, 0x8B5CF6, 1); }
-      else { g.lineStyle(1, 0xc8c4b8, 1); }
-      g.strokeRoundedRect(x, cardsY, CARD_W, CARD_H, 5);
-
-      // Rank top-left
-      this.addV(this.add.text(x + 5, cardsY + 4, rankLabel, { fontSize: '8px', fontFamily: '"Press Start 2P", monospace', color: textColor }).setDepth(34));
-      // Suit top-left small
-      this.addV(this.add.text(x + 5, cardsY + 16, suitSymbol, { fontSize: '8px', fontFamily: 'serif', color: textColor }).setDepth(34));
-      // Suit center large
-      this.addV(this.add.text(x + CARD_W / 2, cardsY + CARD_H / 2 - 2, suitSymbol, { fontSize: '22px', fontFamily: 'serif', color: textColor }).setOrigin(0.5).setDepth(34));
-      // Rank bottom-right
-      this.addV(this.add.text(x + CARD_W - 5, cardsY + CARD_H - 4, rankLabel, { fontSize: '8px', fontFamily: '"Press Start 2P", monospace', color: textColor }).setOrigin(1, 1).setDepth(34));
-
-      // HOLD badge above card
-      if (isHeld) {
-        const hg = this.addV(this.add.graphics().setDepth(34));
-        hg.fillStyle(0xF5C842, 1); hg.fillRoundedRect(x + 5, cardsY - 18, CARD_W - 10, 14, 3);
-        this.addV(this.add.text(x + CARD_W / 2, cardsY - 11, 'HOLD', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#000000' }).setOrigin(0.5).setDepth(35));
-      }
-
-      // Cursor arrow (bouncing)
-      if (isCursor) {
-        const arrow = this.addV(this.add.text(x + CARD_W / 2, cardsY - 24, '▼', { fontSize: '10px', color: '#8B5CF6' }).setOrigin(0.5).setDepth(35));
-        const tw = this.tweens.add({ targets: arrow, y: cardsY - 19, duration: 380, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-        this.casinoTweens.push(tw);
-      }
-    }
-
-    // Result / instruction text
-    const resultY = cardsY + CARD_H + 18;
-    const resultColor = phase === 'result' && this.pokerState.payout > 0 ? '#22CC88' : '#F5C842';
-    this.addV(this.add.text(cx, resultY, resultText, { fontSize: '7px', fontFamily: '"Press Start 2P", monospace', color: resultColor, align: 'center', wordWrap: { width: 460 } }).setOrigin(0.5).setDepth(34));
-
-    // Payout table
-    this.addV(this.add.text(cx, resultY + 20, 'JJ+ ×2  2P ×3  TRIO ×4  ESCALERA ×5  COLOR ×6  FULL ×8  POKER ×12  R.REAL ×40', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#4a3a60', align: 'center', wordWrap: { width: 460 } }).setOrigin(0.5).setDepth(34));
-
-    // Bet selector chips
-    const betY = resultY + 44;
-    this.addV(this.add.text(cx - 150, betY, 'APUESTA', { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: '#555555' }).setOrigin(0, 0.5).setDepth(34));
-    POKER_BETS.forEach((betVal, idx) => {
-      const bx = cx - 60 + idx * 52;
-      const sel = idx === betIndex;
-      const bg = this.addV(this.add.graphics().setDepth(34));
-      bg.fillStyle(sel ? 0x8B5CF6 : 0x1a0e2e, sel ? 1 : 0.8); bg.fillRoundedRect(bx - 22, betY - 11, 44, 22, 4);
-      if (sel) { bg.lineStyle(1, 0xF5C842, 0.8); bg.strokeRoundedRect(bx - 22, betY - 11, 44, 22, 4); }
-      this.addV(this.add.text(bx, betY, String(betVal), { fontSize: '7px', fontFamily: '"Press Start 2P", monospace', color: sel ? '#ffffff' : '#666666' }).setOrigin(0.5).setDepth(35));
+    // Phase strip
+    const phases: HoldemPhase[] = ['ante', 'preflop', 'flop', 'river', 'showdown'];
+    const phaseLabels = ['ANTE', 'PRE-FLOP', 'FLOP', 'RIVER', 'SHOWDOWN'];
+    const stripG = this.addV(this.add.graphics().setDepth(33));
+    const stripY = cy - 114; const stripW = 460; const stripX = cx - stripW / 2;
+    stripG.fillStyle(0x060410, 0.8); stripG.fillRoundedRect(stripX, stripY, stripW, 14, 3);
+    phases.forEach((ph, idx) => {
+      const pw = stripW / phases.length; const px = stripX + idx * pw;
+      const isCur = ph === phase;
+      if (isCur) { stripG.fillStyle(0x8B5CF6, 0.9); stripG.fillRoundedRect(px + 1, stripY + 1, pw - 2, 12, 2); }
+      this.addV(this.add.text(px + pw / 2, stripY + 7, phaseLabels[idx], { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: isCur ? '#ffffff' : '#444444' }).setOrigin(0.5).setDepth(35));
     });
 
-    // Footer
-    let footer = 'BACK CIERRA';
-    if (phase === 'bet') footer = '< >  APUESTA   |   INTERACT  REPARTE   |   BACK  CIERRA';
-    else if (phase === 'draw') footer = '< >  CURSOR   |   ^ v  HOLD   |   INTERACT  DESCARTA Y ROBA   |   BACK  CIERRA';
-    else if (phase === 'result') footer = 'INTERACT  JUGAR OTRA   |   BACK  CIERRA';
+    // ── Felt table area ──
+    const feltG = this.addV(this.add.graphics().setDepth(32));
+    feltG.fillStyle(0x0b3d1f, 0.9); feltG.fillRoundedRect(cx - 230, cy - 98, 460, 210, 8);
+    feltG.lineStyle(1, 0x1a6a35, 0.5); feltG.strokeRoundedRect(cx - 230, cy - 98, 460, 210, 8);
+
+    const CW = 40; const CH = 57; const CGAP = 8;
+
+    // ── CPU section ──
+    const cpuLabelY = cy - 90;
+    this.addV(this.add.text(cx, cpuLabelY, `CPU  ${cpuLastAction ? `— ${cpuLastAction}` : ''}`, { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: '#888888', align: 'center' }).setOrigin(0.5).setDepth(34));
+    const cpuCardsX = cx - (CW + CGAP / 2);
+    const cpuCardsY = cy - 80;
+    const atShowdown = phase === 'showdown';
+    this.drawCard(cpuCardsX, cpuCardsY, cpuHole[0] ?? null, !atShowdown, atShowdown ? 'purple' : 'none', CW, CH);
+    this.drawCard(cpuCardsX + CW + CGAP, cpuCardsY, cpuHole[1] ?? null, !atShowdown, atShowdown ? 'purple' : 'none', CW, CH);
+    if (atShowdown && cpuHole.length === 2) {
+      const cpuBest = this.bestAvailableHand(cpuHole, community);
+      this.addV(this.add.text(cx, cpuCardsY + CH + 8, cpuBest.label, { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#9B6CF6', align: 'center' }).setOrigin(0.5).setDepth(34));
+    }
+
+    // ── Community cards ──
+    const commLabelY = cy - 14;
+    this.addV(this.add.text(cx, commLabelY, 'COMUNIDAD', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#2a5a3a' }).setOrigin(0.5).setDepth(34));
+    const commTotalW = 5 * CW + 4 * CGAP;
+    const commX = cx - commTotalW / 2;
+    const commY = cy - 4;
+    for (let i = 0; i < 5; i++) {
+      const cx5 = commX + i * (CW + CGAP);
+      this.drawCard(cx5, commY, community[i] ?? null, false, 'none', CW, CH);
+    }
+
+    // ── Player section ──
+    const plLabelY = cy + 60;
+    const playerBest = phase !== 'ante' && playerHole.length === 2 ? this.bestAvailableHand(playerHole, community) : null;
+    this.addV(this.add.text(cx - (CW + CGAP / 2) - 10, plLabelY, 'TU MANO', { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: '#22CC88' }).setOrigin(0, 0.5).setDepth(34));
+    if (playerBest) this.addV(this.add.text(cx + CW + 20, plLabelY, playerBest.label, { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#22CC88' }).setOrigin(0, 0.5).setDepth(34));
+    const plCardsX = cx - (CW + CGAP / 2);
+    const plCardsY = cy + 70;
+    const winnerBorder: 'gold' | 'green' | 'none' = phase === 'showdown' ? (playerBest && (playerBest.payoutMultiplier > (this.bestAvailableHand(cpuHole, community).payoutMultiplier)) ? 'gold' : 'none') : 'none';
+    this.drawCard(plCardsX, plCardsY, playerHole[0] ?? null, false, winnerBorder, CW, CH);
+    this.drawCard(plCardsX + CW + CGAP, plCardsY, playerHole[1] ?? null, false, winnerBorder, CW, CH);
+
+    // ── Result text ──
+    const resultColor = phase === 'showdown' ? (resultText.includes('GANASTE') ? '#22CC88' : resultText.includes('EMPATE') ? '#F5C842' : '#FF5A5A') : '#F5C842';
+    this.addV(this.add.text(cx, cy + 100, resultText, { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: resultColor, align: 'center', wordWrap: { width: 450 } }).setOrigin(0.5).setDepth(34));
+
+    // ── Action selector (only during active phases) ──
+    if (phase === 'ante') {
+      this.addV(this.add.text(cx, cy + 75, 'ANTE', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#555555' }).setOrigin(0.5).setDepth(34));
+      HOLDEM_ANTES.forEach((av, idx) => {
+        const bx = cx - 90 + idx * 50;
+        const sel = idx === anteIndex;
+        const bg = this.addV(this.add.graphics().setDepth(34));
+        bg.fillStyle(sel ? 0x8B5CF6 : 0x1a0e2e, sel ? 1 : 0.8); bg.fillRoundedRect(bx - 20, cy + 82, 40, 18, 3);
+        if (sel) { bg.lineStyle(1, 0xF5C842, 0.8); bg.strokeRoundedRect(bx - 20, cy + 82, 40, 18, 3); }
+        this.addV(this.add.text(bx, cy + 91, String(av), { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: sel ? '#ffffff' : '#666666' }).setOrigin(0.5).setDepth(35));
+      });
+    } else if (phase === 'preflop' || phase === 'flop' || phase === 'river') {
+      const actions = ['FOLD', 'PASAR', `SUBIR +${HOLDEM_ANTES[anteIndex]}T`];
+      const actionColors = ['#FF5A5A', '#22CC88', '#F5C842'];
+      const actionBgColors = [0x4a0808, 0x083020, 0x4a3808];
+      const totalAW = 330; const aStartX = cx - totalAW / 2;
+      actions.forEach((label, idx) => {
+        const aw = idx === 2 ? 130 : 90; const ax = aStartX + (idx === 0 ? 0 : idx === 1 ? 100 : 200);
+        const sel = idx === actionIndex;
+        const bg = this.addV(this.add.graphics().setDepth(34));
+        bg.fillStyle(sel ? actionBgColors[idx] : 0x0a0a0a, sel ? 1 : 0.8); bg.fillRoundedRect(ax, cy + 80, aw, 22, 4);
+        if (sel) { bg.lineStyle(2, parseInt(actionColors[idx].replace('#', ''), 16), 0.9); bg.strokeRoundedRect(ax, cy + 80, aw, 22, 4); }
+        this.addV(this.add.text(ax + aw / 2, cy + 91, label, { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: sel ? actionColors[idx] : '#444444' }).setOrigin(0.5).setDepth(35));
+      });
+    }
+
+    // ── Footer ──
+    let footer = 'INTERACT  JUGAR OTRA   |   BACK  CIERRA';
+    if (phase === 'ante') footer = '< >  ANTE   |   INTERACT  REPARTIR   |   BACK  CIERRA';
+    else if (phase !== 'showdown') footer = '< >  ACCIÓN   |   INTERACT  CONFIRMA   |   BACK  CIERRA';
     this.overlayFooter.setPosition(cx, cy + 126).setText(footer).setVisible(true);
   }
 
@@ -987,16 +1093,8 @@ export class CasinoInterior extends Phaser.Scene {
   }
 
   private drawPokerCard() {
-    if (this.pokerState.deck.length === 0) this.pokerState.deck = this.createPokerDeck();
-    return this.pokerState.deck.pop() ?? 1;
-  }
-
-  private formatPokerCard(card: number) {
-    const rank = ((card - 1) % 13) + 1;
-    const suitIndex = Math.floor((card - 1) / 13);
-    const rankLabel = rank === 1 ? 'A' : rank === 11 ? 'J' : rank === 12 ? 'Q' : rank === 13 ? 'K' : String(rank);
-    const suitLabel = ['S', 'H', 'D', 'C'][suitIndex] ?? 'S';
-    return `${rankLabel}${suitLabel}`;
+    if (this.holdemState.deck.length === 0) this.holdemState.deck = this.createPokerDeck();
+    return this.holdemState.deck.pop() ?? 1;
   }
 
   private evaluatePokerHand(cards: number[]): PokerResult {
