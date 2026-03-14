@@ -36,8 +36,25 @@ export const DEFAULT_AVATAR_CONFIG: Required<AvatarConfig> = {
   equipBottom: '',
 };
 
+const AVATAR_KINDS: AvatarKind[] = ['procedural', 'gengar', 'buho', 'piplup', 'chacha'];
+const HAIR_STYLES: HairStyle[] = ['SPI', 'FLA', 'MOH', 'X'];
+
 export function normalizeAvatarConfig(config: AvatarConfig = {}): Required<AvatarConfig> {
-  return { ...DEFAULT_AVATAR_CONFIG, ...config };
+  const next = { ...DEFAULT_AVATAR_CONFIG, ...config };
+  if (!AVATAR_KINDS.includes(next.avatarKind)) {
+    next.avatarKind = DEFAULT_AVATAR_CONFIG.avatarKind;
+  }
+  if (!HAIR_STYLES.includes(next.hairStyle)) {
+    next.hairStyle = DEFAULT_AVATAR_CONFIG.hairStyle;
+  }
+  next.bodyColor = typeof next.bodyColor === 'number' ? next.bodyColor : DEFAULT_AVATAR_CONFIG.bodyColor;
+  next.hairColor = typeof next.hairColor === 'number' ? next.hairColor : DEFAULT_AVATAR_CONFIG.hairColor;
+  next.eyeColor = typeof next.eyeColor === 'number' ? next.eyeColor : DEFAULT_AVATAR_CONFIG.eyeColor;
+  next.topColor = typeof next.topColor === 'number' ? next.topColor : DEFAULT_AVATAR_CONFIG.topColor;
+  next.bottomColor = typeof next.bottomColor === 'number' ? next.bottomColor : DEFAULT_AVATAR_CONFIG.bottomColor;
+  next.pp = typeof next.pp === 'number' ? Phaser.Math.Clamp(next.pp, 0, 10) : DEFAULT_AVATAR_CONFIG.pp;
+  next.tt = typeof next.tt === 'number' ? Phaser.Math.Clamp(next.tt, 0, 10) : DEFAULT_AVATAR_CONFIG.tt;
+  return next;
 }
 
 export function loadStoredAvatarConfig(): Required<AvatarConfig> {
@@ -90,6 +107,10 @@ export class AvatarRenderer {
       return;
     }
 
+    this.buildProceduralAvatar(scene);
+  }
+
+  private buildProceduralAvatar(scene: Phaser.Scene) {
     const c = this.config;
 
     // Separate attributes (0..10) — bizarre extremes without scaling whole character
@@ -140,7 +161,6 @@ export class AvatarRenderer {
     // Hair (graphics so we can draw variants)
     this.hair = scene.add.graphics();
     this.drawHairVariant(bodyR);
-
     this.container.add([
       this.leftFoot,
       this.rightFoot,
@@ -160,16 +180,26 @@ export class AvatarRenderer {
   }
 
   private buildSpecialAvatar(scene: Phaser.Scene, kind: Exclude<AvatarKind, 'procedural'>) {
-    const textureKey = ensureSeedTexture(scene, kind);
-    this.specialSprite = scene.add.image(0, this.specialBaseY, textureKey);
-    this.specialSprite.setOrigin(0.5, 1);
+    try {
+      const textureKey = ensureSeedTexture(scene, kind);
+      const texture = scene.textures.get(textureKey);
+      const src = texture?.getSourceImage?.() as { width?: number; height?: number } | null;
+      const w = src?.width ?? 0;
+      const h = src?.height ?? 0;
 
-    const src = scene.textures.get(textureKey).getSourceImage() as { width?: number; height?: number };
-    const w = src?.width ?? 1;
-    const h = src?.height ?? 1;
-    const scale = Math.min(54 / w, 54 / h);
-    this.specialSprite.setScale(scale);
-    this.container.add(this.specialSprite);
+      if (!texture || !w || !h) {
+        throw new Error(`Invalid seed texture: ${textureKey}`);
+      }
+
+      this.specialSprite = scene.add.image(0, this.specialBaseY, textureKey);
+      this.specialSprite.setOrigin(0.5, 1);
+      this.specialSprite.setScale(Math.min(54 / w, 54 / h));
+      this.container.add(this.specialSprite);
+    } catch (error) {
+      console.error('[Waspi] Failed to build special avatar, falling back to procedural.', error);
+      this.config.avatarKind = 'procedural';
+      this.buildProceduralAvatar(scene);
+    }
   }
 
   private drawHairVariant(bodyR: number) {
@@ -309,7 +339,9 @@ function createChromaKeyTexture(
 ) {
   if (typeof document === 'undefined') return false;
 
-  const src = scene.textures.get(sourceKey).getSourceImage() as HTMLImageElement | HTMLCanvasElement;
+  const sourceTexture = scene.textures.get(sourceKey);
+  const src = sourceTexture?.getSourceImage?.() as HTMLImageElement | HTMLCanvasElement | null;
+  if (!src) return false;
   const w = (src as { width?: number }).width ?? 0;
   const h = (src as { height?: number }).height ?? 0;
   if (!w || !h) return false;
@@ -320,7 +352,12 @@ function createChromaKeyTexture(
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return false;
 
-  ctx.drawImage(src, 0, 0);
+  try {
+    ctx.drawImage(src, 0, 0);
+  } catch (error) {
+    console.error(`[Waspi] Failed to draw seed texture ${sourceKey}`, error);
+    return false;
+  }
   const img = ctx.getImageData(0, 0, w, h);
   const d = img.data;
 
