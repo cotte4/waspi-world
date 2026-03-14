@@ -63,38 +63,441 @@ export class StoreInterior extends Phaser.Scene {
     this.playerUsername = this.getOrCreateUsername();
     this.dialog = new DialogSystem(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
-    this.cleanupFns.push(eventBus.on(EVENTS.SHOP_OPEN, () => {
-      this.shopOverlayOpen = true;
-    }));
-    this.cleanupFns.push(eventBus.on(EVENTS.SHOP_CLOSE, () => {
-      this.shopOverlayOpen = false;
-    }));
+    this.cleanupFns.push(eventBus.on(EVENTS.SHOP_OPEN, () => { this.shopOverlayOpen = true; }));
+    this.cleanupFns.push(eventBus.on(EVENTS.SHOP_CLOSE, () => { this.shopOverlayOpen = false; }));
 
-    const g = this.add.graphics();
-    g.fillStyle(0x0c0c16);
-    g.fillRect(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
-
+    // ── Room dimensions ────────────────────────────────────────────
     const roomW = 640;
     const roomH = 400;
-    const roomX = (width - roomW) / 2;
-    const roomY = (height - roomH) / 2;
+    const roomX = (width - roomW) / 2;   // 80
+    const roomY = (height - roomH) / 2;  // 100
+    const roomR = roomX + roomW;          // 720
+    const roomB = roomY + roomH;          // 500
 
-    g.fillStyle(0x141426);
-    g.fillRect(roomX, roomY, roomW, roomH);
-    g.lineStyle(3, COLORS.GOLD, 0.6);
-    g.strokeRect(roomX, roomY, roomW, roomH);
+    const GOLD   = 0xF5C842;
+    const NEON   = 0x39FF14;
+    const DARK   = 0x080810;
+    const ROOM   = 0x0d0d1a;
+    const FLOOR  = 0x0f0f1e;
 
-    g.fillStyle(0x151520);
-    g.fillRect(roomX + 40, roomY + 70, 120, 40);
-    g.fillRect(roomX + roomW - 160, roomY + 70, 120, 40);
-    g.fillRect(roomX + 40, roomY + 150, 120, 40);
-    g.fillRect(roomX + roomW - 160, roomY + 150, 120, 40);
+    // ── BG + global grid ──────────────────────────────────────────
+    const bg = this.add.graphics();
+    bg.fillStyle(DARK);
+    bg.fillRect(0, 0, width, height);
 
-    const floor = this.add.rectangle(width / 2, roomY + roomH - 60, roomW - 40, 90, 0x111018, 0.9);
-    floor.setStrokeStyle(2, 0x000000, 0.6);
+    // Faint global grid
+    bg.lineStyle(1, 0x1a1a2e, 0.25);
+    for (let gx = 0; gx < width; gx += 40) bg.lineBetween(gx, 0, gx, height);
+    for (let gy = 0; gy < height; gy += 40) bg.lineBetween(0, gy, width, gy);
 
-    this.px = width / 2;
-    this.py = roomY + roomH - 80;
+    // ── Room fill ─────────────────────────────────────────────────
+    const room = this.add.graphics();
+
+    // Outer ambient glow
+    room.fillStyle(GOLD, 0.03);
+    room.fillRect(roomX - 6, roomY - 6, roomW + 12, roomH + 12);
+
+    // Room bg
+    room.fillStyle(ROOM);
+    room.fillRect(roomX, roomY, roomW, roomH);
+
+    // Wall grid lines (very faint)
+    room.lineStyle(1, 0x15152a, 0.8);
+    for (let wx = roomX + 20; wx < roomR; wx += 40) room.lineBetween(wx, roomY, wx, roomB - 90);
+    for (let wy = roomY + 30; wy < roomB - 90; wy += 30) room.lineBetween(roomX, wy, roomR, wy);
+
+    // Floor zone (bottom 90px)
+    room.fillStyle(FLOOR);
+    room.fillRect(roomX, roomB - 90, roomW, 90);
+
+    // Checkerboard floor tiles
+    const ts = 18;
+    for (let ty = 0; ty < 5; ty++) {
+      for (let tx = 0; tx < Math.floor(roomW / ts); tx++) {
+        if ((tx + ty) % 2 === 0) {
+          room.fillStyle(0x131328, 1);
+          room.fillRect(roomX + tx * ts, roomB - 90 + ty * ts, ts, ts);
+        }
+      }
+    }
+
+    // Floor divider
+    room.lineStyle(1, GOLD, 0.2);
+    room.lineBetween(roomX, roomB - 90, roomR, roomB - 90);
+
+    // Room border (double-line)
+    room.lineStyle(1, GOLD, 0.12);
+    room.strokeRect(roomX - 2, roomY - 2, roomW + 4, roomH + 4);
+    room.lineStyle(2, GOLD, 0.75);
+    room.strokeRect(roomX, roomY, roomW, roomH);
+
+    // Corner L-brackets
+    const bLen = 16;
+    room.lineStyle(2, GOLD, 1);
+    // TL
+    room.lineBetween(roomX, roomY, roomX + bLen, roomY);
+    room.lineBetween(roomX, roomY, roomX, roomY + bLen);
+    // TR
+    room.lineBetween(roomR, roomY, roomR - bLen, roomY);
+    room.lineBetween(roomR, roomY, roomR, roomY + bLen);
+    // BL
+    room.lineBetween(roomX, roomB, roomX + bLen, roomB);
+    room.lineBetween(roomX, roomB, roomX, roomB - bLen);
+    // BR
+    room.lineBetween(roomR, roomB, roomR - bLen, roomB);
+    room.lineBetween(roomR, roomB, roomR, roomB - bLen);
+
+    // ── Header strip ──────────────────────────────────────────────
+    const hdr = this.add.graphics();
+    hdr.fillStyle(0x09091a);
+    hdr.fillRect(roomX, roomY, roomW, 62);
+    hdr.lineStyle(1, GOLD, 0.2);
+    hdr.lineBetween(roomX, roomY + 62, roomR, roomY + 62);
+
+    // Scanline accent over header
+    for (let sl = roomY + 2; sl < roomY + 62; sl += 4) {
+      hdr.lineStyle(1, 0x000000, 0.25);
+      hdr.lineBetween(roomX, sl, roomR, sl);
+    }
+
+    // Left header: title
+    this.add.text(roomX + 16, roomY + 18, 'WASPI', {
+      fontSize: '16px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
+    });
+    this.add.text(roomX + 16, roomY + 42, 'STORE', {
+      fontSize: '10px',
+      fontFamily: '"Silkscreen", monospace',
+      color: '#888899',
+    });
+
+    // Right header: category badge
+    const badgeG = this.add.graphics();
+    badgeG.fillStyle(GOLD, 0.1);
+    badgeG.fillRect(roomX + 230, roomY + 14, 280, 18);
+    badgeG.lineStyle(1, GOLD, 0.4);
+    badgeG.strokeRect(roomX + 230, roomY + 14, 280, 18);
+    this.add.text(roomX + 230 + 140, roomY + 23, '★ ROPA FÍSICA — PAGO EN ARS', {
+      fontSize: '6px',
+      fontFamily: '"Silkscreen", monospace',
+      color: '#F5C842',
+    }).setOrigin(0.5);
+
+    // "THE DROP" sub-badge
+    const dropG = this.add.graphics();
+    dropG.fillStyle(NEON, 0.08);
+    dropG.fillRect(roomX + 230, roomY + 36, 100, 14);
+    dropG.lineStyle(1, NEON, 0.3);
+    dropG.strokeRect(roomX + 230, roomY + 36, 100, 14);
+    this.add.text(roomX + 280, roomY + 43, '▸ TEMPORADA 01', {
+      fontSize: '5px',
+      fontFamily: '"Silkscreen", monospace',
+      color: '#39FF14',
+    }).setOrigin(0.5);
+
+    // ── Left column: decorative shelves ──────────────────────────
+    const shelfX = roomX + 12;
+    const shelfW = 148;
+
+    // Separator line
+    const sepG = this.add.graphics();
+    sepG.lineStyle(1, 0x1f1f38, 1);
+    sepG.lineBetween(roomX + shelfW + 20, roomY + 62, roomX + shelfW + 20, roomB - 90);
+
+    // Shelf 1 — Color swatches display
+    const sh1 = this.add.graphics();
+    sh1.fillStyle(0x171730);
+    sh1.fillRect(shelfX, roomY + 72, shelfW, 42);
+    sh1.lineStyle(1, 0x2a2a50, 1);
+    sh1.strokeRect(shelfX, roomY + 72, shelfW, 42);
+    // Shelf bracket (pixel-art style)
+    sh1.lineStyle(2, 0x2a2a50, 1);
+    sh1.lineBetween(shelfX, roomY + 113, shelfX + 8, roomY + 123);
+    sh1.lineBetween(shelfX + shelfW, roomY + 113, shelfX + shelfW - 8, roomY + 123);
+    // Color swatches on shelf
+    const shelfColors = [0x1A1A1A, 0xE8E8E8, 0xD94444, 0x1A1A1A, 0x556B2F];
+    shelfColors.forEach((col, i) => {
+      sh1.fillStyle(col, 0.9);
+      sh1.fillRect(shelfX + 6 + i * 26, roomY + 79, 18, 24);
+      sh1.lineStyle(1, 0x000000, 0.4);
+      sh1.strokeRect(shelfX + 6 + i * 26, roomY + 79, 18, 24);
+    });
+    this.add.text(shelfX + shelfW / 2, roomY + 120, 'COLORES', {
+      fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#444466',
+    }).setOrigin(0.5);
+
+    // Shelf 2 — Hanging rack
+    const sh2 = this.add.graphics();
+    sh2.fillStyle(0x171730);
+    sh2.fillRect(shelfX, roomY + 140, shelfW, 50);
+    sh2.lineStyle(1, 0x2a2a50, 1);
+    sh2.strokeRect(shelfX, roomY + 140, shelfW, 50);
+    // Rack bar
+    sh2.lineStyle(2, GOLD, 0.35);
+    sh2.lineBetween(shelfX + 10, roomY + 150, shelfX + shelfW - 10, roomY + 150);
+    // Hangers + garments
+    const hangColors = [0x222222, 0xD94444, 0x555555, 0x556B2F];
+    hangColors.forEach((col, i) => {
+      const hx = shelfX + 16 + i * 30;
+      sh2.lineStyle(1, 0x888888, 0.6);
+      sh2.lineBetween(hx + 6, roomY + 150, hx + 10, roomY + 160);
+      sh2.fillStyle(col, 0.8);
+      sh2.fillRect(hx, roomY + 160, 20, 18);
+      sh2.lineStyle(1, 0x000000, 0.3);
+      sh2.strokeRect(hx, roomY + 160, 20, 18);
+    });
+    this.add.text(shelfX + shelfW / 2, roomY + 197, 'DROP PICKS', {
+      fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#444466',
+    }).setOrigin(0.5);
+
+    // Shelf 3 — NEW ARRIVALS
+    const sh3 = this.add.graphics();
+    sh3.fillStyle(0x171730);
+    sh3.fillRect(shelfX, roomY + 212, shelfW, 46);
+    sh3.lineStyle(1, GOLD, 0.3);
+    sh3.strokeRect(shelfX, roomY + 212, shelfW, 46);
+    sh3.fillStyle(GOLD, 0.07);
+    sh3.fillRect(shelfX + 3, roomY + 215, shelfW - 6, 40);
+    this.add.text(shelfX + shelfW / 2, roomY + 228, '★ NEW DROP ★', {
+      fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: '#F5C842',
+    }).setOrigin(0.5);
+    this.add.text(shelfX + shelfW / 2, roomY + 244, 'TEMPORADA 01', {
+      fontSize: '5px', fontFamily: '"Silkscreen", monospace', color: '#666688',
+    }).setOrigin(0.5);
+
+    // ── Vendor NPC (pixel-art character) ─────────────────────────
+    const vx = roomX + 100;
+    const vy = roomY + 286;
+    this.vendorX = vx;
+    this.vendorY = vy;
+
+    const npc = this.add.graphics();
+
+    // Shadow ellipse
+    npc.fillStyle(0x000000, 0.28);
+    npc.fillEllipse(vx, vy + 56, 34, 10);
+
+    // Spotlight under vendor
+    npc.fillStyle(GOLD, 0.05);
+    npc.fillEllipse(vx, vy + 50, 64, 20);
+
+    // Legs
+    npc.fillStyle(0x0a0a22);
+    npc.fillRect(vx - 12, vy + 38, 10, 18);
+    npc.fillRect(vx + 2, vy + 38, 10, 18);
+    // Shoes
+    npc.fillStyle(0xf0f0f0);
+    npc.fillRect(vx - 14, vy + 54, 13, 5);
+    npc.fillRect(vx + 1, vy + 54, 13, 5);
+
+    // Body — dark hoodie
+    npc.fillStyle(0x14082e);
+    npc.fillRect(vx - 15, vy + 14, 30, 26);
+    // Hoodie front pocket
+    npc.fillStyle(0x0d0520);
+    npc.fillRect(vx - 8, vy + 26, 16, 12);
+    // Arm left
+    npc.fillStyle(0x14082e);
+    npc.fillRect(vx - 22, vy + 16, 8, 20);
+    // Arm right
+    npc.fillRect(vx + 14, vy + 16, 8, 20);
+    // Hands
+    npc.fillStyle(0xc9845a);
+    npc.fillRect(vx - 22, vy + 34, 8, 6);
+    npc.fillRect(vx + 14, vy + 34, 8, 6);
+    // Neck
+    npc.fillStyle(0xc9845a);
+    npc.fillRect(vx - 4, vy + 10, 8, 6);
+    // Head
+    npc.fillRect(vx - 11, vy - 4, 22, 18);
+    // Eyes
+    npc.fillStyle(0x111111);
+    npc.fillRect(vx - 6, vy + 2, 4, 4);
+    npc.fillRect(vx + 2, vy + 2, 4, 4);
+    // Cap brim
+    npc.fillStyle(GOLD);
+    npc.fillRect(vx - 13, vy - 4, 26, 5);
+    // Cap crown
+    npc.fillRect(vx - 9, vy - 13, 18, 10);
+    // Cap logo dot
+    npc.fillStyle(0x0a0520);
+    npc.fillRect(vx - 2, vy - 12, 4, 4);
+    npc.setDepth(8);
+
+    // Vendor name tag
+    this.add.text(vx, vy - 20, 'WASPI BOY', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(9);
+
+    // SPACE prompt badge
+    const spaceG = this.add.graphics();
+    spaceG.fillStyle(0x000000, 0.85);
+    spaceG.fillRoundedRect(vx - 40, vy + 68, 80, 16, 3);
+    spaceG.lineStyle(1, GOLD, 0.45);
+    spaceG.strokeRoundedRect(vx - 40, vy + 68, 80, 16, 3);
+    spaceG.setDepth(9);
+    this.add.text(vx, vy + 76, '[ SPACE ] HABLAR', {
+      fontSize: '5px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+    }).setOrigin(0.5).setDepth(10);
+
+    // Pulse tween on SPACE badge
+    this.tweens.add({
+      targets: spaceG,
+      alpha: { from: 0.6, to: 1 },
+      duration: 900,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    // ── Product list ─────────────────────────────────────────────
+    const listCX  = roomX + 460;  // center x of cards
+    const cardW   = 390;
+    const cardH   = 36;
+    const cardGap = 6;
+    let   cardY   = roomY + 90;
+
+    const items = CATALOG.filter((item) => typeof item.priceArs === 'number');
+
+    // Column headers
+    this.add.text(listCX - cardW / 2 + 50, cardY - 14, 'PRENDA', {
+      fontSize: '6px', fontFamily: '"Silkscreen", monospace', color: '#444466',
+    }).setOrigin(0, 0.5);
+    this.add.text(listCX + 110, cardY - 14, 'TALLES', {
+      fontSize: '6px', fontFamily: '"Silkscreen", monospace', color: '#444466',
+    }).setOrigin(0.5, 0.5);
+    this.add.text(listCX + cardW / 2 - 6, cardY - 14, 'PRECIO', {
+      fontSize: '6px', fontFamily: '"Silkscreen", monospace', color: '#444466',
+    }).setOrigin(1, 0.5);
+
+    // Divider
+    const divG = this.add.graphics();
+    divG.lineStyle(1, 0x222240, 1);
+    divG.lineBetween(listCX - cardW / 2, cardY - 6, listCX + cardW / 2, cardY - 6);
+
+    items.forEach((item) => {
+      const cy = cardY;
+      const cleft = listCX - cardW / 2;
+
+      // Card background
+      const cardBg = this.add.graphics();
+      const drawCard = (hover: boolean) => {
+        cardBg.clear();
+        if (hover) {
+          cardBg.fillStyle(0x111128, 1);
+          cardBg.fillRect(cleft, cy - cardH / 2, cardW, cardH);
+          cardBg.lineStyle(1, GOLD, 0.7);
+          cardBg.strokeRect(cleft, cy - cardH / 2, cardW, cardH);
+        } else {
+          cardBg.fillStyle(0x0b0b1c, 1);
+          cardBg.fillRect(cleft, cy - cardH / 2, cardW, cardH);
+          cardBg.lineStyle(1, 0x1e1e38, 1);
+          cardBg.strokeRect(cleft, cy - cardH / 2, cardW, cardH);
+        }
+        // Left color accent bar
+        cardBg.fillStyle(item.color ?? 0x444444, hover ? 1 : 0.7);
+        cardBg.fillRect(cleft, cy - cardH / 2, 4, cardH);
+      };
+      drawCard(false);
+
+      // Color swatch
+      const swG = this.add.graphics();
+      swG.fillStyle(item.color ?? 0x444444, 1);
+      swG.fillRect(cleft + 14, cy - 12, 22, 22);
+      swG.lineStyle(1, 0x000000, 0.5);
+      swG.strokeRect(cleft + 14, cy - 12, 22, 22);
+
+      // LIMITED badge
+      if (item.isLimited) {
+        const limG = this.add.graphics();
+        limG.fillStyle(0xD94444, 0.9);
+        limG.fillRect(cleft + 14, cy - 12, 22, 8);
+        this.add.text(cleft + 25, cy - 8, 'LTD', {
+          fontSize: '4px', fontFamily: '"Press Start 2P", monospace', color: '#ffffff',
+        }).setOrigin(0.5);
+      }
+
+      // Item name
+      const label = this.add.text(cleft + 46, cy - 8, item.name, {
+        fontSize: '7px',
+        fontFamily: '"Silkscreen", monospace',
+        color: '#FFFFFF',
+      }).setOrigin(0, 0.5);
+
+      // Sizes
+      this.add.text(cleft + 46, cy + 8, (item.sizes ?? []).join(' · '), {
+        fontSize: '6px',
+        fontFamily: '"Silkscreen", monospace',
+        color: '#444466',
+      }).setOrigin(0, 0.5);
+
+      // Sizes chips (centered around listCX+110)
+      const sizesStr = (item.sizes ?? []).join(' · ');
+      this.add.text(listCX + 110, cy, sizesStr, {
+        fontSize: '6px',
+        fontFamily: '"Silkscreen", monospace',
+        color: '#666688',
+      }).setOrigin(0.5);
+
+      // Price
+      const price = this.add.text(listCX + cardW / 2 - 22, cy, `$${item.priceArs?.toLocaleString('es-AR')}`, {
+        fontSize: '8px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#F5C842',
+      }).setOrigin(1, 0.5);
+
+      // Arrow CTA
+      const arrow = this.add.text(listCX + cardW / 2 - 6, cy, '►', {
+        fontSize: '8px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#39FF14',
+      }).setOrigin(0.5);
+
+      // Hit area
+      const hit = this.add.rectangle(listCX, cy, cardW, cardH, 0xffffff, 0)
+        .setInteractive({ useHandCursor: true });
+
+      const openShop = () => {
+        if (this.shopOverlayOpen) return;
+        this.selectedItemId = item.id;
+        eventBus.emit(EVENTS.SHOP_OPEN, { tab: 'products', itemId: item.id, source: 'store_interior' });
+        this.flashMessage(width / 2, roomB - 30, '▸ SHOP ABIERTO', '#39FF14');
+      };
+
+      hit.on('pointerdown', openShop);
+      hit.on('pointerover', () => {
+        drawCard(true);
+        label.setColor('#F5C842');
+        arrow.setColor('#F5C842');
+      });
+      hit.on('pointerout', () => {
+        drawCard(false);
+        label.setColor('#FFFFFF');
+        arrow.setColor('#39FF14');
+      });
+
+      cardY += cardH + cardGap;
+    });
+
+    // ── Footer hint ────────────────────────────────────────────────
+    this.add.text(width / 2, roomB + 18, 'ACERCATE AL VENDEDOR Y APRETÁ SPACE  •  ESC = SALIR', {
+      fontSize: '6px',
+      fontFamily: '"Silkscreen", monospace',
+      color: '#333355',
+    }).setOrigin(0.5);
+
+    // ── Player ─────────────────────────────────────────────────────
+    this.px = width / 2 + 80;
+    this.py = roomB - 60;
     this.player = new AvatarRenderer(this, this.px, this.py, loadStoredAvatarConfig());
     this.player.setDepth(10);
     this.localNameplate = this.add.text(this.px, this.py - 44, this.playerUsername, {
@@ -105,82 +508,17 @@ export class StoreInterior extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5, 1).setDepth(20);
 
-    this.add.text(width / 2, roomY + 24, 'WASPI STORE', {
-      fontSize: '16px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-    }).setOrigin(0.5);
-
-    this.add.text(width / 2, roomY + 52, 'CLICK EN UNA PRENDA Y ABRI EL CHECKOUT', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#888888',
-    }).setOrigin(0.5);
     createBackButton(this, () => this.exitToWorld());
 
-    const vendor = this.add.rectangle(width / 2, roomY + 120, 42, 56, 0x241a10, 1)
-      .setStrokeStyle(2, COLORS.GOLD, 0.45);
-    this.vendorX = vendor.x;
-    this.vendorY = vendor.y;
-    this.add.text(width / 2, roomY + 158, 'NPC VENDEDOR', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-    }).setOrigin(0.5);
-    vendor.setDepth(5);
+    // ── Staggered entry animation ─────────────────────────────────
+    // Groups: room bg → shelves/vendor → product list → footer
+    // (using alpha tweens on depth layers via cameras.main)
+    // Simple camera fade covers the entry feel
+    this.cameras.main.resetFX();
+    this.cameras.main.setAlpha(1);
+    this.cameras.main.fadeIn(300, 0, 0, 0);
 
-    const listX = roomX + 210;
-    let listY = roomY + 90;
-    const items = CATALOG.filter((item) => typeof item.priceArs === 'number');
-
-    items.forEach((item) => {
-      const row = this.add.rectangle(listX, listY, 360, 30, 0x0b0b12, 1)
-        .setStrokeStyle(1, 0x333333, 1)
-        .setInteractive({ useHandCursor: true });
-      const swatch = this.add.rectangle(listX - 165, listY, 18, 18, item.color ?? 0x111111, 1)
-        .setStrokeStyle(1, 0x000000, 0.35)
-        .setInteractive({ useHandCursor: true });
-      const label = this.add.text(listX - 140, listY - 4, item.name, {
-        fontSize: '8px',
-        fontFamily: '"Silkscreen", monospace',
-        color: '#FFFFFF',
-      }).setOrigin(0, 0.5).setInteractive({ useHandCursor: true });
-      this.add.text(listX - 140, listY + 8, `Talles: ${(item.sizes ?? []).join(' / ')}`, {
-        fontSize: '7px',
-        fontFamily: '"Silkscreen", monospace',
-        color: '#7f7f92',
-      }).setOrigin(0, 0.5);
-      const price = this.add.text(listX + 165, listY, `ARS ${item.priceArs?.toLocaleString('es-AR')}`, {
-        fontSize: '8px',
-        fontFamily: '"Press Start 2P", monospace',
-        color: '#F5C842',
-      }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
-
-      const openShop = () => {
-        if (this.shopOverlayOpen) return;
-        this.selectedItemId = item.id;
-        eventBus.emit(EVENTS.SHOP_OPEN, {
-          tab: 'products',
-          itemId: item.id,
-          source: 'store_interior',
-        });
-        this.flashMessage(width / 2, roomY + roomH - 30, 'SHOP ABIERTO', '#39FF14');
-      };
-
-      row.on('pointerdown', openShop);
-      swatch.on('pointerdown', openShop);
-      label.on('pointerdown', openShop);
-      price.on('pointerdown', openShop);
-
-      listY += 34;
-    });
-
-    this.add.text(width / 2, roomY + roomH + 24, 'ACERCATE AL VENDEDOR Y APRETA SPACE', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#666666',
-    }).setOrigin(0.5);
-
+    // ── Inputs ─────────────────────────────────────────────────────
     this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -189,10 +527,6 @@ export class StoreInterior extends Phaser.Scene {
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
     this.setupRealtime();
-
-    this.cameras.main.resetFX();
-    this.cameras.main.setAlpha(1);
-    this.cameras.main.fadeIn(250, 0, 0, 0);
   }
 
   private flashMessage(x: number, y: number, msg: string, color: string) {
@@ -206,8 +540,8 @@ export class StoreInterior extends Phaser.Scene {
     this.tweens.add({
       targets: text,
       alpha: { from: 1, to: 0 },
-      y: y - 10,
-      duration: 700,
+      y: y - 14,
+      duration: 800,
       ease: 'Sine.easeOut',
       onComplete: () => text.destroy(),
     });
@@ -285,7 +619,7 @@ export class StoreInterior extends Phaser.Scene {
         itemId,
         source: 'store_interior',
       });
-      this.flashMessage(this.scale.width / 2, this.scale.height - 40, 'SHOP ABIERTO', '#39FF14');
+      this.flashMessage(this.scale.width / 2, this.scale.height - 40, '▸ SHOP ABIERTO', '#39FF14');
     });
   }
 
