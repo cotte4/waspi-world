@@ -2404,7 +2404,7 @@ export class WorldScene extends Phaser.Scene {
     g.fillStyle(0x08070f);
     g.fillRect(x - 5, y, w + 10, 20);
 
-    // Preserved facade wings
+    // Preserved concrete side walls
     [[x + 52, y + 34], [x + w - 102, y + 34]].forEach(([wx, wy]) => {
       g.fillStyle(0x251d30, 1);
       g.fillRect(wx, wy, 50, 90);
@@ -2418,19 +2418,82 @@ export class WorldScene extends Phaser.Scene {
     g.lineStyle(2, 0xB48BFF, 0.9);
     g.strokeRoundedRect(x + w / 2 - 56, y + 42, 112, 126, 10);
 
+    // Entry platform
+    g.fillStyle(0x1b1624, 1);
+    g.fillRect(x + w / 2 - 86, y + 160, 172, 16);
+    g.lineStyle(1.5, 0x3a304a, 0.8);
+    g.strokeRect(x + w / 2 - 86, y + 160, 172, 16);
+
     // Descending steps
     g.fillStyle(0x2c2438, 1);
     for (let i = 0; i < 6; i++) {
       g.fillRect(x + w / 2 - 36 + i * 3, y + 72 + i * 13, 72 - i * 6, 8);
     }
 
-    // Basement door threshold
+    // Stair rails
+    g.lineStyle(3, 0x6e6f88, 0.95);
+    g.lineBetween(x + w / 2 - 76, y + 158, x + w / 2 - 44, y + 82);
+    g.lineBetween(x + w / 2 + 76, y + 158, x + w / 2 + 44, y + 82);
+    g.lineStyle(2, 0x8588a5, 0.8);
+    g.lineBetween(x + w / 2 - 70, y + 142, x + w / 2 - 40, y + 92);
+    g.lineBetween(x + w / 2 + 70, y + 142, x + w / 2 + 40, y + 92);
+
+    // Security gate and threshold
     g.fillStyle(0x050508);
-    g.fillRect(x + w / 2 - 24, y + h - 60, 48, 60);
-    g.lineStyle(2, 0x5a496e, 0.8);
-    g.strokeRect(x + w / 2 - 24, y + h - 60, 48, 60);
+    g.fillRect(x + w / 2 - 28, y + h - 64, 56, 64);
+    g.lineStyle(2, 0x5a496e, 0.85);
+    g.strokeRect(x + w / 2 - 28, y + h - 64, 56, 64);
+    g.lineStyle(1.5, 0x7b6f93, 0.55);
+    for (let i = -18; i <= 18; i += 12) {
+      g.lineBetween(x + w / 2 + i, y + h - 60, x + w / 2 + i, y + h - 6);
+    }
     g.fillStyle(COLORS.GOLD);
-    g.fillCircle(x + w / 2 + 10, y + h - 30, 3);
+    g.fillCircle(x + w / 2 + 12, y + h - 32, 3);
+
+    // Hazard strips on platform
+    g.fillStyle(0x2a2220, 1);
+    g.fillRect(x + w / 2 - 90, y + 176, 180, 10);
+    for (let i = 0; i < 8; i++) {
+      g.fillStyle(i % 2 === 0 ? 0xF5C842 : 0x111111, 1);
+      g.fillRect(x + w / 2 - 88 + i * 22, y + 177, 18, 8);
+    }
+
+    // Warning lights
+    [
+      [x + w / 2 - 102, y + 54],
+      [x + w / 2 + 102, y + 54],
+    ].forEach(([lx, ly]) => {
+      g.fillStyle(0xff5577, 0.16);
+      g.fillCircle(lx, ly, 22);
+      g.fillStyle(0xff5577, 0.32);
+      g.fillCircle(lx, ly, 12);
+      g.fillStyle(0xff8899, 1);
+      g.fillCircle(lx, ly, 5);
+    });
+
+    // Side signage panels
+    g.fillStyle(0x0c0b11, 1);
+    g.fillRoundedRect(x + 18, y + 148, 96, 32, 6);
+    g.fillRoundedRect(x + w - 114, y + 148, 96, 32, 6);
+    g.lineStyle(1.5, 0x4b3e60, 0.8);
+    g.strokeRoundedRect(x + 18, y + 148, 96, 32, 6);
+    g.strokeRoundedRect(x + w - 114, y + 148, 96, 32, 6);
+
+    this.add.text(x + 66, y + 164, 'ACCESS', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(3);
+
+    this.add.text(x + w - 66, y + 164, 'B-01', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#D4BCFF',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(3);
 
     this.add.text(x + w/2, y + 10, 'STAIRWAYS', {
       fontSize: '8px',
