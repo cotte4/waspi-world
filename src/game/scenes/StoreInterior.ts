@@ -5,7 +5,7 @@ import { CATALOG } from '../config/catalog';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { DialogSystem } from '../systems/DialogSystem';
-import { isActionJustDown, loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
+import { SceneControls } from '../systems/SceneControls';
 import { supabase, isConfigured } from '../../lib/supabase';
 
 type StoreRemotePlayer = {
@@ -55,7 +55,7 @@ export class StoreInterior extends Phaser.Scene {
   private lastMoveDx = 0;
   private lastMoveDy = 0;
   private lastIsMoving = false;
-  private controlSettings: ControlSettings = loadControlSettings();
+  private controls!: SceneControls;
 
   constructor() {
     super({ key: 'StoreInterior' });
@@ -65,19 +65,13 @@ export class StoreInterior extends Phaser.Scene {
     const { width, height } = this.scale;
     announceScene(this);
     this.input.enabled = true;
+    this.controls = new SceneControls(this);
     this.playerId = this.getOrCreatePlayerId();
     this.playerUsername = this.getOrCreateUsername();
     this.dialog = new DialogSystem(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     this.cleanupFns.push(eventBus.on(EVENTS.SHOP_OPEN, () => { this.shopOverlayOpen = true; }));
     this.cleanupFns.push(eventBus.on(EVENTS.SHOP_CLOSE, () => { this.shopOverlayOpen = false; }));
-    this.cleanupFns.push(eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
-      this.controlSettings = {
-        ...this.controlSettings,
-        ...(payload as Partial<ControlSettings>),
-      };
-    }));
     this.cleanupFns.push(bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', {
         returnX: SAFE_PLAZA_RETURN.X,
@@ -576,7 +570,7 @@ export class StoreInterior extends Phaser.Scene {
     this.updateRemotePlayers();
 
     if (this.shopOverlayOpen) {
-      if (isActionJustDown(this, this.controlSettings, 'back')) {
+      if (this.controls.isActionJustDown('back')) {
         this.shopOverlayOpen = false;
         eventBus.emit(EVENTS.SHOP_CLOSE);
       }
@@ -587,7 +581,7 @@ export class StoreInterior extends Phaser.Scene {
       this.handleMovement();
     }
 
-    if (isActionJustDown(this, this.controlSettings, 'back')) {
+    if (this.controls.isActionJustDown('back')) {
       if (this.dialog.isActive()) {
         this.dialog.clear();
         return;
@@ -596,7 +590,7 @@ export class StoreInterior extends Phaser.Scene {
       return;
     }
 
-    if (isActionJustDown(this, this.controlSettings, 'interact')) {
+    if (this.controls.isActionJustDown('interact')) {
       if (this.dialog.isActive()) {
         this.dialog.advance();
       } else {
@@ -648,11 +642,7 @@ export class StoreInterior extends Phaser.Scene {
 
   private handleMovement() {
     const speed = 180 / 60;
-    let { dx, dy } = readMovementVector({
-      scene: this,
-      settings: this.controlSettings,
-      includeJoystick: true,
-    });
+    let { dx, dy } = this.controls.readMovement(true);
 
     if (dx !== 0 && dy !== 0) {
       dx *= 0.707;

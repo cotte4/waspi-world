@@ -1,8 +1,7 @@
 import Phaser from 'phaser';
 import { BUILDINGS, SAFE_PLAZA_RETURN } from '../config/constants';
-import { eventBus, EVENTS } from '../config/eventBus';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
-import { isActionJustDown, loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
+import { SceneControls } from '../systems/SceneControls';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -86,7 +85,7 @@ export class BasementScene extends Phaser.Scene {
   private keySpace!: Phaser.Input.Keyboard.Key;
   private interactionText?: Phaser.GameObjects.Text;
   private interactionGlow?: Phaser.GameObjects.Ellipse;
-  private controlSettings: ControlSettings = loadControlSettings();
+  private controls!: SceneControls;
 
   constructor() {
     super({ key: 'BasementScene' });
@@ -98,20 +97,13 @@ export class BasementScene extends Phaser.Scene {
 
   create() {
     announceScene(this);
+    this.controls = new SceneControls(this);
     bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', {
         returnX: SAFE_PLAZA_RETURN.X,
         returnY: SAFE_PLAZA_RETURN.Y,
       });
     });
-    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
-      this.controlSettings = {
-        ...this.controlSettings,
-        ...(payload as Partial<ControlSettings>),
-      };
-    });
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
     this.cameras.main.setBackgroundColor('#0E0E14');
     this.cameras.main.setBounds(0, 0, SCENE_W, SCENE_H);
     this.cameras.main.setZoom(0.94);
@@ -143,10 +135,7 @@ export class BasementScene extends Phaser.Scene {
 
   update(_time: number, delta: number) {
     const speed = 520 * (delta / 1000);
-    let { dx, dy } = readMovementVector({
-      scene: this,
-      settings: this.controlSettings,
-    });
+    let { dx, dy } = this.controls.readMovement();
 
     if (dx !== 0 && dy !== 0) {
       dx *= 0.707;
@@ -161,12 +150,12 @@ export class BasementScene extends Phaser.Scene {
 
     this.updateInteractionUi();
 
-    if (isActionJustDown(this, this.controlSettings, 'interact')) {
+    if (this.controls.isActionJustDown('interact')) {
       this.enterZombieDepths();
       return;
     }
 
-    if (isActionJustDown(this, this.controlSettings, 'back')) {
+    if (this.controls.isActionJustDown('back')) {
       this.exitToWorld();
     }
   }

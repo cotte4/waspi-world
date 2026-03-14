@@ -3,7 +3,7 @@ import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRendere
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { InteriorRoom } from '../systems/InteriorRoom';
-import { loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
+import { SceneControls } from '../systems/SceneControls';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
 import {
   getBuildCost,
@@ -72,7 +72,7 @@ export class VecindadScene extends Phaser.Scene {
   private promptText?: Phaser.GameObjects.Text;
   private hudText?: Phaser.GameObjects.Text;
   private bridgeCleanupFns: Array<() => void> = [];
-  private controlSettings: ControlSettings = loadControlSettings();
+  private controls!: SceneControls;
 
   constructor() {
     super({ key: 'VecindadScene' });
@@ -87,6 +87,7 @@ export class VecindadScene extends Phaser.Scene {
   create() {
     announceScene(this);
     this.input.enabled = true;
+    this.controls = new SceneControls(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     this.loadVecindadState();
 
@@ -109,13 +110,6 @@ export class VecindadScene extends Phaser.Scene {
     this.keyL = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.L);
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyE = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
-    this.bridgeCleanupFns.push(eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
-      this.controlSettings = {
-        ...this.controlSettings,
-        ...(payload as Partial<ControlSettings>),
-      };
-    }));
     this.bridgeCleanupFns.push(bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', {
         returnX: SAFE_PLAZA_RETURN.X,
@@ -728,11 +722,7 @@ export class VecindadScene extends Phaser.Scene {
 
   private handleMovement(delta: number) {
     const speed = (VecindadScene.MOVE_SPEED * delta) / 1000;
-    let { dx, dy } = readMovementVector({
-      scene: this,
-      settings: this.controlSettings,
-      includeJoystick: true,
-    });
+    let { dx, dy } = this.controls.readMovement(true);
     if (dx !== 0 && dy !== 0) {
       dx *= 0.707;
       dy *= 0.707;

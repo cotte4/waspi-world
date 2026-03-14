@@ -475,6 +475,7 @@ export class WorldScene extends Phaser.Scene {
   create() {
     announceScene(this);
     this.input.enabled = true;
+    this.controls = new SceneControls(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
 
     // Generate player ID and username

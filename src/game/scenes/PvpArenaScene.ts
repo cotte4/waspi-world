@@ -1,10 +1,9 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarAction, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { COLORS, SAFE_PLAZA_RETURN } from '../config/constants';
-import { eventBus, EVENTS } from '../config/eventBus';
 import { getTenksBalance, initTenks } from '../systems/TenksSystem';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
-import { isActionDown, isActionJustDown, loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
+import { SceneControls } from '../systems/SceneControls';
 import { supabase, isConfigured } from '../../lib/supabase';
 
 type ArenaRemotePlayer = {
@@ -172,7 +171,7 @@ export class PvpArenaScene extends Phaser.Scene {
   private keyL!: Phaser.Input.Keyboard.Key;
   private pointerShootHandler?: (pointer: Phaser.Input.Pointer) => void;
   private readyBusy = false;
-  private controlSettings: ControlSettings = loadControlSettings();
+  private controls!: SceneControls;
 
   constructor() {
     super({ key: 'PvpArenaScene' });
@@ -180,6 +179,7 @@ export class PvpArenaScene extends Phaser.Scene {
 
   create() {
     this.input.enabled = true;
+    this.controls = new SceneControls(this);
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
 
@@ -230,14 +230,6 @@ export class PvpArenaScene extends Phaser.Scene {
         returnY: SAFE_PLAZA_RETURN.Y,
       });
     });
-    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
-      this.controlSettings = {
-        ...this.controlSettings,
-        ...(payload as Partial<ControlSettings>),
-      };
-    });
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
     void this.syncAuthenticatedIdentity();
     this.refreshUi();
     this.cameras.main.resetFX();
@@ -251,7 +243,7 @@ export class PvpArenaScene extends Phaser.Scene {
     this.handleBetInput();
     this.handleReadyInput();
 
-    if (isActionJustDown(this, this.controlSettings, 'back')) {
+    if (this.controls.isActionJustDown('back')) {
       this.requestExit();
       return;
     }
@@ -264,7 +256,7 @@ export class PvpArenaScene extends Phaser.Scene {
     this.maybeAbortUnpairedMatch();
 
     if (this.inMatch && this.alive && this.time.now >= this.countdownEndsAt) {
-      if (isActionDown(this, this.controlSettings, 'shoot') || this.input.activePointer.leftButtonDown()) {
+      if (this.controls.isActionDown('shoot') || this.input.activePointer.leftButtonDown()) {
         this.shoot(this.input.activePointer.worldX, this.input.activePointer.worldY);
       }
     }
@@ -518,11 +510,7 @@ export class PvpArenaScene extends Phaser.Scene {
       return;
     }
 
-    const { dx: mx, dy: my } = readMovementVector({
-      scene: this,
-      settings: this.controlSettings,
-      includeJoystick: true,
-    });
+    const { dx: mx, dy: my } = this.controls.readMovement(true);
     const moving = mx !== 0 || my !== 0;
     this.lastMoveDx = mx;
     this.lastMoveDy = my;
@@ -583,7 +571,7 @@ export class PvpArenaScene extends Phaser.Scene {
   }
 
   private handleReadyInput() {
-    if (this.inMatch || !isActionJustDown(this, this.controlSettings, 'interact') || this.readyBusy) return;
+    if (this.inMatch || !this.controls.isActionJustDown('interact') || this.readyBusy) return;
     void this.toggleReady();
   }
 

@@ -5,7 +5,7 @@ import { eventBus, EVENTS } from '../config/eventBus';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
-import { isActionJustDown, loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
+import { SceneControls } from '../systems/SceneControls';
 
 interface ArcadePenaltyReward {
   won?: boolean;
@@ -65,7 +65,7 @@ export class ArcadeInterior extends Phaser.Scene {
   private lastMoveDx = 0;
   private lastMoveDy = 0;
   private lastIsMoving = false;
-  private controlSettings: ControlSettings = loadControlSettings();
+  private controls!: SceneControls;
 
   constructor() {
     super({ key: 'ArcadeInterior' });
@@ -120,6 +120,7 @@ export class ArcadeInterior extends Phaser.Scene {
     const { width, height } = this.scale;
     this.inTransition = false;
     this.input.enabled = true;
+    this.controls = new SceneControls(this);
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     bindSafeResetToPlaza(this, () => {
@@ -137,15 +138,6 @@ export class ArcadeInterior extends Phaser.Scene {
       };
       this.applyMusicSettings();
     });
-    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
-      this.controlSettings = {
-        ...this.controlSettings,
-        ...(payload as Partial<ControlSettings>),
-      };
-    });
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
-
     const roomW = 700;
     const roomH = 400;
     const roomX = (width - roomW) / 2;
@@ -295,7 +287,7 @@ export class ArcadeInterior extends Phaser.Scene {
     this.updateMachineState();
     this.room?.update();
 
-    if (isActionJustDown(this, this.controlSettings, 'back')) {
+    if (this.controls.isActionJustDown('back')) {
       this.exitToWorld();
     }
   }
@@ -377,10 +369,7 @@ export class ArcadeInterior extends Phaser.Scene {
 
   private handleMovement(delta: number) {
     const speed = (185 * delta) / 1000;
-    let { dx, dy } = readMovementVector({
-      scene: this,
-      settings: this.controlSettings,
-    });
+    let { dx, dy } = this.controls.readMovement();
 
     if (dx !== 0 && dy !== 0) {
       dx *= 0.707;

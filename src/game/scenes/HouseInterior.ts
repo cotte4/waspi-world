@@ -4,7 +4,7 @@ import { SAFE_PLAZA_RETURN, WORLD } from '../config/constants';
 import { announceScene, bindSafeResetToPlaza, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { InteriorRoom } from '../systems/InteriorRoom';
-import { isActionJustDown, loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
+import { SceneControls } from '../systems/SceneControls';
 
 type HouseInteriorData = {
   returnScene?: string;
@@ -66,7 +66,7 @@ export class HouseInterior extends Phaser.Scene {
   private returnX?: number;
   private returnY?: number;
   private layout!: RoomLayout;
-  private controlSettings: ControlSettings = loadControlSettings();
+  private controls!: SceneControls;
 
   constructor() {
     super({ key: 'HouseInterior' });
@@ -150,31 +150,24 @@ export class HouseInterior extends Phaser.Scene {
     this.cameras.main.resetFX();
     this.cameras.main.setAlpha(1);
     this.cameras.main.fadeIn(250, 0, 0, 0);
+    this.controls = new SceneControls(this);
     bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', {
         returnX: SAFE_PLAZA_RETURN.X,
         returnY: SAFE_PLAZA_RETURN.Y,
       });
     });
-    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
-      this.controlSettings = {
-        ...this.controlSettings,
-        ...(payload as Partial<ControlSettings>),
-      };
-    });
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
   }
 
   update() {
     if (this.inTransition) return;
     this.handleMovement();
     this.room?.update();
-    if (isActionJustDown(this, this.controlSettings, 'interact')) {
+    if (this.controls.isActionJustDown('interact')) {
       this.handleInteraction();
       return;
     }
-    if (isActionJustDown(this, this.controlSettings, 'back')) {
+    if (this.controls.isActionJustDown('back')) {
       this.inTransition = true;
       transitionToScene(this, this.returnScene, {
         returnX: this.returnX,
@@ -185,10 +178,7 @@ export class HouseInterior extends Phaser.Scene {
 
   private handleMovement() {
     const speed = 180 / 60;
-    let { dx, dy } = readMovementVector({
-      scene: this,
-      settings: this.controlSettings,
-    });
+    let { dx, dy } = this.controls.readMovement();
 
     if (dx !== 0 && dy !== 0) {
       dx *= 0.707;

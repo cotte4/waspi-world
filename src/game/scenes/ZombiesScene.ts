@@ -3,8 +3,7 @@ import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { ensureFallbackRectTexture, getSafeAnimationDurationMs, hasUsableTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation } from '../systems/AnimationSafety';
-import { isActionDown, isActionJustDown, loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
-import { eventBus, EVENTS } from '../config/eventBus';
+import { SceneControls } from '../systems/SceneControls';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
 import {
   ZOMBIES_PLAYER,
@@ -237,7 +236,7 @@ export class ZombiesScene extends Phaser.Scene {
   private keySpace!: Phaser.Input.Keyboard.Key;
   private pointerDownHandler?: (pointer: Phaser.Input.Pointer) => void;
   private restartPending = false;
-  private controlSettings: ControlSettings = loadControlSettings();
+  private controls!: SceneControls;
   private returnScene: string = 'WorldScene';
   private returnX: number = PLAYER_RETURN.x;
   private returnY: number = PLAYER_RETURN.y;
@@ -260,6 +259,7 @@ export class ZombiesScene extends Phaser.Scene {
 
   create() {
     this.input.enabled = true;
+    this.controls = new SceneControls(this);
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
 
@@ -746,14 +746,6 @@ export class ZombiesScene extends Phaser.Scene {
       this.tryShoot(pointer.worldX, pointer.worldY);
     };
     this.input.on('pointerdown', this.pointerDownHandler);
-    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
-      this.controlSettings = {
-        ...this.controlSettings,
-        ...(payload as Partial<ControlSettings>),
-      };
-    });
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
   }
 
   private setupHud() {
@@ -989,13 +981,13 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number) {
-    if (isActionJustDown(this, this.controlSettings, 'back')) {
+    if (this.controls.isActionJustDown('back')) {
       this.requestExit();
       return;
     }
 
     if (this.gameOver) {
-      if (isActionJustDown(this, this.controlSettings, 'interact')) {
+      if (this.controls.isActionJustDown('interact')) {
         this.restartRun();
       }
       this.updatePromptHud({ kind: 'exit', x: EXIT_PAD.x, y: EXIT_PAD.y, radius: EXIT_PAD.radius, label: 'INTERACT REINICIAR  |  BACK SALIR', color: 0xFF6A6A });
@@ -1019,11 +1011,7 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private handleMovement() {
-    let { dx, dy } = readMovementVector({
-      scene: this,
-      settings: this.controlSettings,
-      includeJoystick: true,
-    });
+    let { dx, dy } = this.controls.readMovement(true);
 
     if (dx !== 0 || dy !== 0) {
       const len = Math.hypot(dx, dy) || 1;
@@ -1057,7 +1045,7 @@ export class ZombiesScene extends Phaser.Scene {
     if (this.reloadEndsAt > this.time.now) return;
     if (this.boxRollingUntil > this.time.now) return;
 
-    if (isActionDown(this, this.controlSettings, 'shoot')) {
+    if (this.controls.isActionDown('shoot')) {
       this.tryShoot(this.input.activePointer.worldX, this.input.activePointer.worldY);
     }
 
@@ -1819,7 +1807,7 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private handleContextInteraction() {
-    if (!isActionJustDown(this, this.controlSettings, 'interact')) return;
+    if (!this.controls.isActionJustDown('interact')) return;
     const option = this.getNearbyInteraction();
     if (!option) return;
 

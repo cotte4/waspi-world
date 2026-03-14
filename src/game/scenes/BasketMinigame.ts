@@ -4,7 +4,7 @@ import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
 import { calculateBasketReward } from '../../lib/basketRewards';
-import { isActionJustDown, loadControlSettings, type ControlSettings } from '../systems/ControlSettings';
+import { SceneControls } from '../systems/SceneControls';
 
 type BasketPhase = 'aiming' | 'flying' | 'result' | 'done' | 'exiting';
 
@@ -50,7 +50,7 @@ export class BasketMinigame extends Phaser.Scene {
   private ball!: Phaser.GameObjects.Arc;
   private shadow!: Phaser.GameObjects.Ellipse;
   private scoreText!: Phaser.GameObjects.Text;
-  private controlSettings: ControlSettings = loadControlSettings();
+  private controls!: SceneControls;
 
   private hoopBaseX = 0;
   private readonly hoopY = 212;
@@ -90,6 +90,7 @@ export class BasketMinigame extends Phaser.Scene {
     const { width, height } = this.scale;
     this.resetSceneState();
     this.input.enabled = true;
+    this.controls = new SceneControls(this);
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
 
@@ -189,15 +190,6 @@ export class BasketMinigame extends Phaser.Scene {
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.input.on('pointerdown', this.handleShootInput, this);
-    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
-      this.controlSettings = {
-        ...this.controlSettings,
-        ...(payload as Partial<ControlSettings>),
-      };
-    });
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
-
     this.refreshHud();
     this.refreshScorePanel();
     this.redrawAimGuide();
@@ -210,7 +202,7 @@ export class BasketMinigame extends Phaser.Scene {
   update(_time: number, delta: number) {
     if (this.isFinished) return;
 
-    if (isActionJustDown(this, this.controlSettings, 'back')) {
+    if (this.controls.isActionJustDown('back')) {
       this.finishAndExit();
       return;
     }
@@ -223,7 +215,7 @@ export class BasketMinigame extends Phaser.Scene {
       }
     }
 
-    if (isActionJustDown(this, this.controlSettings, 'interact')) {
+    if (this.controls.isActionJustDown('interact')) {
       this.handleShootInput();
     }
 

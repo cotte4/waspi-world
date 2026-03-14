@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { addTenks } from '../systems/TenksSystem';
 import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
-import { isActionJustDown, loadControlSettings, type ControlSettings } from '../systems/ControlSettings';
+import { SceneControls } from '../systems/SceneControls';
 
 type PenaltyPhase = 'aiming' | 'shooting' | 'result' | 'done' | 'exiting';
 
@@ -37,7 +37,7 @@ export class PenaltyMinigame extends Phaser.Scene {
   private summaryLabel!: Phaser.GameObjects.Text;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private keyEsc!: Phaser.Input.Keyboard.Key;
-  private controlSettings: ControlSettings = loadControlSettings();
+  private controls!: SceneControls;
 
   constructor() {
     super({ key: 'PenaltyMinigame' });
@@ -61,6 +61,7 @@ export class PenaltyMinigame extends Phaser.Scene {
     const { width, height } = this.scale;
     this.resetSceneState();
     this.input.enabled = true;
+    this.controls = new SceneControls(this);
     announceScene(this);
 
     this.goalX = width / 2;
@@ -164,15 +165,6 @@ export class PenaltyMinigame extends Phaser.Scene {
     this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.input.on('pointerdown', this.handleShootInput, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
-    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
-      this.controlSettings = {
-        ...this.controlSettings,
-        ...(payload as Partial<ControlSettings>),
-      };
-    });
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
-
     this.refreshHud();
     this.redrawAimGuide();
     this.cameras.main.resetFX();
@@ -183,12 +175,12 @@ export class PenaltyMinigame extends Phaser.Scene {
   update(_time: number, delta: number) {
     if (this.isFinished) return;
 
-    if (isActionJustDown(this, this.controlSettings, 'back')) {
+    if (this.controls.isActionJustDown('back')) {
       this.finishAndExit(false);
       return;
     }
 
-    if (isActionJustDown(this, this.controlSettings, 'interact')) {
+    if (this.controls.isActionJustDown('interact')) {
       this.handleShootInput();
     }
 
