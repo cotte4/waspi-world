@@ -10,15 +10,31 @@ import { safeSceneDelayedCall } from '../systems/AnimationSafety';
 
 type StationId = 'slots' | 'roulette' | 'blackjack' | 'poker';
 interface Station { id: StationId; label: string; cx: number; cy: number; triggerR: number; color: number; }
-type CasinoOverlayMode = 'slots' | 'blackjack' | null;
+type CasinoOverlayMode = 'slots' | 'roulette' | 'blackjack' | 'poker' | null;
 type BlackjackPhase = 'bet' | 'player' | 'dealer' | 'result';
+type RouletteBetKind = 'red' | 'black' | 'even' | 'odd' | 'lucky7';
+type PokerPhase = 'bet' | 'draw' | 'result';
 interface SlotsState { betIndex: number; reels: string[]; resultText: string; spinning: boolean; spinToken: number; }
 interface BlackjackState { phase: BlackjackPhase; betIndex: number; playerCards: number[]; dealerCards: number[]; dealerHidden: boolean; actionIndex: number; resultText: string; currentBet: number; deck: number[]; settled: boolean; handToken: number; }
+interface RouletteState { betIndex: number; optionIndex: number; resultText: string; spinning: boolean; spinToken: number; lastNumber: number | null; lastColor: 'red' | 'black' | 'green' | null; }
+interface PokerState { phase: PokerPhase; betIndex: number; cards: number[]; holds: boolean[]; cursorIndex: number; resultText: string; currentBet: number; deck: number[]; payout: number; }
+interface RouletteBetOption { id: RouletteBetKind; label: string; payout: number; color: string; }
+interface PokerResult { label: string; payoutMultiplier: number; }
 
 const SLOT_BETS = [100, 250, 500, 1000] as const;
+const ROULETTE_BETS = [100, 250, 500, 1000] as const;
 const BLACKJACK_BETS = [100, 250, 500, 1000] as const;
+const POKER_BETS = [100, 250, 500, 1000] as const;
 const SLOT_SYMBOLS = ['7', 'BAR', 'WASP', 'STAR', 'BELL'] as const;
 const BLACKJACK_ACTIONS = ['HIT', 'STAND'] as const;
+const ROULETTE_OPTIONS: RouletteBetOption[] = [
+  { id: 'red', label: 'ROJO', payout: 2, color: '#FF5A5A' },
+  { id: 'black', label: 'NEGRO', payout: 2, color: '#DDDDDD' },
+  { id: 'even', label: 'PAR', payout: 2, color: '#4FD1C5' },
+  { id: 'odd', label: 'IMPAR', payout: 2, color: '#F5C842' },
+  { id: 'lucky7', label: 'NUM 7', payout: 12, color: '#B794F4' },
+];
+const ROULETTE_RED_NUMBERS = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
 
 export class CasinoInterior extends Phaser.Scene {
   private static readonly RETURN_X = BUILDINGS.CASINO.x + BUILDINGS.CASINO.w / 2;
@@ -51,7 +67,9 @@ export class CasinoInterior extends Phaser.Scene {
   private overlayFooter?: Phaser.GameObjects.Text;
   private overlayAccent?: Phaser.GameObjects.Text;
   private slotsState: SlotsState = { betIndex: 0, reels: ['7', '7', '7'], resultText: 'ELEGI UNA APUESTA Y GIRA.', spinning: false, spinToken: 0 };
+  private rouletteState: RouletteState = { betIndex: 0, optionIndex: 0, resultText: 'ELEGI UNA APUESTA Y DALE AL GIRO.', spinning: false, spinToken: 0, lastNumber: null, lastColor: null };
   private blackjackState: BlackjackState = { phase: 'bet', betIndex: 0, playerCards: [], dealerCards: [], dealerHidden: true, actionIndex: 0, resultText: 'ELEGI UNA APUESTA Y REPARTE.', currentBet: 0, deck: [], settled: false, handToken: 0 };
+  private pokerState: PokerState = { phase: 'bet', betIndex: 0, cards: [], holds: [false, false, false, false, false], cursorIndex: 0, resultText: 'ELEGI UNA APUESTA Y REPARTE.', currentBet: 0, deck: [], payout: 0 };
 
   constructor() { super({ key: 'CasinoInterior' }); }
 
@@ -283,13 +301,30 @@ export class CasinoInterior extends Phaser.Scene {
 
   private activateStation(stationId: StationId) {
     if (stationId === 'slots') { this.openSlots(); return; }
+    if (stationId === 'roulette') { this.openRoulette(); return; }
     if (stationId === 'blackjack') { this.openBlackjack(); return; }
-    this.showToast('ESTA MESA LLEGA DESPUES.');
+    if (stationId === 'poker') { this.openPoker(); return; }
   }
 
   private openSlots() {
     this.overlayMode = 'slots';
     this.slotsState = { betIndex: 0, reels: ['7', '7', '7'], resultText: 'ELEGI UNA APUESTA Y GIRA.', spinning: false, spinToken: this.slotsState.spinToken };
+    this.setOverlayVisible(true);
+    this.redrawOverlay();
+    this.hideStationUi();
+  }
+
+  private openRoulette() {
+    this.overlayMode = 'roulette';
+    this.rouletteState = {
+      betIndex: this.rouletteState.betIndex,
+      optionIndex: this.rouletteState.optionIndex,
+      resultText: 'ELEGI APUESTA, TIPO Y GIRA.',
+      spinning: false,
+      spinToken: this.rouletteState.spinToken,
+      lastNumber: this.rouletteState.lastNumber,
+      lastColor: this.rouletteState.lastColor,
+    };
     this.setOverlayVisible(true);
     this.redrawOverlay();
     this.hideStationUi();
@@ -303,10 +338,32 @@ export class CasinoInterior extends Phaser.Scene {
     this.hideStationUi();
   }
 
+  private openPoker() {
+    this.overlayMode = 'poker';
+    this.pokerState = {
+      phase: 'bet',
+      betIndex: this.pokerState.betIndex,
+      cards: [],
+      holds: [false, false, false, false, false],
+      cursorIndex: 0,
+      resultText: 'ELEGI UNA APUESTA Y REPARTE.',
+      currentBet: 0,
+      deck: [],
+      payout: 0,
+    };
+    this.setOverlayVisible(true);
+    this.redrawOverlay();
+    this.hideStationUi();
+  }
+
   private closeOverlay() {
     if (this.overlayMode === 'slots' && this.slotsState.spinning) {
       this.slotsState.spinToken += 1;
       this.slotsState.spinning = false;
+    }
+    if (this.overlayMode === 'roulette' && this.rouletteState.spinning) {
+      this.rouletteState.spinToken += 1;
+      this.rouletteState.spinning = false;
     }
     if (this.overlayMode === 'blackjack') {
       this.blackjackState.handToken += 1;
@@ -323,14 +380,19 @@ export class CasinoInterior extends Phaser.Scene {
 
   private redrawOverlay() {
     if (!this.overlayMode || !this.overlayBg || !this.overlayFrame || !this.overlayTitle || !this.overlayBody || !this.overlayFooter || !this.overlayAccent) return;
-    const cx = this.scale.width / 2; const cy = this.roomY + this.roomH / 2; const panelW = 500; const panelH = 230; const panelX = cx - panelW / 2; const panelY = cy - panelH / 2; const accentColor = this.overlayMode === 'slots' ? 0xF5C842 : 0x22CC88;
+    const cx = this.scale.width / 2; const cy = this.roomY + this.roomH / 2; const panelW = 500; const panelH = 230; const panelX = cx - panelW / 2; const panelY = cy - panelH / 2;
+    const accentColor = this.overlayMode === 'slots' ? 0xF5C842 : this.overlayMode === 'roulette' ? 0xFF5A5A : this.overlayMode === 'poker' ? 0x8B5CF6 : 0x22CC88;
     this.overlayBg.clear(); this.overlayBg.fillStyle(0x000000, 0.78); this.overlayBg.fillRect(0, 0, this.scale.width, this.scale.height); this.overlayBg.fillStyle(0x0a0716, 0.96); this.overlayBg.fillRoundedRect(panelX, panelY, panelW, panelH, 12);
     this.overlayFrame.clear(); this.overlayFrame.lineStyle(2, accentColor, 0.95); this.overlayFrame.strokeRoundedRect(panelX, panelY, panelW, panelH, 12); this.overlayFrame.lineStyle(1, 0xF5C842, 0.2); this.overlayFrame.strokeRoundedRect(panelX + 6, panelY + 6, panelW - 12, panelH - 12, 10);
     if (this.overlayMode === 'slots') { this.renderSlotsOverlay(); return; }
+    if (this.overlayMode === 'roulette') { this.renderRouletteOverlay(); return; }
+    if (this.overlayMode === 'poker') { this.renderPokerOverlay(); return; }
     this.renderBlackjackOverlay();
   }
   private handleOverlayInput() {
     if (this.overlayMode === 'slots') { this.handleSlotsInput(); return; }
+    if (this.overlayMode === 'roulette') { this.handleRouletteInput(); return; }
+    if (this.overlayMode === 'poker') { this.handlePokerInput(); return; }
     if (this.overlayMode === 'blackjack') this.handleBlackjackInput();
   }
 
@@ -339,6 +401,15 @@ export class CasinoInterior extends Phaser.Scene {
     if (this.controls.isMovementDirectionJustDown('left')) { this.slotsState.betIndex = (this.slotsState.betIndex + SLOT_BETS.length - 1) % SLOT_BETS.length; this.redrawOverlay(); }
     if (this.controls.isMovementDirectionJustDown('right')) { this.slotsState.betIndex = (this.slotsState.betIndex + 1) % SLOT_BETS.length; this.redrawOverlay(); }
     if (this.controls.isActionJustDown('interact')) this.startSlotsSpin();
+  }
+
+  private handleRouletteInput() {
+    if (this.rouletteState.spinning) return;
+    if (this.controls.isMovementDirectionJustDown('left')) { this.rouletteState.betIndex = (this.rouletteState.betIndex + ROULETTE_BETS.length - 1) % ROULETTE_BETS.length; this.redrawOverlay(); }
+    if (this.controls.isMovementDirectionJustDown('right')) { this.rouletteState.betIndex = (this.rouletteState.betIndex + 1) % ROULETTE_BETS.length; this.redrawOverlay(); }
+    if (this.controls.isMovementDirectionJustDown('up')) { this.rouletteState.optionIndex = (this.rouletteState.optionIndex + ROULETTE_OPTIONS.length - 1) % ROULETTE_OPTIONS.length; this.redrawOverlay(); }
+    if (this.controls.isMovementDirectionJustDown('down')) { this.rouletteState.optionIndex = (this.rouletteState.optionIndex + 1) % ROULETTE_OPTIONS.length; this.redrawOverlay(); }
+    if (this.controls.isActionJustDown('interact')) this.startRouletteSpin();
   }
 
   private startSlotsSpin() {
@@ -382,6 +453,55 @@ export class CasinoInterior extends Phaser.Scene {
     this.redrawOverlay();
   }
 
+  private startRouletteSpin() {
+    const bet = ROULETTE_BETS[this.rouletteState.betIndex];
+    if (!spendTenks(bet, 'casino_roulette_bet')) {
+      this.rouletteState.resultText = 'NO TENES TENKS SUFICIENTES.';
+      this.redrawOverlay();
+      this.showToast('NO ALCANZA PARA GIRAR.');
+      return;
+    }
+    const winningNumber = Phaser.Math.Between(0, 36);
+    this.rouletteState.spinning = true;
+    this.rouletteState.resultText = 'LA BOLA ESTA GIRANDO...';
+    const token = this.rouletteState.spinToken + 1;
+    this.rouletteState.spinToken = token;
+    this.redrawOverlay();
+    const totalTicks = 14;
+    for (let tick = 0; tick < totalTicks; tick += 1) {
+      safeSceneDelayedCall(this, 90 * tick, () => {
+        if (this.overlayMode !== 'roulette' || this.rouletteState.spinToken !== token) return;
+        const number = tick === totalTicks - 1 ? winningNumber : Phaser.Math.Between(0, 36);
+        this.rouletteState.lastNumber = number;
+        this.rouletteState.lastColor = this.getRouletteColor(number);
+        if (tick === totalTicks - 1) this.finishRouletteSpin(number, bet);
+        else this.redrawOverlay();
+      }, 'casino roulette spin');
+    }
+  }
+
+  private finishRouletteSpin(number: number, bet: number) {
+    const option = ROULETTE_OPTIONS[this.rouletteState.optionIndex];
+    const color = this.getRouletteColor(number);
+    const isEven = number !== 0 && number % 2 === 0;
+    const won = (option.id === 'red' && color === 'red')
+      || (option.id === 'black' && color === 'black')
+      || (option.id === 'even' && isEven)
+      || (option.id === 'odd' && number !== 0 && !isEven)
+      || (option.id === 'lucky7' && number === 7);
+    const payout = won ? bet * option.payout : 0;
+    if (payout > 0) {
+      addTenks(payout, 'casino_roulette_payout');
+      this.showToast(`+${payout} TENKS`);
+      this.rouletteState.resultText = `SALIO ${number} ${color.toUpperCase()}. GANASTE ${payout} TENKS.`;
+    } else {
+      this.showToast('LA CASA GANA');
+      this.rouletteState.resultText = `SALIO ${number} ${color.toUpperCase()}. NO COBRAS ESTA.`;
+    }
+    this.rouletteState.spinning = false;
+    this.redrawOverlay();
+  }
+
   private renderSlotsOverlay() {
     if (!this.overlayTitle || !this.overlayBody || !this.overlayFooter || !this.overlayAccent) return;
     const balance = getTenksBalance();
@@ -392,6 +512,30 @@ export class CasinoInterior extends Phaser.Scene {
     this.overlayTitle.setText('SLOTS');
     this.overlayBody.setText([reelsLine, '', `APUESTA: ${bet} TENKS`, betLine, '', this.slotsState.resultText, '', 'TRIPLE 7 x8  |  TRIPLE x5  |  PAREJA x2'].join('\n'));
     this.overlayFooter.setText(this.slotsState.spinning ? 'ESPERA EL GIRO...' : '< > CAMBIA APUESTA   |   INTERACT GIRA   |   BACK CIERRA');
+  }
+
+  private renderRouletteOverlay() {
+    if (!this.overlayTitle || !this.overlayBody || !this.overlayFooter || !this.overlayAccent) return;
+    const balance = getTenksBalance();
+    const bet = ROULETTE_BETS[this.rouletteState.betIndex];
+    const betLine = ROULETTE_BETS.map((value, index) => (index === this.rouletteState.betIndex ? `[${value}]` : `${value}`)).join('  ');
+    const optionLine = ROULETTE_OPTIONS.map((option, index) => (index === this.rouletteState.optionIndex ? `[${option.label}]` : option.label)).join('  ');
+    const lastRoll = this.rouletteState.lastNumber === null ? '--' : `${this.rouletteState.lastNumber} ${this.rouletteState.lastColor?.toUpperCase() ?? ''}`;
+    const option = ROULETTE_OPTIONS[this.rouletteState.optionIndex];
+    this.overlayAccent.setText(`SALDO ${balance} TENKS`);
+    this.overlayTitle.setText('RULETA');
+    this.overlayBody.setText([
+      `ULTIMO GIRO: ${lastRoll}`,
+      '',
+      `APUESTA: ${bet} TENKS`,
+      betLine,
+      '',
+      `TIPO: ${optionLine}`,
+      `PAGA x${option.payout} TOTAL`,
+      '',
+      this.rouletteState.resultText,
+    ].join('\n'));
+    this.overlayFooter.setText(this.rouletteState.spinning ? 'GIRANDO...' : '< > BET   |   ^ v TIPO   |   INTERACT GIRA   |   BACK CIERRA');
   }
 
   private handleBlackjackInput() {
@@ -530,6 +674,101 @@ export class CasinoInterior extends Phaser.Scene {
     this.overlayFooter.setText(footer);
   }
 
+  private handlePokerInput() {
+    if (this.pokerState.phase === 'bet') {
+      if (this.controls.isMovementDirectionJustDown('left')) { this.pokerState.betIndex = (this.pokerState.betIndex + POKER_BETS.length - 1) % POKER_BETS.length; this.redrawOverlay(); }
+      if (this.controls.isMovementDirectionJustDown('right')) { this.pokerState.betIndex = (this.pokerState.betIndex + 1) % POKER_BETS.length; this.redrawOverlay(); }
+      if (this.controls.isActionJustDown('interact')) this.startPokerHand();
+      return;
+    }
+    if (this.pokerState.phase === 'draw') {
+      if (this.controls.isMovementDirectionJustDown('left')) { this.pokerState.cursorIndex = (this.pokerState.cursorIndex + 4) % 5; this.redrawOverlay(); }
+      if (this.controls.isMovementDirectionJustDown('right')) { this.pokerState.cursorIndex = (this.pokerState.cursorIndex + 1) % 5; this.redrawOverlay(); }
+      if (this.controls.isMovementDirectionJustDown('up') || this.controls.isMovementDirectionJustDown('down')) {
+        this.pokerState.holds[this.pokerState.cursorIndex] = !this.pokerState.holds[this.pokerState.cursorIndex];
+        this.redrawOverlay();
+      }
+      if (this.controls.isActionJustDown('interact')) this.finalizePokerDraw();
+      return;
+    }
+    if (this.pokerState.phase === 'result' && this.controls.isActionJustDown('interact')) this.openPoker();
+  }
+
+  private startPokerHand() {
+    const bet = POKER_BETS[this.pokerState.betIndex];
+    if (!spendTenks(bet, 'casino_poker_bet')) {
+      this.pokerState.resultText = 'NO TENES TENKS SUFICIENTES.';
+      this.redrawOverlay();
+      this.showToast('NO ALCANZA PARA JUGAR.');
+      return;
+    }
+    const deck = this.createPokerDeck();
+    const cards = Array.from({ length: 5 }, () => deck.pop() ?? 0);
+    this.pokerState.phase = 'draw';
+    this.pokerState.currentBet = bet;
+    this.pokerState.cards = cards;
+    this.pokerState.deck = deck;
+    this.pokerState.holds = [false, false, false, false, false];
+    this.pokerState.cursorIndex = 0;
+    this.pokerState.payout = 0;
+    this.pokerState.resultText = 'MARCA HOLD CON ^/v Y DALE INTERACT PARA ROBAR.';
+    this.redrawOverlay();
+  }
+
+  private finalizePokerDraw() {
+    for (let index = 0; index < this.pokerState.cards.length; index += 1) {
+      if (!this.pokerState.holds[index]) {
+        this.pokerState.cards[index] = this.drawPokerCard();
+      }
+    }
+    const result = this.evaluatePokerHand(this.pokerState.cards);
+    const payout = result.payoutMultiplier > 0 ? this.pokerState.currentBet * result.payoutMultiplier : 0;
+    if (payout > 0) {
+      addTenks(payout, 'casino_poker_payout');
+      this.showToast(`+${payout} TENKS`);
+    } else {
+      this.showToast('MANO PERDEDORA');
+    }
+    this.pokerState.phase = 'result';
+    this.pokerState.payout = payout;
+    this.pokerState.resultText = payout > 0 ? `${result.label}. COBRAS ${payout} TENKS.` : `${result.label}. NO HAY PAGO.`;
+    this.redrawOverlay();
+  }
+
+  private renderPokerOverlay() {
+    if (!this.overlayTitle || !this.overlayBody || !this.overlayFooter || !this.overlayAccent) return;
+    const balance = getTenksBalance();
+    const bet = POKER_BETS[this.pokerState.betIndex];
+    const betLine = POKER_BETS.map((value, index) => (index === this.pokerState.betIndex ? `[${value}]` : `${value}`)).join('  ');
+    const cardsLine = this.pokerState.cards.length === 0
+      ? '[ -- ]  [ -- ]  [ -- ]  [ -- ]  [ -- ]'
+      : this.pokerState.cards.map((card) => `[${this.formatPokerCard(card).padStart(3, ' ')}]`).join('  ');
+    const holdLine = this.pokerState.cards.length === 0
+      ? ''
+      : this.pokerState.holds.map((hold, index) => {
+        const selected = index === this.pokerState.cursorIndex ? '>' : ' ';
+        return `${selected}${hold ? 'HOLD' : '----'}`;
+      }).join('  ');
+    this.overlayAccent.setText(`SALDO ${balance} TENKS`);
+    this.overlayTitle.setText('POKER');
+    this.overlayBody.setText([
+      `APUESTA: ${bet} TENKS`,
+      betLine,
+      '',
+      cardsLine,
+      holdLine,
+      '',
+      this.pokerState.resultText,
+      '',
+      'PAGA: JJ+ x2 | 2P x3 | TRIO x4 | COLOR x6 | FULL x8 | ESCALERA x5',
+    ].join('\n'));
+    let footer = 'BACK CIERRA';
+    if (this.pokerState.phase === 'bet') footer = '< > CAMBIA APUESTA   |   INTERACT REPARTE   |   BACK CIERRA';
+    else if (this.pokerState.phase === 'draw') footer = '< > CURSOR   |   ^ v HOLD   |   INTERACT ROBA   |   BACK CIERRA';
+    else if (this.pokerState.phase === 'result') footer = 'INTERACT JUGAR OTRA   |   BACK CIERRA';
+    this.overlayFooter.setText(footer);
+  }
+
   private randomSlotSymbol() { return Phaser.Utils.Array.GetRandom([...SLOT_SYMBOLS]); }
   private createBlackjackDeck() {
     const deck: number[] = [];
@@ -557,6 +796,58 @@ export class CasinoInterior extends Phaser.Scene {
     });
     while (total > 21 && aces > 0) { total -= 10; aces -= 1; }
     return total;
+  }
+
+  private getRouletteColor(number: number) {
+    if (number === 0) return 'green';
+    return ROULETTE_RED_NUMBERS.has(number) ? 'red' : 'black';
+  }
+
+  private createPokerDeck() {
+    const deck: number[] = [];
+    for (let suit = 0; suit < 4; suit += 1) {
+      for (let rank = 1; rank <= 13; rank += 1) deck.push(suit * 13 + rank);
+    }
+    return Phaser.Utils.Array.Shuffle(deck);
+  }
+
+  private drawPokerCard() {
+    if (this.pokerState.deck.length === 0) this.pokerState.deck = this.createPokerDeck();
+    return this.pokerState.deck.pop() ?? 1;
+  }
+
+  private formatPokerCard(card: number) {
+    const rank = ((card - 1) % 13) + 1;
+    const suitIndex = Math.floor((card - 1) / 13);
+    const rankLabel = rank === 1 ? 'A' : rank === 11 ? 'J' : rank === 12 ? 'Q' : rank === 13 ? 'K' : String(rank);
+    const suitLabel = ['S', 'H', 'D', 'C'][suitIndex] ?? 'S';
+    return `${rankLabel}${suitLabel}`;
+  }
+
+  private evaluatePokerHand(cards: number[]): PokerResult {
+    const ranks = cards.map((card) => ((card - 1) % 13) + 1);
+    const suits = cards.map((card) => Math.floor((card - 1) / 13));
+    const counts = new Map<number, number>();
+    ranks.forEach((rank) => counts.set(rank, (counts.get(rank) ?? 0) + 1));
+    const groups = [...counts.values()].sort((a, b) => b - a);
+    const uniqueRanks = [...new Set(ranks)].sort((a, b) => a - b);
+    const normalized = uniqueRanks.map((rank) => (rank === 1 ? 14 : rank)).sort((a, b) => a - b);
+    const isFlush = suits.every((suit) => suit === suits[0]);
+    const isWheel = uniqueRanks.length === 5 && uniqueRanks.join(',') === '1,2,3,4,5';
+    const isStraight = uniqueRanks.length === 5 && (normalized[4] - normalized[0] === 4 || isWheel);
+    const hasAceHighStraight = normalized.join(',') === '10,11,12,13,14';
+    const pairRank = [...counts.entries()].find(([, count]) => count === 2)?.[0] ?? 0;
+
+    if (isStraight && isFlush && hasAceHighStraight) return { label: 'ESCALERA REAL', payoutMultiplier: 40 };
+    if (isStraight && isFlush) return { label: 'ESCALERA COLOR', payoutMultiplier: 20 };
+    if (groups[0] === 4) return { label: 'POKER', payoutMultiplier: 12 };
+    if (groups[0] === 3 && groups[1] === 2) return { label: 'FULL HOUSE', payoutMultiplier: 8 };
+    if (isFlush) return { label: 'COLOR', payoutMultiplier: 6 };
+    if (isStraight) return { label: 'ESCALERA', payoutMultiplier: 5 };
+    if (groups[0] === 3) return { label: 'TRIO', payoutMultiplier: 4 };
+    if (groups[0] === 2 && groups[1] === 2) return { label: 'DOBLE PAREJA', payoutMultiplier: 3 };
+    if (groups[0] === 2 && (pairRank === 1 || pairRank >= 11)) return { label: 'JACKS O MEJOR', payoutMultiplier: 2 };
+    return { label: 'NADA', payoutMultiplier: 0 };
   }
 
   private updateStationProximity() {
