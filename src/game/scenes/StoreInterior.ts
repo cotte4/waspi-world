@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { BUILDINGS, COLORS, SAFE_PLAZA_RETURN, WORLD, ZONES } from '../config/constants';
+import { BUILDINGS, SAFE_PLAZA_RETURN, ZONES } from '../config/constants';
 import { CATALOG } from '../config/catalog';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
@@ -462,7 +462,7 @@ export class StoreInterior extends Phaser.Scene {
       }).setOrigin(0.5);
 
       // Price
-      const price = this.add.text(listCX + cardW / 2 - 22, cy, `$${item.priceArs?.toLocaleString('es-AR')}`, {
+      this.add.text(listCX + cardW / 2 - 22, cy, `$${item.priceArs?.toLocaleString('es-AR')}`, {
         fontSize: '8px',
         fontFamily: '"Press Start 2P", monospace',
         color: '#F5C842',

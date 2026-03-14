@@ -1665,6 +1665,7 @@ export class WorldScene extends Phaser.Scene {
       BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2,
       BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2,
       BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2,
+      BUILDINGS.CASINO.x + BUILDINGS.CASINO.w / 2,
     ];
     g.fillStyle(0xD9DEE8, 0.18);
     crossings.forEach((centerX) => {
@@ -2868,11 +2869,12 @@ export class WorldScene extends Phaser.Scene {
     let finalY = newY;
 
     if (inBuildingZone) {
-      // Check if near a door entrance (within 60px of door center)
+      // Allow entering the facade band only if we're aligned with a building entrance.
       const doors = [
         BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2,
         BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2,
         BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2,
+        BUILDINGS.CASINO.x + BUILDINGS.CASINO.w / 2,
       ];
       const nearDoor = doors.some(doorX => Math.abs(newX - doorX) < 60);
 
