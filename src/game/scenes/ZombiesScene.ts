@@ -30,6 +30,13 @@ const EXIT_PAD = { x: 182, y: 878, radius: 42 } as const;
 const PLAYER_RETURN = { x: 1600, y: 1540 } as const;
 const WALL_THICKNESS = 36;
 
+type ZombiesSceneInitData = {
+  returnScene?: string;
+  returnX?: number;
+  returnY?: number;
+  entryLabel?: string;
+};
+
 type DoorState = {
   id: ZombiesSectionId;
   unlocked: boolean;
@@ -216,9 +223,20 @@ export class ZombiesScene extends Phaser.Scene {
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private pointerDownHandler?: (pointer: Phaser.Input.Pointer) => void;
+  private returnScene: string = 'WorldScene';
+  private returnX: number = PLAYER_RETURN.x;
+  private returnY: number = PLAYER_RETURN.y;
+  private entryLabel: string = 'LA PLAZA';
 
   constructor() {
     super({ key: 'ZombiesScene' });
+  }
+
+  init(data?: ZombiesSceneInitData) {
+    this.returnScene = data?.returnScene ?? 'WorldScene';
+    this.returnX = typeof data?.returnX === 'number' ? data.returnX : PLAYER_RETURN.x;
+    this.returnY = typeof data?.returnY === 'number' ? data.returnY : PLAYER_RETURN.y;
+    this.entryLabel = data?.entryLabel ?? 'LA PLAZA';
   }
 
   create() {
@@ -1658,7 +1676,7 @@ export class ZombiesScene extends Phaser.Scene {
     const options: InteractionOption[] = [];
 
     if (Phaser.Math.Distance.Between(this.px, this.py, EXIT_PAD.x, EXIT_PAD.y) <= EXIT_PAD.radius + 24) {
-      options.push({ kind: 'exit', x: EXIT_PAD.x, y: EXIT_PAD.y, radius: EXIT_PAD.radius + 18, label: 'E VOLVER A LA PLAZA', color: 0x39FF14 });
+      options.push({ kind: 'exit', x: EXIT_PAD.x, y: EXIT_PAD.y, radius: EXIT_PAD.radius + 18, label: `E VOLVER A ${this.entryLabel}`, color: 0x39FF14 });
     }
 
     const boxRadius = 74;
@@ -2150,9 +2168,9 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private requestExit() {
-    transitionToScene(this, 'WorldScene', {
-      returnX: PLAYER_RETURN.x,
-      returnY: PLAYER_RETURN.y,
+    transitionToScene(this, this.returnScene, {
+      returnX: this.returnX,
+      returnY: this.returnY,
     });
   }
 

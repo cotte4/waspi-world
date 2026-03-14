@@ -1765,32 +1765,6 @@ export class WorldScene extends Phaser.Scene {
     this.drawConstructionSite(820, ZONES.PLAZA_Y + 190, 280, 210, 'CASINO', '#FF4466');
     this.drawConstructionSite(2220, ZONES.PLAZA_Y + 190, 280, 210, 'GUN SHOP', '#46B3FF');
 
-    // Down-plaza gateway to the dedicated zombies district.
-    g.fillStyle(0x120c0f, 1);
-    g.fillRoundedRect(1500, ZONES.PLAZA_Y + 620, 200, 92, 16);
-    g.lineStyle(3, 0xff6ea8, 0.78);
-    g.strokeRoundedRect(1500, ZONES.PLAZA_Y + 620, 200, 92, 16);
-    g.fillStyle(0x2a111d, 1);
-    g.fillRect(1588, ZONES.PLAZA_Y + 588, 24, 124);
-    g.fillRect(1518, ZONES.PLAZA_Y + 640, 20, 52);
-    g.fillRect(1662, ZONES.PLAZA_Y + 640, 20, 52);
-
-    this.add.text(1600, ZONES.PLAZA_Y + 648, 'ZOMBIES', {
-      fontSize: '9px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FF90C2',
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(2);
-
-    this.add.text(1600, ZONES.PLAZA_Y + 684, 'SPACE ENTRAR', {
-      fontSize: '6px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FFD3E4',
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(2);
-
     // Plaza text
     this.add.text(fx, ZONES.PLAZA_Y + 20, 'PLAZA', {
       fontSize: '8px',
@@ -3504,7 +3478,6 @@ export class WorldScene extends Phaser.Scene {
     const nearBasement = Math.abs(this.px - basementDoorX) < 90
       && this.py >= BUILDINGS.HOUSE.y + BUILDINGS.HOUSE.h - 90
       && this.py <= BUILDINGS.HOUSE.y + BUILDINGS.HOUSE.h + 70;
-    const nearZombies = this.px >= 1490 && this.px <= 1710 && this.py >= ZONES.PLAZA_Y + 600 && this.py <= ZONES.PLAZA_Y + 740;
     const nearArcade = Math.abs(this.px - arcadeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearStore = Math.abs(this.px - storeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearCafe = Math.abs(this.px - cafeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
@@ -3514,9 +3487,6 @@ export class WorldScene extends Phaser.Scene {
     }
     if (nearBasement) {
       return { x: basementDoorX, y: basementDoorY, w: BUILDINGS.HOUSE.w + 20, h: BUILDINGS.HOUSE.h + 10, label: 'SPACE ENTRAR BASEMENT', color: 0xB48BFF, sceneKey: 'BasementScene' };
-    }
-    if (nearZombies) {
-      return { x: 1600, y: ZONES.PLAZA_Y + 666, w: 220, h: 120, label: 'SPACE ENTRAR ZOMBIES', color: 0xFF6EA8, sceneKey: 'ZombiesScene' };
     }
     if (nearPvpBooth) {
       return { x: 990, y: ZONES.PLAZA_Y + 485, w: 180, h: 90, label: 'SPACE ENTRAR PVP PIT', color: 0xFF4DA6, sceneKey: 'PvpArenaScene' };

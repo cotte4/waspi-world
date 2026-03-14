@@ -32,6 +32,7 @@ const C_FLOOR_OWL     = 0x0D0D18;
 // ─── Player spawn & zombie spawns (exported for game logic) ───────────────────
 
 export const BASEMENT_PLAYER_SPAWN = { x: 160, y: 660 };
+export const BASEMENT_ZOMBIES_ENTRY = { x: 1540, y: 1410 };
 const BASEMENT_RETURN = {
   x: BUILDINGS.HOUSE.x + BUILDINGS.HOUSE.w / 2,
   y: BUILDINGS.HOUSE.y + BUILDINGS.HOUSE.h + 26,
@@ -76,6 +77,9 @@ export class BasementScene extends Phaser.Scene {
   private keyS!: Phaser.Input.Keyboard.Key;
   private keyD!: Phaser.Input.Keyboard.Key;
   private keyEsc!: Phaser.Input.Keyboard.Key;
+  private keySpace!: Phaser.Input.Keyboard.Key;
+  private interactionText?: Phaser.GameObjects.Text;
+  private interactionGlow?: Phaser.GameObjects.Ellipse;
 
   constructor() {
     super({ key: 'BasementScene' });
@@ -108,6 +112,7 @@ export class BasementScene extends Phaser.Scene {
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
     this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.cameras.main.fadeIn(220, 0, 0, 0);
   }
 
@@ -132,6 +137,13 @@ export class BasementScene extends Phaser.Scene {
       cam.scrollY = Phaser.Math.Clamp(cam.scrollY + dy * speed, 0, SCENE_H - cam.height / cam.zoom);
     }
 
+    this.updateInteractionUi();
+
+    if (Phaser.Input.Keyboard.JustDown(this.keySpace) && this.isNearZombieAccess()) {
+      this.enterZombieDepths();
+      return;
+    }
+
     if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
       this.exitToWorld();
     }
@@ -141,6 +153,15 @@ export class BasementScene extends Phaser.Scene {
     transitionToScene(this, 'WorldScene', {
       returnX: BASEMENT_RETURN.x,
       returnY: BASEMENT_RETURN.y,
+    });
+  }
+
+  private enterZombieDepths() {
+    transitionToScene(this, 'ZombiesScene', {
+      returnScene: 'BasementScene',
+      returnX: BASEMENT_ZOMBIES_ENTRY.x,
+      returnY: BASEMENT_ZOMBIES_ENTRY.y,
+      entryLabel: 'BASEMENT',
     });
   }
 
@@ -735,6 +756,78 @@ export class BasementScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(DEPTH_FURNITURE + 4);
+
+    const descentGlow = this.add.ellipse(BASEMENT_ZOMBIES_ENTRY.x, BASEMENT_ZOMBIES_ENTRY.y + 18, 134, 56, 0xFF6EA8, 0.08)
+      .setDepth(DEPTH_FURNITURE + 2)
+      .setStrokeStyle(2, 0xFF6EA8, 0.42);
+    this.tweens.add({
+      targets: descentGlow,
+      alpha: { from: 0.08, to: 0.24 },
+      scaleX: 1.05,
+      scaleY: 1.12,
+      yoyo: true,
+      repeat: -1,
+      duration: 960,
+      ease: 'Sine.easeInOut',
+    });
+
+    const guide = this.add.graphics().setDepth(DEPTH_FURNITURE + 3);
+    guide.fillStyle(0x090811, 1);
+    guide.fillRoundedRect(BASEMENT_ZOMBIES_ENTRY.x - 82, BASEMENT_ZOMBIES_ENTRY.y - 40, 164, 88, 10);
+    guide.lineStyle(2, 0xFF6EA8, 0.85);
+    guide.strokeRoundedRect(BASEMENT_ZOMBIES_ENTRY.x - 82, BASEMENT_ZOMBIES_ENTRY.y - 40, 164, 88, 10);
+    guide.fillStyle(0x1e1323, 1);
+    for (let i = 0; i < 5; i += 1) {
+      guide.fillRect(BASEMENT_ZOMBIES_ENTRY.x - 36 + i * 8, BASEMENT_ZOMBIES_ENTRY.y - 8 + i * 11, 72 - i * 16, 7);
+    }
+    guide.lineStyle(2, 0x9E89B4, 0.85);
+    guide.lineBetween(BASEMENT_ZOMBIES_ENTRY.x - 58, BASEMENT_ZOMBIES_ENTRY.y + 34, BASEMENT_ZOMBIES_ENTRY.x - 20, BASEMENT_ZOMBIES_ENTRY.y - 14);
+    guide.lineBetween(BASEMENT_ZOMBIES_ENTRY.x + 58, BASEMENT_ZOMBIES_ENTRY.y + 34, BASEMENT_ZOMBIES_ENTRY.x + 20, BASEMENT_ZOMBIES_ENTRY.y - 14);
+
+    this.add.text(BASEMENT_ZOMBIES_ENTRY.x, BASEMENT_ZOMBIES_ENTRY.y - 68, 'LOWER ACCESS', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FF9DC8',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(DEPTH_FURNITURE + 4);
+
+    this.add.text(BASEMENT_ZOMBIES_ENTRY.x, BASEMENT_ZOMBIES_ENTRY.y + 66, 'DESCENSO', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(DEPTH_FURNITURE + 4);
+  }
+
+  private isNearZombieAccess() {
+    const cam = this.cameras.main;
+    return Phaser.Math.Distance.Between(cam.midPoint.x, cam.midPoint.y, BASEMENT_ZOMBIES_ENTRY.x, BASEMENT_ZOMBIES_ENTRY.y) <= 170;
+  }
+
+  private updateInteractionUi() {
+    if (!this.interactionText) {
+      this.interactionText = this.add.text(this.cameras.main.width / 2, this.cameras.main.height - 36, '', {
+        fontSize: '8px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#FF9DC8',
+        stroke: '#000000',
+        strokeThickness: 3,
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(12001).setVisible(false);
+    }
+    if (!this.interactionGlow) {
+      this.interactionGlow = this.add.ellipse(this.cameras.main.width / 2, this.cameras.main.height - 40, 360, 28, 0xFF6EA8, 0.12)
+        .setScrollFactor(0)
+        .setDepth(12000)
+        .setVisible(false);
+    }
+
+    const near = this.isNearZombieAccess();
+    this.interactionText.setVisible(near);
+    this.interactionGlow.setVisible(near);
+    if (!near) return;
+    this.interactionText.setText('SPACE BAJAR AL NIVEL ZOMBIES');
   }
 
   // ---------------------------------------------------------------------------
