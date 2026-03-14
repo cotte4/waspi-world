@@ -148,6 +148,16 @@ type MaterialNode = {
   label: Phaser.GameObjects.Text;
 };
 
+type InteractionTarget = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  label: string;
+  color: number;
+  sceneKey?: string;
+};
+
 const REMOTE_CHAT_MIN_MS = 1000;
 const REMOTE_MOVE_MIN_MS = 50;
 const REMOTE_HIT_MIN_MS = 120;
@@ -295,7 +305,7 @@ export class WorldScene extends Phaser.Scene {
   private hp = 100;
   private hpBar!: Phaser.GameObjects.Graphics;
   private hpText!: Phaser.GameObjects.Text;
-  private gunEnabled = false;
+  private gunEnabled = true;
   private keyF!: Phaser.Input.Keyboard.Key;
   private keyQ!: Phaser.Input.Keyboard.Key;
   private keyOne!: Phaser.Input.Keyboard.Key;
@@ -356,6 +366,9 @@ export class WorldScene extends Phaser.Scene {
   private parcelPrompt?: Phaser.GameObjects.Text;
   private materialNodes: MaterialNode[] = [];
   private vecindadHud?: Phaser.GameObjects.Text;
+  private interactionHint?: Phaser.GameObjects.Text;
+  private interactionHighlight?: Phaser.GameObjects.Graphics;
+  private runtimeFailures = new Set<string>();
 
   constructor() {
     super({ key: 'WorldScene' });
@@ -365,6 +378,7 @@ export class WorldScene extends Phaser.Scene {
     this.inTransition = false;
     this.px = data?.returnX ?? PLAYER.SPAWN_X;
     this.py = data?.returnY ?? PLAYER.SPAWN_Y;
+    this.runtimeFailures.clear();
   }
 
   private runBootStep(label: string, fn: () => void) {
@@ -372,6 +386,18 @@ export class WorldScene extends Phaser.Scene {
       fn();
     } catch (error) {
       console.error(`[Waspi][WorldScene] Boot step failed: ${label}`, error);
+    }
+  }
+
+  private runFrameStep(label: string, fn: () => void) {
+    try {
+      fn();
+    } catch (error) {
+      if (!this.runtimeFailures.has(label)) {
+        this.runtimeFailures.add(label);
+        console.error(`[Waspi][WorldScene] Runtime step failed: ${label}`, error);
+        eventBus.emit(EVENTS.UI_NOTICE, `Problema temporal en ${label}.`);
+      }
     }
   }
 
@@ -506,6 +532,7 @@ export class WorldScene extends Phaser.Scene {
 
     // Chat system
     this.chatSystem = new ChatSystem(this);
+    this.setupInteractionUi();
 
     // Bridge events from React
     this.runBootStep('react bridge', () => this.setupReactBridge());
@@ -619,6 +646,19 @@ export class WorldScene extends Phaser.Scene {
       { x: ZONES.TRAINING_X + ZONES.TRAINING_W - 110, y: ZONES.TRAINING_Y + 90, archetype: 'boss' },
     ];
     dummyPositions.forEach((p, index) => this.spawnTrainingDummy(p.x, p.y, index, p.archetype));
+  }
+
+  private setupInteractionUi() {
+    this.interactionHighlight?.destroy();
+    this.interactionHint?.destroy();
+    this.interactionHighlight = this.add.graphics().setDepth(3100);
+    this.interactionHint = this.add.text(0, 0, '', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5, 1).setDepth(3101).setAlpha(0);
   }
 
   private setupHpHud() {
@@ -1477,11 +1517,8 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private refreshUtilitiesFromInventory() {
-    this.gunEnabled = hasUtilityEquipped('UTIL-GUN-01');
+    this.gunEnabled = true;
     this.ballEnabled = hasUtilityEquipped('UTIL-BALL-01');
-    if (!this.gunEnabled) {
-      this.currentWeapon = 'pistol';
-    }
     this.renderCombatHud();
     this.syncWeaponVisual();
 
@@ -3195,7 +3232,8 @@ export class WorldScene extends Phaser.Scene {
     this.handleMovement(delta);
     this.syncPosition();
     this.chatSystem.update();
-    this.updateDummies();
+    this.runFrameStep('training combat', () => this.updateDummies());
+    this.runFrameStep('interaction highlight', () => this.updateInteractionHighlight());
     this.handleInteraction();
 
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyQ)) {
@@ -3217,7 +3255,7 @@ export class WorldScene extends Phaser.Scene {
       this.shootAt(this.input.activePointer.worldX, this.input.activePointer.worldY);
     }
 
-    this.updateWeaponSpritePosition();
+    this.runFrameStep('weapon visuals', () => this.updateWeaponSpritePosition());
 
     // Football follow animation
     if (this.football && this.ballEnabled) {
@@ -3250,51 +3288,84 @@ export class WorldScene extends Phaser.Scene {
     }
 
     // Interpolate remote players
-    for (const [playerId, rp] of this.remotePlayers) {
-      rp.x = Phaser.Math.Linear(rp.x, rp.targetX, 0.18);
-      rp.y = Phaser.Math.Linear(rp.y, rp.targetY, 0.18);
-      const deltaX = rp.targetX - rp.x;
-      const deltaY = rp.targetY - rp.y;
-      const isMoving = rp.isMoving || Math.abs(deltaX) > 0.8 || Math.abs(deltaY) > 0.8;
-      const visualDx = Math.abs(deltaX) > 0.1 ? deltaX : rp.moveDx;
-      rp.avatar.update(isMoving, visualDx);
-      rp.avatar.setPosition(rp.x, rp.y);
-      rp.avatar.setDepth(Math.floor(rp.y / 10));
-      rp.nameplate.setPosition(rp.x, rp.y - 46);
-      this.updateRemoteWeaponSprite(rp);
-      this.chatSystem.updatePosition(playerId, rp.x, rp.y);
-      this.syncHitboxPosition(rp.hitbox, rp.x, rp.y);
-    }
+    this.runFrameStep('remote players', () => {
+      for (const [playerId, rp] of this.remotePlayers) {
+        rp.x = Phaser.Math.Linear(rp.x, rp.targetX, 0.18);
+        rp.y = Phaser.Math.Linear(rp.y, rp.targetY, 0.18);
+        const deltaX = rp.targetX - rp.x;
+        const deltaY = rp.targetY - rp.y;
+        const isMoving = rp.isMoving || Math.abs(deltaX) > 0.8 || Math.abs(deltaY) > 0.8;
+        const visualDx = Math.abs(deltaX) > 0.1 ? deltaX : rp.moveDx;
+        rp.avatar.update(isMoving, visualDx);
+        rp.avatar.setPosition(rp.x, rp.y);
+        rp.avatar.setDepth(Math.floor(rp.y / 10));
+        rp.nameplate.setPosition(rp.x, rp.y - 46);
+        this.updateRemoteWeaponSprite(rp);
+        this.chatSystem.updatePosition(playerId, rp.x, rp.y);
+        this.syncHitboxPosition(rp.hitbox, rp.x, rp.y);
+      }
+    });
   }
 
   // ─── Interaction ───────────────────────────────────────────────────────────────
 
-  private handleInteraction() {
-    if (this.inTransition) return;
-
-    if (!Phaser.Input.Keyboard.JustDown(this.keySpace)) return;
-
-    // Check proximity to each building door (horizontal distance threshold)
+  private getInteractionTarget(): InteractionTarget | null {
     const arcadeDoorX = BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2;
     const storeDoorX = BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2;
     const cafeDoorX = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
     const nearVecindad = this.px < 220 && this.py > ZONES.SOUTH_SIDEWALK_Y - 30 && this.py < ZONES.PLAZA_Y + 120;
     const nearPvpBooth = this.px >= 900 && this.px <= 1080 && this.py >= ZONES.PLAZA_Y + 420 && this.py <= ZONES.PLAZA_Y + 550;
-
     const nearArcade = Math.abs(this.px - arcadeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearStore = Math.abs(this.px - storeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearCafe = Math.abs(this.px - cafeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
 
     if (nearVecindad) {
-      this.transitionToScene('VecindadScene');
-    } else if (nearPvpBooth) {
-      this.transitionToScene('PvpArenaScene');
-    } else if (nearArcade) {
-      this.transitionToScene('ArcadeInterior');
-    } else if (nearStore) {
-      this.transitionToScene('StoreInterior');
-    } else if (nearCafe) {
-      this.transitionToScene('CafeInterior');
+      return { x: 120, y: ZONES.PLAZA_Y + 40, w: 140, h: 80, label: 'SPACE ENTRAR VECINDAD', color: 0xF5C842, sceneKey: 'VecindadScene' };
+    }
+    if (nearPvpBooth) {
+      return { x: 990, y: ZONES.PLAZA_Y + 485, w: 180, h: 90, label: 'SPACE ENTRAR PVP PIT', color: 0xFF4DA6, sceneKey: 'PvpArenaScene' };
+    }
+    if (nearArcade) {
+      return { x: arcadeDoorX, y: BUILDINGS.ARCADE.y + BUILDINGS.ARCADE.h - 28, w: 110, h: 76, label: 'SPACE ENTRAR ARCADE', color: 0x46B3FF, sceneKey: 'ArcadeInterior' };
+    }
+    if (nearStore) {
+      return { x: storeDoorX, y: BUILDINGS.STORE.y + BUILDINGS.STORE.h - 28, w: 110, h: 76, label: 'SPACE ENTRAR SHOP', color: 0x39FF14, sceneKey: 'StoreInterior' };
+    }
+    if (nearCafe) {
+      return { x: cafeDoorX, y: BUILDINGS.CAFE.y + BUILDINGS.CAFE.h - 28, w: 110, h: 76, label: 'SPACE ENTRAR CAFE', color: 0xFF8B3D, sceneKey: 'CafeInterior' };
+    }
+    return null;
+  }
+
+  private updateInteractionHighlight() {
+    if (!this.interactionHighlight || !this.interactionHint) return;
+    const target = this.getInteractionTarget();
+    this.interactionHighlight.clear();
+    if (!target) {
+      this.interactionHint.setAlpha(0);
+      return;
+    }
+
+    const pulse = 0.3 + ((Math.sin(this.time.now / 180) + 1) * 0.16);
+    this.interactionHighlight.lineStyle(3, target.color, 0.88);
+    this.interactionHighlight.strokeRoundedRect(target.x - target.w / 2, target.y - target.h / 2, target.w, target.h, 10);
+    this.interactionHighlight.fillStyle(target.color, pulse * 0.2);
+    this.interactionHighlight.fillRoundedRect(target.x - target.w / 2, target.y - target.h / 2, target.w, target.h, 10);
+
+    const rgb = Phaser.Display.Color.IntegerToRGB(target.color);
+    this.interactionHint.setText(target.label);
+    this.interactionHint.setColor(`rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`);
+    this.interactionHint.setPosition(target.x, target.y - target.h / 2 - 10);
+    this.interactionHint.setAlpha(1);
+  }
+
+  private handleInteraction() {
+    if (this.inTransition) return;
+    if (!Phaser.Input.Keyboard.JustDown(this.keySpace)) return;
+
+    const target = this.getInteractionTarget();
+    if (target?.sceneKey) {
+      this.transitionToScene(target.sceneKey);
     }
   }
 
@@ -3397,6 +3468,10 @@ export class WorldScene extends Phaser.Scene {
     }
     this.audioCtx = undefined;
     this.audioUnlocked = false;
+    this.interactionHighlight?.destroy();
+    this.interactionHighlight = undefined;
+    this.interactionHint?.destroy();
+    this.interactionHint = undefined;
   }
 
   private emitPresence() {
