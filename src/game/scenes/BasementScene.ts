@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { ZONES } from '../config/constants';
+import { BUILDINGS } from '../config/constants';
 import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -32,7 +32,10 @@ const C_FLOOR_OWL     = 0x0D0D18;
 // ─── Player spawn & zombie spawns (exported for game logic) ───────────────────
 
 export const BASEMENT_PLAYER_SPAWN = { x: 160, y: 660 };
-const BASEMENT_RETURN = { x: 1290, y: ZONES.PLAZA_Y + 668 };
+const BASEMENT_RETURN = {
+  x: BUILDINGS.HOUSE.x + BUILDINGS.HOUSE.w / 2,
+  y: BUILDINGS.HOUSE.y + BUILDINGS.HOUSE.h + 26,
+};
 
 export const ZOMBIE_SPAWNS: Array<{ x: number; y: number; archetype: 'rusher' | 'shooter' | 'tank' | 'boss' }> = [
   { x: 400,  y: 700,  archetype: 'rusher'  },

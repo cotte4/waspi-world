@@ -1791,36 +1791,6 @@ export class WorldScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(2);
 
-    // Down-plaza gateway to Stairways to Basement.
-    g.fillStyle(0x0e0a12, 1);
-    g.fillRoundedRect(1185, ZONES.PLAZA_Y + 620, 210, 96, 16);
-    g.lineStyle(3, 0xB48BFF, 0.8);
-    g.strokeRoundedRect(1185, ZONES.PLAZA_Y + 620, 210, 96, 16);
-    g.fillStyle(0x1f1730, 1);
-    g.fillRect(1278, ZONES.PLAZA_Y + 590, 24, 126);
-    g.fillStyle(0x0b0b14, 1);
-    g.fillRect(1210, ZONES.PLAZA_Y + 646, 160, 46);
-    g.lineStyle(2, 0xC8A96E, 0.35);
-    for (let i = 0; i < 5; i++) {
-      g.lineBetween(1222 + i * 30, ZONES.PLAZA_Y + 650, 1222 + i * 30, ZONES.PLAZA_Y + 688);
-    }
-
-    this.add.text(1290, ZONES.PLAZA_Y + 646, 'STAIRWAYS', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#D4BCFF',
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(2);
-
-    this.add.text(1290, ZONES.PLAZA_Y + 675, 'TO BASEMENT', {
-      fontSize: '7px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(2);
-
     // Plaza text
     this.add.text(fx, ZONES.PLAZA_Y + 20, 'PLAZA', {
       fontSize: '8px',
@@ -2427,34 +2397,55 @@ export class WorldScene extends Phaser.Scene {
     const { x, y, w, h } = BUILDINGS.HOUSE;
     const g = this.add.graphics().setDepth(2);
 
-    g.fillStyle(COLORS.BUILDING_HOUSE);
+    g.fillStyle(0x15111c);
     g.fillRect(x, y, w, h);
 
     // Roof
-    g.fillStyle(COLORS.ROOF_DARK);
+    g.fillStyle(0x08070f);
     g.fillRect(x - 5, y, w + 10, 20);
 
-    // Windows
-    [[x + 60, y + 30], [x + w - 110, y + 30]].forEach(([wx, wy]) => {
-      g.fillStyle(COLORS.WINDOW_WARM, 0.2);
-      g.fillRect(wx, wy, 50, 55);
-      g.lineStyle(1.5, 0x886633, 0.7);
-      g.strokeRect(wx, wy, 50, 55);
+    // Preserved facade wings
+    [[x + 52, y + 34], [x + w - 102, y + 34]].forEach(([wx, wy]) => {
+      g.fillStyle(0x251d30, 1);
+      g.fillRect(wx, wy, 50, 90);
+      g.lineStyle(1.5, 0x5a496e, 0.75);
+      g.strokeRect(wx, wy, 50, 90);
     });
 
-    // Door
-    g.fillStyle(0x050508);
-    g.fillRect(x + w/2 - 20, y + h - 60, 40, 60);
-    g.lineStyle(2, 0x443322, 0.8);
-    g.strokeRect(x + w/2 - 20, y + h - 60, 40, 60);
-    g.fillStyle(0x886633);
-    g.fillCircle(x + w/2 + 8, y + h - 30, 3);
+    // Central stairwell opening
+    g.fillStyle(0x090811, 1);
+    g.fillRoundedRect(x + w / 2 - 56, y + 42, 112, 126, 10);
+    g.lineStyle(2, 0xB48BFF, 0.9);
+    g.strokeRoundedRect(x + w / 2 - 56, y + 42, 112, 126, 10);
 
-    // Label
-    this.add.text(x + w/2, y + 10, 'TU CASA', {
+    // Descending steps
+    g.fillStyle(0x2c2438, 1);
+    for (let i = 0; i < 6; i++) {
+      g.fillRect(x + w / 2 - 36 + i * 3, y + 72 + i * 13, 72 - i * 6, 8);
+    }
+
+    // Basement door threshold
+    g.fillStyle(0x050508);
+    g.fillRect(x + w / 2 - 24, y + h - 60, 48, 60);
+    g.lineStyle(2, 0x5a496e, 0.8);
+    g.strokeRect(x + w / 2 - 24, y + h - 60, 48, 60);
+    g.fillStyle(COLORS.GOLD);
+    g.fillCircle(x + w / 2 + 10, y + h - 30, 3);
+
+    this.add.text(x + w/2, y + 10, 'STAIRWAYS', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
-      color: '#334455',
+      color: '#D4BCFF',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(3);
+
+    this.add.text(x + w/2, y + 32, 'TO BASEMENT', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
     }).setOrigin(0.5).setDepth(3);
   }
 
@@ -3445,7 +3436,11 @@ export class WorldScene extends Phaser.Scene {
     const cafeDoorX = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
     const nearVecindad = this.px < 220 && this.py > ZONES.SOUTH_SIDEWALK_Y - 30 && this.py < ZONES.PLAZA_Y + 120;
     const nearPvpBooth = this.px >= 900 && this.px <= 1080 && this.py >= ZONES.PLAZA_Y + 420 && this.py <= ZONES.PLAZA_Y + 550;
-    const nearBasement = this.px >= 1175 && this.px <= 1405 && this.py >= ZONES.PLAZA_Y + 600 && this.py <= ZONES.PLAZA_Y + 740;
+    const basementDoorX = BUILDINGS.HOUSE.x + BUILDINGS.HOUSE.w / 2;
+    const basementDoorY = BUILDINGS.HOUSE.y + BUILDINGS.HOUSE.h - 32;
+    const nearBasement = Math.abs(this.px - basementDoorX) < 90
+      && this.py >= BUILDINGS.HOUSE.y + BUILDINGS.HOUSE.h - 90
+      && this.py <= BUILDINGS.HOUSE.y + BUILDINGS.HOUSE.h + 70;
     const nearZombies = this.px >= 1490 && this.px <= 1710 && this.py >= ZONES.PLAZA_Y + 600 && this.py <= ZONES.PLAZA_Y + 740;
     const nearArcade = Math.abs(this.px - arcadeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearStore = Math.abs(this.px - storeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
@@ -3455,7 +3450,7 @@ export class WorldScene extends Phaser.Scene {
       return { x: 120, y: ZONES.PLAZA_Y + 40, w: 140, h: 80, label: 'SPACE ENTRAR VECINDAD', color: 0xF5C842, sceneKey: 'VecindadScene' };
     }
     if (nearBasement) {
-      return { x: 1290, y: ZONES.PLAZA_Y + 668, w: 230, h: 120, label: 'SPACE ENTRAR BASEMENT', color: 0xB48BFF, sceneKey: 'BasementScene' };
+      return { x: basementDoorX, y: basementDoorY, w: BUILDINGS.HOUSE.w + 20, h: BUILDINGS.HOUSE.h + 10, label: 'SPACE ENTRAR BASEMENT', color: 0xB48BFF, sceneKey: 'BasementScene' };
     }
     if (nearZombies) {
       return { x: 1600, y: ZONES.PLAZA_Y + 666, w: 220, h: 120, label: 'SPACE ENTRAR ZOMBIES', color: 0xFF6EA8, sceneKey: 'ZombiesScene' };
