@@ -13,7 +13,8 @@ function buildLevelMilestones(maxLevel: number) {
   const milestones = [0];
   let totalXp = 0;
   for (let level = 2; level <= maxLevel; level += 1) {
-    const stepXp = Math.round(10 + Math.pow(level - 1, 1.58) * 4.4);
+    // Easier early levels, then a steep late-game climb.
+    const stepXp = Math.round(6 + Math.pow(level - 1, 2.08) * 2.1);
     totalXp += stepXp;
     milestones.push(totalXp);
   }
