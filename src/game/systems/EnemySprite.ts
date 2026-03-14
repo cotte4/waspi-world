@@ -45,46 +45,55 @@ export class EnemySprite {
 
   private playAnim(state: ZombieState) {
     if (!this.sprite || !this.sprite.scene) return;
-    const key = this.animKey(state);
-    const isLooping = state === 'idle' || state === 'walk';
-    const fallbackKey = ensureZombieFallbackTexture(this.scene, this.type);
-    safePlaySpriteAnimation(this.scene, this.sprite, key, `zombie_${this.type}_${state}`, fallbackKey, true);
+    try {
+      const key = this.animKey(state);
+      const isLooping = state === 'idle' || state === 'walk';
+      const fallbackKey = ensureZombieFallbackTexture(this.scene, this.type);
+      safePlaySpriteAnimation(this.scene, this.sprite, key, `zombie_${this.type}_${state}`, fallbackKey, true);
 
-    if (!isLooping) {
-      this.sprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
-        if (!this.sprite || !this.sprite.scene) return;
-        if (this.dead) return;
-        if (this.currentState === state) {
-          this.currentState = 'idle';
-          this.playAnim('idle');
-        }
-      });
+      if (!isLooping) {
+        this.sprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
+          if (!this.sprite || !this.sprite.scene) return;
+          if (this.dead) return;
+          if (this.currentState === state) {
+            this.currentState = 'idle';
+            this.playAnim('idle');
+          }
+        });
+      }
+    } catch (error) {
+      console.error(`[Waspi] EnemySprite playAnim failed for ${this.type}:${state}`, error);
     }
   }
 
   setState(state: ZombieState) {
     if (!this.sprite || !this.sprite.scene) return;
-    if (this.dead && state !== 'death') return;
+    try {
+      if (this.dead && state !== 'death') return;
 
-    // Avoid re-triggering looping anims every frame
-    if (
-      (state === 'idle' || state === 'walk') &&
-      this.currentState === state
-    ) return;
+      // Avoid re-triggering looping anims every frame
+      if (
+        (state === 'idle' || state === 'walk') &&
+        this.currentState === state
+      ) return;
 
-    this.currentState = state;
+      this.currentState = state;
 
-    if (state === 'death') {
-      this.dead = true;
-      this.playAnim('death');
-      // Hide after death animation completes
-      this.sprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
-        this.sprite.setAlpha(0);
-      });
-      return;
+      if (state === 'death') {
+        this.dead = true;
+        this.playAnim('death');
+        // Hide after death animation completes
+        this.sprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
+          if (!this.sprite || !this.sprite.scene) return;
+          this.sprite.setAlpha(0);
+        });
+        return;
+      }
+
+      this.playAnim(state);
+    } catch (error) {
+      console.error(`[Waspi] EnemySprite setState failed for ${this.type}:${state}`, error);
     }
-
-    this.playAnim(state);
   }
 
   setPosition(x: number, y: number) {
