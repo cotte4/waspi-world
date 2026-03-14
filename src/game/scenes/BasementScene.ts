@@ -139,7 +139,7 @@ export class BasementScene extends Phaser.Scene {
 
     this.updateInteractionUi();
 
-    if (Phaser.Input.Keyboard.JustDown(this.keySpace) && this.isNearZombieAccess()) {
+    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
       this.enterZombieDepths();
       return;
     }
@@ -729,10 +729,18 @@ export class BasementScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(12000);
 
-    this.add.text(this.cameras.main.width / 2, 48, 'WASD / FLECHAS EXPLORAR  ·  ESC VOLVER', {
+    this.add.text(this.cameras.main.width / 2, 48, 'WASD / FLECHAS EXPLORAR  |  SPACE BAJAR  |  ESC VOLVER', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#C8A96E',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(12000);
+
+    this.add.text(this.cameras.main.width / 2, 68, 'EL NIVEL ZOMBIES REAL ESTA ABAJO', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FF9DC8',
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(12000);
@@ -824,20 +832,15 @@ export class BasementScene extends Phaser.Scene {
     }
 
     const near = this.isNearZombieAccess();
-    this.interactionText.setVisible(near);
-    this.interactionGlow.setVisible(near);
-    if (!near) return;
-    this.interactionText.setText('SPACE BAJAR AL NIVEL ZOMBIES');
+    this.interactionText.setVisible(true);
+    this.interactionGlow.setVisible(true);
+    this.interactionGlow.setFillStyle(0xFF6EA8, near ? 0.18 : 0.08);
+    this.interactionText.setColor(near ? '#FF9DC8' : '#D8A8FF');
+    this.interactionText.setText(near
+      ? 'SPACE BAJAR AL NIVEL ZOMBIES'
+      : 'SPACE ENTRAR AL NIVEL ZOMBIES');
   }
 
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Renders a furniture piece with a fill, a lighter top edge highlight,
-   * and a stroke — matching the WorldScene building interior style.
-   */
   private addFurniture(
     g: Phaser.GameObjects.Graphics,
     x: number,
