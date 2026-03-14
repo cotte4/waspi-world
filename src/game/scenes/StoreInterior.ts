@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { COLORS, WORLD } from '../config/constants';
+import { BUILDINGS, COLORS, WORLD, ZONES } from '../config/constants';
 import { CATALOG } from '../config/catalog';
 import { announceScene, createBackButton } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
@@ -21,6 +21,8 @@ type StoreRemotePlayer = {
 };
 
 export class StoreInterior extends Phaser.Scene {
+  private static readonly RETURN_X = BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2;
+  private static readonly RETURN_Y = ZONES.SOUTH_SIDEWALK_Y + 26;
   private player!: AvatarRenderer;
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private keySpace!: Phaser.Input.Keyboard.Key;
@@ -210,13 +212,20 @@ export class StoreInterior extends Phaser.Scene {
 
   update() {
     if (this.inTransition) return;
-    if (this.shopOverlayOpen) return;
+    this.syncPosition();
+    this.updateRemotePlayers();
+
+    if (this.shopOverlayOpen) {
+      if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
+        this.shopOverlayOpen = false;
+        eventBus.emit(EVENTS.SHOP_CLOSE);
+      }
+      return;
+    }
 
     if (!this.dialog.isActive()) {
       this.handleMovement();
     }
-    this.syncPosition();
-    this.updateRemotePlayers();
 
     if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
       if (this.dialog.isActive()) {
@@ -238,11 +247,18 @@ export class StoreInterior extends Phaser.Scene {
 
   private exitToWorld() {
     if (this.inTransition) return;
+    this.dialog.clear();
+    this.shopOverlayOpen = false;
     eventBus.emit(EVENTS.SHOP_CLOSE);
     this.inTransition = true;
+    this.cameras.main.resetFX();
+    this.cameras.main.setAlpha(1);
     this.cameras.main.fadeOut(250, 0, 0, 0);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('WorldScene');
+      this.scene.start('WorldScene', {
+        returnX: StoreInterior.RETURN_X,
+        returnY: StoreInterior.RETURN_Y,
+      });
     });
   }
 

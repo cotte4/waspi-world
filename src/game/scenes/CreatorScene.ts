@@ -11,11 +11,13 @@ import { announceScene } from '../systems/SceneUi';
 
 const USERNAME_KEY = 'waspi_username';
 type CreatorControl = 'seed' | 'bodyColor' | 'eyeColor' | 'hairColor' | 'hairStyle' | 'pp' | 'tt' | 'save';
+type SeedId = 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha';
 
 export class CreatorScene extends Phaser.Scene {
   private preview!: AvatarRenderer;
-  private selectedSeed: 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha' = 'procedural';
-  private seedButtons: Array<{ id: 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha'; rect: Phaser.GameObjects.Rectangle; text: Phaser.GameObjects.Text }> = [];
+  private selectedSeed: SeedId = 'procedural';
+  private seedButtons: Array<{ id: SeedId; rect: Phaser.GameObjects.Rectangle; text: Phaser.GameObjects.Text }> = [];
+  private seedStatusText?: Phaser.GameObjects.Text;
   private config: Required<AvatarConfig>;
   private styleButtons: Array<{ style: HairStyle; rect: Phaser.GameObjects.Rectangle; text: Phaser.GameObjects.Text }> = [];
   private ppDots: Phaser.GameObjects.Rectangle[] = [];
@@ -36,7 +38,7 @@ export class CreatorScene extends Phaser.Scene {
   private readonly bodyColorOptions = [0xF5D5A4, 0xE6B98A, 0xD89B73, 0xBF7B4E, 0x9B5A3A, 0x7A412A];
   private readonly eyeColorOptions = [0x222222, 0x3B82F6, 0x22C55E, 0xA855F7, 0xDC2626, 0xFACC15];
   private readonly hairColorOptions = [0x1F130A, 0x8B5A2B, 0xF97316, 0xEF4444, 0xFFFFFF, 0xEC4899];
-  private readonly seedOptions: Array<'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha'> = ['procedural', 'gengar', 'buho', 'piplup', 'chacha'];
+  private readonly seedOptions: SeedId[] = ['procedural', 'gengar', 'buho', 'piplup', 'chacha'];
   private readonly hairStyleOptions: HairStyle[] = ['SPI', 'FLA', 'MOH', 'X'];
 
   constructor() {
@@ -65,7 +67,6 @@ export class CreatorScene extends Phaser.Scene {
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
 
-    // Background
     this.cameras.main.setBackgroundColor('#05050A');
     const bg = this.add.graphics().setDepth(-1);
     bg.fillStyle(0x05050a, 1);
@@ -74,101 +75,119 @@ export class CreatorScene extends Phaser.Scene {
     bg.fillRect(32, 54, width - 64, height - 96);
     bg.lineStyle(2, 0x2a2236, 0.9);
     bg.strokeRect(32, 54, width - 64, height - 96);
-
-    // Soft grid on the right side (editor)
-    bg.lineStyle(1, 0x141424, 0.5);
-    for (let x = width / 2 + 40; x < width - 48; x += 24) {
-      bg.lineBetween(x, 120, x, height - 72);
+    bg.lineStyle(1, 0x141424, 0.4);
+    for (let x = 44; x < width - 44; x += 28) {
+      bg.lineBetween(x, 126, x, height - 66);
     }
-    for (let y = 120; y < height - 72; y += 20) {
-      bg.lineBetween(width / 2 + 40, y, width - 48, y);
+    for (let y = 126; y < height - 66; y += 24) {
+      bg.lineBetween(44, y, width - 44, y);
     }
 
-    // Title
-    this.add.text(width / 2, 80, 'WASPI WORLD', {
+    const leftCard = { x: 56, y: 140, w: 254, h: 298 };
+    const identityCard = { x: 338, y: 140, w: 406, h: 114 };
+    const customCard = { x: 338, y: 270, w: 406, h: 214 };
+    const confirmCard = { x: 248, y: 506, w: 304, h: 58 };
+
+    this.drawCard(leftCard.x, leftCard.y, leftCard.w, leftCard.h, 0x3a3344);
+    this.drawCard(identityCard.x, identityCard.y, identityCard.w, identityCard.h, 0x2b3347);
+    this.drawCard(customCard.x, customCard.y, customCard.w, customCard.h, 0x2d2f46);
+    this.drawCard(confirmCard.x, confirmCard.y, confirmCard.w, confirmCard.h, 0x4a3a12);
+
+    this.add.text(width / 2, 86, 'WASPI WORLD', {
       fontSize: '28px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, 120, 'CREA TU WASPI', {
-      fontSize: '10px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#888888',
-    }).setOrigin(0.5);
-
-    // Preview panel
-    const panelW = 190;
-    const panelH = 190;
-    const panelX = width / 2 - 180;
-    const panelY = 210;
-    this.previewX = panelX;
-    this.previewY = panelY + 20;
-    const g = this.add.graphics();
-    g.fillStyle(0x030308);
-    g.fillRoundedRect(panelX - panelW / 2, panelY - panelH / 2, panelW, panelH, 14);
-    g.lineStyle(2, 0x3a3344, 1);
-    g.strokeRoundedRect(panelX - panelW / 2, panelY - panelH / 2, panelW, panelH, 14);
-    g.lineStyle(1, 0xF5C842, 0.22);
-    g.strokeRoundedRect(panelX - panelW / 2 + 5, panelY - panelH / 2 + 5, panelW - 10, panelH - 10, 11);
-
-    // Seed selector
-    const seedLabel = this.add.text(panelX, 146, 'SEED', {
+    this.add.text(width / 2, 118, 'BASE | IDENTIDAD | CUSTOM', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
-      color: '#666666',
+      color: '#7F8495',
     }).setOrigin(0.5);
+
+    const sectionStyle = {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#7F8495',
+    };
+    const labelStyle = {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#888888',
+    };
+
+    const seedLabel = this.add.text(leftCard.x + 18, leftCard.y + 18, 'BASE / SEED', sectionStyle).setOrigin(0, 0);
     this.controlLabels.set('seed', seedLabel);
 
-    const seeds: Array<{ id: 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha'; label: string }> = [
+    const previewFrame = this.add.graphics();
+    previewFrame.fillStyle(0x030308, 1);
+    previewFrame.fillRoundedRect(leftCard.x + 28, leftCard.y + 38, leftCard.w - 56, 152, 14);
+    previewFrame.lineStyle(2, 0xF5C842, 0.22);
+    previewFrame.strokeRoundedRect(leftCard.x + 28, leftCard.y + 38, leftCard.w - 56, 152, 14);
+
+    this.previewX = leftCard.x + leftCard.w / 2;
+    this.previewY = leftCard.y + 154;
+    this.preview = new AvatarRenderer(this, this.previewX, this.previewY, {
+      ...this.config,
+      avatarKind: this.selectedSeed,
+    });
+
+    this.seedStatusText = this.add.text(leftCard.x + leftCard.w / 2, leftCard.y + 206, '', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+    }).setOrigin(0.5);
+
+    const seeds: Array<{ id: SeedId; label: string }> = [
       { id: 'procedural', label: 'PROC' },
       { id: 'gengar', label: 'GEN' },
       { id: 'buho', label: 'BUH' },
       { id: 'piplup', label: 'PIP' },
       { id: 'chacha', label: 'CHA' },
     ];
-    seeds.forEach((s, i) => {
-      const x = panelX - 140 + i * 70;
-      const y = 170;
-      const rect = this.add.rectangle(x, y, 46, 22, 0x111111, 1)
-        .setStrokeStyle(1, s.id === this.selectedSeed ? 0xF5C842 : 0x333333, 1)
+
+    const seedBaseX = leftCard.x + 64;
+    const seedBaseY = leftCard.y + 246;
+    const seedGapX = 64;
+    const seedGapY = 34;
+    seeds.forEach((seed, index) => {
+      const col = index % 3;
+      const row = Math.floor(index / 3);
+      const x = seedBaseX + col * seedGapX;
+      const y = seedBaseY + row * seedGapY;
+      const rect = this.add.rectangle(x, y, 54, 24, 0x111111, 1)
+        .setStrokeStyle(1, 0x333333, 1)
         .setInteractive({ useHandCursor: true });
-      const txt = this.add.text(x, y, s.label, {
+      const text = this.add.text(x, y, seed.label, {
         fontSize: '8px',
         fontFamily: '"Press Start 2P", monospace',
-        color: s.id === this.selectedSeed ? '#F5C842' : '#CCCCCC',
+        color: '#CCCCCC',
       }).setOrigin(0.5);
       rect.on('pointerdown', () => {
-        this.selectedSeed = s.id;
+        this.selectedSeed = seed.id;
         this.refreshSeedButtons();
         this.refreshPreview();
       });
-      this.seedButtons.push({ id: s.id, rect, text: txt });
+      this.seedButtons.push({ id: seed.id, rect, text });
     });
 
-    // Avatar preview (no walk animation)
-    this.preview = new AvatarRenderer(this, this.previewX, this.previewY, {
-      ...this.config,
-      avatarKind: this.selectedSeed,
-    });
-    this.refreshSliders();
+    this.add.text(identityCard.x + 18, identityCard.y + 18, 'IDENTIDAD', sectionStyle).setOrigin(0, 0);
+    this.add.text(identityCard.x + 18, identityCard.y + 42, 'NOMBRE', labelStyle).setOrigin(0, 0.5);
+    this.add.text(identityCard.x + 18, identityCard.y + 86, 'SEED ACTIVO', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#666666',
+    }).setOrigin(0, 0.5);
 
-    // Name input
     const storedName = (typeof window !== 'undefined' ? window.localStorage.getItem(USERNAME_KEY) : null) ?? '';
     const defaultName = storedName || `WASPI_${Math.floor(Math.random() * 999)}`;
-
-    this.add.text(width / 2 + 120, 142, 'NOMBRE', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#888888',
-    }).setOrigin(0.5);
 
     const inputEl = document.createElement('input');
     inputEl.value = defaultName;
     inputEl.maxLength = 18;
     inputEl.autocomplete = 'off';
     inputEl.spellcheck = false;
-    inputEl.style.width = '260px';
+    inputEl.style.width = '280px';
     inputEl.style.padding = '10px 12px';
     inputEl.style.background = 'rgba(0,0,0,0.65)';
     inputEl.style.border = '1px solid rgba(245,200,66,0.35)';
@@ -178,7 +197,6 @@ export class CreatorScene extends Phaser.Scene {
     inputEl.style.fontSize = '16px';
     inputEl.style.textAlign = 'center';
     inputEl.style.letterSpacing = '1px';
-
     inputEl.addEventListener('input', () => {
       const cleaned = inputEl.value
         .toUpperCase()
@@ -186,81 +204,71 @@ export class CreatorScene extends Phaser.Scene {
         .slice(0, 18);
       if (cleaned !== inputEl.value) inputEl.value = cleaned;
     });
-
     inputEl.name = 'waspi-username';
     inputEl.id = 'waspi-username';
-    this.usernameInput = this.add.dom(width / 2 + 120, 170, inputEl);
+    this.usernameInput = this.add.dom(identityCard.x + 206, identityCard.y + 62, inputEl);
     this.usernameInputElement = inputEl;
 
-    let rowY = 210;
+    this.add.text(customCard.x + 18, customCard.y + 18, 'CUSTOM', sectionStyle).setOrigin(0, 0);
 
-    const labelStyle = {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#888888',
-    };
+    let rowY = customCard.y + 52;
+    const labelX = customCard.x + 18;
+    const swatchStartX = customCard.x + 154;
 
-    const makeRow = (control: CreatorControl, label: string, colors: number[], onPick: (c: number) => void) => {
-      const labelText = this.add.text(width / 2 - 10, rowY, label, labelStyle).setOrigin(0, 0.5);
+    const makeColorRow = (control: CreatorControl, label: string, colors: number[], onPick: (color: number) => void) => {
+      const labelText = this.add.text(labelX, rowY, label, labelStyle).setOrigin(0, 0.5);
       this.controlLabels.set(control, labelText);
-      const startX = width / 2 + 80;
-      colors.forEach((c, i) => {
-        const x = startX + i * 26;
-        const rect = this.add.rectangle(x, rowY, 20, 20, c)
+      colors.forEach((color, index) => {
+        const x = swatchStartX + index * 26;
+        const rect = this.add.rectangle(x, rowY, 20, 20, color)
           .setStrokeStyle(1, 0x222222, 1)
           .setInteractive({ useHandCursor: true });
         rect.on('pointerdown', () => {
-          onPick(c);
+          onPick(color);
           this.refreshPreview();
         });
       });
-      rowY += 32;
+      rowY += 34;
     };
 
-    // Colors
-    makeRow('bodyColor', 'CUERPO', this.bodyColorOptions, c => { this.config.bodyColor = c; });
+    makeColorRow('bodyColor', 'CUERPO', this.bodyColorOptions, (color) => { this.config.bodyColor = color; });
+    makeColorRow('eyeColor', 'OJOS', this.eyeColorOptions, (color) => { this.config.eyeColor = color; });
+    makeColorRow('hairColor', 'PELO', this.hairColorOptions, (color) => { this.config.hairColor = color; });
 
-    makeRow('eyeColor', 'OJOS', this.eyeColorOptions, c => { this.config.eyeColor = c; });
-
-    makeRow('hairColor', 'PELO', this.hairColorOptions, c => { this.config.hairColor = c; });
-
-    // Estilo buttons (haircuts)
-    const styleLabel = this.add.text(width / 2 - 190, rowY, 'ESTILO', labelStyle).setOrigin(0, 0.5);
+    const styleLabel = this.add.text(labelX, rowY, 'ESTILO', labelStyle).setOrigin(0, 0.5);
     this.controlLabels.set('hairStyle', styleLabel);
-    this.hairStyleOptions.forEach((s, i) => {
-      const x = width / 2 - 40 + i * 40;
-      const btn = this.add.rectangle(x, rowY, 30, 22, 0x111111, 1)
-        .setStrokeStyle(1, s === this.config.hairStyle ? 0xF5C842 : 0x333333, 1)
+    this.hairStyleOptions.forEach((style, index) => {
+      const x = swatchStartX + index * 44;
+      const btn = this.add.rectangle(x, rowY, 34, 24, 0x111111, 1)
+        .setStrokeStyle(1, 0x333333, 1)
         .setInteractive({ useHandCursor: true });
-      const txt = this.add.text(x, rowY, s, {
+      const txt = this.add.text(x, rowY, style, {
         fontSize: '8px',
         fontFamily: '"Press Start 2P", monospace',
-        color: s === this.config.hairStyle ? '#F5C842' : '#CCCCCC',
+        color: '#CCCCCC',
       }).setOrigin(0.5);
       btn.on('pointerdown', () => {
-        this.config.hairStyle = s;
+        this.config.hairStyle = style;
         this.refreshStyleButtons();
         this.refreshPreview();
       });
-      this.styleButtons.push({ style: s, rect: btn, text: txt });
+      this.styleButtons.push({ style, rect: btn, text: txt });
     });
 
-    rowY += 40;
+    rowY += 42;
 
-    // PP / TT sliders (discrete 0..10) — extreme
-    // NOTE: use getters so +/- always use current value (not captured initial)
     const makeSlider = (
       control: 'pp' | 'tt',
       label: 'PP' | 'TT',
       getValue: () => number,
-      setValue: (next: number) => void
+      setValue: (next: number) => void,
     ) => {
-      const labelText = this.add.text(width / 2 - 190, rowY, label, labelStyle).setOrigin(0, 0.5);
+      const labelText = this.add.text(labelX, rowY, label, labelStyle).setOrigin(0, 0.5);
       this.controlLabels.set(control, labelText);
 
-      const minusX = width / 2 - 80;
-      const plusX = width / 2 + 100;
-      const centerX = width / 2 + 10;
+      const minusX = swatchStartX - 28;
+      const plusX = swatchStartX + 160;
+      const centerX = swatchStartX + 64;
 
       const minus = this.add.rectangle(minusX, rowY, 22, 18, 0x111111, 1)
         .setStrokeStyle(1, 0x333333, 1)
@@ -283,26 +291,24 @@ export class CreatorScene extends Phaser.Scene {
       const dots: Phaser.GameObjects.Rectangle[] = [];
       for (let i = 0; i <= 10; i++) {
         const x = centerX + i * 14 - 70;
-        const r = this.add.rectangle(x, rowY, 10, 10, 0x111111, 1)
+        const dot = this.add.rectangle(x, rowY, 10, 10, 0x111111, 1)
           .setStrokeStyle(1, i === getValue() ? 0xF5C842 : 0x333333, 1)
           .setInteractive({ useHandCursor: true });
-        r.on('pointerdown', () => {
+        dot.on('pointerdown', () => {
           setValue(i);
           this.refreshSliders();
           this.refreshPreview();
         });
-        dots.push(r);
+        dots.push(dot);
       }
 
       minus.on('pointerdown', () => {
-        const cur = getValue();
-        setValue(Math.max(0, cur - 1));
+        setValue(Math.max(0, getValue() - 1));
         this.refreshSliders();
         this.refreshPreview();
       });
       plus.on('pointerdown', () => {
-        const cur = getValue();
-        setValue(Math.min(10, cur + 1));
+        setValue(Math.min(10, getValue() + 1));
         this.refreshSliders();
         this.refreshPreview();
       });
@@ -311,34 +317,29 @@ export class CreatorScene extends Phaser.Scene {
     };
 
     this.ppDots = makeSlider('pp', 'PP', () => this.config.pp, (next) => { this.config.pp = next; });
-    rowY += 28;
+    rowY += 30;
     this.ttDots = makeSlider('tt', 'TT', () => this.config.tt, (next) => { this.config.tt = next; });
 
-    rowY += 34;
-
-    // ENTRAR button
-    const btnW = 160;
-    const btnH = 36;
-    const btnY = height - 70;
-    const btn = this.add.rectangle(width / 2, btnY, btnW, btnH, 0xF5C842, 1)
+    const btnX = confirmCard.x + confirmCard.w / 2;
+    const btnY = confirmCard.y + 28;
+    const btn = this.add.rectangle(btnX, btnY, 170, 36, 0xF5C842, 1)
       .setInteractive({ useHandCursor: true });
-    this.add.text(width / 2, btnY, 'ENTRAR', {
+    this.add.text(btnX, btnY, 'ENTRAR', {
       fontSize: '12px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#111111',
     }).setOrigin(0.5);
-    const saveLabel = this.add.text(width / 2 + 170, btnY, 'ENTER GUARDAR', {
-      fontSize: '8px',
+    const saveLabel = this.add.text(confirmCard.x + confirmCard.w - 14, confirmCard.y + 12, 'ENTER GUARDAR', {
+      fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#666666',
-    }).setOrigin(0, 0.5);
+    }).setOrigin(1, 0);
     this.controlLabels.set('save', saveLabel);
-
     btn.on('pointerdown', () => {
       this.commitAndEnter();
     });
 
-    this.add.text(width / 2 + 120, height - 28, 'ARRIBA/ABAJO SECCION · IZQ/DER CAMBIA · ENTER GUARDAR', {
+    this.add.text(width / 2, height - 24, 'ARRIBA/ABAJO SECCION | IZQ/DER CAMBIA | ENTER GUARDAR', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#666666',
@@ -350,6 +351,10 @@ export class CreatorScene extends Phaser.Scene {
     this.keyRight = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
     this.keyEnter = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
     this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+
+    this.refreshSeedButtons();
+    this.refreshStyleButtons();
+    this.refreshSliders();
     this.refreshControlHighlights();
 
     this.cameras.main.resetFX();
@@ -382,17 +387,28 @@ export class CreatorScene extends Phaser.Scene {
     }
   }
 
+  private drawCard(x: number, y: number, w: number, h: number, accent: number) {
+    const card = this.add.graphics();
+    card.fillStyle(0x080811, 0.98);
+    card.fillRoundedRect(x, y, w, h, 16);
+    card.lineStyle(2, accent, 0.95);
+    card.strokeRoundedRect(x, y, w, h, 16);
+    card.lineStyle(1, 0xF5C842, 0.18);
+    card.strokeRoundedRect(x + 6, y + 6, w - 12, h - 12, 12);
+  }
+
   private refreshStyleButtons() {
-    for (const b of this.styleButtons) {
-      const active = b.style === this.config.hairStyle;
-      b.rect.setStrokeStyle(1, active ? 0xF5C842 : 0x333333, 1);
-      b.text.setColor(active ? '#F5C842' : '#CCCCCC');
+    for (const button of this.styleButtons) {
+      const active = button.style === this.config.hairStyle;
+      button.rect.setFillStyle(active ? 0x2f2410 : 0x111111, 1);
+      button.rect.setStrokeStyle(1, active ? 0xF5C842 : 0x333333, 1);
+      button.text.setColor(active ? '#F5C842' : '#CCCCCC');
     }
   }
 
   private refreshSliders() {
-    this.ppDots.forEach((d, i) => d.setStrokeStyle(1, i === this.config.pp ? 0xF5C842 : 0x333333, 1));
-    this.ttDots.forEach((d, i) => d.setStrokeStyle(1, i === this.config.tt ? 0xF5C842 : 0x333333, 1));
+    this.ppDots.forEach((dot, index) => dot.setStrokeStyle(1, index === this.config.pp ? 0xF5C842 : 0x333333, 1));
+    this.ttDots.forEach((dot, index) => dot.setStrokeStyle(1, index === this.config.tt ? 0xF5C842 : 0x333333, 1));
   }
 
   private refreshPreview() {
@@ -401,6 +417,7 @@ export class CreatorScene extends Phaser.Scene {
       ...this.config,
       avatarKind: this.selectedSeed,
     });
+    this.refreshSeedStatus();
   }
 
   private handleSceneShutdown() {
@@ -408,11 +425,18 @@ export class CreatorScene extends Phaser.Scene {
   }
 
   private refreshSeedButtons() {
-    for (const b of this.seedButtons) {
-      const active = b.id === this.selectedSeed;
-      b.rect.setStrokeStyle(1, active ? 0xF5C842 : 0x333333, 1);
-      b.text.setColor(active ? '#F5C842' : '#CCCCCC');
+    for (const button of this.seedButtons) {
+      const active = button.id === this.selectedSeed;
+      button.rect.setFillStyle(active ? 0x20180b : 0x111111, 1);
+      button.rect.setStrokeStyle(1, active ? 0xF5C842 : 0x333333, 1);
+      button.text.setColor(active ? '#F5C842' : '#CCCCCC');
     }
+    this.refreshSeedStatus();
+  }
+
+  private refreshSeedStatus() {
+    if (!this.seedStatusText) return;
+    this.seedStatusText.setText(`SEED ACTIVO: ${this.getSeedLabel(this.selectedSeed)}`);
   }
 
   private refreshControlHighlights() {
@@ -494,6 +518,23 @@ export class CreatorScene extends Phaser.Scene {
     const index = values.indexOf(current);
     const nextIndex = Phaser.Math.Wrap((index >= 0 ? index : 0) + direction, 0, values.length);
     return values[nextIndex];
+  }
+
+  private getSeedLabel(seed: SeedId) {
+    switch (seed) {
+      case 'procedural':
+        return 'PROC';
+      case 'gengar':
+        return 'GEN';
+      case 'buho':
+        return 'BUH';
+      case 'piplup':
+        return 'PIP';
+      case 'chacha':
+        return 'CHA';
+      default:
+        return 'PROC';
+    }
   }
 
   private isUsernameFocused() {

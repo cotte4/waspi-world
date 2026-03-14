@@ -39,6 +39,7 @@ type VecindadSceneData = {
 };
 
 export class VecindadScene extends Phaser.Scene {
+  private static readonly MOVE_SPEED = 145;
   private player!: AvatarRenderer;
   private room?: InteriorRoom;
   private keySpace!: Phaser.Input.Keyboard.Key;
@@ -105,9 +106,9 @@ export class VecindadScene extends Phaser.Scene {
     this.cameras.main.fadeIn(240, 0, 0, 0);
   }
 
-  update() {
+  update(_time: number, delta: number) {
     if (this.inTransition) return;
-    this.handleMovement();
+    this.handleMovement(delta);
     this.room?.update();
     this.updateMaterialNodes();
     this.updatePrompt();
@@ -702,8 +703,8 @@ export class VecindadScene extends Phaser.Scene {
     });
   }
 
-  private handleMovement() {
-    const speed = 180 / 60;
+  private handleMovement(delta: number) {
+    const speed = (VecindadScene.MOVE_SPEED * delta) / 1000;
     let dx = 0;
     let dy = 0;
 
@@ -721,8 +722,8 @@ export class VecindadScene extends Phaser.Scene {
       dy *= 0.707;
     }
 
-    this.px = Phaser.Math.Clamp(this.px + dx * speed * 16.6, 84, VECINDAD_MAP.WIDTH - 84);
-    this.py = Phaser.Math.Clamp(this.py + dy * speed * 16.6, 84, VECINDAD_MAP.HEIGHT - 84);
+    this.px = Phaser.Math.Clamp(this.px + dx * speed, 84, VECINDAD_MAP.WIDTH - 84);
+    this.py = Phaser.Math.Clamp(this.py + dy * speed, 84, VECINDAD_MAP.HEIGHT - 84);
 
     this.player.update(dx !== 0 || dy !== 0, dx);
     this.player.setPosition(this.px, this.py);
