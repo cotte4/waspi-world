@@ -458,6 +458,11 @@ export class BasketMinigame extends Phaser.Scene {
     if (this.phase === 'done' || this.phase === 'exiting') return;
     this.phase = 'done';
     this.grantedRewardTenks = calculateBasketReward(this.score);
+    eventBus.emit(EVENTS.STATS_BASKET_GAME, {
+      score: this.score,
+      shots: this.shotsTaken,
+      makes: this.score, // each scored basket = 1 make
+    });
     this.resultLabel.setAlpha(1);
     this.resultLabel.setY(322);
     this.resultLabel.setText(this.grantedRewardTenks > 0 ? `+${this.grantedRewardTenks} TENKS` : 'SIN PREMIO');
@@ -602,7 +607,7 @@ export class BasketMinigame extends Phaser.Scene {
 
     const json = await res.json().catch(() => null) as { tenksEarned?: number; player?: { tenks?: number } } | null;
     if (typeof json?.player?.tenks === 'number') {
-      initTenks(json.player.tenks);
+      initTenks(json.player.tenks, { preferStored: false });
     }
     this.grantedRewardTenks = typeof json?.tenksEarned === 'number' ? json.tenksEarned : this.grantedRewardTenks;
     eventBus.emit(EVENTS.UI_NOTICE, `Basket +${this.grantedRewardTenks} TENKS`);

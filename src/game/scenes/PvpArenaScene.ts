@@ -4,6 +4,7 @@ import { COLORS } from '../config/constants';
 import { getTenksBalance, initTenks } from '../systems/TenksSystem';
 import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { supabase, isConfigured } from '../../lib/supabase';
+import { eventBus, EVENTS } from '../config/eventBus';
 
 type ArenaRemotePlayer = {
   avatar: AvatarRenderer;
@@ -67,14 +68,26 @@ type MatchEndPayload = {
   reason?: string;
 };
 
+type ArenaResultCard = {
+  matchId: string;
+  title: string;
+  accent: string;
+  winnerName: string;
+  loserName: string;
+  pot: number;
+  reason: string;
+  status: string;
+  deltaLabel: string;
+};
+
 const BET_OPTIONS = [250, 500, 1000] as const;
 const PLAYER_RADIUS = 18;
 const MOVE_SPEED = 186;
 const MAX_HP = 100;
-const MAX_LIVES = 3;
+const MAX_LIVES = 2;
 const RESPAWN_MS = 1600;
 const COUNTDOWN_MS = 3000;
-const RESULT_MS = 2600;
+const RESULT_MS = 5200;
 const MOVE_SYNC_MS = 66;
 const RANGE = 520;
 const DAMAGE = 32;
@@ -109,6 +122,7 @@ export class PvpArenaScene extends Phaser.Scene {
   private avatarConfig: AvatarConfig = {};
   private channel: ReturnType<NonNullable<typeof supabase>['channel']> | null = null;
   private remotePlayers = new Map<string, ArenaRemotePlayer>();
+  private playerNames = new Map<string, string>();
   private player!: AvatarRenderer;
   private playerNameplate!: Phaser.GameObjects.Text;
   private px = LOBBY_BOUNDS.centerX;
@@ -149,6 +163,17 @@ export class PvpArenaScene extends Phaser.Scene {
   private livesText!: Phaser.GameObjects.Text;
   private noticeText!: Phaser.GameObjects.Text;
   private countdownText!: Phaser.GameObjects.Text;
+  private resultShade!: Phaser.GameObjects.Rectangle;
+  private resultCard!: Phaser.GameObjects.Rectangle;
+  private resultTitleText!: Phaser.GameObjects.Text;
+  private resultWinnerText!: Phaser.GameObjects.Text;
+  private resultPotText!: Phaser.GameObjects.Text;
+  private resultReasonText!: Phaser.GameObjects.Text;
+  private resultStatusText!: Phaser.GameObjects.Text;
+  private resultCardState: ArenaResultCard | null = null;
+  private pendingSettlementResult: MatchEndPayload | null = null;
+  private pendingCancelMatchId = '';
+  private nextPendingActionAt = 0;
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private keyOne!: Phaser.Input.Keyboard.Key;
@@ -175,6 +200,7 @@ export class PvpArenaScene extends Phaser.Scene {
     this.playerId = this.getOrCreatePlayerId();
     this.username = this.getOrCreateUsername();
     this.avatarConfig = loadStoredAvatarConfig();
+    this.playerNames.set(this.playerId, this.username);
 
     this.drawScene();
     this.createUi();
@@ -233,6 +259,7 @@ export class PvpArenaScene extends Phaser.Scene {
     this.maybeStartMatch();
     this.maybeRespawn();
     this.maybeAbortUnpairedMatch();
+    this.maybeRetryPendingServerActions();
 
     if (this.inMatch && this.alive && this.time.now >= this.countdownEndsAt) {
       if (this.keyF.isDown || this.input.activePointer.leftButtonDown()) {
@@ -333,7 +360,7 @@ export class PvpArenaScene extends Phaser.Scene {
       color: '#F5C842',
     }).setOrigin(0.5);
 
-    this.add.text(400, 68, '1V1 / 3 VIDAS / EL GANADOR SE LLEVA EL POZO', {
+    this.add.text(400, 68, '1V1 / BO3 / PRIMERO A 2 / EL GANADOR SE LLEVA EL POZO', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#9A9AB2',
@@ -435,6 +462,47 @@ export class PvpArenaScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 4,
     }).setOrigin(0.5).setDepth(1000);
+
+    this.resultShade = this.add.rectangle(400, 300, 800, 600, 0x000000, 0.48)
+      .setDepth(1180)
+      .setVisible(false);
+    this.resultCard = this.add.rectangle(400, 344, 406, 156, 0x0e1520, 0.96)
+      .setStrokeStyle(3, COLORS.GOLD, 0.62)
+      .setDepth(1190)
+      .setVisible(false);
+    this.resultTitleText = this.add.text(400, 290, '', {
+      fontSize: '10px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+    }).setOrigin(0.5).setDepth(1195).setVisible(false);
+    this.resultWinnerText = this.add.text(400, 328, '', {
+      fontSize: '12px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F0F3FF',
+      align: 'center',
+      lineSpacing: 8,
+    }).setOrigin(0.5).setDepth(1195).setVisible(false);
+    this.resultPotText = this.add.text(400, 374, '', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      align: 'center',
+      lineSpacing: 6,
+    }).setOrigin(0.5).setDepth(1195).setVisible(false);
+    this.resultReasonText = this.add.text(400, 412, '', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#A9BDD4',
+      align: 'center',
+      lineSpacing: 6,
+    }).setOrigin(0.5).setDepth(1195).setVisible(false);
+    this.resultStatusText = this.add.text(400, 442, '', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#C9D7E8',
+      align: 'center',
+      lineSpacing: 6,
+    }).setOrigin(0.5).setDepth(1195).setVisible(false);
 
     this.add.text(742, 88, '1/2/3 APUESTA', {
       fontSize: '7px',
@@ -626,6 +694,8 @@ export class PvpArenaScene extends Phaser.Scene {
       return;
     }
 
+    this.hideResultPanel();
+
     const slot = next.players[0] === this.playerId ? 0 : 1;
     const opponentId = next.players[slot === 0 ? 1 : 0] ?? '';
     const reserved = await this.reserveStake(next.match_id, next.bet, opponentId);
@@ -650,6 +720,7 @@ export class PvpArenaScene extends Phaser.Scene {
     this.countdownEndsAt = this.time.now + COUNTDOWN_MS;
     this.opponentReadyDeadline = this.time.now + COUNTDOWN_MS + 1600;
     this.teleportToSpawn(this.slot);
+    this.player.playRespawnAnimation();
     this.flashNotice(`MATCH POR ${next.bet} TENKS`, '#39FF14');
     this.broadcastState('player:move');
   }
@@ -669,8 +740,9 @@ export class PvpArenaScene extends Phaser.Scene {
     this.respawnAt = 0;
     this.countdownEndsAt = this.time.now + 850;
     this.teleportToSpawn(this.slot);
+    this.player.playRespawnAnimation();
     this.broadcastState('player:move');
-    this.flashNotice(`VIDAS ${this.lives}`, '#46B3FF');
+    this.flashNotice(`RONDAS RESTANTES ${this.lives}`, '#46B3FF');
   }
 
   private maybeAbortUnpairedMatch() {
@@ -688,10 +760,28 @@ export class PvpArenaScene extends Phaser.Scene {
     this.resetMatchState();
   }
 
+  private maybeRetryPendingServerActions() {
+    if (this.inMatch || this.time.now < this.nextPendingActionAt) return;
+
+    if (this.pendingSettlementResult) {
+      this.nextPendingActionAt = this.time.now + 4000;
+      void this.settleStake(this.pendingSettlementResult);
+      return;
+    }
+
+    if (this.pendingCancelMatchId) {
+      const retryMatchId = this.pendingCancelMatchId;
+      this.nextPendingActionAt = this.time.now + 4000;
+      void this.cancelStake(retryMatchId);
+    }
+  }
+
   private shoot(targetX: number, targetY: number) {
     if (!this.inMatch || !this.alive || this.time.now < this.countdownEndsAt) return;
     if (this.time.now - this.lastShotAt < COOLDOWN_MS) return;
     this.lastShotAt = this.time.now;
+    this.player.playShootAnimation();
+    this.cameras.main.shake(45, 0.0013, true);
 
     const angle = Phaser.Math.Angle.Between(this.px, this.py, targetX, targetY);
     const tracerEndX = this.px + Math.cos(angle) * 180;
@@ -711,8 +801,8 @@ export class PvpArenaScene extends Phaser.Scene {
     this.tweens.add({
       targets: muzzle,
       alpha: 0,
-      scale: 1.8,
-      duration: 140,
+      scale: 2.15,
+      duration: 150,
       onComplete: () => muzzle.destroy(),
     });
 
@@ -773,10 +863,12 @@ export class PvpArenaScene extends Phaser.Scene {
     this.tweens.add({
       targets: burst,
       alpha: 0,
-      scale: 2,
-      duration: 180,
+      scale: 2.25,
+      duration: 190,
       onComplete: () => burst.destroy(),
     });
+    this.player.playHitAnimation();
+    this.cameras.main.shake(this.hp > 0 ? 65 : 120, this.hp > 0 ? 0.0018 : 0.0032, true);
 
     if (this.hp > 0) {
       this.broadcastState('player:move');
@@ -786,11 +878,12 @@ export class PvpArenaScene extends Phaser.Scene {
     this.lives = Math.max(0, this.lives - 1);
     this.alive = false;
     this.hp = 0;
+    this.player.playDefeatAnimation();
     this.broadcastState('player:move');
 
     if (this.lives > 0) {
       this.respawnAt = this.time.now + RESPAWN_MS;
-      this.flashNotice(`CAISTE - VIDA ${this.lives}`, '#FF7A7A');
+      this.flashNotice(`CAISTE - TE QUEDAN ${this.lives}`, '#FF7A7A');
       return;
     }
 
@@ -827,21 +920,27 @@ export class PvpArenaScene extends Phaser.Scene {
     this.handledMatchResults.add(next.match_id);
     this.matchResolved = true;
     this.opponentReadyDeadline = 0;
+    this.showResultPanel(next);
 
     if (next.winner_id === this.playerId) {
       void this.settleStake(next);
     }
 
     if (next.winner_id === this.playerId && next.pot > 0) {
-      this.flashNotice(`GANASTE +${next.pot} TENKS`, '#39FF14');
+      this.flashNotice('VICTORIA - COBRANDO POZO...', '#39FF14');
+      eventBus.emit(EVENTS.STATS_PVP_RESULT, { won: true });
     } else if (next.loser_id === this.playerId) {
-      this.flashNotice('MATCH PERDIDO', '#FF7A7A');
+      this.flashNotice(`MATCH PERDIDO -${this.matchBet} TENKS`, '#FF7A7A');
+      eventBus.emit(EVENTS.STATS_PVP_RESULT, { won: false });
     } else {
       this.observedMatchResultId = next.match_id;
       this.flashNotice(`MATCH TERMINADO: ${next.reason ?? 'RESUELTO'}`, '#46B3FF');
     }
 
     this.time.delayedCall(RESULT_MS, () => {
+      if (this.pendingSettlementResult?.match_id !== next.match_id) {
+        this.hideResultPanel(next.match_id);
+      }
       if (localInvolved) {
         this.resetMatchState();
       }
@@ -862,7 +961,6 @@ export class PvpArenaScene extends Phaser.Scene {
     this.slot = null;
     this.matchResolved = false;
     this.observedMatchResultId = '';
-    this.paidEntryForMatch = '';
     this.lossReportedMatchId = '';
     this.px = LOBBY_BOUNDS.centerX;
     this.py = LOBBY_BOUNDS.bottom - 26;
@@ -874,10 +972,13 @@ export class PvpArenaScene extends Phaser.Scene {
   private handleRemoteState(payload: unknown) {
     const next = parseArenaStatePayload(payload);
     if (!next || next.player_id === this.playerId) return;
+    this.playerNames.set(next.player_id, next.username);
     if (!this.remotePlayers.has(next.player_id)) {
       this.spawnRemotePlayer(next.player_id, next.username, next.x, next.y, next.avatar ?? {});
     }
     const remote = this.remotePlayers.get(next.player_id)!;
+    const wasAlive = remote.alive;
+    const previousHp = remote.hp;
     remote.targetX = next.x;
     remote.targetY = next.y;
     remote.username = next.username;
@@ -892,6 +993,13 @@ export class PvpArenaScene extends Phaser.Scene {
     remote.slot = next.slot === 0 || next.slot === 1 ? next.slot : null;
     remote.matchId = next.match_id ?? '';
     remote.nameplate.setText(`${next.username}${remote.ready && !remote.inMatch ? ' *' : ''}`);
+    if (wasAlive && !remote.alive) {
+      remote.avatar.playDefeatAnimation();
+    } else if (!wasAlive && remote.alive) {
+      remote.avatar.playRespawnAnimation();
+    } else if (remote.alive && remote.hp < previousHp) {
+      remote.avatar.playHitAnimation();
+    }
   }
 
   private handleRemoteLeave(payload: unknown) {
@@ -899,6 +1007,7 @@ export class PvpArenaScene extends Phaser.Scene {
     if (!playerId) return;
     const remote = this.remotePlayers.get(playerId);
     if (!remote) return;
+    this.playerNames.set(playerId, remote.username);
     remote.avatar.destroy();
     remote.nameplate.destroy();
     this.remotePlayers.delete(playerId);
@@ -988,7 +1097,7 @@ export class PvpArenaScene extends Phaser.Scene {
     this.rosterText.setText([
       'JUGADORES EN LA FILA',
       ...readyPlayers.slice(0, 5).map((player) => {
-        const state = player.inMatch ? `FIGHT ${player.lives}` : (player.ready ? `READY ${player.bet}` : `BET ${player.bet}`);
+         const state = player.inMatch ? `BO3 ${player.lives}` : (player.ready ? `READY ${player.bet}` : `BET ${player.bet}`);
         const me = player.playerId === this.playerId ? 'TU ' : '';
         return `${me}${player.username} ${state}`;
       }),
@@ -1017,14 +1126,14 @@ export class PvpArenaScene extends Phaser.Scene {
     if (this.inMatch && this.opponentId) {
       const opponent = this.remotePlayers.get(this.opponentId);
       const opponentLives = opponent?.lives ?? MAX_LIVES;
-      this.arenaStatus.setText(`ARENA ACTIVA / VIDAS TU ${this.lives} - RIVAL ${opponentLives}`);
+      this.arenaStatus.setText(`ARENA ACTIVA / BO3 TU ${this.lives} - RIVAL ${opponentLives}`);
     } else {
       const waiting = readyPlayers.filter((player) => player.ready && player.bet === this.selectedBet && !player.inMatch).length;
       this.arenaStatus.setText(waiting >= 2 ? 'EMPAREJANDO...' : 'ESPERANDO DOS JUGADORES CON LA MISMA APUESTA');
     }
 
     this.hpText.setText(`HP ${this.hp}`);
-    this.livesText.setText(`VIDAS ${this.lives}/${MAX_LIVES}`);
+    this.livesText.setText(`BO3 ${this.lives}/${MAX_LIVES}`);
   }
 
   private syncState() {
@@ -1109,6 +1218,7 @@ export class PvpArenaScene extends Phaser.Scene {
     }
 
     this.playerId = userId;
+    this.playerNames.set(userId, this.username);
     this.broadcastState('player:join');
   }
 
@@ -1141,7 +1251,7 @@ export class PvpArenaScene extends Phaser.Scene {
 
     const json = await res.json().catch(() => null) as { player?: { tenks?: number } } | null;
     if (typeof json?.player?.tenks === 'number') {
-      initTenks(json.player.tenks);
+      initTenks(json.player.tenks, { preferStored: false });
     }
     this.paidEntryForMatch = matchId;
     this.serverReservedMatchId = matchId;
@@ -1153,6 +1263,8 @@ export class PvpArenaScene extends Phaser.Scene {
     const token = await this.getAuthToken();
     if (!token) {
       this.flashNotice('SESION EXPIRADA: RECONÉCTATE PARA RECUPERAR TU APUESTA', '#FFB36A');
+      this.pendingCancelMatchId = matchId;
+      this.nextPendingActionAt = this.time.now + 4000;
       return;
     }
 
@@ -1171,17 +1283,25 @@ export class PvpArenaScene extends Phaser.Scene {
     if (res?.ok) {
       const json = await res.json().catch(() => null) as { player?: { tenks?: number } } | null;
       if (typeof json?.player?.tenks === 'number') {
-        initTenks(json.player.tenks);
+        initTenks(json.player.tenks, { preferStored: false });
       }
+      this.pendingCancelMatchId = '';
+      this.paidEntryForMatch = '';
+      this.serverReservedMatchId = '';
+      return;
     }
-    this.paidEntryForMatch = '';
-    this.serverReservedMatchId = '';
+    this.pendingCancelMatchId = matchId;
+    this.nextPendingActionAt = this.time.now + 4000;
+    this.flashNotice('REEMBOLSO PENDIENTE: REINTENTANDO...', '#FFB36A');
   }
 
   private async settleStake(result: MatchEndPayload) {
     const token = await this.getAuthToken();
     if (!token) {
       this.flashNotice('SESION EXPIRADA: EL PAGO QUEDÓ PENDIENTE', '#FFB36A');
+      this.pendingSettlementResult = result;
+      this.nextPendingActionAt = this.time.now + 4000;
+      this.updateResultPanelStatus(result.match_id, 'PAGO PENDIENTE / REINTENTANDO', `NETO +${this.matchBet} TENKS`);
       return;
     }
 
@@ -1192,7 +1312,7 @@ export class PvpArenaScene extends Phaser.Scene {
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        action: 'settle',
+        action: result.reason === 'forfeit' ? 'settle_forfeit' : 'settle',
         matchId: result.match_id,
         winnerId: result.winner_id,
         loserId: result.loser_id,
@@ -1202,13 +1322,125 @@ export class PvpArenaScene extends Phaser.Scene {
     if (res?.ok) {
       const json = await res.json().catch(() => null) as { player?: { tenks?: number } } | null;
       if (typeof json?.player?.tenks === 'number') {
-        initTenks(json.player.tenks);
+        initTenks(json.player.tenks, { preferStored: false });
+      }
+      this.pendingSettlementResult = null;
+      this.paidEntryForMatch = '';
+      this.serverReservedMatchId = '';
+      this.updateResultPanelStatus(result.match_id, 'POZO COBRADO', `NETO +${this.matchBet} TENKS`);
+      this.flashNotice(`GANASTE +${result.pot} TENKS`, '#39FF14');
+      if (!this.inMatch) {
+        this.time.delayedCall(1800, () => this.hideResultPanel(result.match_id));
       }
     } else {
       this.flashNotice('PAGO PENDIENTE: REINTENTA ENTRANDO DE NUEVO', '#FFB36A');
+      this.pendingSettlementResult = result;
+      this.nextPendingActionAt = this.time.now + 4000;
+      this.updateResultPanelStatus(result.match_id, 'PAGO PENDIENTE / REINTENTANDO', `NETO +${this.matchBet} TENKS`);
     }
-    this.paidEntryForMatch = '';
-    this.serverReservedMatchId = '';
+  }
+
+  private showResultPanel(result: MatchEndPayload) {
+    const winnerName = this.lookupPlayerName(result.winner_id);
+    const loserName = this.lookupPlayerName(result.loser_id);
+    const title = result.winner_id === this.playerId
+      ? 'VICTORIA'
+      : (result.loser_id === this.playerId ? 'DERROTA' : 'RESULTADO');
+    const accent = result.winner_id === this.playerId
+      ? '#39FF14'
+      : (result.loser_id === this.playerId ? '#FF7A7A' : '#46B3FF');
+
+    this.resultCardState = {
+      matchId: result.match_id,
+      title,
+      accent,
+      winnerName,
+      loserName,
+      pot: result.pot,
+      reason: this.formatResultReason(result.reason),
+      status: this.buildInitialResultStatus(result),
+      deltaLabel: this.buildResultDeltaLabel(result),
+    };
+
+    this.resultTitleText.setText(title).setColor(accent);
+    this.resultWinnerText.setText(`GANADOR\n${winnerName}`);
+    this.resultPotText.setText(`${winnerName} VS ${loserName}\nPOZO ${result.pot} TENKS`);
+    this.resultReasonText.setText(this.resultCardState.reason);
+    this.resultStatusText.setText(`${this.resultCardState.deltaLabel}\n${this.resultCardState.status}`);
+
+    this.resultShade.setAlpha(0);
+    this.resultCard.setAlpha(0);
+    this.resultTitleText.setAlpha(0);
+    this.resultWinnerText.setAlpha(0);
+    this.resultPotText.setAlpha(0);
+    this.resultReasonText.setAlpha(0);
+    this.resultStatusText.setAlpha(0);
+
+    this.resultShade.setVisible(true);
+    this.resultCard.setVisible(true);
+    this.resultTitleText.setVisible(true);
+    this.resultWinnerText.setVisible(true);
+    this.resultPotText.setVisible(true);
+    this.resultReasonText.setVisible(true);
+    this.resultStatusText.setVisible(true);
+
+    this.tweens.add({
+      targets: [
+        this.resultShade,
+        this.resultCard,
+        this.resultTitleText,
+        this.resultWinnerText,
+        this.resultPotText,
+        this.resultReasonText,
+        this.resultStatusText,
+      ],
+      alpha: 1,
+      duration: 180,
+      ease: 'Sine.easeOut',
+    });
+  }
+
+  private hideResultPanel(matchId?: string) {
+    if (matchId && this.resultCardState?.matchId !== matchId) return;
+    this.resultCardState = null;
+    this.resultShade.setVisible(false);
+    this.resultCard.setVisible(false);
+    this.resultTitleText.setVisible(false);
+    this.resultWinnerText.setVisible(false);
+    this.resultPotText.setVisible(false);
+    this.resultReasonText.setVisible(false);
+    this.resultStatusText.setVisible(false);
+  }
+
+  private updateResultPanelStatus(matchId: string, status: string, deltaLabel?: string) {
+    if (!this.resultCardState || this.resultCardState.matchId !== matchId) return;
+    this.resultCardState.status = status;
+    if (deltaLabel) this.resultCardState.deltaLabel = deltaLabel;
+    this.resultStatusText.setText(`${this.resultCardState.deltaLabel}\n${this.resultCardState.status}`);
+  }
+
+  private lookupPlayerName(playerId: string) {
+    if (playerId === this.playerId) return this.username;
+    return this.playerNames.get(playerId) ?? `PLAYER ${playerId.slice(0, 6).toUpperCase()}`;
+  }
+
+  private formatResultReason(reason?: string) {
+    if (reason === 'forfeit') return 'RIVAL DESCONECTADO / COBRO POR ABANDONO';
+    if (reason === 'elimination') return 'GANADOR POR ELIMINACION';
+    if (reason === 'pending_report') return 'RESULTADO LOCAL / PAGO PENDIENTE';
+    return 'MATCH CERRADO';
+  }
+
+  private buildInitialResultStatus(result: MatchEndPayload) {
+    if (result.winner_id === this.playerId) return 'LIQUIDANDO POZO...';
+    if (result.loser_id === this.playerId) return 'APUESTA DESCONTADA';
+    return 'MATCH CERRADO';
+  }
+
+  private buildResultDeltaLabel(result: MatchEndPayload) {
+    if (result.winner_id === this.playerId) return `NETO +${this.matchBet} TENKS`;
+    if (result.loser_id === this.playerId) return `NETO -${this.matchBet} TENKS`;
+    return `POZO ${result.pot} TENKS`;
   }
 
   private async reportLoss(matchId: string, winnerId: string) {

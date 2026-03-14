@@ -1,6 +1,6 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { syncVecindadDeed, type PlayerState } from '@/src/lib/playerState';
-import type { SharedParcelState } from '@/src/lib/vecindad';
+import { normalizeVecindadBuildStage, type SharedParcelState } from '@/src/lib/vecindad';
 
 type Json = string | number | boolean | null | { [key: string]: Json } | Json[];
 
@@ -25,7 +25,7 @@ export async function listVecindadParcels(admin: SupabaseClient): Promise<Shared
     parcelId: row.parcel_id,
     ownerId: row.owner_id,
     ownerUsername: row.owner_username,
-    buildStage: row.build_stage,
+    buildStage: normalizeVecindadBuildStage(row.build_stage),
   }));
 }
 
@@ -43,7 +43,7 @@ export async function getUserVecindadParcel(admin: SupabaseClient, userId: strin
     parcelId: data.parcel_id,
     ownerId: data.owner_id,
     ownerUsername: data.owner_username,
-    buildStage: data.build_stage,
+    buildStage: normalizeVecindadBuildStage(data.build_stage),
   };
 }
 
@@ -61,7 +61,7 @@ export async function getParcelOccupant(admin: SupabaseClient, parcelId: string)
     parcelId: data.parcel_id,
     ownerId: data.owner_id,
     ownerUsername: data.owner_username,
-    buildStage: data.build_stage,
+    buildStage: normalizeVecindadBuildStage(data.build_stage),
   };
 }
 

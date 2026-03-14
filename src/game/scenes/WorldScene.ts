@@ -11,8 +11,9 @@ import { loadHudSettings, type HudSettings } from '../systems/HudSettings';
 import { addXpToProgression, loadProgressionState, saveProgressionState, type ProgressionState } from '../systems/ProgressionSystem';
 import { loadCombatStats, saveCombatStats, type CombatStats } from '../systems/CombatStats';
 import { announceScene } from '../systems/SceneUi';
+import { getZombieHpForRound, getZombieSpeedForRound } from '../config/zombies';
 import type { VecindadState } from '../../lib/playerState';
-import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
+import { getNextVecindadBuildCost, MAX_VECINDAD_STAGE, normalizeVecindadBuildStage, type SharedParcelState, type VecindadParcelConfig, VECINDAD_MAP, VECINDAD_PARCELS } from '../../lib/vecindad';
 
 interface RemotePlayer {
   avatar: AvatarRenderer;
@@ -119,9 +120,16 @@ type DummyState = {
   speed: number;
   preferredDistance: number;
   strafe: number;
+  baseMaxHp: number;
+  baseSpeed: number;
+  baseContactDamage: number;
+  baseRangedDamage: number;
+  baseTenksReward: number;
+  baseShotCooldownMs: number;
   contactDamage: number;
   rangedDamage: number;
   shotCooldownMs: number;
+  lastContactAt: number;
   respawnMs: number;
   isBoss: boolean;
   xpReward: number;
@@ -164,6 +172,15 @@ const REMOTE_HIT_MIN_MS = 120;
 const MAX_REMOTE_CHAT_DISTANCE = 2600;
 const LOCAL_HIT_COOLDOWN_MS = 180;
 const DUMMY_RESPAWN_MS = 1800;
+const TRAINING_SURVIVAL_STEP_MS = 20000;
+const TRAINING_REWARD_STEP_MS = 15000;
+const TRAINING_CONTACT_RADIUS = 28;
+const BASEMENT_HATCH = {
+  x: 920,
+  y: ZONES.PLAZA_Y + 140,
+  w: 96,
+  h: 58,
+} as const;
 const PLAZA_RESPAWN_X = 980;
 const PLAZA_RESPAWN_Y = ZONES.PLAZA_Y + 72;
 const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
@@ -345,6 +362,9 @@ export class WorldScene extends Phaser.Scene {
   private pvpEnabled = true;
   private pveEnabled = true;
   private dummies!: Phaser.Physics.Arcade.Group;
+  private trainingRunStartedAt = 0;
+  private trainingSurvivalMs = 0;
+  private trainingThreatRound = 1;
   private mutedPlayerIds = new Set<string>();
   private remoteMoveTimes = new Map<string, number>();
   private remoteChatTimes = new Map<string, number>();
@@ -363,6 +383,7 @@ export class WorldScene extends Phaser.Scene {
   };
   private sharedParcelState = new Map<string, SharedParcelState>();
   private parcelVisuals = new Map<string, ParcelVisual>();
+  private parcelPreviewConfigs = new Map<string, VecindadParcelConfig>();
   private parcelPrompt?: Phaser.GameObjects.Text;
   private materialNodes: MaterialNode[] = [];
   private vecindadHud?: Phaser.GameObjects.Text;
@@ -424,7 +445,7 @@ export class WorldScene extends Phaser.Scene {
 
   private recreateCombatHud() {
     this.combatHud?.destroy();
-    this.combatHud = this.add.text(8, 74, '', {
+    this.combatHud = this.add.text(8, 102, '', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842',
@@ -434,7 +455,7 @@ export class WorldScene extends Phaser.Scene {
 
   private recreateProgressionHud() {
     this.progressionHud?.destroy();
-    this.progressionHud = this.add.text(8, 116, '', {
+    this.progressionHud = this.add.text(8, 144, '', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#46B3FF',
@@ -608,6 +629,7 @@ export class WorldScene extends Phaser.Scene {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#39FF14',
+      lineSpacing: 5,
     }).setScrollFactor(0).setDepth(9999);
 
     this.arenaNotice = this.add.text(this.scale.width / 2, 88, '', {
@@ -618,19 +640,20 @@ export class WorldScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(10002).setAlpha(0);
 
-    this.combatHud = this.add.text(8, 74, '', {
+    this.combatHud = this.add.text(8, 102, '', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842',
       lineSpacing: 5,
     }).setScrollFactor(0).setDepth(9999);
     this.renderCombatHud();
-    this.progressionHud = this.add.text(8, 116, '', {
+    this.progressionHud = this.add.text(8, 144, '', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#46B3FF',
       lineSpacing: 5,
     }).setScrollFactor(0).setDepth(9999);
+    this.renderTrainingHud();
     this.renderProgressionHud();
     this.applyHudVisibility();
 
@@ -949,6 +972,101 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
+  private formatTrainingTime(ms: number) {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  private getTrainingThreatRound(survivalMs = this.trainingSurvivalMs) {
+    return Math.max(1, 1 + Math.floor(Math.max(0, survivalMs) / TRAINING_SURVIVAL_STEP_MS));
+  }
+
+  private getTrainingTenksMultiplier(survivalMs = this.trainingSurvivalMs) {
+    const steps = Math.floor(Math.max(0, survivalMs) / TRAINING_REWARD_STEP_MS);
+    return 1 + steps * 0.18;
+  }
+
+  private renderTrainingHud() {
+    if (!this.trainingHud) return;
+    this.trainingHud.setText([
+      `TRAINING KOs ${this.trainingScore}`,
+      `SURV ${this.formatTrainingTime(this.trainingSurvivalMs)} | AMENAZA ${this.trainingThreatRound}`,
+      `TENKS x${this.getTrainingTenksMultiplier().toFixed(2)}`,
+    ]);
+  }
+
+  private applyThreatScalingToDummy(dummy: CombatDummy, state: DummyState) {
+    const nextMaxHp = getZombieHpForRound(state.baseMaxHp, this.trainingThreatRound);
+    const hpRatio = state.maxHp > 0 ? Phaser.Math.Clamp(state.hp / state.maxHp, 0, 1) : 1;
+    state.maxHp = nextMaxHp;
+    state.speed = getZombieSpeedForRound(state.baseSpeed, Math.max(0, this.trainingThreatRound - 1));
+    state.contactDamage = Math.max(
+      state.baseContactDamage,
+      Math.round(state.baseContactDamage * (1 + (this.trainingThreatRound - 1) * 0.09)),
+    );
+    state.rangedDamage = Math.max(
+      state.baseRangedDamage,
+      Math.round(state.baseRangedDamage * (1 + (this.trainingThreatRound - 1) * 0.08)),
+    );
+    state.shotCooldownMs = Math.max(
+      340,
+      Math.round(state.baseShotCooldownMs * (1 - Math.min(0.4, (this.trainingThreatRound - 1) * 0.035))),
+    );
+    state.tenksReward = Math.max(
+      state.baseTenksReward,
+      Math.round(state.baseTenksReward * this.getTrainingTenksMultiplier()),
+    );
+
+    if (state.alive) {
+      state.hp = Math.max(1, Math.round(state.maxHp * hpRatio));
+      this.renderDummyState(dummy, state);
+      return;
+    }
+
+    state.hp = 0;
+  }
+
+  private refreshTrainingThreat(force = false) {
+    const nextThreatRound = this.getTrainingThreatRound();
+    if (!force && nextThreatRound === this.trainingThreatRound) return;
+    const previousThreatRound = this.trainingThreatRound;
+    this.trainingThreatRound = nextThreatRound;
+
+    for (const [dummy, state] of this.dummyStates) {
+      this.applyThreatScalingToDummy(dummy, state);
+    }
+
+    this.renderTrainingHud();
+    if (!force && nextThreatRound > previousThreatRound) {
+      this.showArenaNotice(`AMENAZA ${nextThreatRound} | TENKS x${this.getTrainingTenksMultiplier().toFixed(2)}`, '#FF8B3D');
+    }
+  }
+
+  private startTrainingRun() {
+    this.trainingRunStartedAt = this.time.now;
+    this.trainingSurvivalMs = 0;
+    this.trainingThreatRound = 1;
+    this.refreshTrainingThreat(true);
+    this.renderTrainingHud();
+  }
+
+  private finishTrainingRun(reason: 'left' | 'down') {
+    const survivedMs = this.trainingSurvivalMs;
+    this.trainingRunStartedAt = 0;
+    this.trainingSurvivalMs = 0;
+    this.trainingThreatRound = 1;
+    this.refreshTrainingThreat(true);
+    this.renderTrainingHud();
+    if (survivedMs <= 0) return;
+    const prefix = reason === 'down' ? 'CAISTE' : 'SALISTE';
+    this.showArenaNotice(
+      `${prefix} | AGUANTASTE ${this.formatTrainingTime(survivedMs)}`,
+      reason === 'down' ? '#FF6666' : '#46B3FF',
+    );
+  }
+
   private spawnTrainingDummy(x: number, y: number, index: number, archetype: EnemyArchetype) {
     const profile = ENEMY_PROFILES[archetype];
     const label = `${profile.label}_${index + 1}`;
@@ -984,18 +1102,26 @@ export class WorldScene extends Phaser.Scene {
       alive: true,
       tint: profile.tint,
       lastShotAt: 0,
+      baseMaxHp: profile.maxHp,
+      baseSpeed: profile.speed,
+      baseContactDamage: profile.contactDamage,
+      baseRangedDamage: profile.rangedDamage,
+      baseTenksReward: profile.tenksReward,
+      baseShotCooldownMs: profile.shotCooldownMs,
       speed: profile.speed,
       preferredDistance: profile.preferredDistance,
       strafe: profile.strafe,
       contactDamage: profile.contactDamage,
       rangedDamage: profile.rangedDamage,
       shotCooldownMs: profile.shotCooldownMs,
+      lastContactAt: 0,
       respawnMs: profile.respawnMs ?? DUMMY_RESPAWN_MS,
       isBoss: archetype === 'boss',
       xpReward: profile.xpReward,
       tenksReward: profile.tenksReward,
     };
     this.dummyStates.set(dummy, state);
+    this.applyThreatScalingToDummy(dummy, state);
     if (archetype === 'boss') {
       this.bossDummy = dummy;
       this.showArenaNotice('PLAZA BOSS ONLINE', '#3DD6FF');
@@ -1066,9 +1192,7 @@ export class WorldScene extends Phaser.Scene {
     this.combatStats = { ...this.combatStats, kills: this.combatStats.kills + 1 };
     saveCombatStats(this.combatStats);
     eventBus.emit(EVENTS.PLAYER_COMBAT_STATS, this.combatStats);
-    if (this.trainingHud) {
-      this.trainingHud.setText(`TRAINING KOs ${this.trainingScore}`);
-    }
+    this.renderTrainingHud();
     const previousLevel = this.progression.level;
     this.progression = addXpToProgression(this.progression, state.xpReward);
     saveProgressionState(this.progression);
@@ -1125,6 +1249,7 @@ export class WorldScene extends Phaser.Scene {
       if (!state.alive) {
         if (this.time.now < state.respawnAt) continue;
         state.alive = true;
+        this.applyThreatScalingToDummy(dummy, state);
         state.hp = state.maxHp;
         dummy.body.enable = true;
         dummy.setAlpha(0.7);
@@ -1132,6 +1257,7 @@ export class WorldScene extends Phaser.Scene {
         state.nameplate.setText(state.label);
         state.nameplate.setColor(this.getEnemyNameColor(state.archetype));
         state.lastShotAt = this.time.now + Phaser.Math.Between(180, 520);
+        state.lastContactAt = 0;
         const ring = this.add.circle(dummy.x, dummy.y, 10, state.tint, 0).setDepth(4999);
         ring.setStrokeStyle(2, state.tint, 0.8);
         this.tweens.add({
@@ -1168,7 +1294,16 @@ export class WorldScene extends Phaser.Scene {
         targetX = dummy.x + moveX;
         targetY = dummy.y + moveY;
 
-        if (distToPlayer < dummy.radius + 20 && this.time.now - this.lastDamageAt > LOCAL_HIT_COOLDOWN_MS) {
+        const contactCooldown = Math.max(
+          320,
+          Math.round((state.isBoss ? 560 : state.archetype === 'tank' ? 760 : state.archetype === 'shooter' ? 820 : 620) - (this.trainingThreatRound - 1) * 28),
+        );
+        if (
+          distToPlayer < dummy.radius + TRAINING_CONTACT_RADIUS &&
+          this.time.now - state.lastContactAt >= contactCooldown &&
+          this.time.now - this.lastDamageAt >= 90
+        ) {
+          state.lastContactAt = this.time.now;
           this.applyLocalDamage(state.contactDamage, dummy.x, dummy.y);
         }
 
@@ -1288,6 +1423,11 @@ export class WorldScene extends Phaser.Scene {
     this.combatStats = { ...this.combatStats, deaths: this.combatStats.deaths + 1 };
     saveCombatStats(this.combatStats);
     eventBus.emit(EVENTS.PLAYER_COMBAT_STATS, this.combatStats);
+    if (this.inTraining) {
+      this.finishTrainingRun('down');
+      this.inTraining = false;
+      this.trainingBanner?.setText('');
+    }
     this.hp = 100;
     this.renderHpHud();
     this.px = PLAZA_RESPAWN_X;
@@ -1714,6 +1854,33 @@ export class WorldScene extends Phaser.Scene {
       color: '#C0C2CC',
     }).setOrigin(0.5).setDepth(2);
 
+    const basementX = BASEMENT_HATCH.x;
+    const basementY = BASEMENT_HATCH.y;
+    const basementLeft = basementX - BASEMENT_HATCH.w / 2;
+    const basementTop = basementY - BASEMENT_HATCH.h / 2;
+    g.fillStyle(0x161a22, 0.95);
+    g.fillRoundedRect(basementLeft, basementTop, BASEMENT_HATCH.w, BASEMENT_HATCH.h, 14);
+    g.lineStyle(2, 0x46B3FF, 0.85);
+    g.strokeRoundedRect(basementLeft, basementTop, BASEMENT_HATCH.w, BASEMENT_HATCH.h, 14);
+    g.lineStyle(2, 0x2a3542, 0.95);
+    g.lineBetween(basementLeft + 12, basementY, basementLeft + BASEMENT_HATCH.w - 12, basementY);
+    g.lineBetween(basementX, basementTop + 10, basementX, basementTop + BASEMENT_HATCH.h - 10);
+
+    this.add.text(basementX, basementTop - 16, 'SOTANO', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#46B3FF',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+    this.add.text(basementX, basementTop + BASEMENT_HATCH.h + 16, 'SPACE BAJAR', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#C0D6F7',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+
     // Future plaza anchors
     this.drawConstructionSite(820, ZONES.PLAZA_Y + 190, 280, 210, 'CASINO', '#FF4466');
     this.drawConstructionSite(2220, ZONES.PLAZA_Y + 190, 280, 210, 'GUN SHOP', '#46B3FF');
@@ -1797,11 +1964,14 @@ export class WorldScene extends Phaser.Scene {
       color: '#B5B19A',
     }).setOrigin(0.5).setDepth(2);
 
+    this.syncVecindadPreviewLayout(x, y, w, h);
     VECINDAD_PARCELS.forEach((parcel, index) => {
-      this.drawParcelLot(g, parcel, index === 0);
+      const previewParcel = this.parcelPreviewConfigs.get(parcel.id);
+      if (!previewParcel) return;
+      this.drawParcelLot(g, previewParcel, index === 0);
     });
 
-    this.parcelPrompt = this.add.text(x + w / 2, y + h + 20, '', {
+    this.parcelPrompt = this.add.text(x + w / 2, y + h + 20, 'ENTRA POR LA PUERTA PARA GESTIONAR TU PARCELA', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842',
@@ -1814,12 +1984,43 @@ export class WorldScene extends Phaser.Scene {
     this.refreshParcelVisuals();
   }
 
+  private syncVecindadPreviewLayout(x: number, y: number, w: number, h: number) {
+    if (this.parcelPreviewConfigs.size === VECINDAD_PARCELS.length) return;
+
+    this.parcelPreviewConfigs.clear();
+
+    const previewArea = new Phaser.Geom.Rectangle(x + 52, y + 196, w - 104, h - 244);
+    const scale = Math.min(
+      previewArea.width / VECINDAD_MAP.WIDTH,
+      previewArea.height / VECINDAD_MAP.HEIGHT,
+    );
+    const contentWidth = VECINDAD_MAP.WIDTH * scale;
+    const contentHeight = VECINDAD_MAP.HEIGHT * scale;
+    const offsetX = previewArea.x + (previewArea.width - contentWidth) / 2;
+    const offsetY = previewArea.y + (previewArea.height - contentHeight) / 2;
+
+    VECINDAD_PARCELS.forEach((parcel) => {
+      this.parcelPreviewConfigs.set(parcel.id, {
+        ...parcel,
+        x: offsetX + parcel.x * scale,
+        y: offsetY + parcel.y * scale,
+        w: Math.max(78, parcel.w * scale),
+        h: Math.max(58, parcel.h * scale),
+      });
+    });
+  }
+
   private drawParcelLot(
     g: Phaser.GameObjects.Graphics,
     parcel: VecindadParcelConfig,
     featured: boolean,
   ) {
     const { x, y, w, h, id } = parcel;
+    const fenceStepX = Math.max(18, Math.floor(w / 4));
+    const fenceStepY = Math.max(16, Math.floor(h / 3));
+    const innerPadX = Math.max(10, Math.floor(w * 0.14));
+    const innerPadTop = Math.max(18, Math.floor(h * 0.24));
+    const innerPadBottom = Math.max(12, Math.floor(h * 0.18));
     g.fillStyle(featured ? 0x1b3020 : 0x182715, 1);
     g.fillRoundedRect(x, y, w, h, 12);
     g.lineStyle(2, featured ? 0xF5C842 : 0x506842, 0.9);
@@ -1827,38 +2028,50 @@ export class WorldScene extends Phaser.Scene {
 
     // Fence
     g.lineStyle(2, 0x6b4b2a, 0.9);
-    for (let dx = x + 16; dx <= x + w - 16; dx += 26) {
+    for (let dx = x + 14; dx <= x + w - 14; dx += fenceStepX) {
       g.lineBetween(dx, y + 10, dx, y + 28);
       g.lineBetween(dx, y + h - 28, dx, y + h - 10);
     }
-    for (let dy = y + 20; dy <= y + h - 20; dy += 24) {
+    for (let dy = y + 18; dy <= y + h - 18; dy += fenceStepY) {
       g.lineBetween(x + 10, dy, x + 28, dy);
       g.lineBetween(x + w - 28, dy, x + w - 10, dy);
     }
 
     // Foundation placeholder
     g.fillStyle(0x2a2a32, 0.7);
-    g.fillRoundedRect(x + 76, y + 42, w - 152, h - 66, 10);
+    g.fillRoundedRect(
+      x + innerPadX,
+      y + innerPadTop,
+      Math.max(24, w - innerPadX * 2),
+      Math.max(18, h - innerPadTop - innerPadBottom),
+      10,
+    );
     g.lineStyle(2, 0x44445a, 0.8);
-    g.strokeRoundedRect(x + 76, y + 42, w - 152, h - 66, 10);
+    g.strokeRoundedRect(
+      x + innerPadX,
+      y + innerPadTop,
+      Math.max(24, w - innerPadX * 2),
+      Math.max(18, h - innerPadTop - innerPadBottom),
+      10,
+    );
 
     const labelColor = featured ? '#F5C842' : '#C8D6B7';
     const title = this.add.text(x + 18, y + 18, `PARCELA ${id}`, {
-      fontSize: '7px',
+      fontSize: '6px',
       fontFamily: '"Press Start 2P", monospace',
       color: labelColor,
     }).setDepth(2);
 
-    const status = this.add.text(x + w / 2, y + 64, featured ? 'PRIMER LOTE' : 'FOR SALE', {
-      fontSize: '8px',
+    const status = this.add.text(x + w / 2, y + Math.max(26, h * 0.34), featured ? 'PRIMER LOTE' : 'FOR SALE', {
+      fontSize: '6px',
       fontFamily: '"Press Start 2P", monospace',
       color: featured ? '#F5C842' : '#E6E1C8',
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(2);
 
-    const detail = this.add.text(x + w / 2, y + 92, featured ? 'BUY + FARM + BUILD' : 'COMPRA Y CONSTRUYE', {
-      fontSize: '6px',
+    const detail = this.add.text(x + w / 2, y + h - 16, featured ? 'BUY + FARM + BUILD' : 'COMPRA Y CONSTRUYE', {
+      fontSize: '5px',
       fontFamily: '"Press Start 2P", monospace',
       color: featured ? '#B9FF9E' : '#9EB09A',
     }).setOrigin(0.5).setDepth(2);
@@ -1877,13 +2090,15 @@ export class WorldScene extends Phaser.Scene {
     for (const parcel of VECINDAD_PARCELS) {
       const visuals = this.parcelVisuals.get(parcel.id);
       if (!visuals) continue;
+      const previewParcel = this.parcelPreviewConfigs.get(parcel.id);
+      if (!previewParcel) continue;
       const shared = this.sharedParcelState.get(parcel.id);
       const ownedByMe = this.vecindadState.ownedParcelId === parcel.id;
       const occupiedByAnother = Boolean(shared && !ownedByMe);
       const playerOwnsAnother = Boolean(this.vecindadState.ownedParcelId && !ownedByMe);
       const buildStage = ownedByMe
-        ? Math.max(1, this.vecindadState.buildStage)
-        : shared?.buildStage ?? 0;
+        ? normalizeVecindadBuildStage(this.vecindadState.buildStage)
+        : normalizeVecindadBuildStage(shared?.buildStage ?? 0);
 
       visuals.status.setText(
         ownedByMe
@@ -1925,7 +2140,7 @@ export class WorldScene extends Phaser.Scene {
             : `${parcel.cost}T`
       );
       visuals.badge.setColor(ownedByMe ? '#39FF14' : occupiedByAnother ? '#46B3FF' : '#F5C842');
-      this.drawParcelStructure(parcel, visuals.structure, buildStage);
+      this.drawParcelStructure(previewParcel, visuals.structure, buildStage);
     }
     this.renderVecindadHud();
   }
@@ -1935,38 +2150,74 @@ export class WorldScene extends Phaser.Scene {
     if (buildStage <= 0) return;
 
     const fx = parcel.x + parcel.w / 2;
-    const fy = parcel.y + parcel.h - 22;
+    const groundWidth = Math.max(34, parcel.w * 0.56);
+    const groundHeight = Math.max(6, parcel.h * 0.08);
+    const floorWidth = Math.max(28, parcel.w * 0.48);
+    const floorHeight = Math.max(16, parcel.h * 0.2);
+    const upperWidth = Math.max(34, parcel.w * 0.56);
+    const upperHeight = Math.max(14, parcel.h * 0.17);
+    const roofHeight = Math.max(10, parcel.h * 0.16);
+    const groundY = parcel.y + parcel.h - Math.max(12, parcel.h * 0.16);
+    const floorY = groundY - floorHeight;
+    const upperY = floorY - upperHeight + 2;
+    const roofBaseY = buildStage >= 2 ? upperY : floorY;
 
     graphics.fillStyle(0x3b3b45, 0.8);
-    graphics.fillRoundedRect(fx - 48, fy - 14, 96, 14, 6);
+    graphics.fillRoundedRect(fx - groundWidth / 2, groundY, groundWidth, groundHeight, 6);
 
     if (buildStage >= 1) {
       graphics.fillStyle(0x7a5533, 1);
-      graphics.fillRoundedRect(fx - 40, fy - 50, 80, 34, 6);
+      graphics.fillRoundedRect(fx - floorWidth / 2, floorY, floorWidth, floorHeight, 6);
       graphics.lineStyle(2, 0x2c1a0c, 0.9);
-      graphics.strokeRoundedRect(fx - 40, fy - 50, 80, 34, 6);
+      graphics.strokeRoundedRect(fx - floorWidth / 2, floorY, floorWidth, floorHeight, 6);
     }
 
     if (buildStage >= 2) {
       graphics.fillStyle(0xb48a5a, 1);
-      graphics.fillRoundedRect(fx - 44, fy - 88, 88, 40, 6);
+      graphics.fillRoundedRect(fx - upperWidth / 2, upperY, upperWidth, upperHeight, 6);
       graphics.fillStyle(0x2f2114, 1);
-      graphics.fillRect(fx - 10, fy - 62, 20, 26);
+      graphics.fillRect(
+        fx - Math.max(6, floorWidth * 0.12),
+        floorY + floorHeight - Math.max(12, floorHeight * 0.6),
+        Math.max(12, floorWidth * 0.24),
+        Math.max(12, floorHeight * 0.6),
+      );
     }
 
     if (buildStage >= 3) {
       graphics.fillStyle(0x5d2c18, 1);
-      graphics.fillTriangle(fx - 54, fy - 88, fx, fy - 126, fx + 54, fy - 88);
+      graphics.fillTriangle(
+        fx - upperWidth / 2 - 6,
+        roofBaseY + 2,
+        fx,
+        roofBaseY - roofHeight,
+        fx + upperWidth / 2 + 6,
+        roofBaseY + 2,
+      );
       graphics.lineStyle(2, 0x291308, 0.95);
-      graphics.strokeTriangle(fx - 54, fy - 88, fx, fy - 126, fx + 54, fy - 88);
+      graphics.strokeTriangle(
+        fx - upperWidth / 2 - 6,
+        roofBaseY + 2,
+        fx,
+        roofBaseY - roofHeight,
+        fx + upperWidth / 2 + 6,
+        roofBaseY + 2,
+      );
     }
 
     if (buildStage >= 4) {
       graphics.fillStyle(0x88ccff, 0.9);
-      graphics.fillRect(fx - 28, fy - 78, 18, 14);
-      graphics.fillRect(fx + 10, fy - 78, 18, 14);
+      const windowW = Math.max(8, upperWidth * 0.18);
+      const windowH = Math.max(8, upperHeight * 0.4);
+      graphics.fillRect(fx - upperWidth * 0.24 - windowW / 2, upperY + 4, windowW, windowH);
+      graphics.fillRect(fx + upperWidth * 0.24 - windowW / 2, upperY + 4, windowW, windowH);
       graphics.fillStyle(0xf5c842, 0.95);
-      graphics.fillRect(fx - 30, fy - 126, 60, 6);
+      graphics.fillRect(
+        fx - Math.max(18, upperWidth * 0.34),
+        roofBaseY - roofHeight - 6,
+        Math.max(36, upperWidth * 0.68),
+        4,
+      );
     }
   }
 
@@ -2010,8 +2261,8 @@ export class WorldScene extends Phaser.Scene {
 
   private renderVecindadHud() {
     const parcel = this.vecindadState.ownedParcelId ? `PARCELA ${this.vecindadState.ownedParcelId}` : 'SIN PARCELA';
-    const stage = Math.max(0, this.vecindadState.buildStage);
-    const nextCost = stage >= MAX_VECINDAD_STAGE ? 0 : getBuildCost(Math.max(stage, 1));
+    const stage = normalizeVecindadBuildStage(this.vecindadState.buildStage);
+    const nextCost = getNextVecindadBuildCost(stage);
     const text = [
       'LA VECINDAD',
       parcel,
@@ -3127,13 +3378,13 @@ export class WorldScene extends Phaser.Scene {
 
   private buildOwnedParcel() {
     if (!this.vecindadState.ownedParcelId) return;
-    const currentStage = Math.max(1, this.vecindadState.buildStage);
+    const currentStage = normalizeVecindadBuildStage(this.vecindadState.buildStage);
     if (currentStage >= MAX_VECINDAD_STAGE) {
       eventBus.emit(EVENTS.UI_NOTICE, 'Tu casa ya esta al maximo.');
       return;
     }
 
-    const cost = getBuildCost(currentStage);
+    const cost = getNextVecindadBuildCost(currentStage);
     if (this.vecindadState.materials < cost) {
       eventBus.emit(EVENTS.UI_NOTICE, `Necesitas ${cost} materiales para seguir construyendo.`);
       return;
@@ -3283,9 +3534,17 @@ export class WorldScene extends Phaser.Scene {
         this.trainingBanner.setText(this.inTraining ? 'TRAINING: PVP + PVE - F DISPARA - 1/2 CAMBIAN ARMA' : '');
       }
       if (this.inTraining) {
+        this.startTrainingRun();
         this.showArenaNotice('TRAINING HOT ZONE', '#39FF14');
+      } else {
+        this.finishTrainingRun('left');
       }
     }
+    if (this.inTraining && this.trainingRunStartedAt > 0) {
+      this.trainingSurvivalMs = this.time.now - this.trainingRunStartedAt;
+      this.refreshTrainingThreat();
+    }
+    this.renderTrainingHud();
 
     // Interpolate remote players
     this.runFrameStep('remote players', () => {
@@ -3314,6 +3573,11 @@ export class WorldScene extends Phaser.Scene {
     const storeDoorX = BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2;
     const cafeDoorX = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
     const nearVecindad = this.px < 220 && this.py > ZONES.SOUTH_SIDEWALK_Y - 30 && this.py < ZONES.PLAZA_Y + 120;
+    const nearBasement =
+      this.px >= BASEMENT_HATCH.x - 72 &&
+      this.px <= BASEMENT_HATCH.x + 72 &&
+      this.py >= BASEMENT_HATCH.y - 64 &&
+      this.py <= BASEMENT_HATCH.y + 64;
     const nearPvpBooth = this.px >= 900 && this.px <= 1080 && this.py >= ZONES.PLAZA_Y + 420 && this.py <= ZONES.PLAZA_Y + 550;
     const nearArcade = Math.abs(this.px - arcadeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearStore = Math.abs(this.px - storeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
@@ -3321,6 +3585,9 @@ export class WorldScene extends Phaser.Scene {
 
     if (nearVecindad) {
       return { x: 120, y: ZONES.PLAZA_Y + 40, w: 140, h: 80, label: 'SPACE ENTRAR VECINDAD', color: 0xF5C842, sceneKey: 'VecindadScene' };
+    }
+    if (nearBasement) {
+      return { x: BASEMENT_HATCH.x, y: BASEMENT_HATCH.y - 10, w: 150, h: 82, label: 'SPACE BAJAR SOTANO', color: 0x46B3FF, sceneKey: 'ZombiesScene' };
     }
     if (nearPvpBooth) {
       return { x: 990, y: ZONES.PLAZA_Y + 485, w: 180, h: 90, label: 'SPACE ENTRAR PVP PIT', color: 0xFF4DA6, sceneKey: 'PvpArenaScene' };
@@ -3385,14 +3652,18 @@ export class WorldScene extends Phaser.Scene {
     }
 
     if (this.vecindadState.ownedParcelId === parcel.id) {
-      const currentStage = Math.max(1, this.vecindadState.buildStage);
+      const currentStage = normalizeVecindadBuildStage(this.vecindadState.buildStage);
       if (currentStage >= MAX_VECINDAD_STAGE) {
         this.parcelPrompt.setText(`PARCELA ${parcel.id} COMPLETA`);
         this.parcelPrompt.setColor('#39FF14');
         return;
       }
-      const cost = getBuildCost(currentStage);
-      this.parcelPrompt.setText(`E CONSTRUIR STAGE ${currentStage + 1} - ${cost} MATS`);
+      const cost = getNextVecindadBuildCost(currentStage);
+      this.parcelPrompt.setText(
+        currentStage <= 0
+          ? `E LEVANTAR CASA - ${cost} MATS`
+          : `E CONSTRUIR STAGE ${currentStage + 1} - ${cost} MATS`
+      );
       this.parcelPrompt.setColor('#39FF14');
       return;
     }

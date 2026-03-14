@@ -9,7 +9,8 @@ import { CATALOG, getItem as getCatalogItem, type CatalogItem } from '@/src/game
 import { getInventory, equipItem, hasUtilityEquipped, replaceInventory } from '@/src/game/systems/InventorySystem';
 import { loadAudioSettings, saveAudioSettings, type AudioSettings } from '@/src/game/systems/AudioSettings';
 import { loadHudSettings, saveHudSettings, type HudSettings } from '@/src/game/systems/HudSettings';
-import { loadProgressionState, type ProgressionState } from '@/src/game/systems/ProgressionSystem';
+import { loadProgressionState, initProgressionState, type ProgressionState } from '@/src/game/systems/ProgressionSystem';
+import { initStatsSystem, flushStatsSystem, teardownStatsSystem, getStats, type PlayerStats } from '@/src/game/systems/StatsSystem';
 import { supabase } from '@/src/lib/supabase';
 import { getTenksBalance, initTenks } from '@/src/game/systems/TenksSystem';
 import { mutePlayer, normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
@@ -118,6 +119,10 @@ export default function PlayPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [playerActions, setPlayerActions] = useState<PlayerActionsPayload | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'AUDIO' | 'HUD'>('AUDIO');
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [statsTab, setStatsTab] = useState<'COMBAT' | 'PROGRESS' | 'EXPLORE' | 'MINIGAMES'>('COMBAT');
+  const [statsSnapshot, setStatsSnapshot] = useState<PlayerStats | null>(null);
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(initialAudioSettings);
   const [hudSettings, setHudSettings] = useState<HudSettings>(initialHudSettings);
   const tokenRef = useRef<string | null>(null);
@@ -125,10 +130,32 @@ export default function PlayPage() {
   const suppressSyncRef = useRef(false);
   const mutedPlayersRef = useRef<string[]>(loadStoredMutedPlayers());
   const lastInteriorChatSentRef = useRef(0);
+  const progressionSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const chatVisible = CHAT_SCENES.has(activeScene);
   const isAuthenticated = Boolean(authEmail);
+  const closeShop = useCallback(() => {
+    setShopSource('');
+    setShopOpen(false);
+    eventBus.emit(EVENTS.SHOP_CLOSE);
+  }, []);
+  const closeInventory = useCallback(() => {
+    setInventoryOpen(false);
+  }, []);
+  const closePlayerActions = useCallback(() => {
+    setPlayerActions(null);
+  }, []);
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false);
+  }, []);
+  const closeStats = useCallback(() => {
+    setStatsOpen(false);
+  }, []);
+  const openStats = useCallback(() => {
+    setStatsSnapshot(getStats());
+    setStatsOpen(true);
+  }, []);
 
   const clothingItems = useMemo(
     () => (shopItems.length ? shopItems : CATALOG).filter((item) => item.slot !== 'utility' && item.priceTenks > 0),
@@ -136,23 +163,28 @@ export default function PlayPage() {
   );
 
   const applyPlayerState = useCallback((player: PlayerState) => {
+    const nextPlayer = normalizePlayerState(player);
     suppressSyncRef.current = true;
-    playerStateRef.current = player;
+    playerStateRef.current = nextPlayer;
     saveStoredAvatarConfig({
       ...loadStoredAvatarConfig(),
-      ...player.avatar,
+      ...nextPlayer.avatar,
     });
-    saveStoredPlayerState(player);
-    replaceInventory(player.inventory);
-    initTenks(player.tenks);
-    mutedPlayersRef.current = player.mutedPlayers ?? [];
-    setPlayerState(player);
-    setOwned(player.inventory.owned);
-    setEquipped(player.inventory.equipped);
-    setGunOn((player.inventory.equipped.utility ?? []).includes('UTIL-GUN-01'));
-    setBallOn((player.inventory.equipped.utility ?? []).includes('UTIL-BALL-01'));
-    setTenks(player.tenks);
-    eventBus.emit(EVENTS.PARCEL_STATE_CHANGED, player.vecindad);
+    saveStoredPlayerState(nextPlayer);
+    replaceInventory(nextPlayer.inventory);
+    initTenks(nextPlayer.tenks, { preferStored: false });
+    mutedPlayersRef.current = nextPlayer.mutedPlayers ?? [];
+    if (nextPlayer.progression) {
+      const prog = initProgressionState(nextPlayer.progression.kills, nextPlayer.progression.xp);
+      setProgression(prog);
+    }
+    setPlayerState(nextPlayer);
+    setOwned(nextPlayer.inventory.owned);
+    setEquipped(nextPlayer.inventory.equipped);
+    setGunOn((nextPlayer.inventory.equipped.utility ?? []).includes('UTIL-GUN-01'));
+    setBallOn((nextPlayer.inventory.equipped.utility ?? []).includes('UTIL-BALL-01'));
+    setTenks(nextPlayer.tenks);
+    eventBus.emit(EVENTS.PARCEL_STATE_CHANGED, nextPlayer.vecindad);
     queueMicrotask(() => {
       suppressSyncRef.current = false;
     });
@@ -185,6 +217,10 @@ export default function PlayPage() {
         buildStage: 0,
         materials: 0,
       },
+      progression: (() => {
+        const prog = loadProgressionState();
+        return { kills: prog.kills, xp: prog.xp };
+      })(),
     };
 
     await fetch('/api/player', {
@@ -499,6 +535,8 @@ export default function PlayPage() {
       }
     });
 
+    const unsubOpenStats = eventBus.on(EVENTS.OPEN_STATS, openStats);
+
     return () => {
       unsubChat();
       unsubInfo();
@@ -512,13 +550,14 @@ export default function PlayPage() {
       unsubShopOpen();
       unsubShopClose();
       unsubPlayerActions();
+      unsubOpenStats();
       unsubPenalty();
       unsubParcelBuy();
       unsubParcelBuild();
       unsubVecindadUpdate();
       unsubUiNotice();
     };
-  }, [applyPlayerState, playerState, syncPlayerState]);
+  }, [applyPlayerState, openStats, playerState, syncPlayerState]);
 
   useEffect(() => {
     if (!uiNotice) return;
@@ -549,6 +588,7 @@ export default function PlayPage() {
 
   const hydratePlayerState = useCallback(async (session: Session | null) => {
     if (!session?.access_token) {
+      teardownStatsSystem();
       tokenRef.current = null;
       setAuthEmail(session?.user?.email ?? null);
       void loadVecindadSharedState(null);
@@ -557,6 +597,7 @@ export default function PlayPage() {
 
     tokenRef.current = session.access_token;
     setAuthEmail(session.user.email ?? null);
+    void initStatsSystem(session.user.id);
 
     const res = await fetch('/api/player', {
       method: 'GET',
@@ -576,7 +617,14 @@ export default function PlayPage() {
         normalizePlayerState(remotePlayer)
       );
       applyPlayerState(merged);
-      if (JSON.stringify(merged) !== JSON.stringify(normalizePlayerState(remotePlayer))) {
+      // Always push when local has progression the server hasn't seen yet.
+      // Also covers the normal case where other fields (tenks, inventory) differ.
+      const localProg = loadProgressionState();
+      const serverHasProgress =
+        (remotePlayer.progression?.kills ?? 0) >= localProg.kills &&
+        (remotePlayer.progression?.xp ?? 0) >= localProg.xp;
+      const statesDiffer = JSON.stringify(merged) !== JSON.stringify(normalizePlayerState(remotePlayer));
+      if (statesDiffer || !serverHasProgress) {
         void syncPlayerState(merged);
       }
     }
@@ -710,12 +758,14 @@ export default function PlayPage() {
   const signOut = useCallback(async () => {
     if (!supabase) return;
     setAuthBusy(true);
+    await flushStatsSystem();
     const { error } = await supabase.auth.signOut();
     setAuthBusy(false);
     if (error) {
       setAuthStatus(error.message);
       return;
     }
+    teardownStatsSystem();
     tokenRef.current = null;
     setAuthEmail(null);
     setAuthStatus('Sesion cerrada.');
@@ -816,11 +866,43 @@ export default function PlayPage() {
     const unsubAvatar = eventBus.on(EVENTS.AVATAR_SET, () => {
       void syncPlayerState();
     });
+    // Debounce progression syncs — can fire frequently during combat.
+    const unsubProgressionSync = eventBus.on(EVENTS.PLAYER_PROGRESSION, () => {
+      if (progressionSyncTimerRef.current) clearTimeout(progressionSyncTimerRef.current);
+      progressionSyncTimerRef.current = setTimeout(() => {
+        void syncPlayerState();
+      }, 10_000);
+    });
+
+    // Flush progression on tab close using keepalive so the browser completes
+    // the request even after the page unloads (async syncPlayerState won't work here).
+    const handleUnload = () => {
+      const token = tokenRef.current;
+      const base = playerStateRef.current;
+      // Flush progression to /api/player with keepalive so it completes after page closes.
+      if (token && base) {
+        const prog = loadProgressionState();
+        fetch('/api/player', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            player: { ...base, progression: { kills: prog.kills, xp: prog.xp } } satisfies PlayerState,
+          }),
+          keepalive: true,
+        });
+      }
+      // Flush detailed stats (keepalive handled inside flushStatsSystem via supabase-js).
+      void flushStatsSystem();
+    };
+    window.addEventListener('beforeunload', handleUnload);
 
     return () => {
       unsubTenks();
       unsubInventory();
       unsubAvatar();
+      unsubProgressionSync();
+      if (progressionSyncTimerRef.current) clearTimeout(progressionSyncTimerRef.current);
+      window.removeEventListener('beforeunload', handleUnload);
     };
   }, [syncPlayerState]);
 
@@ -853,6 +935,13 @@ export default function PlayPage() {
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (playerActions) { closePlayerActions(); return; }
+        if (inventoryOpen) { closeInventory(); return; }
+        if (shopOpen) { closeShop(); return; }
+        if (statsOpen) { closeStats(); return; }
+        if (settingsOpen) { closeSettings(); return; }
+      }
       if (!chatVisible) return;
       if (e.key === 'Enter' && document.activeElement !== inputRef.current) {
         e.preventDefault();
@@ -865,7 +954,7 @@ export default function PlayPage() {
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [chatVisible]);
+  }, [chatVisible, closeInventory, closePlayerActions, closeSettings, closeShop, closeStats, inventoryOpen, playerActions, settingsOpen, shopOpen, statsOpen]);
 
   useEffect(() => {
     if (!chatVisible) {
@@ -877,12 +966,10 @@ export default function PlayPage() {
     if (shopSource !== 'store_interior') return;
     if (activeScene === 'StoreInterior') return;
     const closeTimer = window.setTimeout(() => {
-      eventBus.emit(EVENTS.SHOP_CLOSE);
-      setShopOpen(false);
-      setShopSource('');
+      closeShop();
     }, 0);
     return () => window.clearTimeout(closeTimer);
-  }, [activeScene, shopSource]);
+  }, [activeScene, closeShop, shopSource]);
 
   useEffect(() => {
     if (!playerInfo || !INTERIOR_SOCIAL_SCENES.has(activeScene)) return;
@@ -1336,15 +1423,33 @@ export default function PlayPage() {
           className="absolute right-2 top-28"
           style={{
             fontFamily: '"Press Start 2P", monospace',
-            fontSize: '8px',
-            padding: '8px 10px',
+            fontSize: '13px',
+            padding: '6px 9px',
             background: 'rgba(255,255,255,0.08)',
             color: '#FFFFFF',
             border: '1px solid rgba(255,255,255,0.15)',
             cursor: 'pointer',
+            lineHeight: 1,
           }}
         >
-          A/V
+          ⚙
+        </button>
+
+        <button
+          onClick={openStats}
+          className="absolute right-2 top-40"
+          title="Ver estadísticas"
+          style={{
+            fontFamily: '"Press Start 2P", monospace',
+            fontSize: '11px',
+            padding: '7px 10px',
+            background: 'rgba(245,200,66,0.12)',
+            color: '#F5C842',
+            border: '1px solid rgba(245,200,66,0.35)',
+            cursor: 'pointer',
+          }}
+        >
+          🏆
         </button>
 
         <div
@@ -1441,118 +1546,145 @@ export default function PlayPage() {
         </div>
 
         {shopOpen && (
-          <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
+          <div
+            className="ww-overlay absolute inset-0 flex items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.6)' }}
+            onClick={(e) => { if (e.target === e.currentTarget) closeShop(); }}
+          >
             <div
-              className="ww-modal p-4"
+              className="ww-modal flex flex-col"
               style={{
                 width: isMobile ? '94%' : 560,
                 maxHeight: isMobile ? '88%' : 500,
-                overflowY: 'auto',
                 background: 'rgba(10,10,18,0.96)',
                 border: '1px solid rgba(245,200,66,0.35)',
                 boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
+                overflow: 'hidden',
               }}
             >
-              <div className="flex items-center justify-between mb-3" style={{ fontFamily: '"Press Start 2P", monospace', color: '#F5C842', fontSize: '10px' }}>
+              <div
+                className="flex items-center justify-between"
+                style={{
+                  padding: '16px 16px 10px',
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                  fontFamily: '"Press Start 2P", monospace',
+                  color: '#F5C842',
+                  fontSize: '10px',
+                  flexShrink: 0,
+                }}
+              >
                 <span>WASPI SHOP</span>
-                <button
-                  onClick={() => {
-                    setShopSource('');
-                    setShopOpen(false);
-                    eventBus.emit(EVENTS.SHOP_CLOSE);
-                  }}
-                  style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: '#999999' }}
-                >
-                  X
+                <button onClick={closeShop} style={modalCloseButtonStyle()}>
+                  CERRAR
                 </button>
               </div>
 
-              <div className="flex gap-2 mb-3">
-                <button style={tabButtonStyle(true)}>
-                  ROPA TENKS
-                </button>
-              </div>
-
-              <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
-                <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: 10 }}>
-                  Compra ropa con TENKS. La prenda se agrega al inventario y se equipa al instante.
+              <div style={{ overflowY: 'auto', padding: '12px 16px 16px', flexGrow: 1 }}>
+                <div className="flex gap-2 mb-3">
+                  <button style={tabButtonStyle(true)}>
+                    ROPA TENKS
+                  </button>
                 </div>
-                <div className="space-y-2">
-                  {clothingItems.map((item) => {
-                    const ownedItem = owned.includes(item.id);
-                    const active = item.slot === 'top' ? equipped.top === item.id : equipped.bottom === item.id;
-                    return (
-                      <div
-                        key={item.id}
-                        className="ww-panel"
-                        style={{
-                          padding: '12px',
-                          border: active ? '1px solid rgba(57,255,20,0.45)' : '1px solid rgba(255,255,255,0.1)',
-                          background: active ? 'rgba(57,255,20,0.07)' : 'rgba(255,255,255,0.04)',
-                        }}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span
-                                className="inline-block"
-                                style={{
-                                  width: 12,
-                                  height: 12,
-                                  background: `#${(item.color ?? 0x777777).toString(16).padStart(6, '0')}`,
-                                  border: '1px solid rgba(0,0,0,0.35)',
-                                }}
-                              />
-                              <div style={{ fontSize: '15px', color: '#FFFFFF' }}>{item.name}</div>
-                              {active && <span style={{ fontSize: '11px', color: '#39FF14' }}>PUESTO</span>}
-                              {!active && ownedItem && <span style={{ fontSize: '11px', color: '#39FF14' }}>TUYO</span>}
+
+                <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: 10 }}>
+                    Compra ropa con TENKS. La prenda se agrega al inventario y se equipa al instante.
+                  </div>
+                  <div className="space-y-2">
+                    {clothingItems.map((item) => {
+                      const ownedItem = owned.includes(item.id);
+                      const active = item.slot === 'top' ? equipped.top === item.id : equipped.bottom === item.id;
+                      return (
+                        <div
+                          key={item.id}
+                          className="ww-panel"
+                          style={{
+                            padding: '12px',
+                            border: active ? '1px solid rgba(57,255,20,0.45)' : '1px solid rgba(255,255,255,0.1)',
+                            background: active ? 'rgba(57,255,20,0.07)' : 'rgba(255,255,255,0.04)',
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="inline-block"
+                                  style={{
+                                    width: 12,
+                                    height: 12,
+                                    background: `#${(item.color ?? 0x777777).toString(16).padStart(6, '0')}`,
+                                    border: '1px solid rgba(0,0,0,0.35)',
+                                  }}
+                                />
+                                <div style={{ fontSize: '15px', color: '#FFFFFF' }}>{item.name}</div>
+                                {active && <span style={{ fontSize: '11px', color: '#39FF14' }}>PUESTO</span>}
+                                {!active && ownedItem && <span style={{ fontSize: '11px', color: '#39FF14' }}>TUYO</span>}
+                              </div>
+                              <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.58)', marginTop: 4 }}>{item.description}</div>
+                              <div style={{ fontSize: '12px', color: '#F5C842', marginTop: 4 }}>
+                                {item.priceTenks.toLocaleString('es-AR')} TENKS
+                              </div>
                             </div>
-                            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.58)', marginTop: 4 }}>{item.description}</div>
-                            <div style={{ fontSize: '12px', color: '#F5C842', marginTop: 4 }}>
-                              {item.priceTenks.toLocaleString('es-AR')} TENKS
-                            </div>
+                            <button
+                              onClick={() => {
+                                if (ownedItem) {
+                                  handleEquipOwnedItem(item.id);
+                                  setShopStatus(active ? `${item.name} ya esta equipado.` : `${item.name} equipado.`);
+                                  return;
+                                }
+                                void buyShopItem(item);
+                              }}
+                              disabled={checkoutBusyId === item.id || active || (!ownedItem && !isAuthenticated)}
+                              style={authButtonStyle(
+                                active ? 'rgba(57,255,20,0.25)' : '#F5C842',
+                                active ? '#39FF14' : '#0E0E14',
+                                checkoutBusyId === item.id || active || (!ownedItem && !isAuthenticated),
+                                active
+                              )}
+                            >
+                              {active
+                                ? 'PUESTO'
+                                : checkoutBusyId === item.id
+                                  ? 'CARGANDO...'
+                                  : ownedItem
+                                    ? 'EQUIPAR'
+                                    : 'COMPRAR'}
+                            </button>
                           </div>
-                          <button
-                            onClick={() => {
-                              if (ownedItem) {
-                                handleEquipOwnedItem(item.id);
-                                setShopStatus(active ? `${item.name} ya esta equipado.` : `${item.name} equipado.`);
-                                return;
-                              }
-                              void buyShopItem(item);
-                            }}
-                            disabled={checkoutBusyId === item.id || active || (!ownedItem && !isAuthenticated)}
-                            style={authButtonStyle(
-                              active ? 'rgba(57,255,20,0.25)' : '#F5C842',
-                              active ? '#39FF14' : '#0E0E14',
-                              checkoutBusyId === item.id || active || (!ownedItem && !isAuthenticated),
-                              active
-                            )}
-                          >
-                            {active
-                              ? 'PUESTO'
-                              : checkoutBusyId === item.id
-                                ? 'CARGANDO...'
-                                : ownedItem
-                                  ? 'EQUIPAR'
-                                  : 'COMPRAR'}
-                          </button>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '12px', color: shopStatus ? '#BBBBBB' : 'rgba(255,255,255,0.35)', marginTop: 10, minHeight: 16 }}>
+                  {shopStatus || 'Toda la ropa de la tienda se compra con TENKS y se equipa al instante.'}
                 </div>
               </div>
 
-              <div style={{ fontSize: '12px', color: shopStatus ? '#BBBBBB' : 'rgba(255,255,255,0.35)', marginTop: 10, minHeight: 16 }}>
-                {shopStatus || 'Toda la ropa de la tienda se compra con TENKS y se equipa al instante.'}
+              <div
+                style={{
+                  padding: '10px 16px 16px',
+                  borderTop: '1px solid rgba(255,255,255,0.06)',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  flexShrink: 0,
+                }}
+              >
+                <button onClick={closeShop} style={secondaryModalButtonStyle()}>
+                  CERRAR SHOP
+                </button>
               </div>
             </div>
           </div>
         )}
 
         {playerActions && (
-          <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
+          <div
+            className="ww-overlay absolute inset-0 flex items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.45)' }}
+            onClick={(e) => { if (e.target === e.currentTarget) closePlayerActions(); }}
+          >
             <div
               className="ww-modal"
               style={{
@@ -1563,8 +1695,13 @@ export default function PlayPage() {
                 padding: 16,
               }}
             >
-              <div style={{ fontFamily: '"Press Start 2P", monospace', color: '#F5C842', fontSize: '10px', marginBottom: 12 }}>
-                ACCIONES DE JUGADOR
+              <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
+                <div style={{ fontFamily: '"Press Start 2P", monospace', color: '#F5C842', fontSize: '10px' }}>
+                  ACCIONES DE JUGADOR
+                </div>
+                <button onClick={closePlayerActions} style={modalCloseButtonStyle()}>
+                  CERRAR
+                </button>
               </div>
               <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: '16px', color: '#FFFFFF', marginBottom: 6 }}>
                 {playerActions.username}
@@ -1579,7 +1716,7 @@ export default function PlayPage() {
                 <button onClick={handleReportPlayer} style={authButtonStyle('rgba(255,255,255,0.08)', '#FFFFFF', false, true)}>
                   REPORTAR
                 </button>
-                <button onClick={() => setPlayerActions(null)} style={authButtonStyle('rgba(255,255,255,0.08)', '#FFFFFF', false, true)}>
+                <button onClick={closePlayerActions} style={authButtonStyle('rgba(255,255,255,0.08)', '#FFFFFF', false, true)}>
                   CANCELAR
                 </button>
               </div>
@@ -1588,7 +1725,11 @@ export default function PlayPage() {
         )}
 
         {inventoryOpen && (
-          <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }}>
+          <div
+            className="ww-overlay absolute inset-0 flex items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.55)' }}
+            onClick={(e) => { if (e.target === e.currentTarget) closeInventory(); }}
+          >
             <div
               className="ww-modal p-4"
               style={{
@@ -1600,8 +1741,8 @@ export default function PlayPage() {
             >
               <div className="flex items-center justify-between mb-3" style={{ fontFamily: '"Press Start 2P", monospace', color: '#F5C842', fontSize: '10px' }}>
                 <span>INVENTARIO</span>
-                <button onClick={() => setInventoryOpen(false)} style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: '#999999' }}>
-                  X
+                <button onClick={closeInventory} style={modalCloseButtonStyle()}>
+                  CERRAR
                 </button>
               </div>
 
@@ -1780,7 +1921,7 @@ export default function PlayPage() {
                     EDITAR WASPI
                   </button>
                   <button
-                    onClick={() => setInventoryOpen(false)}
+                    onClick={closeInventory}
                     style={{
                       flex: 1,
                       fontFamily: '"Press Start 2P", monospace',
@@ -1868,109 +2009,323 @@ export default function PlayPage() {
           </div>
         )}
 
-        {settingsOpen && (
-          <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }}>
+        {statsOpen && statsSnapshot && (
+          <div
+            className="ww-overlay absolute inset-0 flex items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.92)', zIndex: 40 }}
+            onClick={(e) => { if (e.target === e.currentTarget) closeStats(); }}
+          >
             <div
-              className="ww-modal p-4"
+              className="ww-modal flex flex-col"
               style={{
-                width: isMobile ? '94%' : 420,
-                background: 'rgba(10,10,18,0.96)',
-                border: '1px solid rgba(245,200,66,0.35)',
-                boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
+                width: isMobile ? '100%' : 640,
+                height: isMobile ? '100%' : 500,
+                background: 'rgba(8,8,18,0.98)',
+                border: '1px solid rgba(245,200,66,0.3)',
+                boxShadow: '0 0 60px rgba(245,200,66,0.08), 0 20px 60px rgba(0,0,0,0.7)',
+                overflow: 'hidden',
               }}
             >
-              <div className="flex items-center justify-between mb-3" style={{ fontFamily: '"Press Start 2P", monospace', color: '#F5C842', fontSize: '10px' }}>
-                <span>SETTINGS</span>
-                <button onClick={() => setSettingsOpen(false)} style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: '#999999' }}>
-                  X
+              {/* Header */}
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, rgba(245,200,66,0.12) 0%, rgba(0,0,0,0) 60%)',
+                  borderBottom: '1px solid rgba(245,200,66,0.18)',
+                  padding: '14px 16px 10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                }}
+              >
+                <div
+                  style={{
+                    width: 36, height: 36,
+                    borderRadius: '50%',
+                    background: 'rgba(245,200,66,0.15)',
+                    border: '2px solid rgba(245,200,66,0.4)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 18,
+                    flexShrink: 0,
+                  }}
+                >
+                  🎮
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 9, color: '#F5C842', letterSpacing: 1 }}>
+                    {playerInfo?.username ?? '---'}
+                  </div>
+                  <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 3 }}>
+                    NIVEL {progression.level}
+                    {progression.nextLevelAt !== null && (
+                      <span style={{ color: 'rgba(255,255,255,0.3)', marginLeft: 8 }}>
+                        · {progression.xp} / {progression.nextLevelAt} XP
+                      </span>
+                    )}
+                  </div>
+                  {/* XP bar */}
+                  <div style={{ marginTop: 5, height: 3, background: 'rgba(255,255,255,0.1)', borderRadius: 2 }}>
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${Math.round(progressPct * 100)}%`,
+                        background: 'linear-gradient(90deg, #F5C842, #FFE084)',
+                        borderRadius: 2,
+                        transition: 'width 600ms ease',
+                      }}
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={closeStats}
+                  style={modalCloseButtonStyle()}
+                >
+                  CERRAR
                 </button>
               </div>
 
-              <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
-                <div className="flex items-center justify-between py-2">
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>AUDIO</div>
-                    <div style={{ fontSize: '16px' }}>MUSIC</div>
-                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Arcade theme and future scene tracks</div>
-                  </div>
+              {/* Tabs */}
+              <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
+                {(['COMBAT', 'PROGRESS', 'EXPLORE', 'MINIGAMES'] as const).map((tab) => (
                   <button
-                    onClick={() => setAudioSettings((current) => ({ ...current, musicEnabled: !current.musicEnabled }))}
-                    style={toggleButtonStyle(audioSettings.musicEnabled)}
+                    key={tab}
+                    onClick={() => setStatsTab(tab)}
+                    style={{
+                      flex: 1,
+                      fontFamily: '"Press Start 2P", monospace',
+                      fontSize: isMobile ? 6 : 7,
+                      padding: '9px 4px',
+                      background: statsTab === tab ? 'rgba(245,200,66,0.14)' : 'transparent',
+                      color: statsTab === tab ? '#F5C842' : 'rgba(255,255,255,0.35)',
+                      border: 'none',
+                      borderBottom: statsTab === tab ? '2px solid #F5C842' : '2px solid transparent',
+                      cursor: 'pointer',
+                      letterSpacing: 0.5,
+                    }}
                   >
-                    {audioSettings.musicEnabled ? 'ON' : 'OFF'}
+                    {tab}
                   </button>
+                ))}
+              </div>
+
+              {/* Tab content */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+                {statsTab === 'COMBAT' && (
+                  <div>
+                    {[
+                      { label: 'ZOMBIE KILLS',  value: statsSnapshot.zombie_kills },
+                      { label: 'PVP KILLS',     value: statsSnapshot.pvp_kills },
+                      { label: 'TOTAL KILLS',   value: statsSnapshot.zombie_kills + statsSnapshot.pvp_kills, gold: true },
+                      { label: 'DEATHS',        value: statsSnapshot.deaths },
+                      { label: 'K/D RATIO',     value: statsSnapshot.deaths === 0
+                          ? (statsSnapshot.zombie_kills + statsSnapshot.pvp_kills > 0 ? '∞' : '---')
+                          : ((statsSnapshot.zombie_kills + statsSnapshot.pvp_kills) / statsSnapshot.deaths).toFixed(2), gold: true },
+                      { label: 'BEST STREAK',   value: statsSnapshot.kill_streak_best },
+                    ].map(({ label, value, gold }) => (
+                      <StatRow key={label} label={label} value={value} gold={gold} />
+                    ))}
+                  </div>
+                )}
+
+                {statsTab === 'PROGRESS' && (
+                  <div>
+                    {[
+                      { label: 'LEVEL',         value: progression.level, gold: true },
+                      { label: 'TOTAL XP',      value: progression.xp },
+                      { label: 'NEXT LEVEL AT', value: progression.nextLevelAt ?? '---' },
+                      { label: 'ITEMS OWNED',   value: owned.filter((id) => !id.startsWith('UTIL-')).length },
+                    ].map(({ label, value, gold }) => (
+                      <StatRow key={label} label={label} value={value} gold={gold} />
+                    ))}
+                  </div>
+                )}
+
+                {statsTab === 'EXPLORE' && (
+                  <div>
+                    {[
+                      { label: 'TIME PLAYED',   value: formatTime(statsSnapshot.time_played_seconds), gold: true },
+                      { label: 'ZONES VISITED', value: statsSnapshot.zones_visited.length, gold: true },
+                    ].map(({ label, value, gold }) => (
+                      <StatRow key={label} label={label} value={value} gold={gold} />
+                    ))}
+                    {statsSnapshot.zones_visited.length > 0 && (
+                      <div style={{ marginTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 10 }}>
+                        <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 10, color: 'rgba(255,255,255,0.35)', marginBottom: 6 }}>
+                          ZONAS EXPLORADAS
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {statsSnapshot.zones_visited.map((z) => (
+                            <span
+                              key={z}
+                              style={{
+                                fontFamily: '"Silkscreen", monospace',
+                                fontSize: 10,
+                                padding: '2px 7px',
+                                background: 'rgba(245,200,66,0.1)',
+                                border: '1px solid rgba(245,200,66,0.25)',
+                                color: 'rgba(245,200,66,0.85)',
+                              }}
+                            >
+                              {z}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {statsTab === 'MINIGAMES' && (
+                  <div>
+                    <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 7, color: 'rgba(255,255,255,0.3)', marginBottom: 8, letterSpacing: 1 }}>BASKET</div>
+                    {[
+                      { label: 'BEST SCORE', value: statsSnapshot.basket_best_score, gold: true },
+                      { label: 'SHOTS TAKEN', value: statsSnapshot.basket_shots },
+                      { label: 'BASKETS',    value: statsSnapshot.basket_makes },
+                      { label: 'ACCURACY',   value: statsSnapshot.basket_shots === 0 ? '---' : `${Math.round((statsSnapshot.basket_makes / statsSnapshot.basket_shots) * 100)}%`, gold: true },
+                    ].map(({ label, value, gold }) => (
+                      <StatRow key={`b-${label}`} label={label} value={value} gold={gold} />
+                    ))}
+
+                    <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 7, color: 'rgba(255,255,255,0.3)', margin: '14px 0 8px', letterSpacing: 1 }}>PENALTY</div>
+                    {[
+                      { label: 'WINS',       value: statsSnapshot.penalty_wins, gold: true },
+                      { label: 'LOSSES',     value: statsSnapshot.penalty_losses },
+                      { label: 'GOALS',      value: statsSnapshot.penalty_goals },
+                      { label: 'SAVES',      value: statsSnapshot.penalty_saves },
+                    ].map(({ label, value, gold }) => (
+                      <StatRow key={`p-${label}`} label={label} value={value} gold={gold} />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '7px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 10, color: 'rgba(255,255,255,0.2)' }}>
+                  {isAuthenticated ? '✓ SINCRONIZADO' : '⚠ INICIA SESION PARA GUARDAR'}
                 </div>
-
-                  <div className="flex items-center justify-between py-2">
-                    <div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>AUDIO</div>
-                      <div style={{ fontSize: '16px' }}>SFX</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Combat shots, hits, boss cues</div>
-                  </div>
-                  <button
-                    onClick={() => setAudioSettings((current) => ({ ...current, sfxEnabled: !current.sfxEnabled }))}
-                    style={toggleButtonStyle(audioSettings.sfxEnabled)}
-                    >
-                      {audioSettings.sfxEnabled ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
-
-                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginTop: 12, marginBottom: 4 }}>HUD</div>
-
-                  <div className="flex items-center justify-between py-2">
-                    <div>
-                      <div style={{ fontSize: '16px' }}>SOCIAL PANEL</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Connected players card on the left</div>
-                    </div>
-                    <button
-                      onClick={() => setHudSettings((current) => ({ ...current, showSocialPanel: !current.showSocialPanel }))}
-                      style={toggleButtonStyle(hudSettings.showSocialPanel)}
-                    >
-                      {hudSettings.showSocialPanel ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between py-2">
-                    <div>
-                      <div style={{ fontSize: '16px' }}>PROGRESS PANEL</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Level, XP and KOs summary card</div>
-                    </div>
-                    <button
-                      onClick={() => setHudSettings((current) => ({ ...current, showProgressPanel: !current.showProgressPanel }))}
-                      style={toggleButtonStyle(hudSettings.showProgressPanel)}
-                    >
-                      {hudSettings.showProgressPanel ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between py-2">
-                    <div>
-                      <div style={{ fontSize: '16px' }}>CONTROLS TIP</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Top-right gameplay hint card</div>
-                    </div>
-                    <button
-                      onClick={() => setHudSettings((current) => ({ ...current, showControlsPanel: !current.showControlsPanel }))}
-                      style={toggleButtonStyle(hudSettings.showControlsPanel)}
-                    >
-                      {hudSettings.showControlsPanel ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between py-2">
-                    <div>
-                      <div style={{ fontSize: '16px' }}>ARENA HUD</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Training combat and progression text in-world</div>
-                    </div>
-                    <button
-                      onClick={() => setHudSettings((current) => ({ ...current, showArenaHud: !current.showArenaHud }))}
-                      style={toggleButtonStyle(hudSettings.showArenaHud)}
-                    >
-                      {hudSettings.showArenaHud ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
+                <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 10, color: 'rgba(255,255,255,0.2)' }}>
+                  WASPI WORLD
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {settingsOpen && (
+          <div
+            className="ww-overlay absolute inset-0 flex items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.6)', zIndex: 9000 }}
+            onClick={(e) => { if (e.target === e.currentTarget) closeSettings(); }}
+          >
+            <div
+              style={{
+                width: isMobile ? '92%' : 380,
+                background: 'rgba(10,10,18,0.97)',
+                border: '1px solid rgba(245,200,66,0.3)',
+                boxShadow: '0 16px 48px rgba(0,0,0,0.7)',
+                display: 'flex',
+                flexDirection: 'column',
+                maxHeight: '80vh',
+              }}
+            >
+              {/* Header */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px 16px 0',
+                fontFamily: '"Press Start 2P", monospace',
+                color: '#F5C842',
+                fontSize: '10px',
+                flexShrink: 0,
+              }}>
+                <span>⚙ SETTINGS</span>
+                <button onClick={closeSettings} style={modalCloseButtonStyle()}>
+                  CERRAR
+                </button>
+              </div>
+
+              {/* Tabs */}
+              <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', margin: '10px 16px 0', flexShrink: 0 }}>
+                {(['AUDIO', 'HUD'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setSettingsTab(tab)}
+                    style={{
+                      fontFamily: '"Press Start 2P", monospace',
+                      fontSize: '7px',
+                      padding: '8px 14px',
+                      background: 'none',
+                      border: 'none',
+                      borderBottom: settingsTab === tab ? '2px solid #F5C842' : '2px solid transparent',
+                      color: settingsTab === tab ? '#F5C842' : 'rgba(255,255,255,0.35)',
+                      cursor: 'pointer',
+                      marginBottom: -1,
+                    }}
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+
+              {/* Scrollable content */}
+              <div style={{ overflowY: 'auto', padding: '8px 16px 16px', flexGrow: 1 }}>
+                {settingsTab === 'AUDIO' && (
+                  <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: '13px' }}>
+                    {[
+                      { label: 'MUSIC', desc: 'Arcade theme & scene tracks', value: audioSettings.musicEnabled, toggle: () => setAudioSettings((c) => ({ ...c, musicEnabled: !c.musicEnabled })) },
+                      { label: 'SFX', desc: 'Shots, hits, UI sounds', value: audioSettings.sfxEnabled, toggle: () => setAudioSettings((c) => ({ ...c, sfxEnabled: !c.sfxEnabled })) },
+                    ].map(({ label, desc, value, toggle }) => (
+                      <div key={label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div>
+                          <div style={{ color: '#fff', marginBottom: 3 }}>{label}</div>
+                          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>{desc}</div>
+                        </div>
+                        <button onClick={toggle} style={toggleButtonStyle(value)}>
+                          {value ? 'ON' : 'OFF'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {settingsTab === 'HUD' && (
+                  <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: '13px' }}>
+                    {[
+                      { label: 'SOCIAL PANEL', desc: 'Connected players list (left)', value: hudSettings.showSocialPanel, toggle: () => setHudSettings((c) => ({ ...c, showSocialPanel: !c.showSocialPanel })) },
+                      { label: 'PROGRESS PANEL', desc: 'Level, XP & KOs card', value: hudSettings.showProgressPanel, toggle: () => setHudSettings((c) => ({ ...c, showProgressPanel: !c.showProgressPanel })) },
+                      { label: 'CONTROLS TIP', desc: 'Keybind hint card (top-right)', value: hudSettings.showControlsPanel, toggle: () => setHudSettings((c) => ({ ...c, showControlsPanel: !c.showControlsPanel })) },
+                      { label: 'ARENA HUD', desc: 'Combat & progression text in-world', value: hudSettings.showArenaHud, toggle: () => setHudSettings((c) => ({ ...c, showArenaHud: !c.showArenaHud })) },
+                    ].map(({ label, desc, value, toggle }) => (
+                      <div key={label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div>
+                          <div style={{ color: '#fff', marginBottom: 3 }}>{label}</div>
+                          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>{desc}</div>
+                        </div>
+                        <button onClick={toggle} style={toggleButtonStyle(value)}>
+                          {value ? 'ON' : 'OFF'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  padding: '0 16px 16px',
+                  flexShrink: 0,
+                }}
+              >
+                <button onClick={closeSettings} style={secondaryModalButtonStyle()}>
+                  CERRAR SETTINGS
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {uiNotice && (
@@ -1995,6 +2350,36 @@ export default function PlayPage() {
     </div>
     </>
   );
+}
+
+function StatRow({ label, value, gold }: { label: string; value: string | number; gold?: boolean }) {
+  const isEmpty = value === 0 || value === '0' || value === '';
+  return (
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '7px 0',
+        borderBottom: '1px solid rgba(255,255,255,0.05)',
+      }}
+    >
+      <span style={{ fontFamily: '"Silkscreen", monospace', fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>
+        {label}
+      </span>
+      <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 8, color: isEmpty ? 'rgba(255,255,255,0.2)' : gold ? '#F5C842' : '#FFFFFF' }}>
+        {isEmpty ? '---' : value}
+      </span>
+    </div>
+  );
+}
+
+function formatTime(seconds: number): string {
+  if (seconds <= 0) return '---';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
 function nextBtnBg(smoking: boolean) {
@@ -2035,6 +2420,31 @@ function tabButtonStyle(active: boolean) {
     background: active ? '#F5C842' : 'rgba(255,255,255,0.08)',
     color: active ? '#0E0E14' : '#FFFFFF',
     border: active ? 'none' : '1px solid rgba(255,255,255,0.15)',
+    cursor: 'pointer',
+  } as const;
+}
+
+function modalCloseButtonStyle() {
+  return {
+    fontFamily: '"Press Start 2P", monospace',
+    fontSize: '8px',
+    padding: '8px 10px',
+    color: '#FFFFFF',
+    background: 'rgba(255,255,255,0.08)',
+    border: '1px solid rgba(255,255,255,0.15)',
+    cursor: 'pointer',
+    flexShrink: 0,
+  } as const;
+}
+
+function secondaryModalButtonStyle() {
+  return {
+    fontFamily: '"Press Start 2P", monospace',
+    fontSize: '8px',
+    padding: '10px 12px',
+    background: 'rgba(255,255,255,0.08)',
+    color: '#FFFFFF',
+    border: '1px solid rgba(255,255,255,0.15)',
     cursor: 'pointer',
   } as const;
 }
@@ -2106,6 +2516,22 @@ function mergeHydratedPlayerState(
     remotePlayer.vecindad.materials === 0 &&
     localPlayer.vecindad.materials > 0;
 
+  // Take the higher of local vs remote to avoid rolling back offline progress.
+  // Fall back to ProgressionSystem's own localStorage key when localPlayer.progression
+  // is absent — this covers saves created before the progression-persistence patch.
+  const localProg = localPlayer.progression ?? (() => {
+    const p = loadProgressionState();
+    return (p.kills > 0 || p.xp > 0) ? { kills: p.kills, xp: p.xp } : undefined;
+  })();
+  const remoteProg = remotePlayer.progression;
+  const mergedProgression: PlayerState['progression'] =
+    localProg || remoteProg
+      ? {
+          kills: Math.max(localProg?.kills ?? 0, remoteProg?.kills ?? 0),
+          xp: Math.max(localProg?.xp ?? 0, remoteProg?.xp ?? 0),
+        }
+      : undefined;
+
   return normalizePlayerState({
     ...remotePlayer,
     mutedPlayers: (remotePlayer.mutedPlayers?.length ? remotePlayer.mutedPlayers : localPlayer.mutedPlayers) ?? [],
@@ -2118,6 +2544,7 @@ function mergeHydratedPlayerState(
         ? localPlayer.vecindad.materials
         : remotePlayer.vecindad.materials,
     },
+    progression: mergedProgression,
   });
 }
 

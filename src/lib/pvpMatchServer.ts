@@ -292,6 +292,87 @@ export async function reportPvpLoss(
   return { outcome };
 }
 
+export async function settlePvpForfeit(
+  admin: SupabaseClient,
+  input: {
+    caller: User;
+    matchId: string;
+    winnerId: string;
+    loserId: string;
+  }
+) {
+  const winner = await loadUserWithState(admin, input.winnerId);
+  const loser = await loadUserWithState(admin, input.loserId);
+  const caller = await loadUserWithState(admin, input.caller.id);
+  if (!winner || !loser || !caller) throw new Error('Participant not found.');
+  const nextWinner = await releaseExpiredReservation(admin, winner);
+  const nextLoser = await releaseExpiredReservation(admin, loser);
+  const nextCaller = await releaseExpiredReservation(admin, caller);
+  if (nextCaller.user.id !== input.winnerId) {
+    throw new Error('Only the winner can settle a forfeit.');
+  }
+
+  const winnerReservation = nextWinner.reservation;
+  const loserReservation = nextLoser.reservation;
+  if (!winnerReservation || !loserReservation) {
+    if (winnerReservation && winnerReservation.matchId === input.matchId) {
+      await persistPlayerMetadata(admin, {
+        user: nextWinner.user,
+        player: nextWinner.player,
+        reservation: null,
+        outcome: nextWinner.outcome?.matchId === input.matchId ? null : nextWinner.outcome,
+      });
+    }
+    if (loserReservation && loserReservation.matchId === input.matchId) {
+      await persistPlayerMetadata(admin, {
+        user: nextLoser.user,
+        player: nextLoser.player,
+        reservation: null,
+        outcome: nextLoser.outcome?.matchId === input.matchId ? null : nextLoser.outcome,
+      });
+    }
+    const callerNext = await loadUserWithState(admin, input.caller.id);
+    return { player: callerNext?.player ?? nextCaller.player, settled: true, alreadySettled: true };
+  }
+  if (winnerReservation.matchId !== input.matchId || loserReservation.matchId !== input.matchId) {
+    throw new Error('Reservation mismatch.');
+  }
+  if (winnerReservation.opponentId !== nextLoser.user.id || loserReservation.opponentId !== nextWinner.user.id) {
+    throw new Error('Opponent mismatch.');
+  }
+  if (winnerReservation.bet !== loserReservation.bet) {
+    throw new Error('Bet mismatch.');
+  }
+
+  const pot = winnerReservation.bet + loserReservation.bet;
+  const winnerNext: PlayerState = {
+    ...nextWinner.player,
+    tenks: nextWinner.player.tenks + pot,
+  };
+
+  await persistPlayerMetadata(admin, {
+    user: nextWinner.user,
+    player: winnerNext,
+    reservation: null,
+    outcome: null,
+  });
+  await appendTenksTransaction(admin, {
+    playerId: nextWinner.user.id,
+    amount: pot,
+    reason: 'pvp_match_forfeit_win',
+    balanceAfter: winnerNext.tenks,
+  });
+
+  await persistPlayerMetadata(admin, {
+    user: nextLoser.user,
+    player: nextLoser.player,
+    reservation: null,
+    outcome: null,
+  });
+
+  return { player: winnerNext, settled: true, alreadySettled: false, pot };
+}
+
 export async function settlePvpMatch(
   admin: SupabaseClient,
   input: {

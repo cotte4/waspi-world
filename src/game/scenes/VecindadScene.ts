@@ -4,8 +4,10 @@ import { announceScene, createBackButton, transitionToScene } from '../systems/S
 import { eventBus, EVENTS } from '../config/eventBus';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import {
-  getBuildCost,
+  getHouseInteriorStage,
+  getNextVecindadBuildCost,
   MAX_VECINDAD_STAGE,
+  normalizeVecindadBuildStage,
   type SharedParcelState,
   type VecindadParcelConfig,
   VECINDAD_MAP,
@@ -469,8 +471,8 @@ export class VecindadScene extends Phaser.Scene {
 
   private renderHud() {
     if (!this.hudText) return;
-    const stage = Math.max(0, this.vecindadState.buildStage);
-    const nextCost = stage >= MAX_VECINDAD_STAGE ? 0 : getBuildCost(stage);
+    const stage = normalizeVecindadBuildStage(this.vecindadState.buildStage);
+    const nextCost = getNextVecindadBuildCost(stage);
     const objective = !this.vecindadState.ownedParcelId
       ? 'OBJETIVO COMPRA UNA PARCELA'
       : stage <= 0
@@ -532,7 +534,7 @@ export class VecindadScene extends Phaser.Scene {
     const stage = mine ? this.vecindadState.buildStage : shared?.buildStage ?? 0;
 
     if (mine) {
-      const nextCost = stage >= MAX_VECINDAD_STAGE ? 0 : getBuildCost(stage);
+      const nextCost = getNextVecindadBuildCost(stage);
       if (this.isNearHouseDoor(parcel) && stage > 0) {
         this.promptText.setText('SPACE ENTRAR A TU CASA');
         this.promptText.setColor('#39FF14');
@@ -604,7 +606,9 @@ export class VecindadScene extends Phaser.Scene {
 
     const shared = this.sharedParcels.get(parcel.id);
     const mine = this.vecindadState.ownedParcelId === parcel.id;
-    const stage = mine ? this.vecindadState.buildStage : shared?.buildStage ?? 0;
+    const stage = mine
+      ? normalizeVecindadBuildStage(this.vecindadState.buildStage)
+      : normalizeVecindadBuildStage(shared?.buildStage ?? 0);
     if (stage <= 0) return;
 
     const ownerName = mine ? 'TU CASA' : `CASA DE ${shared?.ownerUsername?.toUpperCase() ?? 'VECINO'}`;
@@ -615,7 +619,7 @@ export class VecindadScene extends Phaser.Scene {
         returnScene: 'VecindadScene',
         roomKey: `waspi-room-house-${parcel.id}`,
         houseLabel: ownerName,
-        buildStage: Math.max(1, stage),
+        buildStage: getHouseInteriorStage(stage),
         returnX: parcel.x + parcel.w / 2,
         returnY: parcel.y + parcel.h - 28,
       });
@@ -643,13 +647,13 @@ export class VecindadScene extends Phaser.Scene {
 
   private buildOwnedParcel() {
     if (!this.vecindadState.ownedParcelId) return;
-    const currentStage = this.vecindadState.buildStage;
+    const currentStage = normalizeVecindadBuildStage(this.vecindadState.buildStage);
     if (currentStage >= MAX_VECINDAD_STAGE) {
       eventBus.emit(EVENTS.UI_NOTICE, 'Tu casa ya esta al maximo.');
       return;
     }
 
-    const cost = getBuildCost(currentStage);
+    const cost = getNextVecindadBuildCost(currentStage);
     if (this.vecindadState.materials < cost) {
       eventBus.emit(EVENTS.UI_NOTICE, `Necesitas ${cost} materiales para seguir construyendo.`);
       return;

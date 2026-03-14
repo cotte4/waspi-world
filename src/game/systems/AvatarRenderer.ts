@@ -77,6 +77,13 @@ export class AvatarRenderer {
   private container: Phaser.GameObjects.Container;
   private facingLeft = false;
   private walkTick = 0;
+  private posX = 0;
+  private posY = 0;
+  private animScaleX = 1;
+  private animScaleY = 1;
+  private animAngle = 0;
+  private animOffsetX = 0;
+  private animOffsetY = 0;
   private body?: Phaser.GameObjects.Arc;
   private ppBlob?: Phaser.GameObjects.Ellipse;
   private ttLeft?: Phaser.GameObjects.Ellipse;
@@ -94,6 +101,8 @@ export class AvatarRenderer {
   constructor(scene: Phaser.Scene, x: number, y: number, config: AvatarConfig = {}) {
     this.config = normalizeAvatarConfig(config);
     this.container = scene.add.container(x, y);
+    this.posX = x;
+    this.posY = y;
     this.buildAvatar(scene);
   }
 
@@ -252,7 +261,10 @@ export class AvatarRenderer {
     this.leftHand?.setAngle(-swing * 0.7);
     this.rightHand?.setAngle(swing * 0.7);
 
-    this.container.setY(this.container.y + bob * 0.2);
+    const facingScaleX = (this.facingLeft ? -1 : 1) * this.animScaleX;
+    this.container.setScale(facingScaleX, this.animScaleY);
+    this.container.setAngle(this.animAngle);
+    this.container.setPosition(this.posX + this.animOffsetX, this.posY + this.animOffsetY + bob * 0.2);
 
     if (this.specialSprite) {
       this.specialSprite.setY(this.specialBaseY + bob);
@@ -292,7 +304,9 @@ export class AvatarRenderer {
   }
 
   setPosition(x: number, y: number) {
-    this.container.setPosition(x, y);
+    this.posX = x;
+    this.posY = y;
+    this.container.setPosition(x + this.animOffsetX, y + this.animOffsetY);
   }
 
   setDepth(d: number) {
@@ -302,6 +316,84 @@ export class AvatarRenderer {
   getContainer() { return this.container; }
   get x() { return this.container.x; }
   get y() { return this.container.y; }
+
+  playShootAnimation() {
+    const scene = this.container.scene;
+    if (!scene) return;
+    scene.tweens.killTweensOf(this);
+    this.animScaleX = 1;
+    this.animScaleY = 1;
+    this.animAngle = 0;
+    scene.tweens.add({
+      targets: this,
+      animScaleX: 1.08,
+      animScaleY: 0.92,
+      animOffsetX: this.facingLeft ? 3 : -3,
+      animAngle: this.facingLeft ? -5 : 5,
+      duration: 70,
+      yoyo: true,
+      ease: 'Quad.easeOut',
+      onComplete: () => this.resetAnimPose(),
+    });
+  }
+
+  playHitAnimation() {
+    const scene = this.container.scene;
+    if (!scene) return;
+    scene.tweens.killTweensOf(this);
+    scene.tweens.add({
+      targets: this,
+      animAngle: this.facingLeft ? 8 : -8,
+      animOffsetX: this.facingLeft ? -4 : 4,
+      animScaleY: 0.94,
+      duration: 90,
+      yoyo: true,
+      ease: 'Sine.easeOut',
+      onComplete: () => this.resetAnimPose(),
+    });
+  }
+
+  playDefeatAnimation() {
+    const scene = this.container.scene;
+    if (!scene) return;
+    scene.tweens.killTweensOf(this);
+    scene.tweens.add({
+      targets: this,
+      animAngle: this.facingLeft ? -88 : 88,
+      animScaleY: 0.82,
+      animOffsetY: 7,
+      duration: 180,
+      ease: 'Cubic.easeOut',
+    });
+  }
+
+  playRespawnAnimation() {
+    const scene = this.container.scene;
+    if (!scene) return;
+    scene.tweens.killTweensOf(this);
+    this.animScaleX = 0.76;
+    this.animScaleY = 0.76;
+    this.animOffsetY = 8;
+    this.animAngle = 0;
+    this.animOffsetX = 0;
+    scene.tweens.add({
+      targets: this,
+      animScaleX: 1,
+      animScaleY: 1,
+      animOffsetY: 0,
+      duration: 220,
+      ease: 'Back.easeOut',
+      onComplete: () => this.resetAnimPose(),
+    });
+  }
+
+  private resetAnimPose() {
+    this.animScaleX = 1;
+    this.animScaleY = 1;
+    this.animAngle = 0;
+    this.animOffsetX = 0;
+    this.animOffsetY = 0;
+  }
 
   destroy() {
     this.container.destroy();

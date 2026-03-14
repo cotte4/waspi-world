@@ -52,4 +52,10 @@ export const EVENTS = {
   VECINDAD_SHARED_STATE_CHANGED: 'vecindad:shared:state:changed',
   VECINDAD_UPDATE_REQUEST: 'vecindad:update:request',
   UI_NOTICE: 'ui:notice',
+  // Stats tracking — emitted by scenes, consumed by StatsSystem
+  STATS_ZOMBIE_KILL: 'stats:zombie:kill',
+  STATS_PVP_RESULT: 'stats:pvp:result',
+  STATS_BASKET_GAME: 'stats:basket:game',
+  // Stats panel open — can be emitted from anywhere (HUD button, Phaser scene, etc.)
+  OPEN_STATS: 'stats:open',
 } as const;
