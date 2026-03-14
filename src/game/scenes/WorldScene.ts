@@ -74,6 +74,9 @@ type WeaponStats = {
   cooldownMs: number;
   color: number;
   knockback: number;
+  idleTexture: string;
+  idleAnim: string;
+  shootAnim: string;
 };
 
 type EnemyProfile = {
@@ -156,16 +159,22 @@ const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
     cooldownMs: 120,
     color: 0xF5C842,
     knockback: 18,
+    idleTexture: 'weapon_glock_idle',
+    idleAnim: 'weapon-glock-idle',
+    shootAnim: 'weapon-glock-shoot',
   },
   shotgun: {
     label: 'SHOTGUN',
-    pellets: 6,
-    spread: 0.17,
+    pellets: 3,
+    spread: 0.15,
     speed: 610,
-    damage: 11,
-    cooldownMs: 360,
+    damage: 16,
+    cooldownMs: 320,
     color: 0xFF8B3D,
     knockback: 34,
+    idleTexture: 'weapon_shotgun_idle',
+    idleAnim: 'weapon-shotgun-idle',
+    shootAnim: 'weapon-shotgun-shoot',
   },
 };
 const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
@@ -281,6 +290,7 @@ export class WorldScene extends Phaser.Scene {
   private hpText!: Phaser.GameObjects.Text;
   private gunEnabled = false;
   private keyF!: Phaser.Input.Keyboard.Key;
+  private keyQ!: Phaser.Input.Keyboard.Key;
   private keyOne!: Phaser.Input.Keyboard.Key;
   private keyTwo!: Phaser.Input.Keyboard.Key;
   private bullets!: Phaser.Physics.Arcade.Group;
@@ -292,8 +302,11 @@ export class WorldScene extends Phaser.Scene {
   private trainingHud?: Phaser.GameObjects.Text;
   private combatHud?: Phaser.GameObjects.Text;
   private progressionHud?: Phaser.GameObjects.Text;
+  private weaponHud?: Phaser.GameObjects.Text;
+  private gunSprite?: Phaser.GameObjects.Sprite;
   private dummyStates = new Map<CombatDummy, DummyState>();
   private currentWeapon: WeaponMode = 'pistol';
+  private weaponAimAngle = 0;
   private bossDummy?: CombatDummy;
   private bossHud?: Phaser.GameObjects.Container;
   private bossBar?: Phaser.GameObjects.Graphics;
@@ -469,6 +482,7 @@ export class WorldScene extends Phaser.Scene {
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyE = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
     this.keyF = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.F);
+    this.keyQ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
     this.keyOne = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
     this.keyTwo = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
 
@@ -508,6 +522,7 @@ export class WorldScene extends Phaser.Scene {
     // HP/Combat/Utilities
     this.runBootStep('hp hud', () => this.setupHpHud());
     this.runBootStep('combat', () => this.setupCombat());
+    this.runBootStep('weapon system', () => this.setupWeaponSystem());
     this.runBootStep('utility refresh', () => this.refreshUtilitiesFromInventory());
     this.audioSettingsCleanup = eventBus.on(EVENTS.AUDIO_SETTINGS_CHANGED, (payload: unknown) => {
       if (!payload || typeof payload !== 'object') return;
@@ -625,6 +640,113 @@ export class WorldScene extends Phaser.Scene {
     this.hpText.setText(`HP ${this.hp}`);
   }
 
+  private ensureWeaponAnimations() {
+    const animations = [
+      { key: 'weapon-glock-idle', texture: 'weapon_glock_idle', frameRate: 8, repeat: -1 },
+      { key: 'weapon-glock-shoot', texture: 'weapon_glock_shoot', frameRate: 18, repeat: 0 },
+      { key: 'weapon-shotgun-idle', texture: 'weapon_shotgun_idle', frameRate: 8, repeat: -1 },
+      { key: 'weapon-shotgun-shoot', texture: 'weapon_shotgun_shoot', frameRate: 18, repeat: 0 },
+    ] as const;
+
+    for (const animation of animations) {
+      if (this.anims.exists(animation.key)) continue;
+      this.anims.create({
+        key: animation.key,
+        frames: this.anims.generateFrameNumbers(animation.texture, { start: 0, end: 3 }),
+        frameRate: animation.frameRate,
+        repeat: animation.repeat,
+      });
+    }
+  }
+
+  private setupWeaponSystem() {
+    this.ensureWeaponAnimations();
+    this.gunSprite = this.add.sprite(this.px, this.py - 8, WEAPON_STATS[this.currentWeapon].idleTexture, 0)
+      .setDepth(2050)
+      .setVisible(false)
+      .setOrigin(0.26, 0.62)
+      .setScale(0.72);
+    this.gunSprite.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (animation: Phaser.Animations.Animation) => {
+      const weapon = WEAPON_STATS[this.currentWeapon];
+      if (animation.key === weapon.shootAnim) {
+        this.gunSprite?.play(weapon.idleAnim, true);
+      }
+    });
+
+    this.weaponHud = this.add.text(8, this.scale.height - 42, '', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+    }).setScrollFactor(0).setDepth(9999);
+
+    this.syncWeaponVisual();
+  }
+
+  private syncWeaponVisual() {
+    if (!this.gunSprite || !this.weaponHud) return;
+    const weapon = WEAPON_STATS[this.currentWeapon];
+    const shouldShow = this.gunEnabled;
+
+    this.gunSprite.setVisible(shouldShow);
+    this.weaponHud.setVisible(shouldShow && this.hudSettings.showArenaHud);
+
+    if (!shouldShow) {
+      this.weaponHud.setText('');
+      this.gunSprite.stop();
+      return;
+    }
+
+    if (this.gunSprite.texture.key !== weapon.idleTexture) {
+      this.gunSprite.setTexture(weapon.idleTexture, 0);
+    }
+    if (!this.gunSprite.anims.isPlaying || this.gunSprite.anims.currentAnim?.key !== weapon.idleAnim) {
+      this.gunSprite.play(weapon.idleAnim, true);
+    }
+    this.weaponHud.setColor(this.currentWeapon === 'shotgun' ? '#FF8B3D' : '#F5C842');
+    this.weaponHud.setText(`ARMA ${weapon.label} | Q CAMBIA`);
+    this.updateWeaponSpritePosition();
+  }
+
+  private updateWeaponSpritePosition() {
+    if (!this.gunSprite) return;
+    if (!this.gunEnabled) {
+      this.gunSprite.setVisible(false);
+      return;
+    }
+
+    const pointer = this.input.activePointer;
+    if (pointer) {
+      const dx = pointer.worldX - this.px;
+      const dy = pointer.worldY - this.py;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+        this.weaponAimAngle = Phaser.Math.Angle.Between(this.px, this.py, pointer.worldX, pointer.worldY);
+      }
+    }
+
+    if (!Number.isFinite(this.weaponAimAngle)) {
+      this.weaponAimAngle = 0;
+    }
+
+    const angle = this.weaponAimAngle;
+    const offsetX = Math.cos(angle) * 16;
+    const offsetY = Math.sin(angle) * 10 - 8;
+    this.gunSprite.setPosition(this.px + offsetX, this.py + offsetY);
+    this.gunSprite.setRotation(angle);
+    this.gunSprite.setFlipY(angle > Math.PI / 2 || angle < -Math.PI / 2);
+    this.gunSprite.setDepth(2100 + Math.floor(this.py / 10));
+  }
+
+  private switchWeapon(nextWeapon?: WeaponMode) {
+    if (!this.gunEnabled) return;
+    if (nextWeapon) {
+      this.currentWeapon = nextWeapon;
+    } else {
+      this.currentWeapon = this.currentWeapon === 'pistol' ? 'shotgun' : 'pistol';
+    }
+    this.syncWeaponVisual();
+    this.renderCombatHud();
+  }
+
   private renderCombatHud() {
     this.guardHudRender('combat', () => this.recreateCombatHud(), () => {
       if (!this.combatHud) {
@@ -642,7 +764,7 @@ export class WorldScene extends Phaser.Scene {
       const weapon = WEAPON_STATS[this.currentWeapon];
       this.combatHud.setColor(this.currentWeapon === 'shotgun' ? '#FF8B3D' : '#F5C842');
       this.combatHud.setText([
-        `WEAPON ${weapon.label} | 1/2 CAMBIA`,
+        `WEAPON ${weapon.label} | Q / 1 / 2`,
         'F / CLICK DISPARA | R1 S2 T3 B5',
       ]);
     });
@@ -670,6 +792,7 @@ export class WorldScene extends Phaser.Scene {
     this.trainingHud?.setVisible(visible);
     this.combatHud?.setVisible(visible);
     this.progressionHud?.setVisible(visible);
+    this.weaponHud?.setVisible(visible && this.gunEnabled);
   }
 
   private getEnemyNameColor(archetype: EnemyArchetype) {
@@ -1153,6 +1276,10 @@ export class WorldScene extends Phaser.Scene {
     const weapon = WEAPON_STATS[this.currentWeapon];
     if (now - this.lastShotAt < weapon.cooldownMs) return;
     this.lastShotAt = now;
+    this.weaponAimAngle = Phaser.Math.Angle.Between(this.px, this.py, wx, wy);
+    if (this.gunSprite) {
+      this.gunSprite.play(weapon.shootAnim, true);
+    }
     this.ensureAudioReady();
     this.playCombatTone(
       this.currentWeapon === 'shotgun' ? 120 : 220,
@@ -1308,6 +1435,7 @@ export class WorldScene extends Phaser.Scene {
       this.currentWeapon = 'pistol';
     }
     this.renderCombatHud();
+    this.syncWeaponVisual();
 
     if (this.ballEnabled && !this.football) {
       this.football = this.add.arc(this.px + 18, this.py - 6, 7, 0, 360, false, 0xFFFFFF);
@@ -2991,13 +3119,14 @@ export class WorldScene extends Phaser.Scene {
     this.updateDummies();
     this.handleInteraction();
 
+    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyQ)) {
+      this.switchWeapon();
+    }
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyOne)) {
-      this.currentWeapon = 'pistol';
-      this.renderCombatHud();
+      this.switchWeapon('pistol');
     }
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyTwo)) {
-      this.currentWeapon = 'shotgun';
-      this.renderCombatHud();
+      this.switchWeapon('shotgun');
     }
 
     // Gun shoot with keyboard
@@ -3008,6 +3137,8 @@ export class WorldScene extends Phaser.Scene {
     if (this.gunEnabled && !this.isTouch && this.input.activePointer.isDown && !this.inputBlocked) {
       this.shootAt(this.input.activePointer.worldX, this.input.activePointer.worldY);
     }
+
+    this.updateWeaponSpritePosition();
 
     // Football follow animation
     if (this.football && this.ballEnabled) {

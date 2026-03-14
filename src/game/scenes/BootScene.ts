@@ -79,6 +79,10 @@ export class BootScene extends Phaser.Scene {
     this.load.image('seed_buho', '/assets/seeds/buho.png');
     this.load.image('seed_piplup', '/assets/seeds/piplup.png');
     this.load.image('seed_chacha', '/assets/seeds/chacha.png');
+    this.load.spritesheet('weapon_glock_idle', '/assets/sprites/guns/01_glock/idle_strip.png', { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_glock_shoot', '/assets/sprites/guns/01_glock/shoot_strip.png', { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_shotgun_idle', '/assets/sprites/guns/03_shotgun/idle_strip.png', { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_shotgun_shoot', '/assets/sprites/guns/03_shotgun/shoot_strip.png', { frameWidth: 64, frameHeight: 64 });
     this.load.audio('arcade_theme', '/assets/audio/arcade-theme.mp3');
   }
 
