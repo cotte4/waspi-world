@@ -1,6 +1,13 @@
 import Phaser from 'phaser';
 import { COLORS } from '../config/constants';
-import { ensureFallbackRectTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation } from './AnimationSafety';
+import {
+  ensureFallbackRectTexture,
+  safeCreateSpritesheetAnimation,
+  safeDestroyGameObject,
+  safePlaySpriteAnimation,
+  safeSceneDelayedCall,
+  safeWithLiveSprite,
+} from './AnimationSafety';
 
 export type AvatarKind = 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha' | 'trap_a' | 'trap_b' | 'trap_c' | 'trap_d';
 export type HairStyle = 'SPI' | 'FLA' | 'MOH' | 'X';
@@ -264,6 +271,7 @@ export class AvatarRenderer {
   }
 
   update(isMoving: boolean, dx: number, dy = 0) {
+    if (!this.isContainerUsable()) return;
     this.lastIsMoving = isMoving;
     this.lastDx = dx;
     this.lastDy = dy;
@@ -277,7 +285,7 @@ export class AvatarRenderer {
       this.facingLeft = false;
     }
 
-    if (this.animatedKind && this.specialSprite) {
+    if (this.hasLiveAnimatedSprite()) {
       if (!this.activeAnimatedAction) {
         let nextState: AnimatedMovementState = 'idle';
         if (isMoving) {
@@ -311,8 +319,11 @@ export class AvatarRenderer {
 
     this.container.setY(this.container.y + bob * 0.2);
 
-    if (this.specialSprite) {
-      this.specialSprite.setY(this.specialBaseY + bob);
+    const specialSprite = this.specialSprite;
+    if (this.isSpriteUsable(specialSprite)) {
+      safeWithLiveSprite(specialSprite, (sprite) => {
+        sprite.setY(this.specialBaseY + bob);
+      }, 'avatar-special-bob');
     }
 
     // Smoking idle puffs
@@ -327,7 +338,7 @@ export class AvatarRenderer {
 
   private puffSmoke() {
     const scene = this.container.scene;
-    if (!scene) return;
+    if (!scene || !this.isContainerUsable()) return;
 
     // Approx mouth position relative to container
     const x = this.container.x + 10;
@@ -365,11 +376,17 @@ export class AvatarRenderer {
     this.animatedActionTimer?.remove(false);
     this.animatedActionTimer = undefined;
     this.lastAnimatedState = undefined;
-    this.update(this.lastIsMoving, this.lastDx, this.lastDy);
+    if (!this.hasLiveAnimatedSprite()) return;
+    try {
+      this.update(this.lastIsMoving, this.lastDx, this.lastDy);
+    } catch (error) {
+      console.error('[Waspi] Failed to clear avatar action state safely.', error);
+    }
   }
 
   private playAnimatedAction(action: AvatarAction, durationMs: number) {
-    if (!this.animatedKind || !this.specialSprite) return;
+    const specialSprite = this.specialSprite;
+    if (!this.animatedKind || !this.hasLiveAnimatedSprite() || !specialSprite) return;
     if (this.activeAnimatedAction) {
       const currentPriority = ACTION_PRIORITY[this.activeAnimatedAction];
       const nextPriority = ACTION_PRIORITY[action];
@@ -382,7 +399,7 @@ export class AvatarRenderer {
     const fallbackKey = `character_${this.animatedKind}_fallback`;
     safePlaySpriteAnimation(
       this.container.scene,
-      this.specialSprite,
+      specialSprite,
       getCharacterAnimationKey(this.animatedKind, action),
       textureKey,
       fallbackKey,
@@ -391,22 +408,29 @@ export class AvatarRenderer {
     this.activeAnimatedAction = action;
     this.lastAnimatedState = action;
     this.animatedActionTimer?.remove(false);
-    this.animatedActionTimer = this.container.scene.time.delayedCall(durationMs, () => {
+    const scene = this.container.scene;
+    this.animatedActionTimer = safeSceneDelayedCall(scene, durationMs, () => {
       this.activeAnimatedAction = undefined;
       this.lastAnimatedState = undefined;
       this.animatedActionTimer = undefined;
-      this.update(this.lastIsMoving, this.lastDx, this.lastDy);
-    });
+      if (!this.hasLiveAnimatedSprite()) return;
+      try {
+        this.update(this.lastIsMoving, this.lastDx, this.lastDy);
+      } catch (error) {
+        console.error('[Waspi] Failed to restore avatar state after action animation.', error);
+      }
+    }, `avatar-action-reset:${action}`);
   }
 
   private playAnimatedState(state: AnimatedMovementState) {
-    if (!this.animatedKind || !this.specialSprite) return;
+    const specialSprite = this.specialSprite;
+    if (!this.animatedKind || !this.hasLiveAnimatedSprite() || !specialSprite) return;
     if (this.lastAnimatedState === state) return;
     const textureKey = getCharacterTextureKey(this.animatedKind, state);
     const fallbackKey = `character_${this.animatedKind}_fallback`;
     safePlaySpriteAnimation(
       this.container.scene,
-      this.specialSprite,
+      specialSprite,
       getCharacterAnimationKey(this.animatedKind, state),
       textureKey,
       fallbackKey,
@@ -415,11 +439,21 @@ export class AvatarRenderer {
   }
 
   setPosition(x: number, y: number) {
-    this.container.setPosition(x, y);
+    if (!this.isContainerUsable()) return;
+    try {
+      this.container.setPosition(x, y);
+    } catch (error) {
+      console.error('[Waspi] Failed to set avatar container position.', error);
+    }
   }
 
   setDepth(d: number) {
-    this.container.setDepth(d);
+    if (!this.isContainerUsable()) return;
+    try {
+      this.container.setDepth(d);
+    } catch (error) {
+      console.error('[Waspi] Failed to set avatar container depth.', error);
+    }
   }
 
   getContainer() { return this.container; }
@@ -427,8 +461,25 @@ export class AvatarRenderer {
   get y() { return this.container.y; }
 
   destroy() {
-    this.clearActionState();
-    this.container.destroy();
+    try {
+      this.clearActionState();
+    } catch {
+      // If the scene is already tearing down, we still want destroy to finish.
+    }
+    safeDestroyGameObject(this.specialSprite);
+    if (this.isContainerUsable()) safeDestroyGameObject(this.container);
+  }
+
+  private isContainerUsable() {
+    return Boolean(this.container?.scene && this.container.active);
+  }
+
+  private isSpriteUsable(sprite?: Phaser.GameObjects.Sprite): sprite is Phaser.GameObjects.Sprite {
+    return Boolean(sprite?.scene && sprite.active);
+  }
+
+  private hasLiveAnimatedSprite() {
+    return Boolean(this.animatedKind && this.isSpriteUsable(this.specialSprite) && this.isContainerUsable());
   }
 }
 

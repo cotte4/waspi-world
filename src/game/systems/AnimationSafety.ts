@@ -8,6 +8,78 @@ function isLiveSprite(sprite: Phaser.GameObjects.Sprite | undefined | null) {
     && !!sprite.anims;
 }
 
+export function isLiveGameObject<T extends Phaser.GameObjects.GameObject | null | undefined>(object: T): object is Exclude<T, null | undefined> {
+  return Boolean(object && object.scene && object.active !== false);
+}
+
+export function safeDestroyGameObject(object: { scene?: Phaser.Scene | null; active?: boolean; destroy: () => void } | null | undefined) {
+  if (!object || !object.scene) return false;
+  try {
+    object.destroy();
+    return true;
+  } catch (error) {
+    console.error('[Waspi] Failed to destroy game object safely.', error);
+    return false;
+  }
+}
+
+export function safeSceneDelayedCall(
+  scene: Phaser.Scene,
+  delayMs: number,
+  callback: () => void,
+  label = 'delayed callback',
+) {
+  return scene.time.delayedCall(delayMs, () => {
+    if (!scene.scene || scene.sys?.isActive?.() === false) return;
+    try {
+      callback();
+    } catch (error) {
+      console.error(`[Waspi] Failed during ${label}.`, error);
+    }
+  });
+}
+
+export function safeBindAnimationComplete(
+  scene: Phaser.Scene,
+  sprite: Phaser.GameObjects.Sprite,
+  onComplete: (animation: Phaser.Animations.Animation) => void,
+) {
+  if (!isLiveSprite(sprite)) return () => undefined;
+  const handler = (animation: Phaser.Animations.Animation) => {
+    if (!isLiveSprite(sprite) || !scene.scene || scene.sys?.isActive?.() === false) return;
+    try {
+      onComplete(animation);
+    } catch (error) {
+      console.error('[Waspi] Failed during animation complete handler.', error);
+    }
+  };
+  sprite.on(Phaser.Animations.Events.ANIMATION_COMPLETE, handler);
+  const off = () => {
+    try {
+      sprite.off(Phaser.Animations.Events.ANIMATION_COMPLETE, handler);
+    } catch {
+      // no-op
+    }
+  };
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, off);
+  return off;
+}
+
+export function safeWithLiveSprite(
+  sprite: Phaser.GameObjects.Sprite | undefined | null,
+  work: (sprite: Phaser.GameObjects.Sprite) => void,
+  label: string,
+) {
+  if (!isLiveSprite(sprite)) return false;
+  try {
+    work(sprite as Phaser.GameObjects.Sprite);
+    return true;
+  } catch (error) {
+    console.error(`[Waspi] Failed during ${label}.`, error);
+    return false;
+  }
+}
+
 export function ensureFallbackRectTexture(
   scene: Phaser.Scene,
   key: string,

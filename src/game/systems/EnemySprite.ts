@@ -1,5 +1,13 @@
 import Phaser from 'phaser';
-import { ensureFallbackRectTexture, getSafeAnimationDurationMs, safeCreateSpritesheetAnimation, safePlaySpriteAnimation } from './AnimationSafety';
+import {
+  ensureFallbackRectTexture,
+  getSafeAnimationDurationMs,
+  safeCreateSpritesheetAnimation,
+  safeDestroyGameObject,
+  safePlaySpriteAnimation,
+  safeSceneDelayedCall,
+  safeWithLiveSprite,
+} from './AnimationSafety';
 
 export type ZombieState = 'idle' | 'walk' | 'attack' | 'hurt' | 'death';
 export type ZombieType = 'rusher' | 'shooter' | 'tank' | 'boss';
@@ -90,11 +98,11 @@ export class EnemySprite {
         this.stateLockUntil = Number.POSITIVE_INFINITY;
         this.playAnim('death');
         const delay = this.getAnimDurationMs('death');
-        this.scene.time.delayedCall(delay, () => {
+        safeSceneDelayedCall(this.scene, delay, () => {
           if (!this.canUseSprite()) return;
           if (token !== this.stateToken) return;
           this.sprite.setAlpha(0);
-        });
+        }, `${this.type}:death-hide`);
         return;
       }
 
@@ -102,14 +110,14 @@ export class EnemySprite {
       if (state === 'attack' || state === 'hurt') {
         const delay = this.getAnimDurationMs(state);
         this.stateLockUntil = this.scene.time.now + delay;
-        this.scene.time.delayedCall(delay, () => {
+        safeSceneDelayedCall(this.scene, delay, () => {
           if (!this.canUseSprite()) return;
           if (token !== this.stateToken || this.dead) return;
           if (this.currentState !== state) return;
           this.currentState = 'idle';
           this.stateLockUntil = 0;
           this.playAnim('idle');
-        });
+        }, `${this.type}:${state}-reset`);
         return;
       }
 
@@ -120,12 +128,9 @@ export class EnemySprite {
   }
 
   setPosition(x: number, y: number) {
-    if (!this.canUseSprite()) return;
-    try {
-      this.sprite.setPosition(x, y + ZOMBIE_Y_OFFSET[this.type]);
-    } catch (error) {
-      console.error(`[Waspi] EnemySprite setPosition failed for ${this.type}`, error);
-    }
+    safeWithLiveSprite(this.sprite, (sprite) => {
+      sprite.setPosition(x, y + ZOMBIE_Y_OFFSET[this.type]);
+    }, `EnemySprite setPosition ${this.type}`);
   }
 
   revive() {
@@ -143,31 +148,21 @@ export class EnemySprite {
   }
 
   setAlpha(alpha: number) {
-    if (!this.canUseSprite()) return;
-    try {
-      this.sprite.setAlpha(alpha);
-    } catch (error) {
-      console.error(`[Waspi] EnemySprite setAlpha failed for ${this.type}`, error);
-    }
+    safeWithLiveSprite(this.sprite, (sprite) => {
+      sprite.setAlpha(alpha);
+    }, `EnemySprite setAlpha ${this.type}`);
   }
 
   setFlipX(flip: boolean) {
-    if (!this.canUseSprite()) return;
-    try {
-      this.sprite.setFlipX(flip);
-    } catch (error) {
-      console.error(`[Waspi] EnemySprite setFlipX failed for ${this.type}`, error);
-    }
+    safeWithLiveSprite(this.sprite, (sprite) => {
+      sprite.setFlipX(flip);
+    }, `EnemySprite setFlipX ${this.type}`);
   }
 
   destroy() {
     this.dead = true;
     this.stateToken += 1;
-    try {
-      this.sprite?.destroy();
-    } catch (error) {
-      console.error(`[Waspi] EnemySprite destroy failed for ${this.type}`, error);
-    }
+    safeDestroyGameObject(this.sprite);
   }
 }
 

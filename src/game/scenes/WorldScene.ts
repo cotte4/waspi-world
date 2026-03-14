@@ -10,7 +10,14 @@ import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings'
 import { loadHudSettings, type HudSettings } from '../systems/HudSettings';
 import { addXpToProgression, getMaxProgressionLevel, loadProgressionState, saveProgressionState, type ProgressionState } from '../systems/ProgressionSystem';
 import { loadCombatStats, saveCombatStats, type CombatStats } from '../systems/CombatStats';
-import { ensureFallbackRectTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation, safeSetSpriteTexture } from '../systems/AnimationSafety';
+import {
+  ensureFallbackRectTexture,
+  safeBindAnimationComplete,
+  safeCreateSpritesheetAnimation,
+  safePlaySpriteAnimation,
+  safeSetSpriteTexture,
+  safeWithLiveSprite,
+} from '../systems/AnimationSafety';
 import { announceScene, bindSafeResetToPlaza } from '../systems/SceneUi';
 import { SceneControls } from '../systems/SceneControls';
 import type { VecindadState } from '../../lib/playerState';
@@ -735,7 +742,7 @@ export class WorldScene extends Phaser.Scene {
       .setVisible(false)
       .setOrigin(0.26, 0.62)
       .setScale(0.72);
-    this.gunSprite.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (animation: Phaser.Animations.Animation) => {
+    safeBindAnimationComplete(this, this.gunSprite, (animation: Phaser.Animations.Animation) => {
       const weapon = WEAPON_STATS[this.currentWeapon];
       if (animation.key === weapon.shootAnim) {
         if (this.gunSprite) {
@@ -810,7 +817,7 @@ export class WorldScene extends Phaser.Scene {
         .setVisible(this.gunEnabled)
         .setOrigin(0.26, 0.62)
         .setScale(0.72);
-      rp.gunSprite.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (animation: Phaser.Animations.Animation) => {
+      safeBindAnimationComplete(this, rp.gunSprite, (animation: Phaser.Animations.Animation) => {
         const currentWeapon = WEAPON_STATS[rp.weapon ?? 'pistol'];
         if (animation.key === currentWeapon.shootAnim) {
           if (rp.gunSprite) {
@@ -832,10 +839,12 @@ export class WorldScene extends Phaser.Scene {
     const safeAngle = Number.isFinite(angle) ? angle : 0;
     const offsetX = Math.cos(safeAngle) * 16;
     const offsetY = Math.sin(safeAngle) * 10 - 8;
-    sprite.setPosition(x + offsetX, y + offsetY);
-    sprite.setRotation(safeAngle);
-    sprite.setFlipY(safeAngle > Math.PI / 2 || safeAngle < -Math.PI / 2);
-    sprite.setDepth(depth);
+    safeWithLiveSprite(sprite, (liveSprite) => {
+      liveSprite.setPosition(x + offsetX, y + offsetY);
+      liveSprite.setRotation(safeAngle);
+      liveSprite.setFlipY(safeAngle > Math.PI / 2 || safeAngle < -Math.PI / 2);
+      liveSprite.setDepth(depth);
+    }, 'positionWeaponSprite');
   }
 
   private updateRemoteWeaponSprite(rp: RemotePlayer) {

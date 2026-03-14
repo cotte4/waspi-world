@@ -2,7 +2,16 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
-import { ensureFallbackRectTexture, getSafeAnimationDurationMs, hasUsableTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation } from '../systems/AnimationSafety';
+import {
+  ensureFallbackRectTexture,
+  getSafeAnimationDurationMs,
+  hasUsableTexture,
+  safeCreateSpritesheetAnimation,
+  safeDestroyGameObject,
+  safePlaySpriteAnimation,
+  safeSceneDelayedCall,
+  safeWithLiveSprite,
+} from '../systems/AnimationSafety';
 import { SceneControls } from '../systems/SceneControls';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
 import {
@@ -437,15 +446,11 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private safeDestroyZombieVisual(zombie: ZombieState) {
-    try {
-      if (zombie.container?.scene) zombie.container.destroy();
-      if (zombie.shadow?.scene) zombie.shadow.destroy();
-      if (zombie.hpBg?.scene) zombie.hpBg.destroy();
-      if (zombie.hpFill?.scene) zombie.hpFill.destroy();
-      if (zombie.label?.scene) zombie.label.destroy();
-    } catch (error) {
-      console.error('[Waspi] Failed to destroy zombie visual safely', error);
-    }
+    safeDestroyGameObject(zombie.container);
+    safeDestroyGameObject(zombie.shadow);
+    safeDestroyGameObject(zombie.hpBg);
+    safeDestroyGameObject(zombie.hpFill);
+    safeDestroyGameObject(zombie.label);
   }
 
   private getSpawnSectionsForRound() {
@@ -1648,11 +1653,11 @@ export class ZombiesScene extends Phaser.Scene {
       this.refreshSpawnNodeVisual(node, 0, false);
     } else {
       this.refreshSpawnNodeVisual(node, 1, false);
-      this.time.delayedCall(650, () => {
+      safeSceneDelayedCall(this, 650, () => {
         if (!node.occupiedBy) {
           this.refreshSpawnNodeVisual(node, 0, false);
         }
-      });
+      }, 'releaseSpawnNode reset');
     }
   }
 
@@ -1696,18 +1701,22 @@ export class ZombiesScene extends Phaser.Scene {
         : state === 'spawn'
           ? Math.sin(this.time.now / 70 + zombie.phase) * 1.2
           : 0;
-    zombie.body.setY(bob);
-    zombie.label.setAlpha(state === 'death' ? 0 : 1);
-    zombie.body.setScale(
-      state === 'hurt'
-        ? 1.06
-        : state === 'attack'
-          ? 1.04
-          : state === 'spawn'
-            ? 1.02
-            : 1,
-    );
-    zombie.body.setFlipX(this.px < zombie.x);
+    safeWithLiveSprite(zombie.body, (body) => {
+      body.setY(bob);
+      body.setScale(
+        state === 'hurt'
+          ? 1.06
+          : state === 'attack'
+            ? 1.04
+            : state === 'spawn'
+              ? 1.02
+              : 1,
+      );
+      body.setFlipX(this.px < zombie.x);
+    }, `setZombieState:${zombie.displayLabel}:${state}`);
+    if (zombie.label?.scene && zombie.label.active !== false) {
+      zombie.label.setAlpha(state === 'death' ? 0 : 1);
+    }
 
     if (zombie.lastAnimatedState !== state) {
       this.playZombieStateVisual(zombie, state);
@@ -1743,10 +1752,10 @@ export class ZombiesScene extends Phaser.Scene {
     this.tryDropPickup(zombie.x, zombie.y);
     const burst = this.add.circle(zombie.x, zombie.y - 8, zombie.radius + 8, 0xFF6A6A, 0.26).setDepth(80);
     this.tweens.add({ targets: burst, alpha: 0, scale: 1.9, duration: 220, onComplete: () => burst.destroy() });
-    this.time.delayedCall(this.getZombieDeathDurationMs(zombie), () => {
+    safeSceneDelayedCall(this, this.getZombieDeathDurationMs(zombie), () => {
       this.safeDestroyZombieVisual(zombie);
       this.zombies.delete(zombie.id);
-    });
+    }, `zombie-death-cleanup:${zombie.id}`);
   }
 
   private showFloatingText(text: string, x: number, y: number, color: string) {
