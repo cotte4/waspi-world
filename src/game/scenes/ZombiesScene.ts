@@ -96,7 +96,7 @@ type ZombieState = {
   lastAnimatedState?: ZombieAnimState;
 };
 
-type PickupKind = 'max_ammo' | 'insta_kill';
+type PickupKind = 'max_ammo' | 'insta_kill' | 'double_points' | 'nuke';
 
 type PickupState = {
   id: string;
@@ -159,6 +159,7 @@ export class ZombiesScene extends Phaser.Scene {
   private doors = new Map<ZombiesSectionId, DoorState>();
   private mysteryBoxCooldownUntil: number = 0;
   private instaKillUntil: number = 0;
+  private doublePointsUntil: number = 0;
   private audioContext?: AudioContext;
   private lastSpawnSfxAt = 0;
   private lastStompSfxAt = 0;
@@ -171,6 +172,7 @@ export class ZombiesScene extends Phaser.Scene {
   private statusText?: Phaser.GameObjects.Text;
   private inventoryText?: Phaser.GameObjects.Text;
   private noticeText?: Phaser.GameObjects.Text;
+  private bossIntroText?: Phaser.GameObjects.Text;
   private controlsText?: Phaser.GameObjects.Text;
   private reticle?: Phaser.GameObjects.Graphics;
   private keyW!: Phaser.Input.Keyboard.Key;
@@ -222,6 +224,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.doors.clear();
     this.mysteryBoxCooldownUntil = 0;
     this.instaKillUntil = 0;
+    this.doublePointsUntil = 0;
     this.lastSpawnSfxAt = 0;
     this.lastStompSfxAt = 0;
     this.lastShotAt = 0;
@@ -625,6 +628,15 @@ export class ZombiesScene extends Phaser.Scene {
       align: 'center',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(1200).setAlpha(0);
 
+    this.bossIntroText = this.add.text(ZOMBIES_VIEWPORT.WIDTH / 2, ZOMBIES_VIEWPORT.HEIGHT / 2, '', {
+      fontSize: '18px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FF6A6A',
+      stroke: '#000000',
+      strokeThickness: 6,
+      align: 'center',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(1300).setAlpha(0);
+
     this.activePrompt = this.add.text(ZOMBIES_VIEWPORT.WIDTH / 2, ZOMBIES_VIEWPORT.HEIGHT - 38, '', {
       fontSize: '9px',
       fontFamily: '"Press Start 2P", monospace',
@@ -685,12 +697,16 @@ export class ZombiesScene extends Phaser.Scene {
   private renderHud() {
     const weapon = ZOMBIES_WEAPONS[this.currentWeapon];
     const ammo = this.weaponInventory[this.currentWeapon];
+    const timedBuffs = [
+      this.doublePointsUntil > this.time.now ? `2X ${Math.ceil((this.doublePointsUntil - this.time.now) / 1000)}s` : '',
+      this.instaKillUntil > this.time.now ? `INSTA ${Math.ceil((this.instaKillUntil - this.time.now) / 1000)}s` : '',
+    ].filter(Boolean).join('  ');
     this.roundText?.setText(`ROUND ${this.round}`);
     this.pointsText?.setText(`PTS ${this.points}`);
     this.hpText?.setText(`HP ${Math.max(0, Math.round(this.hp))}`);
     this.ammoText?.setText(`${weapon.label}\n${ammo.ammoInMag}/${ammo.reserveAmmo}`);
     this.statusText?.setText([
-      this.gameOver ? 'GAME OVER' : this.instaKillUntil > this.time.now ? `INSTA ${Math.ceil((this.instaKillUntil - this.time.now) / 1000)}s` : this.reloadEndsAt > this.time.now ? 'RECARGANDO' : 'EN PIE',
+      this.gameOver ? 'GAME OVER' : timedBuffs || (this.reloadEndsAt > this.time.now ? 'RECARGANDO' : 'EN PIE'),
       `ZOMBIES ${this.countAliveZombies()}/${this.roundTarget}`,
       `SPAWN ${this.spawnedThisRound}`,
       this.bossAlive ? 'BOSS ACTIVE' : this.bossRoundActive && !this.bossSpawnedThisRound ? 'BOSS INCOMING' : '',
@@ -734,6 +750,10 @@ export class ZombiesScene extends Phaser.Scene {
     this.bossSpawnedThisRound = false;
     this.bossAlive = false;
     this.showNotice(this.bossRoundActive ? `BOSS ROUND ${this.round}` : `ROUND ${this.round}`, this.bossRoundActive ? '#FF6A6A' : '#FFB36A');
+    if (this.bossRoundActive) {
+      this.showBossIntro(`BOSS ROUND ${this.round}`);
+      this.cameras.main.flash(180, 120, 20, 20, false);
+    }
     this.playZombiesSfx(this.bossRoundActive ? 'boss_round' : 'round_start');
     this.renderHud();
   }
@@ -967,6 +987,10 @@ export class ZombiesScene extends Phaser.Scene {
     return alive;
   }
 
+  private getPointsMultiplier() {
+    return this.doublePointsUntil > this.time.now ? 2 : 1;
+  }
+
   private pickZombieType(): ZombieType {
     const eligible = getEligibleZombieTypes(this.round);
     const roll = Phaser.Math.Between(0, 99);
@@ -994,6 +1018,22 @@ export class ZombiesScene extends Phaser.Scene {
       if (weightDiff !== 0) return weightDiff;
       if (a.boardHealth !== b.boardHealth) return a.boardHealth - b.boardHealth;
       return a.lastUsedAt - b.lastUsedAt;
+    });
+  }
+
+  private showBossIntro(text: string) {
+    if (!this.bossIntroText) return;
+    this.bossIntroText.setText(text);
+    this.bossIntroText.setAlpha(1);
+    this.bossIntroText.setScale(0.86);
+    this.tweens.killTweensOf(this.bossIntroText);
+    this.tweens.add({
+      targets: this.bossIntroText,
+      scaleX: 1,
+      scaleY: 1,
+      alpha: { from: 1, to: 0 },
+      duration: 1800,
+      ease: 'Sine.easeOut',
     });
   }
 
@@ -1263,10 +1303,12 @@ export class ZombiesScene extends Phaser.Scene {
   private damageZombie(zombie: ZombieState, damage: number) {
     if (!zombie.alive) return;
     const appliedDamage = this.instaKillUntil > this.time.now ? zombie.hp : damage;
+    const pointMultiplier = this.getPointsMultiplier();
+    const hitReward = zombie.hitReward * pointMultiplier;
     zombie.hp -= appliedDamage;
     zombie.state = 'hurt';
-    this.points += zombie.hitReward;
-    this.showFloatingText(`+${zombie.hitReward}`, zombie.x, zombie.y - 18, '#F5C842');
+    this.points += hitReward;
+    this.showFloatingText(`+${hitReward}`, zombie.x, zombie.y - 18, pointMultiplier > 1 ? '#FFB36A' : '#F5C842');
     if (zombie.hp > 0) return;
 
     zombie.alive = false;
@@ -1275,10 +1317,11 @@ export class ZombiesScene extends Phaser.Scene {
       this.bossAlive = false;
       this.playZombiesSfx('boss_round');
     }
-    this.points += zombie.killReward;
+    const killReward = zombie.killReward * pointMultiplier;
+    this.points += killReward;
     zombie.container.setAlpha(0);
     zombie.shadow.setAlpha(0);
-    this.showFloatingText(`+${zombie.killReward} ${zombie.displayLabel}`, zombie.x, zombie.y - 34, '#9EFFB7');
+    this.showFloatingText(`+${killReward} ${zombie.displayLabel}`, zombie.x, zombie.y - 34, pointMultiplier > 1 ? '#FFD36A' : '#9EFFB7');
     this.tryDropPickup(zombie.x, zombie.y);
     const burst = this.add.circle(zombie.x, zombie.y - 8, zombie.radius + 8, 0xFF6A6A, 0.26).setDepth(80);
     this.tweens.add({ targets: burst, alpha: 0, scale: 1.9, duration: 220, onComplete: () => burst.destroy() });
@@ -1471,6 +1514,27 @@ export class ZombiesScene extends Phaser.Scene {
     node.boardHealth += 1;
     this.points += 20;
     this.refreshSpawnNodeVisual(node, 0, false);
+    const repairFx = this.add.rectangle(node.x, node.y - 4, 42, 52, 0x46B3FF, 0.12).setDepth(19);
+    this.tweens.add({
+      targets: repairFx,
+      alpha: 0,
+      scaleX: 1.08,
+      scaleY: 1.04,
+      duration: 150,
+      onComplete: () => repairFx.destroy(),
+    });
+    for (const plank of node.planks) {
+      if (plank.visible) {
+        plank.setScale(1.06);
+        this.tweens.add({
+          targets: plank,
+          scaleX: 1,
+          scaleY: 1,
+          duration: 140,
+          ease: 'Back.Out',
+        });
+      }
+    }
     this.showFloatingText('+20 REPAIR', node.x, node.y - 30, '#46B3FF');
     this.showNotice('BARRICADE REPAIRED', '#7CC9FF');
   }
@@ -1480,12 +1544,32 @@ export class ZombiesScene extends Phaser.Scene {
     const dropRoll = Phaser.Math.FloatBetween(0, 1);
     let kind: PickupKind | null = null;
     if (dropRoll <= 0.035) kind = 'max_ammo';
-    else if (dropRoll <= 0.055) kind = 'insta_kill';
+    else if (dropRoll <= 0.052) kind = 'insta_kill';
+    else if (dropRoll <= 0.07) kind = 'double_points';
+    else if (dropRoll <= 0.08) kind = 'nuke';
     if (!kind) return;
 
-    const glowColor = kind === 'max_ammo' ? 0x46B3FF : 0xFF3344;
-    const labelColor = kind === 'max_ammo' ? '#7CC9FF' : '#FF6A6A';
-    const labelText = kind === 'max_ammo' ? 'MAX AMMO' : 'INSTA-KILL';
+    const glowColor = kind === 'max_ammo'
+      ? 0x46B3FF
+      : kind === 'insta_kill'
+        ? 0xFF3344
+        : kind === 'double_points'
+          ? 0xF5C842
+          : 0x9BFF4F;
+    const labelColor = kind === 'max_ammo'
+      ? '#7CC9FF'
+      : kind === 'insta_kill'
+        ? '#FF6A6A'
+        : kind === 'double_points'
+          ? '#FFD36A'
+          : '#C9FF89';
+    const labelText = kind === 'max_ammo'
+      ? 'MAX AMMO'
+      : kind === 'insta_kill'
+        ? 'INSTA-KILL'
+        : kind === 'double_points'
+          ? 'DOUBLE PTS'
+          : 'NUKE';
     const id = `pickup_${++this.pickupIdSeq}`;
     const glow = this.add.ellipse(x, y + 6, 52, 20, glowColor, 0.12).setDepth(90);
     glow.setStrokeStyle(1, glowColor, 0.45);
@@ -1552,10 +1636,38 @@ export class ZombiesScene extends Phaser.Scene {
     } else if (pickup.kind === 'insta_kill') {
       this.instaKillUntil = this.time.now + 12000;
       this.showNotice('INSTA-KILL', '#FF6A6A');
+    } else if (pickup.kind === 'double_points') {
+      this.doublePointsUntil = this.time.now + 15000;
+      this.showNotice('DOUBLE POINTS', '#F5C842');
+    } else if (pickup.kind === 'nuke') {
+      this.triggerNuke();
+      this.showNotice('NUKE', '#9BFF4F');
     }
 
-    this.showFloatingText(pickup.kind === 'max_ammo' ? 'MAX AMMO' : 'INSTA-KILL', pickup.x, pickup.y - 26, pickup.kind === 'max_ammo' ? '#7CC9FF' : '#FF6A6A');
+    const pickupLabel = pickup.kind === 'max_ammo'
+      ? 'MAX AMMO'
+      : pickup.kind === 'insta_kill'
+        ? 'INSTA-KILL'
+        : pickup.kind === 'double_points'
+          ? 'DOUBLE PTS'
+          : 'NUKE';
+    const pickupColor = pickup.kind === 'max_ammo'
+      ? '#7CC9FF'
+      : pickup.kind === 'insta_kill'
+        ? '#FF6A6A'
+        : pickup.kind === 'double_points'
+          ? '#FFD36A'
+          : '#C9FF89';
+    this.showFloatingText(pickupLabel, pickup.x, pickup.y - 26, pickupColor);
     this.destroyPickup(pickup.id);
+  }
+
+  private triggerNuke() {
+    const livingZombies = [...this.zombies.values()].filter((zombie) => zombie.alive);
+    for (const zombie of livingZombies) {
+      this.damageZombie(zombie, zombie.hp + 9999);
+    }
+    this.cameras.main.flash(180, 180, 255, 180, false);
   }
 
   private destroyPickup(id: string) {
