@@ -6,6 +6,22 @@ const DEPTHS_RETURN = { x: 1586, y: 918 } as const;
 const DEPTHS_START = { x: 356, y: 812 } as const;
 const DEPTHS_START_ROUND = 11;
 const DEPTHS_START_POINTS = 3200;
+const DEPTHS_BOX = { x: 435, y: 698 } as const;
+const DEPTHS_PACK = { x: 1278, y: 610 } as const;
+const DEPTHS_WINDOWS = [
+  { x: 118, y: 575 },
+  { x: 130, y: 825 },
+  { x: 650, y: 545 },
+  { x: 650, y: 865 },
+  { x: 760, y: 455 },
+  { x: 1010, y: 445 },
+  { x: 1070, y: 720 },
+  { x: 1190, y: 425 },
+  { x: 1460, y: 415 },
+  { x: 1580, y: 700 },
+  { x: 1210, y: 900 },
+  { x: 1650, y: 900 },
+] as const;
 
 type DepthDoorState = {
   id: string;
@@ -74,6 +90,7 @@ export class BasementZombiesScene extends ZombiesScene {
     };
 
     this.drawDepthsMood();
+    this.drawDepthsGameplayGuides();
     this.unlockDepthDoors(scene);
     this.addDepthsObstacles(scene);
     this.boostDepthsLoadout(scene);
@@ -140,6 +157,71 @@ export class BasementZombiesScene extends ZombiesScene {
       door.label?.setColor('#FF9DD8');
       door.costText?.setVisible(false);
     }
+  }
+
+  private drawDepthsGameplayGuides() {
+    const boxHalo = this.add.ellipse(DEPTHS_BOX.x, DEPTHS_BOX.y + 8, 160, 88, 0xff63ba, 0.08).setDepth(18);
+    boxHalo.setStrokeStyle(2, 0xff63ba, 0.46);
+    const boxLabel = this.add.text(DEPTHS_BOX.x, DEPTHS_BOX.y - 96, 'MYSTERY BOX LIVE', {
+      fontFamily: '"Press Start 2P", monospace',
+      fontSize: '8px',
+      color: '#FFB0E1',
+      stroke: '#10040e',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(60);
+
+    const packHalo = this.add.ellipse(DEPTHS_PACK.x, DEPTHS_PACK.y + 12, 188, 86, 0x58c8ff, 0.08).setDepth(18);
+    packHalo.setStrokeStyle(2, 0x58c8ff, 0.46);
+    const packLabel = this.add.text(DEPTHS_PACK.x, DEPTHS_PACK.y - 92, 'PACK + UPGRADE', {
+      fontFamily: '"Press Start 2P", monospace',
+      fontSize: '8px',
+      color: '#9edfff',
+      stroke: '#071019',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(60);
+
+    const windowsLabel = this.add.text(950, 1034, 'REPAIR WINDOWS FOR PTS', {
+      fontFamily: '"Press Start 2P", monospace',
+      fontSize: '8px',
+      color: '#8fdbff',
+      stroke: '#071019',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(60);
+
+    for (const windowPos of DEPTHS_WINDOWS) {
+      const pulse = this.add.ellipse(windowPos.x, windowPos.y + 12, 72, 28, 0x6bd5ff, 0.03).setDepth(13);
+      pulse.setStrokeStyle(1, 0x6bd5ff, 0.18);
+      this.tweens.add({
+        targets: pulse,
+        alpha: { from: 0.02, to: 0.09 },
+        scaleX: { from: 0.96, to: 1.05 },
+        scaleY: { from: 0.96, to: 1.05 },
+        yoyo: true,
+        repeat: -1,
+        duration: 1100 + ((windowPos.x + windowPos.y) % 240),
+        ease: 'Sine.easeInOut',
+      });
+    }
+
+    this.tweens.add({
+      targets: [boxHalo, packHalo],
+      alpha: { from: 0.06, to: 0.18 },
+      scaleX: { from: 0.98, to: 1.05 },
+      scaleY: { from: 0.98, to: 1.05 },
+      yoyo: true,
+      repeat: -1,
+      duration: 980,
+      ease: 'Sine.easeInOut',
+    });
+
+    this.tweens.add({
+      targets: [boxLabel, packLabel, windowsLabel],
+      alpha: { from: 0.76, to: 1 },
+      yoyo: true,
+      repeat: -1,
+      duration: 1200,
+      ease: 'Sine.easeInOut',
+    });
   }
 
   private addDepthsObstacles(scene: {

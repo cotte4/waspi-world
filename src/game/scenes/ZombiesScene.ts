@@ -2,7 +2,7 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
-import { ensureFallbackRectTexture, getSafeAnimationDurationMs, safeCreateSpritesheetAnimation, safePlaySpriteAnimation } from '../systems/AnimationSafety';
+import { ensureFallbackRectTexture, getSafeAnimationDurationMs, hasUsableTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation } from '../systems/AnimationSafety';
 import {
   ZOMBIES_PLAYER,
   ZOMBIES_POINTS,
@@ -354,11 +354,19 @@ export class ZombiesScene extends Phaser.Scene {
           repeats[state as Exclude<ZombieAnimState, 'spawn'>],
         );
       }
+      safeCreateSpritesheetAnimation(
+        this,
+        `zs_${folder}_spawn`,
+        `zombie_${folder}_spawn`,
+        frameRates.spawn,
+        0,
+      );
     }
 
     for (const state of ['idle', 'walk', 'attack', 'hurt', 'death'] as const) {
       safeCreateSpritesheetAnimation(this, `zs_boss_${state}`, `zombie_boss_${state}`, frameRates[state], repeats[state]);
     }
+    safeCreateSpritesheetAnimation(this, 'zs_boss_spawn', 'zombie_boss_spawn', frameRates.spawn, 0);
   }
 
   private getZombieFallbackTexture(type: ZombieType) {
@@ -368,6 +376,58 @@ export class ZombiesScene extends Phaser.Scene {
   private getZombieTextureKey(type: ZombieType, state: Exclude<ZombieAnimState, 'spawn'>) {
     const folder = ZOMBIE_TYPES[type].folder;
     return `zombie_${folder}_${state}`;
+  }
+
+  private getZombieVisualCandidates(zombie: ZombieState, state: ZombieAnimState) {
+    const baseFolder = zombie.assetFolder;
+    const perState = {
+      spawn: ['spawn', 'walk', 'attack', 'idle'],
+      death: ['death', 'hurt', 'idle'],
+      hurt: ['hurt', 'walk', 'idle'],
+      attack: ['attack', 'walk', 'idle'],
+      walk: ['walk', 'idle'],
+      idle: ['idle', 'walk'],
+    } satisfies Record<ZombieAnimState, string[]>;
+
+    return perState[state].map((candidateState) => ({
+      animationKey: `zs_${baseFolder}_${candidateState}`,
+      textureKey: `zombie_${baseFolder}_${candidateState}`,
+    }));
+  }
+
+  private playZombieStateVisual(zombie: ZombieState, state: ZombieAnimState) {
+    const fallbackTexture = zombie.isBoss ? 'zombie_fallback_boss' : this.getZombieFallbackTexture(zombie.type);
+    const candidates = this.getZombieVisualCandidates(zombie, state);
+
+    for (const candidate of candidates) {
+      if (this.anims.exists(candidate.animationKey) || hasUsableTexture(this, candidate.textureKey)) {
+        safePlaySpriteAnimation(
+          this,
+          zombie.body,
+          candidate.animationKey,
+          candidate.textureKey,
+          fallbackTexture,
+          state === 'death' ? false : true,
+        );
+        zombie.lastAnimatedState = state;
+        return;
+      }
+    }
+
+    safePlaySpriteAnimation(this, zombie.body, '', fallbackTexture, fallbackTexture, false);
+    zombie.lastAnimatedState = state;
+  }
+
+  private safeDestroyZombieVisual(zombie: ZombieState) {
+    try {
+      if (zombie.container?.scene) zombie.container.destroy();
+      if (zombie.shadow?.scene) zombie.shadow.destroy();
+      if (zombie.hpBg?.scene) zombie.hpBg.destroy();
+      if (zombie.hpFill?.scene) zombie.hpFill.destroy();
+      if (zombie.label?.scene) zombie.label.destroy();
+    } catch (error) {
+      console.error('[Waspi] Failed to destroy zombie visual safely', error);
+    }
   }
 
   private getSpawnSectionsForRound() {
@@ -1582,7 +1642,13 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private getZombieDeathDurationMs(zombie: ZombieState) {
-    return getSafeAnimationDurationMs(this, `zs_${zombie.assetFolder}_death`, zombie.isBoss ? 780 : 420);
+    const fallbackMs = zombie.isBoss ? 780 : 420;
+    const candidates = this.getZombieVisualCandidates(zombie, 'death');
+    for (const candidate of candidates) {
+      const duration = getSafeAnimationDurationMs(this, candidate.animationKey, 0);
+      if (duration > 0) return Math.max(fallbackMs, duration);
+    }
+    return fallbackMs;
   }
 
   private setZombieState(zombie: ZombieState, state: ZombieAnimState) {
@@ -1608,18 +1674,8 @@ export class ZombiesScene extends Phaser.Scene {
     );
     zombie.body.setFlipX(this.px < zombie.x);
 
-    const animState = state === 'spawn' ? 'attack' : state;
-    if (zombie.lastAnimatedState !== animState) {
-      const textureKey = `zombie_${zombie.assetFolder}_${animState}`;
-      const fallbackTexture = zombie.isBoss ? 'zombie_fallback_boss' : this.getZombieFallbackTexture(zombie.type);
-      safePlaySpriteAnimation(
-        this,
-        zombie.body,
-        `zs_${zombie.assetFolder}_${animState}`,
-        textureKey,
-        fallbackTexture,
-      );
-      zombie.lastAnimatedState = animState;
+    if (zombie.lastAnimatedState !== state) {
+      this.playZombieStateVisual(zombie, state);
     }
   }
 
@@ -1655,11 +1711,7 @@ export class ZombiesScene extends Phaser.Scene {
     const burst = this.add.circle(zombie.x, zombie.y - 8, zombie.radius + 8, 0xFF6A6A, 0.26).setDepth(80);
     this.tweens.add({ targets: burst, alpha: 0, scale: 1.9, duration: 220, onComplete: () => burst.destroy() });
     this.time.delayedCall(this.getZombieDeathDurationMs(zombie), () => {
-      if (zombie.container?.scene) zombie.container.destroy();
-      if (zombie.shadow?.scene) zombie.shadow.destroy();
-      if (zombie.hpBg?.scene) zombie.hpBg.destroy();
-      if (zombie.hpFill?.scene) zombie.hpFill.destroy();
-      if (zombie.label?.scene) zombie.label.destroy();
+      this.safeDestroyZombieVisual(zombie);
       this.zombies.delete(zombie.id);
     });
   }
