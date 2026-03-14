@@ -1,12 +1,11 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { loadStripe } from '@stripe/stripe-js';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 import { CHAT } from '@/src/game/config/constants';
-import { CATALOG, type CatalogItem } from '@/src/game/config/catalog';
+import { CATALOG, getItem as getCatalogItem, type CatalogItem } from '@/src/game/config/catalog';
 import { getInventory, equipItem, hasUtilityEquipped, replaceInventory } from '@/src/game/systems/InventorySystem';
 import { loadAudioSettings, saveAudioSettings, type AudioSettings } from '@/src/game/systems/AudioSettings';
 import { loadHudSettings, saveHudSettings, type HudSettings } from '@/src/game/systems/HudSettings';
@@ -15,11 +14,12 @@ import { supabase } from '@/src/lib/supabase';
 import { getTenksBalance, initTenks } from '@/src/game/systems/TenksSystem';
 import { mutePlayer, normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
 import type { SharedParcelState } from '@/src/lib/vecindad';
-import type { TenksPack } from '@/src/lib/tenksPacks';
 
 const PhaserGame = dynamic(() => import('@/app/components/PhaserGame'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
+const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
+const MAGIC_LINK_COOLDOWN_MS = 60_000;
 
 interface ChatMsg {
   id: string;
@@ -44,7 +44,7 @@ interface CombatStats {
   deaths: number;
 }
 
-type ShopTab = 'products' | 'tenks';
+type ShopTab = 'products';
 
 interface ShopOpenPayload {
   tab?: ShopTab;
@@ -108,15 +108,11 @@ export default function PlayPage() {
   const [emailInput, setEmailInput] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [authStatus, setAuthStatus] = useState('');
+  const [magicLinkCooldownUntil, setMagicLinkCooldownUntil] = useState(getInitialMagicLinkCooldownUntil);
   const [uiNotice, setUiNotice] = useState('');
   const [shopOpen, setShopOpen] = useState(initialCheckout.open);
   const [shopSource, setShopSource] = useState(initialCheckout.open ? 'checkout_return' : '');
-  const [shopTab, setShopTab] = useState<ShopTab>(initialCheckout.tab);
   const [shopItems, setShopItems] = useState<CatalogItem[]>([]);
-  const [selectedProductId, setSelectedProductId] = useState('');
-  const [selectedSizes, setSelectedSizes] = useState<Record<string, string>>({});
-  const [discountCodeInput, setDiscountCodeInput] = useState('');
-  const [tenksPacks, setTenksPacks] = useState<TenksPack[]>([]);
   const [checkoutBusyId, setCheckoutBusyId] = useState<string | null>(null);
   const [shopStatus, setShopStatus] = useState(initialCheckout.status);
   const [isMobile, setIsMobile] = useState(false);
@@ -125,6 +121,8 @@ export default function PlayPage() {
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(initialAudioSettings);
   const [hudSettings, setHudSettings] = useState<HudSettings>(initialHudSettings);
   const tokenRef = useRef<string | null>(null);
+  const playerStateRef = useRef<PlayerState | null>(null);
+  const suppressSyncRef = useRef(false);
   const mutedPlayersRef = useRef<string[]>(loadStoredMutedPlayers());
   const lastInteriorChatSentRef = useRef(0);
   const logRef = useRef<HTMLDivElement>(null);
@@ -132,12 +130,14 @@ export default function PlayPage() {
   const chatVisible = CHAT_SCENES.has(activeScene);
   const isAuthenticated = Boolean(authEmail);
 
-  const physicalItems = useMemo(
-    () => (shopItems.length ? shopItems : CATALOG).filter((item) => typeof item.priceArs === 'number'),
+  const clothingItems = useMemo(
+    () => (shopItems.length ? shopItems : CATALOG).filter((item) => item.slot !== 'utility' && item.priceTenks > 0),
     [shopItems]
   );
 
   const applyPlayerState = useCallback((player: PlayerState) => {
+    suppressSyncRef.current = true;
+    playerStateRef.current = player;
     saveStoredAvatarConfig({
       ...loadStoredAvatarConfig(),
       ...player.avatar,
@@ -153,13 +153,17 @@ export default function PlayPage() {
     setBallOn((player.inventory.equipped.utility ?? []).includes('UTIL-BALL-01'));
     setTenks(player.tenks);
     eventBus.emit(EVENTS.PARCEL_STATE_CHANGED, player.vecindad);
+    queueMicrotask(() => {
+      suppressSyncRef.current = false;
+    });
   }, []);
 
   const syncPlayerState = useCallback(async (overridePlayerState?: PlayerState) => {
+    if (suppressSyncRef.current && !overridePlayerState) return;
     const token = tokenRef.current;
     if (!token) return;
 
-    const base = overridePlayerState ?? playerState;
+    const base = overridePlayerState ?? playerStateRef.current;
     const nextPlayer: PlayerState = {
       ...(base ?? {
         tenks: getTenksBalance(),
@@ -192,10 +196,47 @@ export default function PlayPage() {
       body: JSON.stringify({
         player: {
           ...nextPlayer,
-        } satisfies PlayerState,
+      } satisfies PlayerState,
       }),
     }).catch(() => undefined);
-  }, [playerState]);
+  }, []);
+
+  const persistInventoryState = useCallback((inventory = getInventory()) => {
+    setOwned(inventory.owned);
+    setEquipped(inventory.equipped);
+    setGunOn((inventory.equipped.utility ?? []).includes('UTIL-GUN-01'));
+    setBallOn((inventory.equipped.utility ?? []).includes('UTIL-BALL-01'));
+
+    const currentPlayer = playerStateRef.current;
+    if (!currentPlayer) return;
+
+    const equippedTop = inventory.equipped.top ? getCatalogItem(inventory.equipped.top) : null;
+    const equippedBottom = inventory.equipped.bottom ? getCatalogItem(inventory.equipped.bottom) : null;
+
+    const nextPlayer = normalizePlayerState({
+      ...currentPlayer,
+      inventory,
+      avatar: {
+        ...currentPlayer.avatar,
+        ...(equippedTop ? { topColor: equippedTop.color ?? currentPlayer.avatar.topColor } : {}),
+        ...(equippedBottom ? { bottomColor: equippedBottom.color ?? currentPlayer.avatar.bottomColor } : {}),
+      },
+    });
+
+    playerStateRef.current = nextPlayer;
+    saveStoredAvatarConfig({
+      ...loadStoredAvatarConfig(),
+      ...nextPlayer.avatar,
+    });
+    saveStoredPlayerState(nextPlayer);
+    setPlayerState(nextPlayer);
+    void syncPlayerState(nextPlayer);
+  }, [syncPlayerState]);
+
+  const handleEquipOwnedItem = useCallback((itemId: string) => {
+    equipItem(itemId);
+    persistInventoryState(getInventory());
+  }, [persistInventoryState]);
 
   const loadVecindadSharedState = useCallback(async (session?: Session | null) => {
     const headers: HeadersInit = {};
@@ -300,11 +341,9 @@ export default function PlayPage() {
 
     const unsubShopOpen = eventBus.on(EVENTS.SHOP_OPEN, (payload: unknown) => {
       const next = (payload as ShopOpenPayload | undefined) ?? {};
-      setShopTab(next.tab ?? 'products');
-      if (next.itemId) setSelectedProductId(next.itemId);
       setShopSource(next.source ?? 'scene');
       setShopOpen(true);
-      setShopStatus(next.source === 'store_interior' ? 'Elegi talle y completa el checkout.' : '');
+      setShopStatus(next.source === 'store_interior' ? 'Compra ropa con TENKS y equipala al instante.' : '');
     });
 
     const unsubShopClose = eventBus.on(EVENTS.SHOP_CLOSE, () => {
@@ -349,7 +388,6 @@ export default function PlayPage() {
           applyPlayerState(json.player as PlayerState);
         }
         if (json.reward?.code) {
-          setDiscountCodeInput(json.reward.code as string);
           setShopStatus(`Ganaste ${json.reward.percentOff}% OFF. Codigo: ${json.reward.code}`);
           setUiNotice(`Premio guardado: ${json.reward.percentOff}% OFF · Codigo ${json.reward.code}`);
         }
@@ -498,6 +536,17 @@ export default function PlayPage() {
     eventBus.emit(EVENTS.HUD_SETTINGS_CHANGED, hudSettings);
   }, [hudSettings]);
 
+  useEffect(() => {
+    if (!magicLinkCooldownUntil || magicLinkCooldownUntil <= Date.now()) return;
+    const timer = window.setInterval(() => {
+      if (Date.now() >= magicLinkCooldownUntil) {
+        setMagicLinkCooldownUntil(0);
+        window.localStorage.removeItem(MAGIC_LINK_COOLDOWN_KEY);
+      }
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [magicLinkCooldownUntil]);
+
   const hydratePlayerState = useCallback(async (session: Session | null) => {
     if (!session?.access_token) {
       tokenRef.current = null;
@@ -604,22 +653,59 @@ export default function PlayPage() {
       return;
     }
 
-    const email = emailInput.trim();
+    const email = emailInput.trim().toLowerCase();
     if (!email) {
       setAuthStatus('Escribi tu email primero.');
       return;
     }
 
+    const remainingMs = magicLinkCooldownUntil - Date.now();
+    if (remainingMs > 0) {
+      setAuthStatus(`Ya te mandamos un link. Espera ${Math.ceil(remainingMs / 1000)}s o usa el ultimo mail.`);
+      return;
+    }
+
+    const { data: currentSession } = await supabase.auth.getSession();
+    if (currentSession.session?.user?.email?.toLowerCase() === email) {
+      setAuthStatus('Ese mail ya tiene una sesion iniciada.');
+      return;
+    }
+
     setAuthBusy(true);
     setAuthStatus('');
-    const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/play` : undefined;
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, '');
+    const redirectTo = appUrl
+      ? `${appUrl}/play`
+      : typeof window !== 'undefined'
+        ? `${window.location.origin}/play`
+        : undefined;
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: redirectTo },
     });
     setAuthBusy(false);
-    setAuthStatus(error ? error.message : 'Magic link enviado. Revisa tu mail.');
-  }, [emailInput]);
+    if (error) {
+      const lowered = error.message.toLowerCase();
+      if (lowered.includes('rate limit') || lowered.includes('security purposes')) {
+        const cooldownUntil = Date.now() + MAGIC_LINK_COOLDOWN_MS;
+        setMagicLinkCooldownUntil(cooldownUntil);
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(MAGIC_LINK_COOLDOWN_KEY, String(cooldownUntil));
+        }
+        setAuthStatus('Tu mail ya puede entrar. Usa el ultimo link recibido o espera 60s para pedir otro.');
+        return;
+      }
+      setAuthStatus(error.message);
+      return;
+    }
+
+    const cooldownUntil = Date.now() + MAGIC_LINK_COOLDOWN_MS;
+    setMagicLinkCooldownUntil(cooldownUntil);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(MAGIC_LINK_COOLDOWN_KEY, String(cooldownUntil));
+    }
+    setAuthStatus('Magic link enviado. Si tu mail ya esta verificado, entra con el ultimo link del correo.');
+  }, [emailInput, magicLinkCooldownUntil]);
 
   const signOut = useCallback(async () => {
     if (!supabase) return;
@@ -635,82 +721,41 @@ export default function PlayPage() {
     setAuthStatus('Sesion cerrada.');
   }, []);
 
-  const ensureStripe = useCallback(async () => {
-    const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
-    if (!publishableKey) {
-      setCheckoutBusyId(null);
-      setShopStatus('Falta NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY.');
-      return null;
-    }
-
-    const stripeJs = await loadStripe(publishableKey);
-    if (!stripeJs) {
-      setCheckoutBusyId(null);
-      setShopStatus('No se pudo inicializar Stripe.');
-      return null;
-    }
-    return stripeJs;
-  }, []);
-
-  const createCheckout = useCallback(async (body: object, busyId: string, missingAuthMessage: string) => {
+  const buyShopItem = useCallback(async (item: CatalogItem) => {
     if (!tokenRef.current) {
-      setShopStatus(missingAuthMessage);
+      setShopStatus('Inicia sesion para comprar ropa con TENKS.');
       return;
     }
 
-    setCheckoutBusyId(busyId);
+    setCheckoutBusyId(item.id);
     setShopStatus('');
 
-    const stripeReady = await ensureStripe();
-    if (!stripeReady) return;
-
-    const res = await fetch('/api/checkout', {
+    const res = await fetch('/api/shop/buy', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${tokenRef.current}`,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ itemId: item.id }),
     }).catch(() => null);
 
     if (!res?.ok) {
       const json = await res?.json().catch(() => null);
       setCheckoutBusyId(null);
-      setShopStatus(json?.error ?? 'No se pudo crear el checkout.');
+      setShopStatus(json?.error ?? 'No pude completar la compra.');
       return;
     }
 
     const json = await res.json();
-    if (json.url) {
-      window.location.href = json.url as string;
-      return;
+    if (json.player) {
+      applyPlayerState(normalizePlayerState(json.player as PlayerState));
     }
-
     setCheckoutBusyId(null);
-    setShopStatus('Respuesta invalida de checkout.');
-  }, [ensureStripe]);
-
-  const startTenksCheckout = useCallback(async (packId: string) => {
-    await createCheckout(
-      { type: 'tenks_pack', packId },
-      packId,
-      'Inicia sesion para acreditar TENKS en tu cuenta.'
+    setShopStatus(
+      (json.notice as string | undefined)
+      ?? `${item.name} comprado por ${item.priceTenks.toLocaleString('es-AR')} TENKS y equipado.`
     );
-  }, [createCheckout]);
-
-  const startProductCheckout = useCallback(async (item: CatalogItem) => {
-    const size = selectedSizes[item.id];
-    if (!size) {
-      setShopStatus('Selecciona un talle antes de comprar.');
-      return;
-    }
-
-    await createCheckout(
-      { type: 'product', itemId: item.id, size, discountCode: discountCodeInput.trim() || undefined },
-      item.id,
-      'Inicia sesion para comprar prendas y recibirlas en tu inventario.'
-    );
-  }, [createCheckout, discountCodeInput, selectedSizes]);
+  }, [applyPlayerState]);
 
   const handleMutePlayer = useCallback(() => {
     if (!playerActions || !playerState) return;
@@ -793,26 +838,12 @@ export default function PlayPage() {
       if (!active) return;
       const items = (json.items ?? []) as CatalogItem[];
       setShopItems(items);
-      setTenksPacks((json.tenksPacks ?? []) as TenksPack[]);
-      setSelectedSizes((prev) => {
-        const next = { ...prev };
-        for (const item of items) {
-          if (!next[item.id] && item.sizes?.[0]) {
-            next[item.id] = item.sizes[0];
-          }
-        }
-        return next;
-      });
-      if (!selectedProductId) {
-        const first = items.find((item) => typeof item.priceArs === 'number');
-        if (first) setSelectedProductId(first.id);
-      }
     };
     run();
     return () => {
       active = false;
     };
-  }, [selectedProductId]);
+  }, []);
 
   useEffect(() => {
     if (logRef.current) {
@@ -1283,7 +1314,6 @@ export default function PlayPage() {
 
         <button
           onClick={() => {
-            setShopTab('tenks');
             setShopSource('hud');
             setShopOpen(true);
           }}
@@ -1438,133 +1468,84 @@ export default function PlayPage() {
               </div>
 
               <div className="flex gap-2 mb-3">
-                <button onClick={() => setShopTab('products')} style={tabButtonStyle(shopTab === 'products')}>
-                  ROPA REAL
-                </button>
-                <button onClick={() => setShopTab('tenks')} style={tabButtonStyle(shopTab === 'tenks')}>
-                  PACKS TENKS
+                <button style={tabButtonStyle(true)}>
+                  ROPA TENKS
                 </button>
               </div>
 
-              {shopTab === 'products' ? (
-                <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
-                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: 10 }}>
-                    Compra la prenda real con Stripe. Cuando el webhook confirme el pago, la misma prenda se agrega y equipa en tu Waspi.
-                  </div>
-                  <div style={{ marginBottom: 10 }}>
-                    <input
-                      value={discountCodeInput}
-                      onChange={(e) => setDiscountCodeInput(e.target.value.toUpperCase())}
-                      placeholder="CODIGO DE DESCUENTO"
-                      style={textInputStyle}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    {physicalItems.map((item) => {
-                      const selected = selectedProductId === item.id;
-                      const ownedItem = owned.includes(item.id);
-                      return (
-                        <div
-                          key={item.id}
-                          className="ww-panel"
-                          style={{
-                            padding: '12px',
-                            border: selected ? '1px solid rgba(245,200,66,0.45)' : '1px solid rgba(255,255,255,0.1)',
-                            background: selected ? 'rgba(245,200,66,0.06)' : 'rgba(255,255,255,0.04)',
-                          }}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className="inline-block"
-                                  style={{
-                                    width: 12,
-                                    height: 12,
-                                    background: `#${(item.color ?? 0x777777).toString(16).padStart(6, '0')}`,
-                                    border: '1px solid rgba(0,0,0,0.35)',
-                                  }}
-                                />
-                                <div style={{ fontSize: '15px', color: '#FFFFFF' }}>{item.name}</div>
-                                {ownedItem && <span style={{ fontSize: '11px', color: '#39FF14' }}>YA EN INVENTARIO</span>}
-                              </div>
-                              <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.58)', marginTop: 4 }}>{item.description}</div>
-                              <div style={{ fontSize: '12px', color: '#F5C842', marginTop: 4 }}>ARS {item.priceArs?.toLocaleString('es-AR')}</div>
-                            </div>
-                            <button
-                              onClick={() => setSelectedProductId(item.id)}
-                              style={authButtonStyle(selected ? '#F5C842' : 'rgba(255,255,255,0.08)', selected ? '#0E0E14' : '#FFFFFF', false, !selected)}
-                            >
-                              {selected ? 'SELECCIONADO' : 'VER'}
-                            </button>
-                          </div>
-                          <div className="mt-3 flex items-center justify-between gap-3">
-                            <div className="flex flex-wrap gap-2">
-                              {(item.sizes ?? []).map((size) => (
-                                <button
-                                  key={size}
-                                  onClick={() => {
-                                    setSelectedProductId(item.id);
-                                    setSelectedSizes((prev) => ({ ...prev, [item.id]: size }));
-                                  }}
-                                  style={sizeChipStyle(selectedSizes[item.id] === size)}
-                                >
-                                  {size}
-                                </button>
-                              ))}
-                            </div>
-                            <button
-                              onClick={() => void startProductCheckout(item)}
-                              disabled={!isAuthenticated || checkoutBusyId === item.id}
-                              style={authButtonStyle('#F5C842', '#0E0E14', !isAuthenticated || checkoutBusyId === item.id)}
-                            >
-                              {checkoutBusyId === item.id ? 'CARGANDO...' : 'COMPRAR'}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+              <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
+                <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: 10 }}>
+                  Compra ropa con TENKS. La prenda se agrega al inventario y se equipa al instante.
                 </div>
-              ) : (
-                <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.85)', fontSize: '14px' }}>
-                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: 10 }}>
-                    Compra TENKS con Stripe y usalos despues en la tienda del juego. {isAuthenticated ? 'Tu cuenta recibira el credito del pack.' : 'Necesitas iniciar sesion para acreditar TENKS.'}
-                  </div>
-                  <div className="space-y-2">
-                    {tenksPacks.map((pack) => (
+                <div className="space-y-2">
+                  {clothingItems.map((item) => {
+                    const ownedItem = owned.includes(item.id);
+                    const active = item.slot === 'top' ? equipped.top === item.id : equipped.bottom === item.id;
+                    return (
                       <div
-                        key={pack.id}
-                        className="ww-panel flex items-center justify-between gap-3"
+                        key={item.id}
+                        className="ww-panel"
                         style={{
-                          padding: '10px 12px',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          background: 'rgba(255,255,255,0.04)',
+                          padding: '12px',
+                          border: active ? '1px solid rgba(57,255,20,0.45)' : '1px solid rgba(255,255,255,0.1)',
+                          background: active ? 'rgba(57,255,20,0.07)' : 'rgba(255,255,255,0.04)',
                         }}
                       >
-                        <div>
-                          <div style={{ fontSize: '15px', color: '#FFFFFF' }}>{pack.name}</div>
-                          <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.58)' }}>{pack.description}</div>
-                          <div style={{ fontSize: '12px', color: '#39FF14' }}>{pack.tenks.toLocaleString('es-AR')} TENKS</div>
-                          <div style={{ fontSize: '12px', color: '#F5C842' }}>ARS {pack.priceArs.toLocaleString('es-AR')}</div>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="inline-block"
+                                style={{
+                                  width: 12,
+                                  height: 12,
+                                  background: `#${(item.color ?? 0x777777).toString(16).padStart(6, '0')}`,
+                                  border: '1px solid rgba(0,0,0,0.35)',
+                                }}
+                              />
+                              <div style={{ fontSize: '15px', color: '#FFFFFF' }}>{item.name}</div>
+                              {active && <span style={{ fontSize: '11px', color: '#39FF14' }}>PUESTO</span>}
+                              {!active && ownedItem && <span style={{ fontSize: '11px', color: '#39FF14' }}>TUYO</span>}
+                            </div>
+                            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.58)', marginTop: 4 }}>{item.description}</div>
+                            <div style={{ fontSize: '12px', color: '#F5C842', marginTop: 4 }}>
+                              {item.priceTenks.toLocaleString('es-AR')} TENKS
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              if (ownedItem) {
+                                handleEquipOwnedItem(item.id);
+                                setShopStatus(active ? `${item.name} ya esta equipado.` : `${item.name} equipado.`);
+                                return;
+                              }
+                              void buyShopItem(item);
+                            }}
+                            disabled={checkoutBusyId === item.id || active || (!ownedItem && !isAuthenticated)}
+                            style={authButtonStyle(
+                              active ? 'rgba(57,255,20,0.25)' : '#F5C842',
+                              active ? '#39FF14' : '#0E0E14',
+                              checkoutBusyId === item.id || active || (!ownedItem && !isAuthenticated),
+                              active
+                            )}
+                          >
+                            {active
+                              ? 'PUESTO'
+                              : checkoutBusyId === item.id
+                                ? 'CARGANDO...'
+                                : ownedItem
+                                  ? 'EQUIPAR'
+                                  : 'COMPRAR'}
+                          </button>
                         </div>
-                        <button
-                          onClick={() => void startTenksCheckout(pack.id)}
-                          disabled={!isAuthenticated || checkoutBusyId === pack.id}
-                          style={authButtonStyle('#F5C842', '#0E0E14', !isAuthenticated || checkoutBusyId === pack.id)}
-                        >
-                          {checkoutBusyId === pack.id ? 'CARGANDO...' : 'COMPRAR'}
-                        </button>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
-              )}
+              </div>
 
               <div style={{ fontSize: '12px', color: shopStatus ? '#BBBBBB' : 'rgba(255,255,255,0.35)', marginTop: 10, minHeight: 16 }}>
-                {shopStatus || (shopTab === 'products'
-                  ? 'Cada compra real usa Stripe Checkout y acredita la prenda virtual por webhook.'
-                  : 'Cada pack abre un checkout alojado por Stripe y el webhook acredita TENKS.')}
+                {shopStatus || 'Toda la ropa de la tienda se compra con TENKS y se equipa al instante.'}
               </div>
             </div>
           </div>
@@ -1659,14 +1640,10 @@ export default function PlayPage() {
                       <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Click o F para disparar</div>
                       <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)' }}>1 pistol / 2 shotgun en training</div>
                     </div>
-                    <button
-                      onClick={() => {
-                        equipItem('UTIL-GUN-01');
-                        const snap = getInventory();
-                        setOwned(snap.owned);
-                        setEquipped(snap.equipped);
-                        setGunOn(hasUtilityEquipped('UTIL-GUN-01'));
-                      }}
+                  <button
+                    onClick={() => {
+                        handleEquipOwnedItem('UTIL-GUN-01');
+                    }}
                       style={{
                         fontFamily: '"Press Start 2P", monospace',
                         fontSize: '9px',
@@ -1687,14 +1664,10 @@ export default function PlayPage() {
                       <div style={{ fontSize: '16px' }}>FOOTBALL</div>
                       <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Bote cosmetic</div>
                     </div>
-                    <button
-                      onClick={() => {
-                        equipItem('UTIL-BALL-01');
-                        const snap = getInventory();
-                        setOwned(snap.owned);
-                        setEquipped(snap.equipped);
-                        setBallOn(hasUtilityEquipped('UTIL-BALL-01'));
-                      }}
+                  <button
+                    onClick={() => {
+                        handleEquipOwnedItem('UTIL-BALL-01');
+                    }}
                       style={{
                         fontFamily: '"Press Start 2P", monospace',
                         fontSize: '9px',
@@ -1770,10 +1743,7 @@ export default function PlayPage() {
                             </div>
                             <button
                               onClick={() => {
-                                equipItem(id);
-                                const snap = getInventory();
-                                setOwned(snap.owned);
-                                setEquipped(snap.equipped);
+                                handleEquipOwnedItem(id);
                               }}
                               style={{
                                 fontFamily: '"Press Start 2P", monospace',
@@ -2069,18 +2039,6 @@ function tabButtonStyle(active: boolean) {
   } as const;
 }
 
-function sizeChipStyle(active: boolean) {
-  return {
-    fontFamily: '"Press Start 2P", monospace',
-    fontSize: '8px',
-    padding: '8px 10px',
-    background: active ? '#39FF14' : 'rgba(255,255,255,0.08)',
-    color: active ? '#0E0E14' : '#FFFFFF',
-    border: '1px solid rgba(255,255,255,0.15)',
-    cursor: 'pointer',
-  } as const;
-}
-
 function hudBadge(color: string, border: string) {
   return {
     background: 'rgba(0,0,0,0.7)',
@@ -2177,33 +2135,44 @@ function loadStoredMutedPlayers() {
   }
 }
 
+function getInitialMagicLinkCooldownUntil() {
+  if (typeof window === 'undefined') return 0;
+  const raw = window.localStorage.getItem(MAGIC_LINK_COOLDOWN_KEY);
+  const cooldownUntil = raw ? Number(raw) : 0;
+  if (!Number.isFinite(cooldownUntil) || cooldownUntil <= Date.now()) {
+    window.localStorage.removeItem(MAGIC_LINK_COOLDOWN_KEY);
+    return 0;
+  }
+  return cooldownUntil;
+}
+
 function getInitialCheckoutState(): { open: boolean; tab: ShopTab; status: string } {
   if (typeof window === 'undefined') {
-    return { open: false, tab: 'tenks', status: '' };
+    return { open: false, tab: 'products', status: '' };
   }
   const status = new URLSearchParams(window.location.search).get('checkout');
   if (status === 'success') {
     return {
       open: true,
-      tab: 'tenks',
-      status: 'Pago recibido. Cuando Stripe confirme el webhook, tus TENKS se acreditaran.',
+      tab: 'products',
+      status: 'La tienda ya usa TENKS para ropa. Si venias de un checkout viejo, ya podes comprar directo en la tienda.',
     };
   }
   if (status === 'product_success') {
     return {
       open: true,
       tab: 'products',
-      status: 'Pago recibido. Cuando Stripe confirme el webhook, la prenda se agregara y equipara en tu Waspi.',
+      status: 'La ropa ahora se compra directo con TENKS y se equipa al instante.',
     };
   }
   if (status === 'cancelled') {
     return {
       open: true,
-      tab: 'tenks',
-      status: 'Checkout cancelado.',
+      tab: 'products',
+      status: 'La tienda ya no necesita checkout para ropa. Compra directo con TENKS.',
     };
   }
-  return { open: false, tab: 'tenks', status: '' };
+  return { open: false, tab: 'products', status: '' };
 }
 
 const textInputStyle = {
