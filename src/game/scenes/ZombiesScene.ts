@@ -3,7 +3,7 @@ import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { ensureFallbackRectTexture, getSafeAnimationDurationMs, hasUsableTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation } from '../systems/AnimationSafety';
-import { loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
+import { isActionDown, isActionJustDown, loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
 import {
@@ -989,16 +989,16 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number) {
-    if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
+    if (isActionJustDown(this, this.controlSettings, 'back')) {
       this.requestExit();
       return;
     }
 
     if (this.gameOver) {
-      if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
+      if (isActionJustDown(this, this.controlSettings, 'interact')) {
         this.restartRun();
       }
-      this.updatePromptHud({ kind: 'exit', x: EXIT_PAD.x, y: EXIT_PAD.y, radius: EXIT_PAD.radius, label: 'SPACE REINICIAR  |  ESC SALIR', color: 0xFF6A6A });
+      this.updatePromptHud({ kind: 'exit', x: EXIT_PAD.x, y: EXIT_PAD.y, radius: EXIT_PAD.radius, label: 'INTERACT REINICIAR  |  BACK SALIR', color: 0xFF6A6A });
       this.renderHud();
       return;
     }
@@ -1056,6 +1056,10 @@ export class ZombiesScene extends Phaser.Scene {
   private handleCombatInput() {
     if (this.reloadEndsAt > this.time.now) return;
     if (this.boxRollingUntil > this.time.now) return;
+
+    if (isActionDown(this, this.controlSettings, 'shoot')) {
+      this.tryShoot(this.input.activePointer.worldX, this.input.activePointer.worldY);
+    }
 
     if (Phaser.Input.Keyboard.JustDown(this.keyQ)) {
       this.cycleWeapon();
@@ -1815,7 +1819,7 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private handleContextInteraction() {
-    if (!Phaser.Input.Keyboard.JustDown(this.keyE)) return;
+    if (!isActionJustDown(this, this.controlSettings, 'interact')) return;
     const option = this.getNearbyInteraction();
     if (!option) return;
 

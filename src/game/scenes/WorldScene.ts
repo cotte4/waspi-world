@@ -12,7 +12,7 @@ import { addXpToProgression, getMaxProgressionLevel, loadProgressionState, saveP
 import { loadCombatStats, saveCombatStats, type CombatStats } from '../systems/CombatStats';
 import { ensureFallbackRectTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation, safeSetSpriteTexture } from '../systems/AnimationSafety';
 import { announceScene, bindSafeResetToPlaza } from '../systems/SceneUi';
-import { loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
+import { isActionDown, isActionJustDown, loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
 import type { VecindadState } from '../../lib/playerState';
 import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
 import { EnemySprite, registerZombieAnims, type ZombieType } from '../systems/EnemySprite';
@@ -3442,7 +3442,7 @@ export class WorldScene extends Phaser.Scene {
     }
 
     // Gun shoot with keyboard
-    if (this.gunEnabled && this.keyF.isDown && !this.inputBlocked) {
+    if (this.gunEnabled && isActionDown(this, this.controlSettings, 'shoot') && !this.inputBlocked) {
       const p = this.input.activePointer;
       this.shootAt(p.worldX, p.worldY);
     }
@@ -3565,7 +3565,7 @@ export class WorldScene extends Phaser.Scene {
 
   private handleInteraction() {
     if (this.inTransition) return;
-    if (!Phaser.Input.Keyboard.JustDown(this.keySpace)) return;
+    if (!isActionJustDown(this, this.controlSettings, 'interact')) return;
 
     const target = this.getInteractionTarget();
     if (target?.sceneKey) {

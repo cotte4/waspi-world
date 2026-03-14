@@ -5,10 +5,13 @@ export const CONTROL_SETTINGS_STORAGE_KEY = 'waspi_control_settings';
 export type MovementScheme = 'wasd' | 'arrows' | 'both' | 'ijkl' | 'custom';
 export type MovementDirection = 'up' | 'left' | 'down' | 'right';
 export type MovementBindings = Record<MovementDirection, string>;
+export type ActionBinding = 'interact' | 'shoot' | 'inventory' | 'chat' | 'back';
+export type ActionBindings = Record<ActionBinding, string>;
 
 export type ControlSettings = {
   movementScheme: MovementScheme;
   movementBindings: MovementBindings;
+  actionBindings: ActionBindings;
   showVirtualJoystick: boolean;
 };
 
@@ -42,6 +45,13 @@ export const MOVEMENT_PRESETS: Record<Exclude<MovementScheme, 'custom'>, Movemen
 export const DEFAULT_CONTROL_SETTINGS: ControlSettings = {
   movementScheme: 'both',
   movementBindings: { ...MOVEMENT_PRESETS.wasd },
+  actionBindings: {
+    interact: 'Space',
+    shoot: 'KeyF',
+    inventory: 'KeyI',
+    chat: 'Enter',
+    back: 'Escape',
+  },
   showVirtualJoystick: false,
 };
 
@@ -126,6 +136,7 @@ let virtualJoystickState: VirtualJoystickState = {
 };
 
 const sceneKeyCache = new WeakMap<Phaser.Scene, Map<string, Phaser.Input.Keyboard.Key>>();
+const sceneActionStateCache = new WeakMap<Phaser.Scene, Map<string, boolean>>();
 
 export function loadControlSettings(): ControlSettings {
   if (typeof window === 'undefined') return DEFAULT_CONTROL_SETTINGS;
@@ -140,6 +151,7 @@ export function loadControlSettings(): ControlSettings {
     return {
       movementScheme,
       movementBindings: bindings,
+      actionBindings: sanitizeActionBindings(parsed.actionBindings),
       showVirtualJoystick: Boolean(parsed.showVirtualJoystick),
     };
   } catch {
@@ -184,6 +196,21 @@ export function assignMovementBinding(
     }
   }
   next[direction] = code;
+  return next;
+}
+
+export function assignActionBinding(
+  bindings: ActionBindings,
+  action: ActionBinding,
+  code: string
+): ActionBindings {
+  const next = { ...bindings };
+  for (const [binding, currentCode] of Object.entries(next) as Array<[ActionBinding, string]>) {
+    if (binding !== action && currentCode === code) {
+      next[binding] = bindings[action];
+    }
+  }
+  next[action] = code;
   return next;
 }
 
@@ -253,6 +280,10 @@ export function isSupportedMovementBindingCode(code: string) {
   return resolvePhaserKeyCode(code) !== null;
 }
 
+export function isSupportedActionBindingCode(code: string) {
+  return resolvePhaserKeyCode(code) !== null;
+}
+
 export function readMovementVector(options: ReadMovementOptions) {
   const { scene, settings } = options;
   const activeCodes = getActiveMovementCodes(settings);
@@ -274,6 +305,30 @@ export function readMovementVector(options: ReadMovementOptions) {
   }
 
   return { dx, dy };
+}
+
+export function isActionDown(scene: Phaser.Scene, settings: ControlSettings, action: ActionBinding) {
+  const key = getSceneKey(scene, settings.actionBindings[action]);
+  return Boolean(key?.isDown);
+}
+
+export function isActionJustDown(scene: Phaser.Scene, settings: ControlSettings, action: ActionBinding) {
+  const key = getSceneKey(scene, settings.actionBindings[action]);
+  if (!key) return false;
+  let cache = sceneActionStateCache.get(scene);
+  if (!cache) {
+    cache = new Map<string, boolean>();
+    sceneActionStateCache.set(scene, cache);
+    scene.events.once('shutdown', () => {
+      sceneActionStateCache.delete(scene);
+    });
+  }
+
+  const code = settings.actionBindings[action];
+  const wasDown = cache.get(code) ?? false;
+  const isDown = Boolean(key.isDown);
+  cache.set(code, isDown);
+  return isDown && !wasDown;
 }
 
 function sanitizeMovementScheme(value: unknown): MovementScheme {
@@ -298,6 +353,28 @@ function sanitizeBindings(value: unknown): MovementBindings | null {
   const right = typeof candidate.right === 'string' && isSupportedMovementBindingCode(candidate.right) ? candidate.right : null;
   if (!up || !left || !down || !right) return null;
   return { up, left, down, right };
+}
+
+function sanitizeActionBindings(value: unknown): ActionBindings {
+  if (!value || typeof value !== 'object') return { ...DEFAULT_CONTROL_SETTINGS.actionBindings };
+  const candidate = value as Partial<Record<ActionBinding, unknown>>;
+  return {
+    interact: typeof candidate.interact === 'string' && isSupportedActionBindingCode(candidate.interact)
+      ? candidate.interact
+      : DEFAULT_CONTROL_SETTINGS.actionBindings.interact,
+    shoot: typeof candidate.shoot === 'string' && isSupportedActionBindingCode(candidate.shoot)
+      ? candidate.shoot
+      : DEFAULT_CONTROL_SETTINGS.actionBindings.shoot,
+    inventory: typeof candidate.inventory === 'string' && isSupportedActionBindingCode(candidate.inventory)
+      ? candidate.inventory
+      : DEFAULT_CONTROL_SETTINGS.actionBindings.inventory,
+    chat: typeof candidate.chat === 'string' && isSupportedActionBindingCode(candidate.chat)
+      ? candidate.chat
+      : DEFAULT_CONTROL_SETTINGS.actionBindings.chat,
+    back: typeof candidate.back === 'string' && isSupportedActionBindingCode(candidate.back)
+      ? candidate.back
+      : DEFAULT_CONTROL_SETTINGS.actionBindings.back,
+  };
 }
 
 function getActiveMovementCodes(settings: ControlSettings): Record<MovementDirection, string[]> {

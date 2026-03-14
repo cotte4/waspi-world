@@ -4,7 +4,7 @@ import { COLORS, SAFE_PLAZA_RETURN } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { getTenksBalance, initTenks } from '../systems/TenksSystem';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
-import { loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
+import { isActionDown, isActionJustDown, loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
 import { supabase, isConfigured } from '../../lib/supabase';
 
 type ArenaRemotePlayer = {
@@ -251,7 +251,7 @@ export class PvpArenaScene extends Phaser.Scene {
     this.handleBetInput();
     this.handleReadyInput();
 
-    if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
+    if (isActionJustDown(this, this.controlSettings, 'back')) {
       this.requestExit();
       return;
     }
@@ -264,7 +264,7 @@ export class PvpArenaScene extends Phaser.Scene {
     this.maybeAbortUnpairedMatch();
 
     if (this.inMatch && this.alive && this.time.now >= this.countdownEndsAt) {
-      if (this.keyF.isDown || this.input.activePointer.leftButtonDown()) {
+      if (isActionDown(this, this.controlSettings, 'shoot') || this.input.activePointer.leftButtonDown()) {
         this.shoot(this.input.activePointer.worldX, this.input.activePointer.worldY);
       }
     }
@@ -583,7 +583,7 @@ export class PvpArenaScene extends Phaser.Scene {
   }
 
   private handleReadyInput() {
-    if (this.inMatch || !Phaser.Input.Keyboard.JustDown(this.keySpace) || this.readyBusy) return;
+    if (this.inMatch || !isActionJustDown(this, this.controlSettings, 'interact') || this.readyBusy) return;
     void this.toggleReady();
   }
 

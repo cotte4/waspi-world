@@ -5,7 +5,7 @@ import { CATALOG } from '../config/catalog';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { DialogSystem } from '../systems/DialogSystem';
-import { loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
+import { isActionJustDown, loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
 import { supabase, isConfigured } from '../../lib/supabase';
 
 type StoreRemotePlayer = {
@@ -576,7 +576,7 @@ export class StoreInterior extends Phaser.Scene {
     this.updateRemotePlayers();
 
     if (this.shopOverlayOpen) {
-      if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
+      if (isActionJustDown(this, this.controlSettings, 'back')) {
         this.shopOverlayOpen = false;
         eventBus.emit(EVENTS.SHOP_CLOSE);
       }
@@ -587,7 +587,7 @@ export class StoreInterior extends Phaser.Scene {
       this.handleMovement();
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
+    if (isActionJustDown(this, this.controlSettings, 'back')) {
       if (this.dialog.isActive()) {
         this.dialog.clear();
         return;
@@ -596,7 +596,7 @@ export class StoreInterior extends Phaser.Scene {
       return;
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
+    if (isActionJustDown(this, this.controlSettings, 'interact')) {
       if (this.dialog.isActive()) {
         this.dialog.advance();
       } else {

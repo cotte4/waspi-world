@@ -10,13 +10,16 @@ import { getInventory, equipItem, hasUtilityEquipped, replaceInventory } from '@
 import { loadAudioSettings, saveAudioSettings, type AudioSettings } from '@/src/game/systems/AudioSettings';
 import { loadHudSettings, saveHudSettings, type HudSettings } from '@/src/game/systems/HudSettings';
 import {
+  assignActionBinding,
   assignMovementBinding,
   clearVirtualJoystickState,
   formatMovementBindingLabel,
+  isSupportedActionBindingCode,
   isSupportedMovementBindingCode,
   loadControlSettings,
   saveControlSettings,
   setVirtualJoystickState,
+  type ActionBinding,
   type ControlSettings,
   type MovementDirection,
   type MovementScheme,
@@ -136,6 +139,7 @@ export default function PlayPage() {
   const [hudSettings, setHudSettings] = useState<HudSettings>(initialHudSettings);
   const [controlSettings, setControlSettings] = useState<ControlSettings>(initialControlSettings);
   const [bindingCaptureDirection, setBindingCaptureDirection] = useState<MovementDirection | null>(null);
+  const [bindingCaptureAction, setBindingCaptureAction] = useState<ActionBinding | null>(null);
   const [joystickUi, setJoystickUi] = useState({ active: false, dx: 0, dy: 0 });
   const [rescueArmed, setRescueArmed] = useState(false);
   const tokenRef = useRef<string | null>(null);
@@ -578,7 +582,7 @@ export default function PlayPage() {
   }, []);
 
   useEffect(() => {
-    if (!bindingCaptureDirection || !settingsOpen) return;
+    if ((!bindingCaptureDirection && !bindingCaptureAction) || !settingsOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return;
@@ -587,27 +591,45 @@ export default function PlayPage() {
 
       if (event.code === 'Escape') {
         setBindingCaptureDirection(null);
+        setBindingCaptureAction(null);
         setUiNotice('Remapeo cancelado.');
         return;
       }
 
-      if (!isSupportedMovementBindingCode(event.code)) {
+      if (bindingCaptureDirection && !isSupportedMovementBindingCode(event.code)) {
         setUiNotice('Tecla no soportada para movimiento.');
         return;
       }
 
-      setControlSettings((current) => ({
-        ...current,
-        movementScheme: 'custom',
-        movementBindings: assignMovementBinding(current.movementBindings, bindingCaptureDirection, event.code),
-      }));
-      setBindingCaptureDirection(null);
-      setUiNotice(`Movimiento ${directionLabel(bindingCaptureDirection)}: ${formatMovementBindingLabel(event.code)}`);
+      if (bindingCaptureAction && !isSupportedActionBindingCode(event.code)) {
+        setUiNotice('Tecla no soportada para accion.');
+        return;
+      }
+
+      if (bindingCaptureDirection) {
+        setControlSettings((current) => ({
+          ...current,
+          movementScheme: 'custom',
+          movementBindings: assignMovementBinding(current.movementBindings, bindingCaptureDirection, event.code),
+        }));
+        setBindingCaptureDirection(null);
+        setUiNotice(`Movimiento ${directionLabel(bindingCaptureDirection)}: ${formatMovementBindingLabel(event.code)}`);
+        return;
+      }
+
+      if (bindingCaptureAction) {
+        setControlSettings((current) => ({
+          ...current,
+          actionBindings: assignActionBinding(current.actionBindings, bindingCaptureAction, event.code),
+        }));
+        setBindingCaptureAction(null);
+        setUiNotice(`Accion ${actionLabel(bindingCaptureAction)}: ${formatMovementBindingLabel(event.code)}`);
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [bindingCaptureDirection, settingsOpen]);
+  }, [bindingCaptureAction, bindingCaptureDirection, settingsOpen]);
 
   useEffect(() => {
     if (!magicLinkCooldownUntil || magicLinkCooldownUntil <= Date.now()) return;
@@ -927,18 +949,18 @@ export default function PlayPage() {
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (!chatVisible) return;
-      if (e.key === 'Enter' && document.activeElement !== inputRef.current) {
+      if (e.code === controlSettings.actionBindings.chat && document.activeElement !== inputRef.current) {
         e.preventDefault();
         inputRef.current?.focus();
       }
-      if (e.key.toLowerCase() === 'i' && document.activeElement !== inputRef.current) {
+      if (e.code === controlSettings.actionBindings.inventory && document.activeElement !== inputRef.current) {
         e.preventDefault();
         eventBus.emit(EVENTS.INVENTORY_TOGGLE);
       }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [chatVisible]);
+  }, [chatVisible, controlSettings.actionBindings.chat, controlSettings.actionBindings.inventory]);
 
   useEffect(() => {
     if (!chatVisible) {
@@ -1095,6 +1117,7 @@ export default function PlayPage() {
   }, []);
   const closeSettings = useCallback(() => {
     setBindingCaptureDirection(null);
+    setBindingCaptureAction(null);
     setSettingsOpen(false);
   }, []);
 
@@ -2201,6 +2224,26 @@ export default function PlayPage() {
                       </div>
                     </div>
 
+                    <div>
+                      <div style={{ fontSize: '16px', marginBottom: 6 }}>ACCIONES</div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginBottom: 6 }}>
+                        Remapea interaccion, disparo, inventario, chat y volver.
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
+                        {(['interact', 'shoot', 'inventory', 'chat', 'back'] as ActionBinding[]).map((action) => (
+                          <button
+                            key={action}
+                            onClick={() => setBindingCaptureAction(action)}
+                            style={optionButtonStyle(bindingCaptureAction === action)}
+                          >
+                            {bindingCaptureAction === action
+                              ? `${actionLabel(action)}: ...`
+                              : `${actionLabel(action)}: ${formatMovementBindingLabel(controlSettings.actionBindings[action])}`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     <div className="flex items-center justify-between py-2">
                       <div>
                         <div style={{ fontSize: '16px' }}>JOYSTICK</div>
@@ -2361,6 +2404,23 @@ function directionLabel(direction: MovementDirection) {
       return 'DER';
     default:
       return 'DIR';
+  }
+}
+
+function actionLabel(action: ActionBinding) {
+  switch (action) {
+    case 'interact':
+      return 'INTERACT';
+    case 'shoot':
+      return 'DISPARAR';
+    case 'inventory':
+      return 'INVENTARIO';
+    case 'chat':
+      return 'CHAT';
+    case 'back':
+      return 'VOLVER';
+    default:
+      return 'ACCION';
   }
 }
 
