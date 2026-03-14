@@ -17,6 +17,7 @@ import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type Vecindad
 interface RemotePlayer {
   avatar: AvatarRenderer;
   nameplate: Phaser.GameObjects.Text;
+  gunSprite?: Phaser.GameObjects.Sprite;
   username: string;
   x: number;
   y: number;
@@ -24,6 +25,8 @@ interface RemotePlayer {
   targetY: number;
   isMoving: boolean;
   moveDx: number;
+  weapon?: WeaponMode;
+  aimAngle: number;
   avatarConfig: AvatarConfig;
   hitbox: HitboxArc;
 }
@@ -40,6 +43,8 @@ type RemoteMoveEvent = {
   y: number;
   dir: number;
   moving: boolean;
+  weapon?: WeaponMode;
+  aim?: number;
 };
 type RemoteChatEvent = {
   player_id: string;
@@ -55,6 +60,8 @@ type RemoteStateEvent = {
   y: number;
   avatar?: AvatarConfig;
   equipped?: EquippedPayload;
+  weapon?: WeaponMode;
+  aim?: number;
 };
 type RemoteHitEvent = {
   target_id: string;
@@ -727,13 +734,52 @@ export class WorldScene extends Phaser.Scene {
       this.weaponAimAngle = 0;
     }
 
-    const angle = this.weaponAimAngle;
-    const offsetX = Math.cos(angle) * 16;
-    const offsetY = Math.sin(angle) * 10 - 8;
-    this.gunSprite.setPosition(this.px + offsetX, this.py + offsetY);
-    this.gunSprite.setRotation(angle);
-    this.gunSprite.setFlipY(angle > Math.PI / 2 || angle < -Math.PI / 2);
-    this.gunSprite.setDepth(2100 + Math.floor(this.py / 10));
+    this.positionWeaponSprite(this.gunSprite, this.px, this.py, this.weaponAimAngle, 2100 + Math.floor(this.py / 10));
+  }
+
+  private ensureRemoteWeaponSprite(rp: RemotePlayer) {
+    const weapon = WEAPON_STATS[rp.weapon ?? 'pistol'];
+    if (!rp.gunSprite || rp.gunSprite.scene !== this) {
+      rp.gunSprite = this.add.sprite(rp.x, rp.y - 8, weapon.idleTexture, 0)
+        .setDepth(2100 + Math.floor(rp.y / 10))
+        .setVisible(this.gunEnabled)
+        .setOrigin(0.26, 0.62)
+        .setScale(0.72);
+      rp.gunSprite.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (animation: Phaser.Animations.Animation) => {
+        const currentWeapon = WEAPON_STATS[rp.weapon ?? 'pistol'];
+        if (animation.key === currentWeapon.shootAnim) {
+          rp.gunSprite?.play(currentWeapon.idleAnim, true);
+        }
+      });
+    }
+
+    if (rp.gunSprite.texture.key !== weapon.idleTexture) {
+      rp.gunSprite.setTexture(weapon.idleTexture, 0);
+    }
+    if (!rp.gunSprite.anims.isPlaying || rp.gunSprite.anims.currentAnim?.key !== weapon.idleAnim) {
+      rp.gunSprite.play(weapon.idleAnim, true);
+    }
+  }
+
+  private positionWeaponSprite(sprite: Phaser.GameObjects.Sprite, x: number, y: number, angle: number, depth: number) {
+    const safeAngle = Number.isFinite(angle) ? angle : 0;
+    const offsetX = Math.cos(safeAngle) * 16;
+    const offsetY = Math.sin(safeAngle) * 10 - 8;
+    sprite.setPosition(x + offsetX, y + offsetY);
+    sprite.setRotation(safeAngle);
+    sprite.setFlipY(safeAngle > Math.PI / 2 || safeAngle < -Math.PI / 2);
+    sprite.setDepth(depth);
+  }
+
+  private updateRemoteWeaponSprite(rp: RemotePlayer) {
+    if (!this.gunEnabled) {
+      rp.gunSprite?.setVisible(false);
+      return;
+    }
+    this.ensureRemoteWeaponSprite(rp);
+    if (!rp.gunSprite) return;
+    rp.gunSprite.setVisible(true);
+    this.positionWeaponSprite(rp.gunSprite, rp.x, rp.y, rp.aimAngle, 2100 + Math.floor(rp.y / 10));
   }
 
   private switchWeapon(nextWeapon?: WeaponMode) {
@@ -745,6 +791,7 @@ export class WorldScene extends Phaser.Scene {
     }
     this.syncWeaponVisual();
     this.renderCombatHud();
+    this.broadcastSelfState('player:update');
   }
 
   private renderCombatHud() {
@@ -1280,6 +1327,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.gunSprite) {
       this.gunSprite.play(weapon.shootAnim, true);
     }
+    this.broadcastSelfState('player:update');
     this.ensureAudioReady();
     this.playCombatTone(
       this.currentWeapon === 'shotgun' ? 120 : 220,
@@ -2565,7 +2613,7 @@ export class WorldScene extends Phaser.Scene {
     const cfg = next.avatar ?? {};
 
     if (!this.remotePlayers.has(next.player_id)) {
-      this.spawnRemotePlayer(next.player_id, next.username, next.x, next.y, cfg);
+      this.spawnRemotePlayer(next.player_id, next.username, next.x, next.y, cfg, next.weapon, next.aim);
       if (next.equipped) {
         this.applyRemoteEquipped(next.player_id, next.equipped);
       }
@@ -2579,6 +2627,12 @@ export class WorldScene extends Phaser.Scene {
     rp.nameplate.setText(next.username);
     rp.targetX = next.x;
     rp.targetY = next.y;
+    if (next.weapon) {
+      rp.weapon = next.weapon;
+    }
+    if (typeof next.aim === 'number' && Number.isFinite(next.aim)) {
+      rp.aimAngle = next.aim;
+    }
     if (next.avatar) {
       rp.avatarConfig = { ...rp.avatarConfig, ...cfg };
       const depth = rp.avatar.getContainer().depth;
@@ -2599,6 +2653,7 @@ export class WorldScene extends Phaser.Scene {
     if (rp) {
       rp.avatar.destroy();
       rp.nameplate.destroy();
+      rp.gunSprite?.destroy();
       this.remotePlayers.delete(playerId);
       this.chatSystem.clearBubble(playerId);
       this.emitPresence();
@@ -2611,7 +2666,7 @@ export class WorldScene extends Phaser.Scene {
     if (!this.allowRemoteEvent(this.remoteMoveTimes, next.player_id, REMOTE_MOVE_MIN_MS)) return;
 
     if (!this.remotePlayers.has(next.player_id)) {
-      this.spawnRemotePlayer(next.player_id, next.username, next.x, next.y, {});
+      this.spawnRemotePlayer(next.player_id, next.username, next.x, next.y, {}, next.weapon, next.aim);
     }
     const rp = this.remotePlayers.get(next.player_id)!;
     rp.targetX = next.x;
@@ -2620,6 +2675,14 @@ export class WorldScene extends Phaser.Scene {
     rp.nameplate.setText(next.username);
     rp.isMoving = next.moving;
     rp.moveDx = next.dir;
+    if (next.weapon) {
+      rp.weapon = next.weapon;
+    }
+    if (typeof next.aim === 'number' && Number.isFinite(next.aim)) {
+      rp.aimAngle = next.aim;
+    } else if (Math.abs(next.dir) > 0.05) {
+      rp.aimAngle = next.dir < 0 ? Math.PI : 0;
+    }
   }
 
   private handleRemoteChat(payload: unknown) {
@@ -2645,7 +2708,7 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
-  private spawnRemotePlayer(id: string, username: string, x: number, y: number, cfg: AvatarConfig) {
+  private spawnRemotePlayer(id: string, username: string, x: number, y: number, cfg: AvatarConfig, weapon: WeaponMode = 'pistol', aimAngle = 0) {
     const avatar = this.createSafeAvatarRenderer(x, y, cfg, `remote-spawn:${id}`);
     avatar.setDepth(40);
 
@@ -2674,7 +2737,7 @@ export class WorldScene extends Phaser.Scene {
       });
     });
 
-    this.remotePlayers.set(id, {
+    const remotePlayer: RemotePlayer = {
       avatar,
       nameplate,
       username,
@@ -2684,9 +2747,14 @@ export class WorldScene extends Phaser.Scene {
       targetY: y,
       isMoving: false,
       moveDx: 0,
+      weapon,
+      aimAngle: Number.isFinite(aimAngle) ? aimAngle : 0,
       avatarConfig: cfg,
       hitbox,
-    });
+    };
+    this.remotePlayers.set(id, remotePlayer);
+    this.ensureRemoteWeaponSprite(remotePlayer);
+    this.updateRemoteWeaponSprite(remotePlayer);
     this.emitPresence();
 
     nameplate.setInteractive({ useHandCursor: true });
@@ -2705,6 +2773,12 @@ export class WorldScene extends Phaser.Scene {
     rp.nameplate.setText(next.username);
     rp.targetX = next.x;
     rp.targetY = next.y;
+    if (next.weapon) {
+      rp.weapon = next.weapon;
+    }
+    if (typeof next.aim === 'number' && Number.isFinite(next.aim)) {
+      rp.aimAngle = next.aim;
+    }
 
     if (next.avatar) {
       rp.avatarConfig = { ...rp.avatarConfig, ...next.avatar };
@@ -2720,6 +2794,7 @@ export class WorldScene extends Phaser.Scene {
     if (next.equipped) {
       this.applyRemoteEquipped(next.player_id, next.equipped);
     }
+    this.ensureRemoteWeaponSprite(rp);
   }
 
   private applyRemoteEquipped(playerId: string, equipped: { top?: string; bottom?: string }) {
@@ -2776,6 +2851,8 @@ export class WorldScene extends Phaser.Scene {
         y: Math.round(this.py),
         dir: this.lastMoveDx,
         moving: this.lastIsMoving,
+        weapon: this.currentWeapon,
+        aim: this.weaponAimAngle,
       },
     });
   }
@@ -3073,6 +3150,8 @@ export class WorldScene extends Phaser.Scene {
       y: this.py,
       avatar: cfg,
       equipped: this.getEquippedIds(),
+      weapon: this.currentWeapon,
+      aim: this.weaponAimAngle,
       topColor: cfg.topColor,
       bottomColor: cfg.bottomColor,
     };
@@ -3182,6 +3261,7 @@ export class WorldScene extends Phaser.Scene {
       rp.avatar.setPosition(rp.x, rp.y);
       rp.avatar.setDepth(Math.floor(rp.y / 10));
       rp.nameplate.setPosition(rp.x, rp.y - 46);
+      this.updateRemoteWeaponSprite(rp);
       this.chatSystem.updatePosition(playerId, rp.x, rp.y);
       this.syncHitboxPosition(rp.hitbox, rp.x, rp.y);
     }
@@ -3369,6 +3449,7 @@ export class WorldScene extends Phaser.Scene {
     const username = this.readStringField(payload, 'username') ?? 'waspi_guest';
     const x = this.readNumberField(payload, 'x');
     const y = this.readNumberField(payload, 'y');
+    const weaponRaw = this.readStringField(payload, 'weapon');
     if (!playerId || x === null || y === null) return null;
     return {
       player_id: playerId,
@@ -3377,6 +3458,8 @@ export class WorldScene extends Phaser.Scene {
       y,
       dir: this.readNumberField(payload, 'dir', 'dx') ?? 0,
       moving: this.readBooleanField(payload, 'moving', 'isMoving') ?? false,
+      weapon: weaponRaw === 'shotgun' ? 'shotgun' : weaponRaw === 'pistol' ? 'pistol' : undefined,
+      aim: this.readNumberField(payload, 'aim') ?? undefined,
     };
   }
 
@@ -3401,6 +3484,7 @@ export class WorldScene extends Phaser.Scene {
     const username = this.readStringField(payload, 'username') ?? 'waspi_guest';
     const x = this.readNumberField(payload, 'x');
     const y = this.readNumberField(payload, 'y');
+    const weaponRaw = this.readStringField(payload, 'weapon');
     if (!playerId || x === null || y === null) return null;
     const avatar = payload && typeof payload === 'object' && 'avatar' in payload && payload.avatar && typeof payload.avatar === 'object'
       ? payload.avatar as AvatarConfig
@@ -3419,6 +3503,8 @@ export class WorldScene extends Phaser.Scene {
       y,
       avatar,
       equipped,
+      weapon: weaponRaw === 'shotgun' ? 'shotgun' : weaponRaw === 'pistol' ? 'pistol' : undefined,
+      aim: this.readNumberField(payload, 'aim') ?? undefined,
     };
   }
 
@@ -3434,6 +3520,7 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 }
+
 
 
 
