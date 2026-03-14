@@ -2913,32 +2913,10 @@ export class WorldScene extends Phaser.Scene {
   // ─── COTTENKS NPC ────────────────────────────────────────────────────────
 
   private spawnCottenksNPC() {
-    // Positioned just to the right of the WASPI STORE door
     const x = 1615;
     const y = 558;
 
-    // Use the real COTTENKS illustration instead of procedural avatar
-    const sprite = this.add.image(x, y, 'cottenks');
-
-    // Scale to ~90px tall to match world NPC proportions
-    const targetH = 90;
-    const scale = targetH / sprite.height;
-    sprite.setScale(scale);
-    sprite.setOrigin(0.5, 1); // anchor at feet
-    sprite.setDepth(Math.floor(y / 10));
-
-    // Idle breathing sway
-    this.tweens.add({
-      targets: sprite,
-      y: y + 4,
-      scaleY: scale * 0.97,
-      duration: 1800,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    });
-
-    // Nameplate
+    // Nameplate (always visible regardless of texture state)
     this.add.text(x, y - 98, 'COTTENKS', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
@@ -2947,7 +2925,6 @@ export class WorldScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5, 1).setDepth(9000);
 
-    // Subtitle
     this.add.text(x, y - 86, 'the og', {
       fontSize: '6px',
       fontFamily: '"Silkscreen", monospace',
@@ -2955,6 +2932,33 @@ export class WorldScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 2,
     }).setOrigin(0.5, 1).setDepth(9000);
+
+    const buildSprite = () => {
+      const sprite = this.add.image(x, y, 'cottenks');
+      const targetH = 90;
+      const scale = sprite.height > 0 ? targetH / sprite.height : 0.2;
+      sprite.setScale(scale);
+      sprite.setOrigin(0.5, 1);
+      sprite.setDepth(Math.floor(y / 10));
+
+      this.tweens.add({
+        targets: sprite,
+        y: y + 4,
+        scaleY: scale * 0.97,
+        duration: 1800,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+    };
+
+    if (this.textures.exists('cottenks')) {
+      buildSprite();
+    } else {
+      this.load.image('cottenks', '/assets/sprites/cottenks.png');
+      this.load.once('complete', buildSprite);
+      this.load.start();
+    }
   }
 
   private openCottenksDialog() {
