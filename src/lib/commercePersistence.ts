@@ -48,9 +48,14 @@ async function resolveUniqueUsername(admin: SupabaseClient, user: User) {
 }
 
 export async function ensureCatalogSeeded(admin: SupabaseClient) {
+  // Only seed physical items that carry a real ARS price.
+  // Utility / TENKS-only items (weapons, deed, etc.) have no price_ars and
+  // would violate NOT-NULL or check constraints on the products table.
   const rows = getSerializedCatalog()
-    .filter((item) => item.slot !== 'utility' || item.priceTenks > 0)
+    .filter((item) => typeof item.priceArs === 'number')
     .map((item) => toProductRecord(item));
+
+  if (!rows.length) return;
 
   const { error } = await admin
     .from('products')
