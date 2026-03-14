@@ -8,7 +8,7 @@ import { addTenks, initTenks } from '../systems/TenksSystem';
 import { getEquippedColors, hasUtilityEquipped } from '../systems/InventorySystem';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
 import { loadHudSettings, type HudSettings } from '../systems/HudSettings';
-import { addXpToProgression, loadProgressionState, saveProgressionState, type ProgressionState } from '../systems/ProgressionSystem';
+import { addXpToProgression, getMaxProgressionLevel, loadProgressionState, saveProgressionState, type ProgressionState } from '../systems/ProgressionSystem';
 import { loadCombatStats, saveCombatStats, type CombatStats } from '../systems/CombatStats';
 import { ensureFallbackRectTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation, safeSetSpriteTexture } from '../systems/AnimationSafety';
 import { announceScene } from '../systems/SceneUi';
@@ -883,7 +883,7 @@ export class WorldScene extends Phaser.Scene {
         : `${this.progression.nextLevelAt - this.progression.xp} XP`;
 
       this.progressionHud.setText([
-        `LVL ${this.progression.level}/11 | XP ${this.progression.xp}`,
+        `LVL ${this.progression.level}/${getMaxProgressionLevel()} | XP ${this.progression.xp}`,
         `KOs ${this.progression.kills} | NEXT ${nextLabel}`,
       ]);
     });
@@ -1106,7 +1106,7 @@ export class WorldScene extends Phaser.Scene {
       this.showArenaNotice(`+${state.xpReward} XP +${state.tenksReward} TENKS ${state.label}`, '#F5C842');
     }
     if (this.progression.level > previousLevel) {
-      this.showArenaNotice(`LEVEL UP ${this.progression.level}/11`, '#46B3FF');
+      this.showArenaNotice(`LEVEL UP ${this.progression.level}/${getMaxProgressionLevel()}`, '#46B3FF');
       this.playCombatTone(260, 0.2, 'square', 0.06);
     }
 

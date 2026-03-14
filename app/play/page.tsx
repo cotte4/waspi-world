@@ -9,7 +9,7 @@ import { CATALOG, getItem as getCatalogItem, type CatalogItem } from '@/src/game
 import { getInventory, equipItem, hasUtilityEquipped, replaceInventory } from '@/src/game/systems/InventorySystem';
 import { loadAudioSettings, saveAudioSettings, type AudioSettings } from '@/src/game/systems/AudioSettings';
 import { loadHudSettings, saveHudSettings, type HudSettings } from '@/src/game/systems/HudSettings';
-import { loadProgressionState, type ProgressionState } from '@/src/game/systems/ProgressionSystem';
+import { getLevelFloorXp, getMaxProgressionLevel, loadProgressionState, type ProgressionState } from '@/src/game/systems/ProgressionSystem';
 import { supabase } from '@/src/lib/supabase';
 import { getTenksBalance, initTenks } from '@/src/game/systems/TenksSystem';
 import { mutePlayer, normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
@@ -999,12 +999,27 @@ export default function PlayPage() {
     setLastSent(now);
   }, [chatVisible, input, lastSent]);
 
+  const currentLevelFloorXp = getLevelFloorXp(progression.level);
   const nextLevelDelta = progression.nextLevelAt === null
     ? 0
     : Math.max(0, progression.nextLevelAt - progression.xp);
+  const levelSpanXp = progression.nextLevelAt === null
+    ? 1
+    : Math.max(1, progression.nextLevelAt - currentLevelFloorXp);
   const progressPct = progression.nextLevelAt === null
     ? 1
-    : Math.max(0, Math.min(1, progression.xp / progression.nextLevelAt));
+    : Math.max(0, Math.min(1, (progression.xp - currentLevelFloorXp) / levelSpanXp));
+  const leftHudVisible = hudSettings.showSocialPanel || hudSettings.showProgressPanel;
+  const toggleLeftHud = () => {
+    setHudSettings((current) => {
+      const shouldShow = !(current.showSocialPanel || current.showProgressPanel);
+      return {
+        ...current,
+        showSocialPanel: shouldShow,
+        showProgressPanel: shouldShow,
+      };
+    });
+  };
   const passiveUtilityItems = useMemo(
     () => owned
       .map((id) => CATALOG.find((i) => i.id === id))
@@ -1170,6 +1185,23 @@ export default function PlayPage() {
         </div>
 
         <div className="absolute top-12 left-2 flex flex-col gap-2">
+          <button
+            onClick={toggleLeftHud}
+            style={{
+              width: 182,
+              fontFamily: '"Press Start 2P", monospace',
+              fontSize: '8px',
+              padding: '8px 10px',
+              background: leftHudVisible ? 'rgba(255,255,255,0.08)' : '#46B3FF',
+              color: leftHudVisible ? '#BFDFFF' : '#071018',
+              border: leftHudVisible ? '1px solid rgba(70,179,255,0.24)' : 'none',
+              cursor: 'pointer',
+              textAlign: 'left',
+              boxShadow: '0 10px 24px rgba(0,0,0,0.28)',
+            }}
+          >
+            {leftHudVisible ? 'HUD IZQ OCULTAR' : 'HUD IZQ MOSTRAR'}
+          </button>
           {hudSettings.showSocialPanel && (
             <div
               className="ww-panel ww-panel-delayed"
@@ -1264,13 +1296,13 @@ export default function PlayPage() {
               </div>
               {hudSettings.progressCollapsed ? (
                 <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: '12px', color: 'rgba(255,255,255,0.82)' }}>
-                  LVL {progression.level} {nextLevelDelta > 0 ? `| NEXT ${nextLevelDelta} XP` : '| MAX'}
+                  LVL {progression.level}/{getMaxProgressionLevel()} {nextLevelDelta > 0 ? `| NEXT ${nextLevelDelta} XP` : '| MAX'}
                 </div>
               ) : (
                 <>
                   <div style={{ display: 'grid', gap: 4, fontFamily: '"Silkscreen", monospace', fontSize: '12px', color: 'rgba(255,255,255,0.82)' }}>
                     <div className="flex items-center justify-between">
-                      <span>LVL {progression.level}</span>
+                      <span>LVL {progression.level}/{getMaxProgressionLevel()}</span>
                       <span>{progression.nextLevelAt === null ? 'MAX' : `${nextLevelDelta} XP`}</span>
                     </div>
                     <div className="flex items-center justify-between">
@@ -1348,13 +1380,15 @@ export default function PlayPage() {
         </button>
 
         <div
-          className="ww-auth-card absolute top-32 right-2"
+          className="ww-auth-card absolute right-2"
           style={{
+            top: 132,
             width: isAuthenticated ? 156 : 228,
             background: 'rgba(0,0,0,0.78)',
             border: '1px solid rgba(245,200,66,0.18)',
             padding: isAuthenticated ? '6px 8px' : '8px',
             boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
+            zIndex: 12,
           }}
         >
           {isAuthenticated ? (

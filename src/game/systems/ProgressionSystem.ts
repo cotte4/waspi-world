@@ -5,8 +5,22 @@ export type ProgressionState = {
   nextLevelAt: number | null;
 };
 
-const STORAGE_KEY = 'waspi_progression_v1';
-const LEVEL_MILESTONES = [0, 8, 20, 36, 56, 80, 110, 146, 188, 236, 290] as const;
+const STORAGE_KEY = 'waspi_progression_v2';
+const LEGACY_STORAGE_KEY = 'waspi_progression_v1';
+const MAX_LEVEL = 42;
+
+function buildLevelMilestones(maxLevel: number) {
+  const milestones = [0];
+  let totalXp = 0;
+  for (let level = 2; level <= maxLevel; level += 1) {
+    const stepXp = Math.round(10 + Math.pow(level - 1, 1.58) * 4.4);
+    totalXp += stepXp;
+    milestones.push(totalXp);
+  }
+  return milestones;
+}
+
+const LEVEL_MILESTONES = buildLevelMilestones(MAX_LEVEL);
 
 function clampKills(kills: unknown) {
   return typeof kills === 'number' && Number.isFinite(kills) ? Math.max(0, Math.floor(kills)) : 0;
@@ -18,6 +32,15 @@ function clampXp(xp: unknown) {
 
 export function getLevelMilestones() {
   return [...LEVEL_MILESTONES];
+}
+
+export function getMaxProgressionLevel() {
+  return LEVEL_MILESTONES.length;
+}
+
+export function getLevelFloorXp(level: number) {
+  const safeLevel = Math.max(1, Math.min(getMaxProgressionLevel(), Math.floor(level)));
+  return LEVEL_MILESTONES[safeLevel - 1] ?? 0;
 }
 
 export function getProgressionForTotals(kills: number, xp: number): ProgressionState {
@@ -45,7 +68,7 @@ export function getProgressionForTotals(kills: number, xp: number): ProgressionS
 export function loadProgressionState(): ProgressionState {
   if (typeof window === 'undefined') return getProgressionForTotals(0, 0);
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return getProgressionForTotals(0, 0);
     const parsed = JSON.parse(raw) as { kills?: number; xp?: number };
     const safeKills = parsed.kills ?? 0;
