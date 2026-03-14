@@ -5,7 +5,7 @@ import { eventBus, EVENTS } from '../config/eventBus';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
-import { isActionJustDown, loadControlSettings, type ControlSettings } from '../systems/ControlSettings';
+import { isActionJustDown, loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
 
 interface ArcadePenaltyReward {
   won?: boolean;
@@ -38,6 +38,10 @@ export class ArcadeInterior extends Phaser.Scene {
   private keyA!: Phaser.Input.Keyboard.Key;
   private keyS!: Phaser.Input.Keyboard.Key;
   private keyD!: Phaser.Input.Keyboard.Key;
+  private keyI!: Phaser.Input.Keyboard.Key;
+  private keyJ!: Phaser.Input.Keyboard.Key;
+  private keyK!: Phaser.Input.Keyboard.Key;
+  private keyL!: Phaser.Input.Keyboard.Key;
   private px = 0;
   private py = 0;
   private basketMachineZone = new Phaser.Geom.Rectangle();
@@ -266,6 +270,10 @@ export class ArcadeInterior extends Phaser.Scene {
     this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    this.keyI = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.I);
+    this.keyJ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.J);
+    this.keyK = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.K);
+    this.keyL = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.L);
     this.applyMusicSettings();
     this.cameras.main.resetFX();
     this.cameras.main.setAlpha(1);
@@ -369,18 +377,10 @@ export class ArcadeInterior extends Phaser.Scene {
 
   private handleMovement(delta: number) {
     const speed = (185 * delta) / 1000;
-    let dx = 0;
-    let dy = 0;
-
-    const left = this.cursors.left.isDown || this.keyA.isDown;
-    const right = this.cursors.right.isDown || this.keyD.isDown;
-    const up = this.cursors.up.isDown || this.keyW.isDown;
-    const down = this.cursors.down.isDown || this.keyS.isDown;
-
-    if (left) dx -= 1;
-    if (right) dx += 1;
-    if (up) dy -= 1;
-    if (down) dy += 1;
+    let { dx, dy } = readMovementVector({
+      scene: this,
+      settings: this.controlSettings,
+    });
 
     if (dx !== 0 && dy !== 0) {
       dx *= 0.707;

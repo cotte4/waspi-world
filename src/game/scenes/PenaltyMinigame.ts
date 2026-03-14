@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { addTenks } from '../systems/TenksSystem';
 import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
+import { isActionJustDown, loadControlSettings, type ControlSettings } from '../systems/ControlSettings';
 
 type PenaltyPhase = 'aiming' | 'shooting' | 'result' | 'done' | 'exiting';
 
@@ -36,6 +37,7 @@ export class PenaltyMinigame extends Phaser.Scene {
   private summaryLabel!: Phaser.GameObjects.Text;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private keyEsc!: Phaser.Input.Keyboard.Key;
+  private controlSettings: ControlSettings = loadControlSettings();
 
   constructor() {
     super({ key: 'PenaltyMinigame' });
@@ -162,6 +164,14 @@ export class PenaltyMinigame extends Phaser.Scene {
     this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.input.on('pointerdown', this.handleShootInput, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
+    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      this.controlSettings = {
+        ...this.controlSettings,
+        ...(payload as Partial<ControlSettings>),
+      };
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
 
     this.refreshHud();
     this.redrawAimGuide();
@@ -173,12 +183,12 @@ export class PenaltyMinigame extends Phaser.Scene {
   update(_time: number, delta: number) {
     if (this.isFinished) return;
 
-    if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
+    if (isActionJustDown(this, this.controlSettings, 'back')) {
       this.finishAndExit(false);
       return;
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
+    if (isActionJustDown(this, this.controlSettings, 'interact')) {
       this.handleShootInput();
     }
 

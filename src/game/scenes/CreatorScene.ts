@@ -7,7 +7,9 @@ import {
   saveStoredAvatarConfig,
 } from '../systems/AvatarRenderer';
 import { COLORS } from '../config/constants';
+import { eventBus, EVENTS } from '../config/eventBus';
 import { announceScene, transitionToScene } from '../systems/SceneUi';
+import { isActionJustDown, isMovementDirectionJustDown, loadControlSettings, type ControlSettings } from '../systems/ControlSettings';
 
 const USERNAME_KEY = 'waspi_username';
 type CreatorControl = 'seed' | 'bodyColor' | 'eyeColor' | 'hairColor' | 'hairStyle' | 'pp' | 'tt' | 'save';
@@ -62,6 +64,7 @@ export class CreatorScene extends Phaser.Scene {
   private controlOrder: CreatorControl[] = ['seed', 'bodyColor', 'eyeColor', 'hairColor', 'hairStyle', 'pp', 'tt', 'save'];
   private activeControlIndex = 0;
   private controlLabels = new Map<CreatorControl, Phaser.GameObjects.Text>();
+  private controlSettings: ControlSettings = loadControlSettings();
 
   private readonly bodyColorOptions = [0xF5D5A4, 0xE6B98A, 0xD89B73, 0xBF7B4E, 0x9B5A3A, 0x7A412A];
   private readonly eyeColorOptions  = [0x222222, 0x3B82F6, 0x22C55E, 0xA855F7, 0xDC2626, 0xFACC15];
@@ -454,6 +457,14 @@ export class CreatorScene extends Phaser.Scene {
     this.keyRight = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
     this.keyEnter = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
     this.keyEsc   = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      this.controlSettings = {
+        ...this.controlSettings,
+        ...(payload as Partial<ControlSettings>),
+      };
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
 
     // ── STAGGERED ENTRY ───────────────────────────────────────────
     // Set all cards to alpha 0 then fade each in
@@ -477,18 +488,18 @@ export class CreatorScene extends Phaser.Scene {
   update() {
     if (this.isUsernameFocused()) return;
 
-    if (Phaser.Input.Keyboard.JustDown(this.keyUp)) {
+    if (Phaser.Input.Keyboard.JustDown(this.keyUp) || isMovementDirectionJustDown(this, this.controlSettings, 'up')) {
       this.activeControlIndex = Phaser.Math.Wrap(this.activeControlIndex - 1, 0, this.controlOrder.length);
       this.refreshControlHighlights();
     }
-    if (Phaser.Input.Keyboard.JustDown(this.keyDown)) {
+    if (Phaser.Input.Keyboard.JustDown(this.keyDown) || isMovementDirectionJustDown(this, this.controlSettings, 'down')) {
       this.activeControlIndex = Phaser.Math.Wrap(this.activeControlIndex + 1, 0, this.controlOrder.length);
       this.refreshControlHighlights();
     }
-    if (Phaser.Input.Keyboard.JustDown(this.keyLeft))  this.adjustActiveControl(-1);
-    if (Phaser.Input.Keyboard.JustDown(this.keyRight)) this.adjustActiveControl(1);
-    if (Phaser.Input.Keyboard.JustDown(this.keyEnter)) this.activateActiveControl();
-    if (Phaser.Input.Keyboard.JustDown(this.keyEsc))   this.commitAndEnter();
+    if (Phaser.Input.Keyboard.JustDown(this.keyLeft) || isMovementDirectionJustDown(this, this.controlSettings, 'left')) this.adjustActiveControl(-1);
+    if (Phaser.Input.Keyboard.JustDown(this.keyRight) || isMovementDirectionJustDown(this, this.controlSettings, 'right')) this.adjustActiveControl(1);
+    if (Phaser.Input.Keyboard.JustDown(this.keyEnter) || isActionJustDown(this, this.controlSettings, 'interact')) this.activateActiveControl();
+    if (Phaser.Input.Keyboard.JustDown(this.keyEsc) || isActionJustDown(this, this.controlSettings, 'back')) this.commitAndEnter();
   }
 
   // ── DRAW HELPERS ──────────────────────────────────────────────────

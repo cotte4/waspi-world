@@ -312,6 +312,28 @@ export function isActionDown(scene: Phaser.Scene, settings: ControlSettings, act
   return Boolean(key?.isDown);
 }
 
+export function isMovementDirectionJustDown(scene: Phaser.Scene, settings: ControlSettings, direction: MovementDirection) {
+  const activeCodes = getActiveMovementCodes(settings)[direction];
+  for (const code of activeCodes) {
+    const key = getSceneKey(scene, code);
+    if (!key) continue;
+    let cache = sceneActionStateCache.get(scene);
+    if (!cache) {
+      cache = new Map<string, boolean>();
+      sceneActionStateCache.set(scene, cache);
+      scene.events.once('shutdown', () => {
+        sceneActionStateCache.delete(scene);
+      });
+    }
+    const stateKey = `move:${code}`;
+    const wasDown = cache.get(stateKey) ?? false;
+    const isDown = Boolean(key.isDown);
+    cache.set(stateKey, isDown);
+    if (isDown && !wasDown) return true;
+  }
+  return false;
+}
+
 export function isActionJustDown(scene: Phaser.Scene, settings: ControlSettings, action: ActionBinding) {
   const key = getSceneKey(scene, settings.actionBindings[action]);
   if (!key) return false;

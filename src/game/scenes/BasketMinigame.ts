@@ -4,6 +4,7 @@ import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
 import { calculateBasketReward } from '../../lib/basketRewards';
+import { isActionJustDown, loadControlSettings, type ControlSettings } from '../systems/ControlSettings';
 
 type BasketPhase = 'aiming' | 'flying' | 'result' | 'done' | 'exiting';
 
@@ -49,6 +50,7 @@ export class BasketMinigame extends Phaser.Scene {
   private ball!: Phaser.GameObjects.Arc;
   private shadow!: Phaser.GameObjects.Ellipse;
   private scoreText!: Phaser.GameObjects.Text;
+  private controlSettings: ControlSettings = loadControlSettings();
 
   private hoopBaseX = 0;
   private readonly hoopY = 212;
@@ -187,6 +189,14 @@ export class BasketMinigame extends Phaser.Scene {
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.input.on('pointerdown', this.handleShootInput, this);
+    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      this.controlSettings = {
+        ...this.controlSettings,
+        ...(payload as Partial<ControlSettings>),
+      };
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
 
     this.refreshHud();
     this.refreshScorePanel();
@@ -200,7 +210,7 @@ export class BasketMinigame extends Phaser.Scene {
   update(_time: number, delta: number) {
     if (this.isFinished) return;
 
-    if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
+    if (isActionJustDown(this, this.controlSettings, 'back')) {
       this.finishAndExit();
       return;
     }
@@ -213,7 +223,7 @@ export class BasketMinigame extends Phaser.Scene {
       }
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
+    if (isActionJustDown(this, this.controlSettings, 'interact')) {
       this.handleShootInput();
     }
 
