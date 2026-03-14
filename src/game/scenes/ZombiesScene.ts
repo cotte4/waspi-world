@@ -1,8 +1,11 @@
 
 import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { ensureFallbackRectTexture, getSafeAnimationDurationMs, hasUsableTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation } from '../systems/AnimationSafety';
+import { loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
+import { eventBus, EVENTS } from '../config/eventBus';
+import { SAFE_PLAZA_RETURN } from '../config/constants';
 import {
   ZOMBIES_PLAYER,
   ZOMBIES_POINTS,
@@ -168,6 +171,7 @@ export class ZombiesScene extends Phaser.Scene {
   private bossRoundActive = false;
   private bossSpawnedThisRound = false;
   private bossAlive = false;
+  private depthsUnlocked = false;
   private gameOver = false;
   private currentWeapon: ZombiesWeaponId = 'pistol';
   private weaponInventory!: WeaponInventory;
@@ -217,6 +221,10 @@ export class ZombiesScene extends Phaser.Scene {
   private keyA!: Phaser.Input.Keyboard.Key;
   private keyS!: Phaser.Input.Keyboard.Key;
   private keyD!: Phaser.Input.Keyboard.Key;
+  private keyI!: Phaser.Input.Keyboard.Key;
+  private keyJ!: Phaser.Input.Keyboard.Key;
+  private keyK!: Phaser.Input.Keyboard.Key;
+  private keyL!: Phaser.Input.Keyboard.Key;
   private keyE!: Phaser.Input.Keyboard.Key;
   private keyQ!: Phaser.Input.Keyboard.Key;
   private keyR!: Phaser.Input.Keyboard.Key;
@@ -228,6 +236,8 @@ export class ZombiesScene extends Phaser.Scene {
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private pointerDownHandler?: (pointer: Phaser.Input.Pointer) => void;
+  private restartPending = false;
+  private controlSettings: ControlSettings = loadControlSettings();
   private returnScene: string = 'WorldScene';
   private returnX: number = PLAYER_RETURN.x;
   private returnY: number = PLAYER_RETURN.y;
@@ -267,6 +277,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.bossRoundActive = false;
     this.bossSpawnedThisRound = false;
     this.bossAlive = false;
+    this.depthsUnlocked = false;
     this.gameOver = false;
     this.zombies.clear();
     this.zombieIdSeq = 0;
@@ -287,6 +298,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.reloadEndsAt = 0;
     this.lastMoveDy = 0;
     this.lastDamageAt = 0;
+    this.restartPending = false;
     this.px = ZOMBIES_PLAYER.startX;
     this.py = ZOMBIES_PLAYER.startY;
 
@@ -300,6 +312,12 @@ export class ZombiesScene extends Phaser.Scene {
     this.setupHud();
     this.setupDoors();
     this.setupMysteryBox();
+    bindSafeResetToPlaza(this, () => {
+      transitionToScene(this, 'WorldScene', {
+        returnX: SAFE_PLAZA_RETURN.X,
+        returnY: SAFE_PLAZA_RETURN.Y,
+      });
+    });
 
     createBackButton(this, () => this.requestExit(), 'SALIR');
     this.cameras.main.startFollow(this.player.getContainer(), true, 0.12, 0.12);
@@ -597,7 +615,7 @@ export class ZombiesScene extends Phaser.Scene {
 
   private updateDepthsAccessVisual() {
     if (!this.depthsRing || !this.depthsLabel) return;
-    const open = this.allowDepthsGate && this.bossSpawnedThisRound && !this.bossAlive && this.round >= 10;
+    const open = this.allowDepthsGate && this.depthsUnlocked;
     this.depthsRing.setFillStyle(open ? 0xFF6EA8 : 0xB05CFF, open ? 0.12 : 0.05);
     this.depthsRing.setStrokeStyle(2, open ? 0xFF6EA8 : 0xB05CFF, open ? 0.58 : 0.2);
     this.depthsLabel.setText(open ? 'BASEMENT DEPTHS' : 'DEPTHS LOCKED');
@@ -707,6 +725,10 @@ export class ZombiesScene extends Phaser.Scene {
     this.keyA = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyS = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    this.keyI = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I);
+    this.keyJ = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.J);
+    this.keyK = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.K);
+    this.keyL = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.L);
     this.keyE = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
     this.keyQ = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
     this.keyR = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
@@ -724,6 +746,14 @@ export class ZombiesScene extends Phaser.Scene {
       this.tryShoot(pointer.worldX, pointer.worldY);
     };
     this.input.on('pointerdown', this.pointerDownHandler);
+    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      this.controlSettings = {
+        ...this.controlSettings,
+        ...(payload as Partial<ControlSettings>),
+      };
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
   }
 
   private setupHud() {
@@ -899,7 +929,7 @@ export class ZombiesScene extends Phaser.Scene {
       this.gameOver ? 'GAME OVER' : timedBuffs || roundState,
       `ZOMBIES ${this.countAliveZombies()}/${this.roundTarget}`,
       `SPAWN ${this.spawnedThisRound}`,
-      this.allowDepthsGate && this.bossSpawnedThisRound && !this.bossAlive && this.round >= 10 ? 'DEPTHS OPEN' : '',
+      this.allowDepthsGate && this.depthsUnlocked ? 'DEPTHS OPEN' : '',
       this.bossAlive ? 'BOSS ACTIVE' : this.bossRoundActive && !this.bossSpawnedThisRound ? 'BOSS INCOMING' : '',
     ].filter(Boolean).join('\n'));
     this.inventoryText?.setText(`ARMAS ${this.weaponOrder.map((id) => {
@@ -966,7 +996,7 @@ export class ZombiesScene extends Phaser.Scene {
 
     if (this.gameOver) {
       if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
-        this.scene.restart();
+        this.restartRun();
       }
       this.updatePromptHud({ kind: 'exit', x: EXIT_PAD.x, y: EXIT_PAD.y, radius: EXIT_PAD.radius, label: 'SPACE REINICIAR  |  ESC SALIR', color: 0xFF6A6A });
       this.renderHud();
@@ -989,12 +1019,11 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private handleMovement() {
-    let dx = 0;
-    let dy = 0;
-    if (this.keyA.isDown) dx -= 1;
-    if (this.keyD.isDown) dx += 1;
-    if (this.keyW.isDown) dy -= 1;
-    if (this.keyS.isDown) dy += 1;
+    let { dx, dy } = readMovementVector({
+      scene: this,
+      settings: this.controlSettings,
+      includeJoystick: true,
+    });
 
     if (dx !== 0 || dy !== 0) {
       const len = Math.hypot(dx, dy) || 1;
@@ -1161,7 +1190,7 @@ export class ZombiesScene extends Phaser.Scene {
       return;
     }
 
-    if (this.bossRoundActive && !this.bossSpawnedThisRound && !this.bossAlive && this.countAliveZombies() < concurrentCap) {
+    if (this.bossRoundActive && !this.bossSpawnedThisRound && !this.bossAlive && this.zombies.size === 0) {
       const spawnedBoss = this.spawnBossZombie();
       if (spawnedBoss) {
         this.bossSpawnedThisRound = true;
@@ -1170,7 +1199,21 @@ export class ZombiesScene extends Phaser.Scene {
       return;
     }
 
-    if (this.countAliveZombies() === 0 && !this.bossAlive && this.zombieProjectiles.size === 0 && this.roundBreakUntil === 0) {
+    if (
+      !this.depthsUnlocked
+      && this.allowDepthsGate
+      && this.bossRoundActive
+      && this.bossSpawnedThisRound
+      && !this.bossAlive
+      && this.zombies.size === 0
+      && this.zombieProjectiles.size === 0
+    ) {
+      this.depthsUnlocked = true;
+      this.updateDepthsAccessVisual();
+      this.showNotice('DEPTHS UNLOCKED', '#FF9DC8');
+    }
+
+    if (this.zombies.size === 0 && !this.bossAlive && this.zombieProjectiles.size === 0 && this.roundBreakUntil === 0) {
       this.roundBreakUntil = this.time.now + ZOMBIES_POINTS.roundBreakMs;
       this.showNotice(`LIMPIASTE LA RONDA ${this.round}`, '#9EFFB7');
     }
@@ -1696,9 +1739,7 @@ export class ZombiesScene extends Phaser.Scene {
     if (zombie.isBoss) {
       this.bossAlive = false;
       this.playZombiesSfx('boss_round');
-      if (this.allowDepthsGate) {
-        this.showNotice('DEPTHS UNLOCKED', '#FF9DC8');
-      }
+      this.showNotice('BOSS DOWN', '#FF9DC8');
     }
     const killReward = zombie.killReward * pointMultiplier;
     this.points += killReward;
@@ -1744,8 +1785,33 @@ export class ZombiesScene extends Phaser.Scene {
     if (this.hp > 0) return;
 
     this.gameOver = true;
+    this.reloadEndsAt = 0;
+    this.boxRollingUntil = 0;
+    this.lastIsMoving = false;
     this.player.playDeath();
     this.showNotice('GAME OVER - SPACE REINICIAR', '#FF6A6A');
+  }
+
+  private restartRun() {
+    if (this.restartPending) return;
+    this.restartPending = true;
+    this.input.enabled = false;
+    try {
+      this.player.clearActionState();
+    } catch (error) {
+      console.error('[Waspi] Failed to clear player animation state before zombies restart.', error);
+    }
+    this.cameras.main.stopFollow();
+    this.cameras.main.resetFX();
+    this.cameras.main.setAlpha(1);
+    this.scene.restart({
+      returnScene: this.returnScene,
+      returnX: this.returnX,
+      returnY: this.returnY,
+      entryLabel: this.entryLabel,
+      allowDepthsGate: this.allowDepthsGate,
+      modeLabel: this.modeLabel,
+    });
   }
 
   private handleContextInteraction() {
@@ -1818,7 +1884,7 @@ export class ZombiesScene extends Phaser.Scene {
       });
     }
 
-    const depthsOpen = this.allowDepthsGate && this.bossSpawnedThisRound && !this.bossAlive && this.round >= 10;
+    const depthsOpen = this.allowDepthsGate && this.depthsUnlocked;
     if (depthsOpen && Phaser.Math.Distance.Between(this.px, this.py, DEPTHS_PAD.x, DEPTHS_PAD.y) <= DEPTHS_PAD.radius + 34) {
       options.push({
         kind: 'depths',
@@ -2304,6 +2370,12 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private handleShutdown() {
+    this.restartPending = false;
+    try {
+      this.player?.clearActionState?.();
+    } catch {
+      // Scene is shutting down; ignore avatar cleanup failures.
+    }
     if (this.pointerDownHandler) {
       this.input.off('pointerdown', this.pointerDownHandler);
       this.pointerDownHandler = undefined;

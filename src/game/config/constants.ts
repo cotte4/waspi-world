@@ -68,6 +68,11 @@ export const ZONES = {
   TRAINING_H: 420,
 } as const;
 
+export const SAFE_PLAZA_RETURN = {
+  X: 980,
+  Y: ZONES.PLAZA_Y + 72,
+} as const;
+
 export const BUILDINGS = {
   ARCADE: {
     x: 520,

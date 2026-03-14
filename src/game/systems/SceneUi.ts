@@ -93,3 +93,16 @@ export function transitionToScene(
     scene.scene.start(targetKey, data);
   });
 }
+
+export function bindSafeResetToPlaza(scene: Phaser.Scene, onReset: () => void) {
+  const handler = () => {
+    try {
+      onReset();
+    } catch (error) {
+      console.error('[Waspi] Failed to run safe plaza reset.', error);
+    }
+  };
+  const off = eventBus.on(EVENTS.SAFE_RESET_TO_PLAZA, handler);
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, off);
+  return off;
+}

@@ -1,9 +1,9 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { BUILDINGS, COLORS, WORLD, ZONES } from '../config/constants';
+import { BUILDINGS, COLORS, SAFE_PLAZA_RETURN, WORLD, ZONES } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
-import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
 
 interface ArcadePenaltyReward {
@@ -116,6 +116,12 @@ export class ArcadeInterior extends Phaser.Scene {
     this.input.enabled = true;
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
+    bindSafeResetToPlaza(this, () => {
+      transitionToScene(this, 'WorldScene', {
+        returnX: SAFE_PLAZA_RETURN.X,
+        returnY: SAFE_PLAZA_RETURN.Y,
+      });
+    });
     this.audioSettingsCleanup = eventBus.on(EVENTS.AUDIO_SETTINGS_CHANGED, (payload: unknown) => {
       if (!payload || typeof payload !== 'object') return;
       const next = payload as Partial<AudioSettings>;

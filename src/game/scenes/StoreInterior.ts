@@ -1,10 +1,11 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { BUILDINGS, COLORS, WORLD, ZONES } from '../config/constants';
+import { BUILDINGS, COLORS, SAFE_PLAZA_RETURN, WORLD, ZONES } from '../config/constants';
 import { CATALOG } from '../config/catalog';
-import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { DialogSystem } from '../systems/DialogSystem';
+import { loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
 import { supabase, isConfigured } from '../../lib/supabase';
 
 type StoreRemotePlayer = {
@@ -33,6 +34,10 @@ export class StoreInterior extends Phaser.Scene {
   private keyA!: Phaser.Input.Keyboard.Key;
   private keyS!: Phaser.Input.Keyboard.Key;
   private keyD!: Phaser.Input.Keyboard.Key;
+  private keyI!: Phaser.Input.Keyboard.Key;
+  private keyJ!: Phaser.Input.Keyboard.Key;
+  private keyK!: Phaser.Input.Keyboard.Key;
+  private keyL!: Phaser.Input.Keyboard.Key;
   private px = 0;
   private py = 0;
   private selectedItemId = '';
@@ -50,6 +55,7 @@ export class StoreInterior extends Phaser.Scene {
   private lastMoveDx = 0;
   private lastMoveDy = 0;
   private lastIsMoving = false;
+  private controlSettings: ControlSettings = loadControlSettings();
 
   constructor() {
     super({ key: 'StoreInterior' });
@@ -65,6 +71,19 @@ export class StoreInterior extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     this.cleanupFns.push(eventBus.on(EVENTS.SHOP_OPEN, () => { this.shopOverlayOpen = true; }));
     this.cleanupFns.push(eventBus.on(EVENTS.SHOP_CLOSE, () => { this.shopOverlayOpen = false; }));
+    this.cleanupFns.push(eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      this.controlSettings = {
+        ...this.controlSettings,
+        ...(payload as Partial<ControlSettings>),
+      };
+    }));
+    this.cleanupFns.push(bindSafeResetToPlaza(this, () => {
+      transitionToScene(this, 'WorldScene', {
+        returnX: SAFE_PLAZA_RETURN.X,
+        returnY: SAFE_PLAZA_RETURN.Y,
+      });
+    }));
 
     // ── Room dimensions ────────────────────────────────────────────
     const roomW = 640;
@@ -526,6 +545,10 @@ export class StoreInterior extends Phaser.Scene {
     this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    this.keyI = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.I);
+    this.keyJ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.J);
+    this.keyK = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.K);
+    this.keyL = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.L);
     this.setupRealtime();
   }
 
@@ -625,18 +648,11 @@ export class StoreInterior extends Phaser.Scene {
 
   private handleMovement() {
     const speed = 180 / 60;
-    let dx = 0;
-    let dy = 0;
-
-    const left = this.cursors.left.isDown || this.keyA.isDown;
-    const right = this.cursors.right.isDown || this.keyD.isDown;
-    const up = this.cursors.up.isDown || this.keyW.isDown;
-    const down = this.cursors.down.isDown || this.keyS.isDown;
-
-    if (left) dx -= 1;
-    if (right) dx += 1;
-    if (up) dy -= 1;
-    if (down) dy += 1;
+    let { dx, dy } = readMovementVector({
+      scene: this,
+      settings: this.controlSettings,
+      includeJoystick: true,
+    });
 
     if (dx !== 0 && dy !== 0) {
       dx *= 0.707;

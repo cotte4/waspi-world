@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
-import { BUILDINGS } from '../config/constants';
-import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { BUILDINGS, SAFE_PLAZA_RETURN } from '../config/constants';
+import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -91,6 +91,12 @@ export class BasementScene extends Phaser.Scene {
 
   create() {
     announceScene(this);
+    bindSafeResetToPlaza(this, () => {
+      transitionToScene(this, 'WorldScene', {
+        returnX: SAFE_PLAZA_RETURN.X,
+        returnY: SAFE_PLAZA_RETURN.Y,
+      });
+    });
     this.cameras.main.setBackgroundColor('#0E0E14');
     this.cameras.main.setBounds(0, 0, SCENE_W, SCENE_H);
     this.cameras.main.setZoom(0.94);

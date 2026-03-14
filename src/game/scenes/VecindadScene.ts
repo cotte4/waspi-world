@@ -1,8 +1,10 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { InteriorRoom } from '../systems/InteriorRoom';
+import { loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
+import { SAFE_PLAZA_RETURN } from '../config/constants';
 import {
   getBuildCost,
   MAX_VECINDAD_STAGE,
@@ -49,6 +51,10 @@ export class VecindadScene extends Phaser.Scene {
   private keyA!: Phaser.Input.Keyboard.Key;
   private keyS!: Phaser.Input.Keyboard.Key;
   private keyD!: Phaser.Input.Keyboard.Key;
+  private keyI!: Phaser.Input.Keyboard.Key;
+  private keyJ!: Phaser.Input.Keyboard.Key;
+  private keyK!: Phaser.Input.Keyboard.Key;
+  private keyL!: Phaser.Input.Keyboard.Key;
   private inTransition = false;
   private px: number = VECINDAD_MAP.SPAWN_X;
   private py: number = VECINDAD_MAP.SPAWN_Y;
@@ -66,6 +72,7 @@ export class VecindadScene extends Phaser.Scene {
   private promptText?: Phaser.GameObjects.Text;
   private hudText?: Phaser.GameObjects.Text;
   private bridgeCleanupFns: Array<() => void> = [];
+  private controlSettings: ControlSettings = loadControlSettings();
 
   constructor() {
     super({ key: 'VecindadScene' });
@@ -96,8 +103,25 @@ export class VecindadScene extends Phaser.Scene {
     this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    this.keyI = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.I);
+    this.keyJ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.J);
+    this.keyK = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.K);
+    this.keyL = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.L);
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyE = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+    this.bridgeCleanupFns.push(eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      this.controlSettings = {
+        ...this.controlSettings,
+        ...(payload as Partial<ControlSettings>),
+      };
+    }));
+    this.bridgeCleanupFns.push(bindSafeResetToPlaza(this, () => {
+      transitionToScene(this, 'WorldScene', {
+        returnX: SAFE_PLAZA_RETURN.X,
+        returnY: SAFE_PLAZA_RETURN.Y,
+      });
+    }));
 
     createBackButton(this, () => this.leaveToWorld(), 'PLAZA');
 
@@ -704,18 +728,11 @@ export class VecindadScene extends Phaser.Scene {
 
   private handleMovement(delta: number) {
     const speed = (VecindadScene.MOVE_SPEED * delta) / 1000;
-    let dx = 0;
-    let dy = 0;
-
-    const left = this.cursors.left.isDown || this.keyA.isDown;
-    const right = this.cursors.right.isDown || this.keyD.isDown;
-    const up = this.cursors.up.isDown || this.keyW.isDown;
-    const down = this.cursors.down.isDown || this.keyS.isDown;
-
-    if (left) dx -= 1;
-    if (right) dx += 1;
-    if (up) dy -= 1;
-    if (down) dy += 1;
+    let { dx, dy } = readMovementVector({
+      scene: this,
+      settings: this.controlSettings,
+      includeJoystick: true,
+    });
     if (dx !== 0 && dy !== 0) {
       dx *= 0.707;
       dy *= 0.707;

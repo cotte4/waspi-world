@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, AvatarConfig, type AvatarAction, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { ChatSystem } from '../systems/ChatSystem';
-import { WORLD, PLAYER, COLORS, ZONES, BUILDINGS, CHAT } from '../config/constants';
+import { WORLD, PLAYER, COLORS, ZONES, BUILDINGS, CHAT, SAFE_PLAZA_RETURN } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
 import { addTenks, initTenks } from '../systems/TenksSystem';
@@ -11,7 +11,8 @@ import { loadHudSettings, type HudSettings } from '../systems/HudSettings';
 import { addXpToProgression, getMaxProgressionLevel, loadProgressionState, saveProgressionState, type ProgressionState } from '../systems/ProgressionSystem';
 import { loadCombatStats, saveCombatStats, type CombatStats } from '../systems/CombatStats';
 import { ensureFallbackRectTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation, safeSetSpriteTexture } from '../systems/AnimationSafety';
-import { announceScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza } from '../systems/SceneUi';
+import { loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
 import type { VecindadState } from '../../lib/playerState';
 import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
 import { EnemySprite, registerZombieAnims, type ZombieType } from '../systems/EnemySprite';
@@ -279,6 +280,10 @@ export class WorldScene extends Phaser.Scene {
   private keyA!: Phaser.Input.Keyboard.Key;
   private keyS!: Phaser.Input.Keyboard.Key;
   private keyD!: Phaser.Input.Keyboard.Key;
+  private keyI!: Phaser.Input.Keyboard.Key;
+  private keyJ!: Phaser.Input.Keyboard.Key;
+  private keyK!: Phaser.Input.Keyboard.Key;
+  private keyL!: Phaser.Input.Keyboard.Key;
   private inputBlocked = false; // true when chat input is focused
 
   // Mobile touch controls
@@ -343,6 +348,7 @@ export class WorldScene extends Phaser.Scene {
   private audioUnlocked = false;
   private audioSettings: AudioSettings = loadAudioSettings();
   private hudSettings: HudSettings = loadHudSettings();
+  private controlSettings: ControlSettings = loadControlSettings();
   private audioSettingsCleanup?: () => void;
   private worldPointerShootHandler?: (p: Phaser.Input.Pointer) => void;
   private touchPointerDownHandler?: (p: Phaser.Input.Pointer) => void;
@@ -522,6 +528,10 @@ export class WorldScene extends Phaser.Scene {
     this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    this.keyI = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.I);
+    this.keyJ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.J);
+    this.keyK = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.K);
+    this.keyL = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.L);
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyE = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
     this.keyF = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.F);
@@ -585,6 +595,14 @@ export class WorldScene extends Phaser.Scene {
       };
       this.applyHudVisibility();
     }));
+    this.bridgeCleanupFns.push(eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      this.controlSettings = {
+        ...this.controlSettings,
+        ...(payload as Partial<ControlSettings>),
+      };
+    }));
+    this.bridgeCleanupFns.push(bindSafeResetToPlaza(this, () => this.safeResetToPlaza()));
 
     // Zombie sprite animations
     this.runBootStep('zombie anims', () => registerZombieAnims(this));
@@ -2570,17 +2588,11 @@ export class WorldScene extends Phaser.Scene {
     }
 
     const speed = PLAYER.SPEED * (delta / 1000);
-    let dx = 0, dy = 0;
-
-    const left = this.cursors.left.isDown || this.keyA.isDown;
-    const right = this.cursors.right.isDown || this.keyD.isDown;
-    const up = this.cursors.up.isDown || this.keyW.isDown;
-    const down = this.cursors.down.isDown || this.keyS.isDown;
-
-    if (left) dx -= 1;
-    if (right) dx += 1;
-    if (up) dy -= 1;
-    if (down) dy += 1;
+    let { dx, dy } = readMovementVector({
+      scene: this,
+      settings: this.controlSettings,
+      includeJoystick: true,
+    });
 
     // Touch fallback if no keyboard input
     if (dx === 0 && dy === 0 && this.isTouch) {
@@ -2631,6 +2643,32 @@ export class WorldScene extends Phaser.Scene {
     this.playerBody.setPosition(this.px, this.py);
     this.playerNameplate.setPosition(this.px, this.py - 46);
     this.chatSystem.updatePosition('__player__', this.px, this.py);
+  }
+
+  private safeResetToPlaza() {
+    this.inTransition = false;
+    this.inputBlocked = false;
+    this.hp = 100;
+    this.px = SAFE_PLAZA_RETURN.X;
+    this.py = SAFE_PLAZA_RETURN.Y;
+    this.lastIsMoving = false;
+    this.lastMoveDx = 0;
+    this.lastMoveDy = 0;
+    this.lastDamageAt = 0;
+    this.playerAvatar.clearActionState();
+    this.playerAvatar.setPosition(this.px, this.py);
+    this.playerAvatar.setDepth(Math.floor(this.py / 10));
+    this.playerNameplate.setPosition(this.px, this.py - 40);
+    this.playerBody.setPosition(this.px, this.py);
+    this.playerHitbox.setPosition(this.px, this.py);
+    this.playerHitbox.body.updateFromGameObject();
+    this.cameras.main.stopFollow();
+    this.cameras.main.resetFX();
+    this.cameras.main.setAlpha(1);
+    this.cameras.main.centerOn(this.px, this.py);
+    this.cameras.main.startFollow(this.playerBody, true, 0.12, 0.12);
+    this.renderHpHud();
+    this.showArenaNotice('VOLVISTE A LA PLAZA', '#F5C842');
   }
 
   private setupTouchControls() {

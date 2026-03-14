@@ -41,6 +41,7 @@ export const EVENTS = {
   SHOP_CLOSE: 'shop:close',
   AUDIO_SETTINGS_CHANGED: 'audio:settings:changed',
   HUD_SETTINGS_CHANGED: 'hud:settings:changed',
+  CONTROL_SETTINGS_CHANGED: 'control:settings:changed',
   PENALTY_RESULT: 'penalty:result',
   PLAYER_ACTIONS_OPEN: 'player:actions:open',
   PLAYER_ACTION_MUTE: 'player:action:mute',
@@ -52,4 +53,5 @@ export const EVENTS = {
   VECINDAD_SHARED_STATE_CHANGED: 'vecindad:shared:state:changed',
   VECINDAD_UPDATE_REQUEST: 'vecindad:update:request',
   UI_NOTICE: 'ui:notice',
+  SAFE_RESET_TO_PLAZA: 'scene:safe-reset-to-plaza',
 } as const;

@@ -9,6 +9,18 @@ import { CATALOG, getItem as getCatalogItem, type CatalogItem } from '@/src/game
 import { getInventory, equipItem, hasUtilityEquipped, replaceInventory } from '@/src/game/systems/InventorySystem';
 import { loadAudioSettings, saveAudioSettings, type AudioSettings } from '@/src/game/systems/AudioSettings';
 import { loadHudSettings, saveHudSettings, type HudSettings } from '@/src/game/systems/HudSettings';
+import {
+  assignMovementBinding,
+  clearVirtualJoystickState,
+  formatMovementBindingLabel,
+  isSupportedMovementBindingCode,
+  loadControlSettings,
+  saveControlSettings,
+  setVirtualJoystickState,
+  type ControlSettings,
+  type MovementDirection,
+  type MovementScheme,
+} from '@/src/game/systems/ControlSettings';
 import { getLevelFloorXp, getMaxProgressionLevel, loadProgressionState, type ProgressionState } from '@/src/game/systems/ProgressionSystem';
 import { supabase } from '@/src/lib/supabase';
 import { getTenksBalance, initTenks } from '@/src/game/systems/TenksSystem';
@@ -80,12 +92,14 @@ interface VecindadSharedPayload {
 
 const CHAT_SCENES = new Set(['WorldScene', 'VecindadScene', 'StoreInterior', 'CafeInterior', 'ArcadeInterior', 'HouseInterior']);
 const INTERIOR_SOCIAL_SCENES = new Set(['VecindadScene', 'StoreInterior', 'CafeInterior', 'ArcadeInterior', 'HouseInterior']);
+const JOYSTICK_SCENES = new Set(['WorldScene', 'VecindadScene', 'StoreInterior', 'PvpArenaScene', 'ZombiesScene', 'BasementZombiesScene']);
 
 export default function PlayPage() {
   const initialInventory = useMemo(() => getInventory(), []);
   const initialCheckout = useMemo(() => getInitialCheckoutState(), []);
   const initialAudioSettings = useMemo(() => loadAudioSettings(), []);
   const initialHudSettings = useMemo(() => loadHudSettings(), []);
+  const initialControlSettings = useMemo(() => loadControlSettings(), []);
   const initialProgression = useMemo(() => loadProgressionState(), []);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
@@ -120,13 +134,20 @@ export default function PlayPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(initialAudioSettings);
   const [hudSettings, setHudSettings] = useState<HudSettings>(initialHudSettings);
+  const [controlSettings, setControlSettings] = useState<ControlSettings>(initialControlSettings);
+  const [bindingCaptureDirection, setBindingCaptureDirection] = useState<MovementDirection | null>(null);
+  const [joystickUi, setJoystickUi] = useState({ active: false, dx: 0, dy: 0 });
+  const [rescueArmed, setRescueArmed] = useState(false);
   const tokenRef = useRef<string | null>(null);
   const playerStateRef = useRef<PlayerState | null>(null);
+  const activeSceneRef = useRef('');
   const suppressSyncRef = useRef(false);
   const mutedPlayersRef = useRef<string[]>(loadStoredMutedPlayers());
   const lastInteriorChatSentRef = useRef(0);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const joystickRef = useRef<HTMLDivElement>(null);
+  const rescueTimeoutRef = useRef<number | null>(null);
   const chatVisible = CHAT_SCENES.has(activeScene);
   const isAuthenticated = Boolean(authEmail);
 
@@ -535,6 +556,58 @@ export default function PlayPage() {
     saveHudSettings(hudSettings);
     eventBus.emit(EVENTS.HUD_SETTINGS_CHANGED, hudSettings);
   }, [hudSettings]);
+
+  useEffect(() => {
+    saveControlSettings(controlSettings);
+    eventBus.emit(EVENTS.CONTROL_SETTINGS_CHANGED, controlSettings);
+    if (!controlSettings.showVirtualJoystick) {
+      clearVirtualJoystickState();
+    }
+  }, [controlSettings]);
+
+  useEffect(() => {
+    activeSceneRef.current = activeScene;
+  }, [activeScene]);
+
+  useEffect(() => () => {
+    clearVirtualJoystickState();
+    if (rescueTimeoutRef.current) {
+      window.clearTimeout(rescueTimeoutRef.current);
+      rescueTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!bindingCaptureDirection || !settingsOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.code === 'Escape') {
+        setBindingCaptureDirection(null);
+        setUiNotice('Remapeo cancelado.');
+        return;
+      }
+
+      if (!isSupportedMovementBindingCode(event.code)) {
+        setUiNotice('Tecla no soportada para movimiento.');
+        return;
+      }
+
+      setControlSettings((current) => ({
+        ...current,
+        movementScheme: 'custom',
+        movementBindings: assignMovementBinding(current.movementBindings, bindingCaptureDirection, event.code),
+      }));
+      setBindingCaptureDirection(null);
+      setUiNotice(`Movimiento ${directionLabel(bindingCaptureDirection)}: ${formatMovementBindingLabel(event.code)}`);
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [bindingCaptureDirection, settingsOpen]);
 
   useEffect(() => {
     if (!magicLinkCooldownUntil || magicLinkCooldownUntil <= Date.now()) return;
@@ -1009,6 +1082,67 @@ export default function PlayPage() {
   const progressPct = progression.nextLevelAt === null
     ? 1
     : Math.max(0, Math.min(1, (progression.xp - currentLevelFloorXp) / levelSpanXp));
+  const joystickVisible = controlSettings.showVirtualJoystick && JOYSTICK_SCENES.has(activeScene);
+  const armSafeReset = useCallback(() => {
+    setRescueArmed(true);
+    setUiNotice('Volver a plaza armado. Toca de nuevo para confirmar.');
+    window.setTimeout(() => {
+      setRescueArmed(false);
+    }, 4000);
+  }, []);
+  const openSettings = useCallback(() => {
+    setSettingsOpen(true);
+  }, []);
+  const closeSettings = useCallback(() => {
+    setBindingCaptureDirection(null);
+    setSettingsOpen(false);
+  }, []);
+
+  const confirmSafeReset = useCallback(() => {
+    setRescueArmed(false);
+    closeSettings();
+    setUiNotice('Rescate a plaza...');
+    eventBus.emit(EVENTS.SAFE_RESET_TO_PLAZA);
+    if (rescueTimeoutRef.current) {
+      window.clearTimeout(rescueTimeoutRef.current);
+    }
+    rescueTimeoutRef.current = window.setTimeout(() => {
+      if (activeSceneRef.current !== 'WorldScene') {
+        window.location.assign('/play');
+      }
+    }, 1200);
+  }, [closeSettings]);
+
+  const handleSafeReset = useCallback(() => {
+    if (rescueArmed) {
+      confirmSafeReset();
+      return;
+    }
+    armSafeReset();
+  }, [armSafeReset, confirmSafeReset, rescueArmed]);
+
+  const updateJoystickFromPoint = useCallback((clientX: number, clientY: number) => {
+    const el = joystickRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const max = rect.width * 0.28;
+    const rawDx = clientX - centerX;
+    const rawDy = clientY - centerY;
+    const distance = Math.hypot(rawDx, rawDy) || 1;
+    const clamped = Math.min(max, distance);
+    const dx = Number(((rawDx / distance) * (clamped / max)).toFixed(4));
+    const dy = Number(((rawDy / distance) * (clamped / max)).toFixed(4));
+    setJoystickUi({ active: true, dx, dy });
+    setVirtualJoystickState({ active: true, dx, dy });
+  }, []);
+
+  const endJoystick = useCallback(() => {
+    setJoystickUi({ active: false, dx: 0, dy: 0 });
+    clearVirtualJoystickState();
+  }, []);
+
   const leftHudVisible = hudSettings.showSocialPanel || hudSettings.showProgressPanel;
   const toggleLeftHud = () => {
     setHudSettings((current) => {
@@ -1364,7 +1498,7 @@ export default function PlayPage() {
         </button>
 
         <button
-          onClick={() => setSettingsOpen(true)}
+          onClick={openSettings}
           className="absolute right-2 top-28"
           style={{
             fontFamily: '"Press Start 2P", monospace',
@@ -1379,10 +1513,27 @@ export default function PlayPage() {
           A/V
         </button>
 
+        <button
+          onClick={handleSafeReset}
+          className="absolute right-2 top-40"
+          style={{
+            fontFamily: '"Press Start 2P", monospace',
+            fontSize: '8px',
+            padding: '8px 10px',
+            background: rescueArmed ? '#FF6A6A' : 'rgba(255,106,106,0.12)',
+            color: rescueArmed ? '#0E0E14' : '#FF9EA6',
+            border: '1px solid rgba(255,106,106,0.28)',
+            cursor: 'pointer',
+            boxShadow: rescueArmed ? '0 0 18px rgba(255,106,106,0.35)' : 'none',
+          }}
+        >
+          {rescueArmed ? 'CONFIRMAR PLAZA' : 'VOLVER A PLAZA'}
+        </button>
+
         <div
           className="ww-auth-card absolute right-2"
           style={{
-            top: 132,
+            top: 176,
             width: isAuthenticated ? 156 : 228,
             background: 'rgba(0,0,0,0.78)',
             border: '1px solid rgba(245,200,66,0.18)',
@@ -1915,7 +2066,7 @@ export default function PlayPage() {
             >
               <div className="flex items-center justify-between mb-3" style={{ fontFamily: '"Press Start 2P", monospace', color: '#F5C842', fontSize: '10px' }}>
                 <span>SETTINGS</span>
-                <button onClick={() => setSettingsOpen(false)} style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: '#999999' }}>
+                <button onClick={closeSettings} style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: '#999999' }}>
                   X
                 </button>
               </div>
@@ -2002,9 +2153,131 @@ export default function PlayPage() {
                       {hudSettings.showArenaHud ? 'ON' : 'OFF'}
                     </button>
                   </div>
+
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginTop: 12, marginBottom: 4 }}>CONTROLES</div>
+
+                  <div style={{ display: 'grid', gap: 8, marginBottom: 6 }}>
+                    <div>
+                      <div style={{ fontSize: '16px', marginBottom: 6 }}>MOVIMIENTO</div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginBottom: 6 }}>
+                        Modo activo: {movementSchemeLabel(controlSettings.movementScheme)}
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
+                        {([
+                          ['both', 'WASD + FLECHAS'],
+                          ['wasd', 'SOLO WASD'],
+                          ['arrows', 'SOLO FLECHAS'],
+                          ['ijkl', 'IJKL'],
+                          ['custom', 'CUSTOM'],
+                        ] as Array<[MovementScheme, string]>).map(([scheme, label]) => (
+                          <button
+                            key={scheme}
+                            onClick={() => setControlSettings((current) => ({ ...current, movementScheme: scheme }))}
+                            style={optionButtonStyle(controlSettings.movementScheme === scheme)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: '16px', marginBottom: 6 }}>REMAPEO</div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginBottom: 6 }}>
+                        Elegi una direccion y apreta una tecla. `ESC` cancela.
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
+                        {(['up', 'left', 'down', 'right'] as MovementDirection[]).map((direction) => (
+                          <button
+                            key={direction}
+                            onClick={() => setBindingCaptureDirection(direction)}
+                            style={optionButtonStyle(bindingCaptureDirection === direction)}
+                          >
+                            {bindingCaptureDirection === direction
+                              ? `${directionLabel(direction)}: ...`
+                              : `${directionLabel(direction)}: ${formatMovementBindingLabel(controlSettings.movementBindings[direction])}`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between py-2">
+                      <div>
+                        <div style={{ fontSize: '16px' }}>JOYSTICK</div>
+                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Overlay virtual para moverte sin teclado</div>
+                      </div>
+                      <button
+                        onClick={() => setControlSettings((current) => ({ ...current, showVirtualJoystick: !current.showVirtualJoystick }))}
+                        style={toggleButtonStyle(controlSettings.showVirtualJoystick)}
+                      >
+                        {controlSettings.showVirtualJoystick ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
+        )}
+
+        {joystickVisible && (
+          <div
+            ref={joystickRef}
+            onPointerDown={(event) => {
+              (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
+              updateJoystickFromPoint(event.clientX, event.clientY);
+            }}
+            onPointerMove={(event) => {
+              if ((event.buttons & 1) !== 1 && !joystickUi.active) return;
+              updateJoystickFromPoint(event.clientX, event.clientY);
+            }}
+            onPointerUp={endJoystick}
+            onPointerCancel={endJoystick}
+            onPointerLeave={() => {
+              if (!joystickUi.active) return;
+              endJoystick();
+            }}
+            className="absolute left-4 bottom-16"
+            style={{
+              width: 144,
+              height: 144,
+              borderRadius: '999px',
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'radial-gradient(circle at 50% 50%, rgba(70,179,255,0.12), rgba(0,0,0,0.18))',
+              boxShadow: '0 18px 38px rgba(0,0,0,0.35)',
+              touchAction: 'none',
+              zIndex: 25,
+            }}
+          >
+            <div
+              style={{
+                position: 'absolute',
+                left: '50%',
+                top: '50%',
+                width: 56,
+                height: 56,
+                borderRadius: '999px',
+                background: 'rgba(245,200,66,0.32)',
+                border: '1px solid rgba(245,200,66,0.42)',
+                transform: `translate(calc(-50% + ${joystickUi.dx * 34}px), calc(-50% + ${joystickUi.dy * 34}px))`,
+                boxShadow: '0 0 16px rgba(245,200,66,0.24)',
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontFamily: '"Press Start 2P", monospace',
+                fontSize: '8px',
+                color: 'rgba(255,255,255,0.42)',
+                pointerEvents: 'none',
+              }}
+            >
+              MOVE
+            </div>
+          </div>
         )}
 
         {uiNotice && (
@@ -2045,6 +2318,50 @@ function toggleButtonStyle(enabled: boolean) {
     color: enabled ? '#0E0E14' : '#FFFFFF',
     cursor: 'pointer',
   } as const;
+}
+
+function optionButtonStyle(active: boolean) {
+  return {
+    fontFamily: '"Press Start 2P", monospace',
+    fontSize: '8px',
+    padding: '10px 8px',
+    border: active ? '1px solid rgba(245,200,66,0.45)' : '1px solid rgba(255,255,255,0.12)',
+    background: active ? 'rgba(245,200,66,0.18)' : 'rgba(255,255,255,0.05)',
+    color: active ? '#F5C842' : '#FFFFFF',
+    cursor: 'pointer',
+    textAlign: 'center',
+  } as const;
+}
+
+function movementSchemeLabel(scheme: MovementScheme) {
+  switch (scheme) {
+    case 'wasd':
+      return 'Solo WASD';
+    case 'arrows':
+      return 'Solo flechas';
+    case 'ijkl':
+      return 'IJKL';
+    case 'custom':
+      return 'Custom';
+    case 'both':
+    default:
+      return 'WASD + flechas';
+  }
+}
+
+function directionLabel(direction: MovementDirection) {
+  switch (direction) {
+    case 'up':
+      return 'ARRIBA';
+    case 'left':
+      return 'IZQ';
+    case 'down':
+      return 'ABAJO';
+    case 'right':
+      return 'DER';
+    default:
+      return 'DIR';
+  }
 }
 
 function authButtonStyle(background: string, color: string, disabled: boolean, bordered = false) {

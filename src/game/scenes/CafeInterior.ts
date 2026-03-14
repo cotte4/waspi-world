@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { BUILDINGS, COLORS, WORLD, ZONES } from '../config/constants';
-import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { BUILDINGS, COLORS, SAFE_PLAZA_RETURN, WORLD, ZONES } from '../config/constants';
+import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { eventBus, EVENTS } from '../config/eventBus';
 
@@ -33,6 +33,12 @@ export class CafeInterior extends Phaser.Scene {
     announceScene(this);
     this.input.enabled = true;
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
+    bindSafeResetToPlaza(this, () => {
+      transitionToScene(this, 'WorldScene', {
+        returnX: SAFE_PLAZA_RETURN.X,
+        returnY: SAFE_PLAZA_RETURN.Y,
+      });
+    });
 
     const g = this.add.graphics();
     g.fillStyle(0x0d0505);

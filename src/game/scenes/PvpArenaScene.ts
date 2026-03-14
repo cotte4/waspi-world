@@ -1,8 +1,10 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarAction, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { COLORS } from '../config/constants';
+import { COLORS, SAFE_PLAZA_RETURN } from '../config/constants';
+import { eventBus, EVENTS } from '../config/eventBus';
 import { getTenksBalance, initTenks } from '../systems/TenksSystem';
-import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
 import { supabase, isConfigured } from '../../lib/supabase';
 
 type ArenaRemotePlayer = {
@@ -164,8 +166,13 @@ export class PvpArenaScene extends Phaser.Scene {
   private keyA!: Phaser.Input.Keyboard.Key;
   private keyS!: Phaser.Input.Keyboard.Key;
   private keyD!: Phaser.Input.Keyboard.Key;
+  private keyI!: Phaser.Input.Keyboard.Key;
+  private keyJ!: Phaser.Input.Keyboard.Key;
+  private keyK!: Phaser.Input.Keyboard.Key;
+  private keyL!: Phaser.Input.Keyboard.Key;
   private pointerShootHandler?: (pointer: Phaser.Input.Pointer) => void;
   private readyBusy = false;
+  private controlSettings: ControlSettings = loadControlSettings();
 
   constructor() {
     super({ key: 'PvpArenaScene' });
@@ -205,6 +212,10 @@ export class PvpArenaScene extends Phaser.Scene {
     this.keyA = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyS = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this.keyD = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D);
+    this.keyI = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.I);
+    this.keyJ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.J);
+    this.keyK = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.K);
+    this.keyL = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.L);
 
     this.pointerShootHandler = (pointer: Phaser.Input.Pointer) => {
       if (!pointer.leftButtonDown()) return;
@@ -213,6 +224,20 @@ export class PvpArenaScene extends Phaser.Scene {
     this.input.on('pointerdown', this.pointerShootHandler);
 
     this.setupChannel();
+    bindSafeResetToPlaza(this, () => {
+      transitionToScene(this, 'WorldScene', {
+        returnX: SAFE_PLAZA_RETURN.X,
+        returnY: SAFE_PLAZA_RETURN.Y,
+      });
+    });
+    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      this.controlSettings = {
+        ...this.controlSettings,
+        ...(payload as Partial<ControlSettings>),
+      };
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
     void this.syncAuthenticatedIdentity();
     this.refreshUi();
     this.cameras.main.resetFX();
@@ -493,12 +518,11 @@ export class PvpArenaScene extends Phaser.Scene {
       return;
     }
 
-    const left = this.cursors.left.isDown || this.keyA.isDown;
-    const right = this.cursors.right.isDown || this.keyD.isDown;
-    const up = this.cursors.up.isDown || this.keyW.isDown;
-    const down = this.cursors.down.isDown || this.keyS.isDown;
-    const mx = (right ? 1 : 0) - (left ? 1 : 0);
-    const my = (down ? 1 : 0) - (up ? 1 : 0);
+    const { dx: mx, dy: my } = readMovementVector({
+      scene: this,
+      settings: this.controlSettings,
+      includeJoystick: true,
+    });
     const moving = mx !== 0 || my !== 0;
     this.lastMoveDx = mx;
     this.lastMoveDy = my;
