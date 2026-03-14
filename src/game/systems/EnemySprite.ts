@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { ensureFallbackRectTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation } from './AnimationSafety';
 
 export type ZombieState = 'idle' | 'walk' | 'attack' | 'hurt' | 'death';
 export type ZombieType = 'rusher' | 'shooter' | 'tank' | 'boss';
@@ -23,10 +24,15 @@ export class EnemySprite {
   private type: ZombieType;
   private currentState: ZombieState = 'idle';
   private dead = false;
+  private scene: Phaser.Scene;
 
   constructor(scene: Phaser.Scene, x: number, y: number, type: ZombieType) {
+    this.scene = scene;
     this.type = type;
-    this.sprite = scene.add.sprite(x, y + ZOMBIE_Y_OFFSET[type], `zombie_${type}_idle`);
+    const initialTexture = scene.textures.exists(`zombie_${type}_idle`)
+      ? `zombie_${type}_idle`
+      : ensureZombieFallbackTexture(scene, type);
+    this.sprite = scene.add.sprite(x, y + ZOMBIE_Y_OFFSET[type], initialTexture);
     this.sprite.setDepth(30);
     this.sprite.setScale(ZOMBIE_SCALE[type]);
     this.sprite.setOrigin(0.5, 0.5);
@@ -38,13 +44,15 @@ export class EnemySprite {
   }
 
   private playAnim(state: ZombieState) {
+    if (!this.sprite || !this.sprite.scene) return;
     const key = this.animKey(state);
     const isLooping = state === 'idle' || state === 'walk';
-
-    this.sprite.play(key, true);
+    const fallbackKey = ensureZombieFallbackTexture(this.scene, this.type);
+    safePlaySpriteAnimation(this.scene, this.sprite, key, `zombie_${this.type}_${state}`, fallbackKey, true);
 
     if (!isLooping) {
       this.sprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
+        if (!this.sprite || !this.sprite.scene) return;
         if (this.dead) return;
         if (this.currentState === state) {
           this.currentState = 'idle';
@@ -55,6 +63,7 @@ export class EnemySprite {
   }
 
   setState(state: ZombieState) {
+    if (!this.sprite || !this.sprite.scene) return;
     if (this.dead && state !== 'death') return;
 
     // Avoid re-triggering looping anims every frame
@@ -79,10 +88,12 @@ export class EnemySprite {
   }
 
   setPosition(x: number, y: number) {
+    if (!this.sprite || !this.sprite.scene) return;
     this.sprite.setPosition(x, y + ZOMBIE_Y_OFFSET[this.type]);
   }
 
   revive() {
+    if (!this.sprite || !this.sprite.scene) return;
     this.dead = false;
     this.currentState = 'idle';
     this.sprite.setAlpha(1);
@@ -90,15 +101,17 @@ export class EnemySprite {
   }
 
   setAlpha(alpha: number) {
+    if (!this.sprite || !this.sprite.scene) return;
     this.sprite.setAlpha(alpha);
   }
 
   setFlipX(flip: boolean) {
+    if (!this.sprite || !this.sprite.scene) return;
     this.sprite.setFlipX(flip);
   }
 
   destroy() {
-    this.sprite.destroy();
+    this.sprite?.destroy();
   }
 }
 
@@ -139,12 +152,13 @@ export function registerZombieAnims(scene: Phaser.Scene) {
 
   for (const c of configs) {
     const key = `zombie_${c.type}_${c.state}`;
-    if (scene.anims.exists(key)) continue;
-    scene.anims.create({
-      key,
-      frames: scene.anims.generateFrameNumbers(key, { start: 0, end: c.frames - 1 }),
-      frameRate: c.fps,
-      repeat: c.loop ? -1 : 0,
-    });
+    ensureZombieFallbackTexture(scene, c.type);
+    safeCreateSpritesheetAnimation(scene, key, key, c.fps, c.loop ? -1 : 0, 0, c.frames - 1);
   }
+}
+
+function ensureZombieFallbackTexture(scene: Phaser.Scene, type: ZombieType) {
+  const size = type === 'boss' ? 128 : type === 'tank' ? 96 : 64;
+  const fill = type === 'boss' ? 0x7a274c : type === 'tank' ? 0x6f5f3f : type === 'shooter' ? 0x55773d : 0x6b7d4b;
+  return ensureFallbackRectTexture(scene, `zombie_fallback_${type}`, size, size, fill);
 }

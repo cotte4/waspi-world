@@ -133,6 +133,7 @@ type DummyState = {
   isBoss: boolean;
   xpReward: number;
   tenksReward: number;
+  radius: number;
 };
 
 type ParcelVisual = {
@@ -1013,6 +1014,7 @@ export class WorldScene extends Phaser.Scene {
       isBoss: archetype === 'boss',
       xpReward: profile.xpReward,
       tenksReward: profile.tenksReward,
+      radius: profile.radius,
     };
     this.dummyStates.set(dummy, state);
     if (archetype === 'boss') {
@@ -1145,6 +1147,7 @@ export class WorldScene extends Phaser.Scene {
 
   private updateDummies() {
     for (const [dummy, state] of this.dummyStates) {
+      if (!dummy.active || !dummy.body) continue;
       if (!state.alive) {
         if (this.time.now < state.respawnAt) continue;
         state.alive = true;
@@ -1191,7 +1194,7 @@ export class WorldScene extends Phaser.Scene {
         targetX = dummy.x + moveX;
         targetY = dummy.y + moveY;
 
-        if (distToPlayer < dummy.radius + 20 && this.time.now - this.lastDamageAt > LOCAL_HIT_COOLDOWN_MS) {
+        if (distToPlayer < state.radius + 20 && this.time.now - this.lastDamageAt > LOCAL_HIT_COOLDOWN_MS) {
           this.applyLocalDamage(state.contactDamage, dummy.x, dummy.y);
           state.sprite?.setState('attack');
         }
