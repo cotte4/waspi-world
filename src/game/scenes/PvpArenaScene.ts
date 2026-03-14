@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { AvatarRenderer, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
+import { AvatarRenderer, type AvatarAction, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { COLORS } from '../config/constants';
 import { getTenksBalance, initTenks } from '../systems/TenksSystem';
 import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
@@ -14,6 +14,7 @@ type ArenaRemotePlayer = {
   targetX: number;
   targetY: number;
   moveDx: number;
+  moveDy: number;
   isMoving: boolean;
   ready: boolean;
   bet: number;
@@ -31,7 +32,9 @@ type ArenaStatePayload = {
   x: number;
   y: number;
   dir?: number | null;
+  dy?: number | null;
   moving?: boolean | null;
+  action?: AvatarAction | null;
   avatar?: AvatarConfig;
   ready?: boolean | null;
   bet?: number | null;
@@ -114,6 +117,7 @@ export class PvpArenaScene extends Phaser.Scene {
   private px = LOBBY_BOUNDS.centerX;
   private py = LOBBY_BOUNDS.bottom - 26;
   private lastMoveDx = 0;
+  private lastMoveDy = 0;
   private lastIsMoving = false;
   private lastPosSent = 0;
   private lastShotAt = 0;
@@ -483,8 +487,9 @@ export class PvpArenaScene extends Phaser.Scene {
   private handleMovement(delta: number) {
     if (this.countdownEndsAt > this.time.now || (!this.alive && this.inMatch)) {
       this.lastMoveDx = 0;
+      this.lastMoveDy = 0;
       this.lastIsMoving = false;
-      this.player.update(false, 0);
+      this.player.update(false, 0, 0);
       return;
     }
 
@@ -496,10 +501,11 @@ export class PvpArenaScene extends Phaser.Scene {
     const my = (down ? 1 : 0) - (up ? 1 : 0);
     const moving = mx !== 0 || my !== 0;
     this.lastMoveDx = mx;
+    this.lastMoveDy = my;
     this.lastIsMoving = moving;
 
     if (!moving) {
-      this.player.update(false, this.lastMoveDx);
+      this.player.update(false, this.lastMoveDx, this.lastMoveDy);
       return;
     }
 
@@ -662,6 +668,18 @@ export class PvpArenaScene extends Phaser.Scene {
     this.playerNameplate.setPosition(this.px, this.py - 46);
   }
 
+  private playAvatarAction(avatar: AvatarRenderer, action: AvatarAction) {
+    if (action === 'shoot') {
+      avatar.playShoot();
+      return;
+    }
+    if (action === 'hurt') {
+      avatar.playHurt();
+      return;
+    }
+    avatar.playDeath();
+  }
+
   private maybeRespawn() {
     if (!this.inMatch || this.alive || this.respawnAt === 0 || this.time.now < this.respawnAt) return;
     this.alive = true;
@@ -692,6 +710,8 @@ export class PvpArenaScene extends Phaser.Scene {
     if (!this.inMatch || !this.alive || this.time.now < this.countdownEndsAt) return;
     if (this.time.now - this.lastShotAt < COOLDOWN_MS) return;
     this.lastShotAt = this.time.now;
+    this.player.playShoot();
+    this.broadcastState('player:move', 'shoot');
 
     const angle = Phaser.Math.Angle.Between(this.px, this.py, targetX, targetY);
     const tracerEndX = this.px + Math.cos(angle) * 180;
@@ -779,14 +799,16 @@ export class PvpArenaScene extends Phaser.Scene {
     });
 
     if (this.hp > 0) {
-      this.broadcastState('player:move');
+      this.player.playHurt();
+      this.broadcastState('player:move', 'hurt');
       return;
     }
 
     this.lives = Math.max(0, this.lives - 1);
     this.alive = false;
     this.hp = 0;
-    this.broadcastState('player:move');
+    this.player.playDeath();
+    this.broadcastState('player:move', 'death');
 
     if (this.lives > 0) {
       this.respawnAt = this.time.now + RESPAWN_MS;
@@ -882,6 +904,7 @@ export class PvpArenaScene extends Phaser.Scene {
     remote.targetY = next.y;
     remote.username = next.username;
     remote.moveDx = next.dir ?? 0;
+    remote.moveDy = next.dy ?? 0;
     remote.isMoving = next.moving ?? false;
     remote.ready = next.ready ?? false;
     remote.bet = next.bet ?? BET_OPTIONS[0];
@@ -892,6 +915,9 @@ export class PvpArenaScene extends Phaser.Scene {
     remote.slot = next.slot === 0 || next.slot === 1 ? next.slot : null;
     remote.matchId = next.match_id ?? '';
     remote.nameplate.setText(`${next.username}${remote.ready && !remote.inMatch ? ' *' : ''}`);
+    if (next.action) {
+      this.playAvatarAction(remote.avatar, next.action);
+    }
   }
 
   private handleRemoteLeave(payload: unknown) {
@@ -936,6 +962,7 @@ export class PvpArenaScene extends Phaser.Scene {
       targetX: x,
       targetY: y,
       moveDx: 0,
+      moveDy: 0,
       isMoving: false,
       ready: false,
       bet: BET_OPTIONS[0],
@@ -954,7 +981,7 @@ export class PvpArenaScene extends Phaser.Scene {
       remote.y = Phaser.Math.Linear(remote.y, remote.targetY, 0.2);
       remote.avatar.setPosition(remote.x, remote.y);
       remote.avatar.setDepth(20 + Math.floor(remote.y / 10));
-      remote.avatar.update(remote.isMoving && remote.alive, remote.moveDx);
+      remote.avatar.update(remote.isMoving && remote.alive, remote.moveDx, remote.moveDy);
       remote.nameplate.setPosition(remote.x, remote.y - 46);
       remote.avatar.getContainer().setAlpha(remote.alive ? 1 : 0.35);
       remote.nameplate.setAlpha(remote.alive ? 1 : 0.5);
@@ -1035,7 +1062,7 @@ export class PvpArenaScene extends Phaser.Scene {
     this.broadcastState('player:move');
   }
 
-  private broadcastState(event: 'player:join' | 'player:move') {
+  private broadcastState(event: 'player:join' | 'player:move', action?: AvatarAction) {
     if (!this.channel) return;
     this.channel.send({
       type: 'broadcast',
@@ -1046,7 +1073,9 @@ export class PvpArenaScene extends Phaser.Scene {
         x: Math.round(this.px),
         y: Math.round(this.py),
         dir: this.lastMoveDx,
+        dy: this.lastMoveDy,
         moving: this.lastIsMoving,
+        action,
         avatar: this.avatarConfig,
         ready: this.ready,
         bet: this.selectedBet,
@@ -1335,7 +1364,12 @@ function parseArenaStatePayload(payload: unknown): ArenaStatePayload | null {
     x,
     y,
     dir: readNumberField(payload, 'dir', 'dx'),
+    dy: readNumberField(payload, 'dy'),
     moving: readBooleanField(payload, 'moving', 'isMoving'),
+    action: (() => {
+      const action = readStringField(payload, 'action');
+      return action === 'shoot' || action === 'hurt' || action === 'death' ? action : null;
+    })(),
     avatar,
     ready: readBooleanField(payload, 'ready'),
     bet: readNumberField(payload, 'bet'),

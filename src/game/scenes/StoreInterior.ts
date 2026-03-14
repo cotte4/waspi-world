@@ -16,6 +16,7 @@ type StoreRemotePlayer = {
   targetX: number;
   targetY: number;
   moveDx: number;
+  moveDy: number;
   isMoving: boolean;
   avatarConfig: AvatarConfig;
 };
@@ -47,6 +48,7 @@ export class StoreInterior extends Phaser.Scene {
   private channel: ReturnType<NonNullable<typeof supabase>['channel']> | null = null;
   private lastPosSent = 0;
   private lastMoveDx = 0;
+  private lastMoveDy = 0;
   private lastIsMoving = false;
 
   constructor() {
@@ -321,6 +323,7 @@ export class StoreInterior extends Phaser.Scene {
     this.player.setDepth(10 + Math.floor(this.py / 10));
     this.localNameplate?.setPosition(this.px, this.py - 44);
     this.lastMoveDx = dx;
+    this.lastMoveDy = dy;
     this.lastIsMoving = dx !== 0 || dy !== 0;
   }
 
@@ -377,6 +380,7 @@ export class StoreInterior extends Phaser.Scene {
         x: Math.round(this.px),
         y: Math.round(this.py),
         dir: this.lastMoveDx,
+        dy: this.lastMoveDy,
         moving: this.lastIsMoving,
         avatar: loadStoredAvatarConfig(),
       },
@@ -395,7 +399,7 @@ export class StoreInterior extends Phaser.Scene {
     for (const remote of this.remotePlayers.values()) {
       remote.x = Phaser.Math.Linear(remote.x, remote.targetX, 0.18);
       remote.y = Phaser.Math.Linear(remote.y, remote.targetY, 0.18);
-      remote.avatar.update(remote.isMoving, remote.moveDx);
+      remote.avatar.update(remote.isMoving, remote.moveDx, remote.moveDy);
       remote.avatar.setPosition(remote.x, remote.y);
       remote.avatar.setDepth(10 + Math.floor(remote.y / 10));
       remote.nameplate.setPosition(remote.x, remote.y - 44);
@@ -426,6 +430,7 @@ export class StoreInterior extends Phaser.Scene {
     remote.targetX = next.x;
     remote.targetY = next.y;
     remote.moveDx = next.dir ?? 0;
+    remote.moveDy = next.dy ?? 0;
     remote.isMoving = next.moving ?? false;
     remote.username = next.username;
     remote.nameplate.setText(next.username);
@@ -461,6 +466,7 @@ export class StoreInterior extends Phaser.Scene {
       targetX: x,
       targetY: y,
       moveDx: 0,
+      moveDy: 0,
       isMoving: false,
       avatarConfig,
     });
@@ -525,6 +531,7 @@ export class StoreInterior extends Phaser.Scene {
       x,
       y,
       dir: this.readNumberField(payload, 'dir', 'dx'),
+      dy: this.readNumberField(payload, 'dy'),
       moving: this.readBooleanField(payload, 'moving', 'isMoving'),
       avatar,
     };

@@ -58,6 +58,7 @@ export class ArcadeInterior extends Phaser.Scene {
   private audioSettingsCleanup?: () => void;
   private room?: InteriorRoom;
   private lastMoveDx = 0;
+  private lastMoveDy = 0;
   private lastIsMoving = false;
 
   constructor() {
@@ -69,6 +70,7 @@ export class ArcadeInterior extends Phaser.Scene {
     this.wasInsideBasketZone = false;
     this.wasInsidePenaltyZone = false;
     this.lastMoveDx = 0;
+    this.lastMoveDy = 0;
     this.lastIsMoving = false;
     this.basketCooldownMs = data.basketCooldownMs ?? 0;
     this.penaltyCooldownMs = data.penaltyCooldownMs ?? 0;
@@ -230,7 +232,7 @@ export class ArcadeInterior extends Phaser.Scene {
     this.room = new InteriorRoom(this, {
       roomKey: 'waspi-room-arcade',
       getPosition: () => ({ x: this.px, y: this.py }),
-      getMovement: () => ({ dx: this.lastMoveDx, isMoving: this.lastIsMoving }),
+      getMovement: () => ({ dx: this.lastMoveDx, dy: this.lastMoveDy, isMoving: this.lastIsMoving }),
       getAvatarConfig: () => loadStoredAvatarConfig(),
       onRemoteClick: (playerId, username) => {
         eventBus.emit(EVENTS.PLAYER_ACTIONS_OPEN, { playerId, username });
@@ -376,6 +378,7 @@ export class ArcadeInterior extends Phaser.Scene {
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(10 + Math.floor(this.py / 10));
     this.lastMoveDx = dx;
+    this.lastMoveDy = dy;
     this.lastIsMoving = dx !== 0 || dy !== 0;
   }
 

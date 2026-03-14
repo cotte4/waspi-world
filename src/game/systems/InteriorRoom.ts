@@ -11,6 +11,7 @@ type InteriorRemotePlayer = {
   targetX: number;
   targetY: number;
   moveDx: number;
+  moveDy: number;
   isMoving: boolean;
   avatarConfig: AvatarConfig;
 };
@@ -21,6 +22,7 @@ type RoomStatePayload = {
   x: number;
   y: number;
   dir?: number | null;
+  dy?: number | null;
   moving?: boolean | null;
   avatar?: AvatarConfig;
 };
@@ -28,7 +30,7 @@ type RoomStatePayload = {
 type InteriorRoomOptions = {
   roomKey: string;
   getPosition: () => { x: number; y: number };
-  getMovement: () => { dx: number; isMoving: boolean };
+  getMovement: () => { dx: number; dy: number; isMoving: boolean };
   getAvatarConfig: () => AvatarConfig;
   onRemoteClick?: (playerId: string, username: string) => void;
   localColor?: string;
@@ -92,7 +94,7 @@ export class InteriorRoom {
     for (const remote of this.remotePlayers.values()) {
       remote.x = Phaser.Math.Linear(remote.x, remote.targetX, 0.18);
       remote.y = Phaser.Math.Linear(remote.y, remote.targetY, 0.18);
-      remote.avatar.update(remote.isMoving, remote.moveDx);
+      remote.avatar.update(remote.isMoving, remote.moveDx, remote.moveDy);
       remote.avatar.setPosition(remote.x, remote.y);
       remote.avatar.setDepth((this.options.depthBase ?? 10) + Math.floor(remote.y / 10));
       remote.nameplate.setPosition(remote.x, remote.y - (this.options.nameplateOffsetY ?? 44));
@@ -139,6 +141,7 @@ export class InteriorRoom {
         x: Math.round(x),
         y: Math.round(y),
         dir: movement.dx,
+        dy: movement.dy,
         moving: movement.isMoving,
         avatar: this.options.getAvatarConfig(),
       },
@@ -169,6 +172,7 @@ export class InteriorRoom {
     remote.targetX = next.x;
     remote.targetY = next.y;
     remote.moveDx = next.dir ?? 0;
+    remote.moveDy = next.dy ?? 0;
     remote.isMoving = next.moving ?? false;
     remote.username = next.username;
     remote.nameplate.setText(next.username);
@@ -211,6 +215,7 @@ export class InteriorRoom {
       targetX: x,
       targetY: y,
       moveDx: 0,
+      moveDy: 0,
       isMoving: false,
       avatarConfig,
     });
@@ -275,6 +280,7 @@ export class InteriorRoom {
       x,
       y,
       dir: this.readNumberField(payload, 'dir', 'dx'),
+      dy: this.readNumberField(payload, 'dy'),
       moving: this.readBooleanField(payload, 'moving', 'isMoving'),
       avatar,
     };

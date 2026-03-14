@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { AvatarRenderer, AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
+import { AvatarRenderer, AvatarConfig, type AvatarAction, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { ChatSystem } from '../systems/ChatSystem';
 import { WORLD, PLAYER, COLORS, ZONES, BUILDINGS, CHAT } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
@@ -27,6 +27,7 @@ interface RemotePlayer {
   targetY: number;
   isMoving: boolean;
   moveDx: number;
+  moveDy: number;
   weapon?: WeaponMode;
   aimAngle: number;
   avatarConfig: AvatarConfig;
@@ -44,9 +45,11 @@ type RemoteMoveEvent = {
   x: number;
   y: number;
   dir: number;
+  dy: number;
   moving: boolean;
   weapon?: WeaponMode;
   aim?: number;
+  action?: AvatarAction;
 };
 type RemoteChatEvent = {
   player_id: string;
@@ -64,6 +67,7 @@ type RemoteStateEvent = {
   equipped?: EquippedPayload;
   weapon?: WeaponMode;
   aim?: number;
+  action?: AvatarAction;
 };
 type RemoteHitEvent = {
   target_id: string;
@@ -303,6 +307,7 @@ export class WorldScene extends Phaser.Scene {
   private channel: ReturnType<NonNullable<typeof supabase>['channel']> | null = null;
   private bridgeCleanupFns: Array<() => void> = [];
   private lastMoveDx = 0;
+  private lastMoveDy = 0;
   private lastIsMoving = false;
 
   // Combat / HP
@@ -1313,11 +1318,17 @@ export class WorldScene extends Phaser.Scene {
     this.playerAvatar.setPosition(this.px, this.py);
     this.playerNameplate.setPosition(this.px, this.py - 46);
 
-    if (this.hp > 0) return;
+    if (this.hp > 0) {
+      this.playerAvatar.playHurt();
+      this.broadcastSelfState('player:update', 'hurt');
+      return;
+    }
 
     this.combatStats = { ...this.combatStats, deaths: this.combatStats.deaths + 1 };
     saveCombatStats(this.combatStats);
     eventBus.emit(EVENTS.PLAYER_COMBAT_STATS, this.combatStats);
+    this.playerAvatar.playDeath();
+    this.broadcastSelfState('player:update', 'death');
     this.hp = 100;
     this.renderHpHud();
     this.px = PLAZA_RESPAWN_X;
@@ -1344,6 +1355,7 @@ export class WorldScene extends Phaser.Scene {
       ease: 'Sine.easeOut',
       onComplete: () => respawnText.destroy(),
     });
+    this.broadcastSelfState('player:update');
   }
 
   private setupCombat() {
@@ -1394,10 +1406,11 @@ export class WorldScene extends Phaser.Scene {
     if (now - this.lastShotAt < weapon.cooldownMs) return;
     this.lastShotAt = now;
     this.weaponAimAngle = Phaser.Math.Angle.Between(this.px, this.py, wx, wy);
+    this.playerAvatar.playShoot();
     if (this.gunSprite) {
       safePlaySpriteAnimation(this, this.gunSprite, weapon.shootAnim, weapon.idleTexture, WEAPON_FALLBACK_TEXTURE, true);
     }
-    this.broadcastSelfState('player:update');
+    this.broadcastSelfState('player:update', 'shoot');
     this.ensureAudioReady();
     this.playCombatTone(
       this.currentWeapon === 'shotgun' ? 120 : 220,
@@ -2490,6 +2503,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.inputBlocked) {
       this.lastIsMoving = false;
       this.lastMoveDx = 0;
+      this.lastMoveDy = 0;
       return;
     }
 
@@ -2518,6 +2532,7 @@ export class WorldScene extends Phaser.Scene {
     const isMoving = dx !== 0 || dy !== 0;
     this.lastIsMoving = isMoving;
     this.lastMoveDx = dx;
+    this.lastMoveDy = dy;
     const newX = Phaser.Math.Clamp(this.px + dx * speed, 20, WORLD.WIDTH - 20);
     const newY = Phaser.Math.Clamp(this.py + dy * speed, 20, WORLD.HEIGHT - 20);
 
@@ -2768,6 +2783,7 @@ export class WorldScene extends Phaser.Scene {
     rp.nameplate.setText(next.username);
     rp.isMoving = next.moving;
     rp.moveDx = next.dir;
+    rp.moveDy = next.dy;
     if (next.weapon) {
       rp.weapon = next.weapon;
     }
@@ -2775,6 +2791,9 @@ export class WorldScene extends Phaser.Scene {
       rp.aimAngle = next.aim;
     } else if (Math.abs(next.dir) > 0.05) {
       rp.aimAngle = next.dir < 0 ? Math.PI : 0;
+    }
+    if (next.action) {
+      this.playAvatarAction(rp.avatar, next.action);
     }
   }
 
@@ -2840,6 +2859,7 @@ export class WorldScene extends Phaser.Scene {
       targetY: y,
       isMoving: false,
       moveDx: 0,
+      moveDy: 0,
       weapon,
       aimAngle: Number.isFinite(aimAngle) ? aimAngle : 0,
       avatarConfig: cfg,
@@ -2871,6 +2891,9 @@ export class WorldScene extends Phaser.Scene {
     }
     if (typeof next.aim === 'number' && Number.isFinite(next.aim)) {
       rp.aimAngle = next.aim;
+    }
+    if (next.action) {
+      this.playAvatarAction(rp.avatar, next.action);
     }
 
     if (next.avatar) {
@@ -2929,6 +2952,18 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
+  private playAvatarAction(avatar: AvatarRenderer, action: AvatarAction) {
+    if (action === 'shoot') {
+      avatar.playShoot();
+      return;
+    }
+    if (action === 'hurt') {
+      avatar.playHurt();
+      return;
+    }
+    avatar.playDeath();
+  }
+
   private syncPosition() {
     const now = Date.now();
     if (now - this.lastPosSent < 66) return; // ~15Hz
@@ -2943,6 +2978,7 @@ export class WorldScene extends Phaser.Scene {
         x: Math.round(this.px),
         y: Math.round(this.py),
         dir: this.lastMoveDx,
+        dy: this.lastMoveDy,
         moving: this.lastIsMoving,
         weapon: this.currentWeapon,
         aim: this.weaponAimAngle,
@@ -3233,7 +3269,7 @@ export class WorldScene extends Phaser.Scene {
     this.playerAvatar.setDepth(depth);
   }
 
-  private broadcastSelfState(event: 'player:join' | 'player:update') {
+  private broadcastSelfState(event: 'player:join' | 'player:update', action?: AvatarAction) {
     if (!this.channel) return;
     const cfg = this.getCurrentAvatarConfig();
     const payload = {
@@ -3245,6 +3281,7 @@ export class WorldScene extends Phaser.Scene {
       equipped: this.getEquippedIds(),
       weapon: this.currentWeapon,
       aim: this.weaponAimAngle,
+      action,
       topColor: cfg.topColor,
       bottomColor: cfg.bottomColor,
     };
@@ -3352,7 +3389,8 @@ export class WorldScene extends Phaser.Scene {
         const deltaY = rp.targetY - rp.y;
         const isMoving = rp.isMoving || Math.abs(deltaX) > 0.8 || Math.abs(deltaY) > 0.8;
         const visualDx = Math.abs(deltaX) > 0.1 ? deltaX : rp.moveDx;
-        rp.avatar.update(isMoving, visualDx);
+        const visualDy = Math.abs(deltaY) > 0.1 ? deltaY : rp.moveDy;
+        rp.avatar.update(isMoving, visualDx, visualDy);
         rp.avatar.setPosition(rp.x, rp.y);
         rp.avatar.setDepth(Math.floor(rp.y / 10));
         rp.nameplate.setPosition(rp.x, rp.y - 46);
@@ -3592,9 +3630,11 @@ export class WorldScene extends Phaser.Scene {
       x,
       y,
       dir: this.readNumberField(payload, 'dir', 'dx') ?? 0,
+      dy: this.readNumberField(payload, 'dy') ?? 0,
       moving: this.readBooleanField(payload, 'moving', 'isMoving') ?? false,
       weapon: weaponRaw === 'shotgun' ? 'shotgun' : weaponRaw === 'pistol' ? 'pistol' : undefined,
       aim: this.readNumberField(payload, 'aim') ?? undefined,
+      action: this.readAvatarAction(payload),
     };
   }
 
@@ -3640,7 +3680,13 @@ export class WorldScene extends Phaser.Scene {
       equipped,
       weapon: weaponRaw === 'shotgun' ? 'shotgun' : weaponRaw === 'pistol' ? 'pistol' : undefined,
       aim: this.readNumberField(payload, 'aim') ?? undefined,
+      action: this.readAvatarAction(payload),
     };
+  }
+
+  private readAvatarAction(payload: unknown): AvatarAction | undefined {
+    const action = this.readStringField(payload, 'action');
+    return action === 'shoot' || action === 'hurt' || action === 'death' ? action : undefined;
   }
 
   private parseRemoteHit(payload: unknown): RemoteHitEvent | null {

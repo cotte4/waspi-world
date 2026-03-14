@@ -941,6 +941,7 @@ export class ZombiesScene extends Phaser.Scene {
 
     ammo.ammoInMag -= 1;
     this.lastShotAt = this.time.now;
+    this.player.playShoot();
     const baseAngle = Phaser.Math.Angle.Between(this.px, this.py, targetX, targetY);
 
     for (let i = 0; i < weapon.pellets; i += 1) {
@@ -1593,11 +1594,13 @@ export class ZombiesScene extends Phaser.Scene {
     if (this.time.now - this.lastDamageAt < 320) return;
     this.lastDamageAt = this.time.now;
     this.hp = Math.max(0, this.hp - amount);
+    this.player.playHurt();
     this.showFloatingText(`-${amount}`, this.px, this.py - 52, '#FF6A6A');
     this.cameras.main.shake(90, 0.0028);
     if (this.hp > 0) return;
 
     this.gameOver = true;
+    this.player.playDeath();
     this.showNotice('GAME OVER - SPACE REINICIAR', '#FF6A6A');
   }
 

@@ -4,6 +4,7 @@ import { ensureFallbackRectTexture, safeCreateSpritesheetAnimation, safePlaySpri
 
 export type AvatarKind = 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha' | 'trap_a' | 'trap_b' | 'trap_c' | 'trap_d';
 export type HairStyle = 'SPI' | 'FLA' | 'MOH' | 'X';
+export type AvatarAction = 'shoot' | 'hurt' | 'death';
 
 export interface AvatarConfig {
   avatarKind?: AvatarKind;
@@ -38,6 +39,8 @@ export const DEFAULT_AVATAR_CONFIG: Required<AvatarConfig> = {
 };
 
 type AnimatedAvatarKind = 'trap_a' | 'trap_b' | 'trap_c' | 'trap_d';
+type AnimatedMovementState = 'idle' | 'walk_side' | 'walk_up' | 'walk_down';
+type AnimatedAvatarState = AnimatedMovementState | AvatarAction;
 
 const AVATAR_KINDS: AvatarKind[] = ['procedural', 'gengar', 'buho', 'piplup', 'chacha', 'trap_a', 'trap_b', 'trap_c', 'trap_d'];
 const ANIMATED_AVATAR_KINDS: AnimatedAvatarKind[] = ['trap_a', 'trap_b', 'trap_c', 'trap_d'];
@@ -93,7 +96,12 @@ export class AvatarRenderer {
   private specialSprite?: Phaser.GameObjects.Sprite;
   private specialBaseY = 12;
   private animatedKind?: AnimatedAvatarKind;
-  private lastAnimatedState?: 'idle' | 'walk_side' | 'walk_up' | 'walk_down';
+  private lastAnimatedState?: AnimatedAvatarState;
+  private activeAnimatedAction?: AvatarAction;
+  private animatedActionTimer?: Phaser.Time.TimerEvent;
+  private lastIsMoving = false;
+  private lastDx = 0;
+  private lastDy = 0;
   private lastPuffAt = 0;
   readonly config: Required<AvatarConfig>;
 
@@ -255,6 +263,10 @@ export class AvatarRenderer {
   }
 
   update(isMoving: boolean, dx: number, dy = 0) {
+    this.lastIsMoving = isMoving;
+    this.lastDx = dx;
+    this.lastDy = dy;
+
     // Direction flip
     if (dx < -0.1 && !this.facingLeft) {
       this.container.setScale(-1, 1);
@@ -265,15 +277,17 @@ export class AvatarRenderer {
     }
 
     if (this.animatedKind && this.specialSprite) {
-      let nextState: 'idle' | 'walk_side' | 'walk_up' | 'walk_down' = 'idle';
-      if (isMoving) {
-        if (Math.abs(dy) > Math.abs(dx) + 0.05) {
-          nextState = dy < 0 ? 'walk_up' : 'walk_down';
-        } else {
-          nextState = 'walk_side';
+      if (!this.activeAnimatedAction) {
+        let nextState: AnimatedMovementState = 'idle';
+        if (isMoving) {
+          if (Math.abs(dy) > Math.abs(dx) + 0.05) {
+            nextState = dy < 0 ? 'walk_up' : 'walk_down';
+          } else {
+            nextState = 'walk_side';
+          }
         }
+        this.playAnimatedState(nextState);
       }
-      this.playAnimatedState(nextState);
       if (!isMoving && this.config.smoke) {
         const now = Date.now();
         if (now - this.lastPuffAt > 900) {
@@ -333,7 +347,42 @@ export class AvatarRenderer {
     });
   }
 
-  private playAnimatedState(state: 'idle' | 'walk_side' | 'walk_up' | 'walk_down') {
+  playShoot() {
+    this.playAnimatedAction('shoot', 170);
+  }
+
+  playHurt() {
+    this.playAnimatedAction('hurt', 240);
+  }
+
+  playDeath() {
+    this.playAnimatedAction('death', 620);
+  }
+
+  private playAnimatedAction(action: AvatarAction, durationMs: number) {
+    if (!this.animatedKind || !this.specialSprite) return;
+    const textureKey = getCharacterTextureKey(this.animatedKind, action);
+    const fallbackKey = `character_${this.animatedKind}_fallback`;
+    safePlaySpriteAnimation(
+      this.container.scene,
+      this.specialSprite,
+      getCharacterAnimationKey(this.animatedKind, action),
+      textureKey,
+      fallbackKey,
+      false,
+    );
+    this.activeAnimatedAction = action;
+    this.lastAnimatedState = action;
+    this.animatedActionTimer?.remove(false);
+    this.animatedActionTimer = this.container.scene.time.delayedCall(durationMs, () => {
+      this.activeAnimatedAction = undefined;
+      this.lastAnimatedState = undefined;
+      this.animatedActionTimer = undefined;
+      this.update(this.lastIsMoving, this.lastDx, this.lastDy);
+    });
+  }
+
+  private playAnimatedState(state: AnimatedMovementState) {
     if (!this.animatedKind || !this.specialSprite) return;
     if (this.lastAnimatedState === state) return;
     const textureKey = getCharacterTextureKey(this.animatedKind, state);
@@ -361,6 +410,8 @@ export class AvatarRenderer {
   get y() { return this.container.y; }
 
   destroy() {
+    this.animatedActionTimer?.remove(false);
+    this.animatedActionTimer = undefined;
     this.container.destroy();
   }
 }
@@ -392,20 +443,23 @@ function isAnimatedAvatarKind(kind: AvatarKind): kind is AnimatedAvatarKind {
   return ANIMATED_AVATAR_KINDS.includes(kind as AnimatedAvatarKind);
 }
 
-function getCharacterTextureKey(kind: AnimatedAvatarKind, state: 'idle' | 'walk_side' | 'walk_up' | 'walk_down') {
+function getCharacterTextureKey(kind: AnimatedAvatarKind, state: AnimatedAvatarState) {
   return `character_${kind}_${state}`;
 }
 
-function getCharacterAnimationKey(kind: AnimatedAvatarKind, state: 'idle' | 'walk_side' | 'walk_up' | 'walk_down') {
+function getCharacterAnimationKey(kind: AnimatedAvatarKind, state: AnimatedAvatarState) {
   return `character_${kind}_${state}_anim`;
 }
 
 function ensureAnimatedCharacterAnimations(scene: Phaser.Scene, kind: AnimatedAvatarKind) {
-  const states: Array<{ state: 'idle' | 'walk_side' | 'walk_up' | 'walk_down'; frameRate: number; repeat: number }> = [
+  const states: Array<{ state: AnimatedAvatarState; frameRate: number; repeat: number }> = [
     { state: 'idle', frameRate: 6, repeat: -1 },
     { state: 'walk_side', frameRate: 10, repeat: -1 },
     { state: 'walk_up', frameRate: 10, repeat: -1 },
     { state: 'walk_down', frameRate: 10, repeat: -1 },
+    { state: 'shoot', frameRate: 14, repeat: 0 },
+    { state: 'hurt', frameRate: 12, repeat: 0 },
+    { state: 'death', frameRate: 10, repeat: 0 },
   ];
   ensureFallbackRectTexture(scene, `character_${kind}_fallback`, 64, 64, 0x5c4b6d);
   for (const { state, frameRate, repeat } of states) {

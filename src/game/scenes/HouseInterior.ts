@@ -52,6 +52,7 @@ export class HouseInterior extends Phaser.Scene {
   private wardrobeRect!: Phaser.Geom.Rectangle;
   private room?: InteriorRoom;
   private lastMoveDx = 0;
+  private lastMoveDy = 0;
   private lastIsMoving = false;
   private returnScene = 'WorldScene';
   private roomKey = 'waspi-room-house';
@@ -97,7 +98,7 @@ export class HouseInterior extends Phaser.Scene {
     this.room = new InteriorRoom(this, {
       roomKey: this.roomKey,
       getPosition: () => ({ x: this.px, y: this.py }),
-      getMovement: () => ({ dx: this.lastMoveDx, isMoving: this.lastIsMoving }),
+      getMovement: () => ({ dx: this.lastMoveDx, dy: this.lastMoveDy, isMoving: this.lastIsMoving }),
       getAvatarConfig: () => loadStoredAvatarConfig(),
       onRemoteClick: (playerId, username) => {
         eventBus.emit(EVENTS.PLAYER_ACTIONS_OPEN, { playerId, username });
@@ -177,6 +178,7 @@ export class HouseInterior extends Phaser.Scene {
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(10 + Math.floor(this.py / 10));
     this.lastMoveDx = dx;
+    this.lastMoveDy = dy;
     this.lastIsMoving = dx !== 0 || dy !== 0;
   }
 
