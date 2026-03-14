@@ -10,9 +10,11 @@ import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings'
 import { loadHudSettings, type HudSettings } from '../systems/HudSettings';
 import { addXpToProgression, loadProgressionState, saveProgressionState, type ProgressionState } from '../systems/ProgressionSystem';
 import { loadCombatStats, saveCombatStats, type CombatStats } from '../systems/CombatStats';
+import { ensureFallbackRectTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation, safeSetSpriteTexture } from '../systems/AnimationSafety';
 import { announceScene } from '../systems/SceneUi';
 import type { VecindadState } from '../../lib/playerState';
 import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
+import { EnemySprite, registerZombieAnims, type ZombieType } from '../systems/EnemySprite';
 
 interface RemotePlayer {
   avatar: AvatarRenderer;
@@ -107,6 +109,7 @@ type DummyState = {
   archetype: EnemyArchetype;
   nameplate: Phaser.GameObjects.Text;
   hpBar: Phaser.GameObjects.Graphics;
+  sprite?: EnemySprite;
   hp: number;
   maxHp: number;
   originX: number;
@@ -253,6 +256,7 @@ const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
     respawnMs: 5000,
   },
 };
+const WEAPON_FALLBACK_TEXTURE = 'weapon_fallback_rect';
 
 export class WorldScene extends Phaser.Scene {
   // Player
@@ -576,6 +580,9 @@ export class WorldScene extends Phaser.Scene {
       this.applyHudVisibility();
     }));
 
+    // Zombie sprite animations
+    this.runBootStep('zombie anims', () => registerZombieAnims(this));
+
     // Training arena
     this.runBootStep('training zone', () => this.setupTrainingZone());
   }
@@ -688,6 +695,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private ensureWeaponAnimations() {
+    ensureFallbackRectTexture(this, WEAPON_FALLBACK_TEXTURE, 24, 8, 0xF5C842, 0x1A1A1A);
     const animations = [
       { key: 'weapon-glock-idle', texture: 'weapon_glock_idle', frameRate: 8, repeat: -1 },
       { key: 'weapon-glock-shoot', texture: 'weapon_glock_shoot', frameRate: 18, repeat: 0 },
@@ -696,19 +704,15 @@ export class WorldScene extends Phaser.Scene {
     ] as const;
 
     for (const animation of animations) {
-      if (this.anims.exists(animation.key)) continue;
-      this.anims.create({
-        key: animation.key,
-        frames: this.anims.generateFrameNumbers(animation.texture, { start: 0, end: 3 }),
-        frameRate: animation.frameRate,
-        repeat: animation.repeat,
-      });
+      safeCreateSpritesheetAnimation(this, animation.key, animation.texture, animation.frameRate, animation.repeat);
     }
   }
 
   private setupWeaponSystem() {
     this.ensureWeaponAnimations();
-    this.gunSprite = this.add.sprite(this.px, this.py - 8, WEAPON_STATS[this.currentWeapon].idleTexture, 0)
+    const weapon = WEAPON_STATS[this.currentWeapon];
+    const initialTexture = this.textures.exists(weapon.idleTexture) ? weapon.idleTexture : WEAPON_FALLBACK_TEXTURE;
+    this.gunSprite = this.add.sprite(this.px, this.py - 8, initialTexture, 0)
       .setDepth(2050)
       .setVisible(false)
       .setOrigin(0.26, 0.62)
@@ -716,7 +720,9 @@ export class WorldScene extends Phaser.Scene {
     this.gunSprite.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (animation: Phaser.Animations.Animation) => {
       const weapon = WEAPON_STATS[this.currentWeapon];
       if (animation.key === weapon.shootAnim) {
-        this.gunSprite?.play(weapon.idleAnim, true);
+        if (this.gunSprite) {
+          safePlaySpriteAnimation(this, this.gunSprite, weapon.idleAnim, weapon.idleTexture, WEAPON_FALLBACK_TEXTURE, true);
+        }
       }
     });
 
@@ -744,10 +750,10 @@ export class WorldScene extends Phaser.Scene {
     }
 
     if (this.gunSprite.texture.key !== weapon.idleTexture) {
-      this.gunSprite.setTexture(weapon.idleTexture, 0);
+      safeSetSpriteTexture(this, this.gunSprite, weapon.idleTexture, WEAPON_FALLBACK_TEXTURE);
     }
     if (!this.gunSprite.anims.isPlaying || this.gunSprite.anims.currentAnim?.key !== weapon.idleAnim) {
-      this.gunSprite.play(weapon.idleAnim, true);
+      safePlaySpriteAnimation(this, this.gunSprite, weapon.idleAnim, weapon.idleTexture, WEAPON_FALLBACK_TEXTURE, true);
     }
     this.weaponHud.setColor(this.currentWeapon === 'shotgun' ? '#FF8B3D' : '#F5C842');
     this.weaponHud.setText(`ARMA ${weapon.label} | Q CAMBIA`);
@@ -780,7 +786,8 @@ export class WorldScene extends Phaser.Scene {
   private ensureRemoteWeaponSprite(rp: RemotePlayer) {
     const weapon = WEAPON_STATS[rp.weapon ?? 'pistol'];
     if (!rp.gunSprite || rp.gunSprite.scene !== this) {
-      rp.gunSprite = this.add.sprite(rp.x, rp.y - 8, weapon.idleTexture, 0)
+      const initialTexture = this.textures.exists(weapon.idleTexture) ? weapon.idleTexture : WEAPON_FALLBACK_TEXTURE;
+      rp.gunSprite = this.add.sprite(rp.x, rp.y - 8, initialTexture, 0)
         .setDepth(2100 + Math.floor(rp.y / 10))
         .setVisible(this.gunEnabled)
         .setOrigin(0.26, 0.62)
@@ -788,16 +795,18 @@ export class WorldScene extends Phaser.Scene {
       rp.gunSprite.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (animation: Phaser.Animations.Animation) => {
         const currentWeapon = WEAPON_STATS[rp.weapon ?? 'pistol'];
         if (animation.key === currentWeapon.shootAnim) {
-          rp.gunSprite?.play(currentWeapon.idleAnim, true);
+          if (rp.gunSprite) {
+            safePlaySpriteAnimation(this, rp.gunSprite, currentWeapon.idleAnim, currentWeapon.idleTexture, WEAPON_FALLBACK_TEXTURE, true);
+          }
         }
       });
     }
 
     if (rp.gunSprite.texture.key !== weapon.idleTexture) {
-      rp.gunSprite.setTexture(weapon.idleTexture, 0);
+      safeSetSpriteTexture(this, rp.gunSprite, weapon.idleTexture, WEAPON_FALLBACK_TEXTURE);
     }
     if (!rp.gunSprite.anims.isPlaying || rp.gunSprite.anims.currentAnim?.key !== weapon.idleAnim) {
-      rp.gunSprite.play(weapon.idleAnim, true);
+      safePlaySpriteAnimation(this, rp.gunSprite, weapon.idleAnim, weapon.idleTexture, WEAPON_FALLBACK_TEXTURE, true);
     }
   }
 
@@ -952,16 +961,20 @@ export class WorldScene extends Phaser.Scene {
   private spawnTrainingDummy(x: number, y: number, index: number, archetype: EnemyArchetype) {
     const profile = ENEMY_PROFILES[archetype];
     const label = `${profile.label}_${index + 1}`;
-    const dummy = this.add.circle(x, y, profile.radius, profile.tint, 0.7) as CombatDummy;
+    // Physics arc — invisible, used only for collision detection
+    const dummy = this.add.circle(x, y, profile.radius, profile.tint, 0) as CombatDummy;
     dummy.setDepth(30);
-    dummy.setStrokeStyle(2, 0xFFFFFF, 0.2);
     this.physics.add.existing(dummy);
     dummy.body.setCircle(profile.radius);
     dummy.body.setImmovable(true);
     dummy.body.setAllowGravity(false);
     this.dummies.add(dummy);
 
-    const nameplate = this.add.text(x, y - 34, label, {
+    // Zombie sprite — visual layer
+    const zombieSprite = new EnemySprite(this, x, y, archetype as ZombieType);
+
+    const nameplateY = archetype === 'boss' ? y - 76 : archetype === 'tank' ? y - 58 : y - 42;
+    const nameplate = this.add.text(x, nameplateY, label, {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: this.getEnemyNameColor(archetype),
@@ -975,6 +988,7 @@ export class WorldScene extends Phaser.Scene {
       archetype,
       nameplate,
       hpBar,
+      sprite: zombieSprite,
       hp: profile.maxHp,
       maxHp: profile.maxHp,
       originX: x,
@@ -1005,7 +1019,9 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private renderDummyState(dummy: CombatDummy, state: DummyState) {
-    state.nameplate.setPosition(dummy.x, dummy.y - 34);
+    const nameplateOffset = state.archetype === 'boss' ? -76 : state.archetype === 'tank' ? -58 : -42;
+    state.nameplate.setPosition(dummy.x, dummy.y + nameplateOffset);
+    state.sprite?.setPosition(dummy.x, dummy.y);
     state.hpBar.clear();
     if (!state.alive) return;
 
@@ -1050,6 +1066,7 @@ export class WorldScene extends Phaser.Scene {
       onComplete: () => hitNumber.destroy(),
     });
 
+    state.sprite?.setState('hurt');
     this.renderDummyState(dummy, state);
     this.renderBossHud();
     if (state.hp > 0) return;
@@ -1057,8 +1074,9 @@ export class WorldScene extends Phaser.Scene {
     state.alive = false;
     state.respawnAt = this.time.now + state.respawnMs;
     state.hp = 0;
-    dummy.setAlpha(0.16);
+    dummy.setAlpha(0);
     dummy.body.enable = false;
+    state.sprite?.setState('death');
     state.nameplate.setText('DOWN');
     state.nameplate.setColor('#888888');
     this.playCombatTone(state.isBoss ? 120 : 160, 0.16, 'sawtooth', 0.06);
@@ -1127,8 +1145,8 @@ export class WorldScene extends Phaser.Scene {
         state.alive = true;
         state.hp = state.maxHp;
         dummy.body.enable = true;
-        dummy.setAlpha(0.7);
-        dummy.setFillStyle(state.tint, 0.7);
+        dummy.setAlpha(0);
+        state.sprite?.revive();
         state.nameplate.setText(state.label);
         state.nameplate.setColor(this.getEnemyNameColor(state.archetype));
         state.lastShotAt = this.time.now + Phaser.Math.Between(180, 520);
@@ -1170,6 +1188,7 @@ export class WorldScene extends Phaser.Scene {
 
         if (distToPlayer < dummy.radius + 20 && this.time.now - this.lastDamageAt > LOCAL_HIT_COOLDOWN_MS) {
           this.applyLocalDamage(state.contactDamage, dummy.x, dummy.y);
+          state.sprite?.setState('attack');
         }
 
         if (
@@ -1192,6 +1211,17 @@ export class WorldScene extends Phaser.Scene {
 
       targetX = Phaser.Math.Clamp(targetX, ZONES.TRAINING_X + 26, ZONES.TRAINING_X + ZONES.TRAINING_W - 26);
       targetY = Phaser.Math.Clamp(targetY, ZONES.TRAINING_Y + 26, ZONES.TRAINING_Y + ZONES.TRAINING_H - 26);
+
+      // Drive zombie sprite animation based on movement
+      const dx = targetX - dummy.x;
+      const dy = targetY - dummy.y;
+      const isMoving = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
+      if (state.sprite) {
+        state.sprite.setState(isMoving ? 'walk' : 'idle');
+        // Flip sprite to face movement direction
+        if (Math.abs(dx) > 0.2) state.sprite.setFlipX(dx < 0);
+      }
+
       dummy.setPosition(targetX, targetY);
       this.renderDummyState(dummy, state);
     }
@@ -1365,7 +1395,7 @@ export class WorldScene extends Phaser.Scene {
     this.lastShotAt = now;
     this.weaponAimAngle = Phaser.Math.Angle.Between(this.px, this.py, wx, wy);
     if (this.gunSprite) {
-      this.gunSprite.play(weapon.shootAnim, true);
+      safePlaySpriteAnimation(this, this.gunSprite, weapon.shootAnim, weapon.idleTexture, WEAPON_FALLBACK_TEXTURE, true);
     }
     this.broadcastSelfState('player:update');
     this.ensureAudioReady();
@@ -1717,6 +1747,32 @@ export class WorldScene extends Phaser.Scene {
     // Future plaza anchors
     this.drawConstructionSite(820, ZONES.PLAZA_Y + 190, 280, 210, 'CASINO', '#FF4466');
     this.drawConstructionSite(2220, ZONES.PLAZA_Y + 190, 280, 210, 'GUN SHOP', '#46B3FF');
+
+    // Down-plaza gateway to the dedicated zombies district.
+    g.fillStyle(0x120c0f, 1);
+    g.fillRoundedRect(1500, ZONES.PLAZA_Y + 620, 200, 92, 16);
+    g.lineStyle(3, 0xff6ea8, 0.78);
+    g.strokeRoundedRect(1500, ZONES.PLAZA_Y + 620, 200, 92, 16);
+    g.fillStyle(0x2a111d, 1);
+    g.fillRect(1588, ZONES.PLAZA_Y + 588, 24, 124);
+    g.fillRect(1518, ZONES.PLAZA_Y + 640, 20, 52);
+    g.fillRect(1662, ZONES.PLAZA_Y + 640, 20, 52);
+
+    this.add.text(1600, ZONES.PLAZA_Y + 648, 'ZOMBIES', {
+      fontSize: '9px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FF90C2',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+
+    this.add.text(1600, ZONES.PLAZA_Y + 684, 'SPACE ENTRAR', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FFD3E4',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
 
     // Plaza text
     this.add.text(fx, ZONES.PLAZA_Y + 20, 'PLAZA', {
@@ -3315,12 +3371,16 @@ export class WorldScene extends Phaser.Scene {
     const cafeDoorX = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
     const nearVecindad = this.px < 220 && this.py > ZONES.SOUTH_SIDEWALK_Y - 30 && this.py < ZONES.PLAZA_Y + 120;
     const nearPvpBooth = this.px >= 900 && this.px <= 1080 && this.py >= ZONES.PLAZA_Y + 420 && this.py <= ZONES.PLAZA_Y + 550;
+    const nearZombies = this.px >= 1490 && this.px <= 1710 && this.py >= ZONES.PLAZA_Y + 600 && this.py <= ZONES.PLAZA_Y + 740;
     const nearArcade = Math.abs(this.px - arcadeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearStore = Math.abs(this.px - storeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearCafe = Math.abs(this.px - cafeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
 
     if (nearVecindad) {
       return { x: 120, y: ZONES.PLAZA_Y + 40, w: 140, h: 80, label: 'SPACE ENTRAR VECINDAD', color: 0xF5C842, sceneKey: 'VecindadScene' };
+    }
+    if (nearZombies) {
+      return { x: 1600, y: ZONES.PLAZA_Y + 666, w: 220, h: 120, label: 'SPACE ENTRAR ZOMBIES', color: 0xFF6EA8, sceneKey: 'ZombiesScene' };
     }
     if (nearPvpBooth) {
       return { x: 990, y: ZONES.PLAZA_Y + 485, w: 180, h: 90, label: 'SPACE ENTRAR PVP PIT', color: 0xFF4DA6, sceneKey: 'PvpArenaScene' };
@@ -3595,6 +3655,8 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 }
+
+
 
 
 

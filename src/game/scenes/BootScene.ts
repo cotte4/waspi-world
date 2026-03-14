@@ -83,6 +83,25 @@ export class BootScene extends Phaser.Scene {
     this.load.spritesheet('weapon_glock_shoot', '/assets/sprites/guns/01_glock/shoot_strip.png', { frameWidth: 64, frameHeight: 64 });
     this.load.spritesheet('weapon_shotgun_idle', '/assets/sprites/guns/03_shotgun/idle_strip.png', { frameWidth: 64, frameHeight: 64 });
     this.load.spritesheet('weapon_shotgun_shoot', '/assets/sprites/guns/03_shotgun/shoot_strip.png', { frameWidth: 64, frameHeight: 64 });
+
+    // Zombie enemy spritesheets
+    const ZOMBIE_FRAME_SIZE: Record<string, number> = { rusher: 64, shooter: 64, tank: 96, boss: 128 };
+    const ZOMBIE_ANIMS: Record<string, string[]> = {
+      rusher:  ['idle', 'walk', 'attack', 'hurt', 'death'],
+      shooter: ['idle', 'walk', 'attack', 'hurt', 'death'],
+      tank:    ['idle', 'walk', 'attack', 'hurt', 'death'],
+      boss:    ['idle', 'walk', 'attack', 'hurt', 'death'],
+    };
+    for (const [type, states] of Object.entries(ZOMBIE_ANIMS)) {
+      const fw = ZOMBIE_FRAME_SIZE[type];
+      for (const state of states) {
+        this.load.spritesheet(
+          `zombie_${type}_${state}`,
+          `/assets/sprites/enemies/zombies/${type}/${state}_strip.png`,
+          { frameWidth: fw, frameHeight: fw },
+        );
+      }
+    }
     this.load.audio('arcade_theme', '/assets/audio/arcade-theme.mp3');
   }
 
