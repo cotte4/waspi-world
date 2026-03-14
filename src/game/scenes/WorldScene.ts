@@ -7,6 +7,7 @@ import { supabase, isConfigured } from '../../lib/supabase';
 import { addTenks, initTenks, getTenksBalance } from '../systems/TenksSystem';
 import { getEquippedColors, hasUtilityEquipped, ownItem, equipItem, getInventory, replaceInventory } from '../systems/InventorySystem';
 import { DialogSystem } from '../systems/DialogSystem';
+import { BranchedDialog, type DialogNode } from '../systems/BranchedDialog';
 import { CATALOG } from '../config/catalog';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
 import { loadHudSettings, type HudSettings } from '../systems/HudSettings';
@@ -405,6 +406,10 @@ export class WorldScene extends Phaser.Scene {
   private gunDealerDialog: DialogSystem | null = null;
   private gunShopOpen = false;
 
+  // COTTENKS NPC
+  private cottenksAvatar: AvatarRenderer | null = null;
+  private cottenksDialog: BranchedDialog | null = null;
+
   constructor() {
     super({ key: 'WorldScene' });
   }
@@ -593,6 +598,7 @@ export class WorldScene extends Phaser.Scene {
     // Ambient NPC
     this.runBootStep('ambient npcs', () => this.spawnAmbientNPCs());
     this.runBootStep('gun dealer npc', () => this.spawnGunDealerNPC());
+    this.runBootStep('cottenks npc', () => this.spawnCottenksNPC());
 
     // HP/Combat/Utilities
     this.runBootStep('hp hud', () => this.setupHpHud());
@@ -2904,6 +2910,161 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
+  // ─── COTTENKS NPC ────────────────────────────────────────────────────────
+
+  private spawnCottenksNPC() {
+    // Positioned just to the right of the WASPI STORE door
+    const x = 1615;
+    const y = 558;
+
+    const cfg: AvatarConfig = {
+      bodyColor: 0xC07A50,    // warm tan skin
+      hairColor: 0x3D0D8C,    // deep purple (Vegeta-style)
+      hairStyle: 'SPI',
+      eyeColor: 0x111111,
+      topColor: 0xF5F5F5,     // white tee
+      bottomColor: 0x111111,  // black cargo pants
+      tt: 6,
+    };
+
+    this.cottenksAvatar = this.createSafeAvatarRenderer(x, y, cfg, 'cottenks');
+    this.cottenksAvatar.setDepth(Math.floor(y / 10));
+
+    // Idle breathing sway
+    this.tweens.add({
+      targets: this.cottenksAvatar.getContainer(),
+      y: y + 5,
+      duration: 1800,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+      onUpdate: () => this.cottenksAvatar?.update(false, 0),
+    });
+
+    // Nameplate — gold, Press Start 2P
+    this.add.text(x, y - 58, 'COTTENKS', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(9000);
+
+    // Small subtitle
+    this.add.text(x, y - 46, 'the og', {
+      fontSize: '6px',
+      fontFamily: '"Silkscreen", monospace',
+      color: '#AAAAAA',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5, 1).setDepth(9000);
+  }
+
+  private openCottenksDialog() {
+    if (this.cottenksDialog?.isActive()) return;
+    this.inputBlocked = true;
+
+    // ── Terminal leaves ──────────────────────────────────────────────────────
+
+    const endBye: DialogNode = {
+      lines: ['COTTENKS: Dale, seguí tu camino. Los TENKS no se ganan parado.'],
+      onComplete: () => { this.cottenksDialog = null; this.inputBlocked = false; },
+    };
+
+    const endStoreGo: DialogNode = {
+      lines: ['COTTENKS: Entrá. No te arrepentís.'],
+      onComplete: () => {
+        this.cottenksDialog = null;
+        this.inputBlocked = false;
+        // Teleport player to store door and trigger entry
+        this.transitionToScene('StoreInterior');
+      },
+    };
+
+    const endEarningTenks: DialogNode = {
+      lines: [
+        'COTTENKS: Jugá en el Arcade. Ganá matches.',
+        'COTTENKS: Comprá en la Store, chateá, habitá el mundo.',
+        'COTTENKS: El que está presente, cobra.',
+      ],
+      onComplete: () => { this.cottenksDialog = null; this.inputBlocked = false; },
+    };
+
+    // ── Branch: ¿Cómo gano TENKS? ────────────────────────────────────────────
+
+    const branchHowToEarn: DialogNode = {
+      lines: [
+        'COTTENKS: Simple: participá.',
+        'COTTENKS: El Arcade paga. Las compras pagan. El chat paga.',
+        'COTTENKS: El mundo te mira. Cuanto más presente estás, más TENKS ganás.',
+      ],
+      choices: [
+        { label: 'Voy a intentarlo.', next: endBye },
+      ],
+    };
+
+    // ── Branch: ¿Qué son los TENKS? ──────────────────────────────────────────
+
+    const branchWhatAreTenks: DialogNode = {
+      lines: [
+        'COTTENKS: Los TENKS son la moneda del mundo WASPI.',
+        'COTTENKS: No se compran con plata. Se ganan con presencia.',
+        'COTTENKS: Sirven para votar drops, desbloquear zonas y conseguir descuentos.',
+      ],
+      choices: [
+        { label: '¿Cómo consigo más?', next: branchHowToEarn },
+        { label: 'Entendido.', next: endBye },
+      ],
+    };
+
+    // ── Branch: ¿Qué hay en la tienda? ───────────────────────────────────────
+
+    const branchStore: DialogNode = {
+      lines: [
+        'COTTENKS: La WASPI STORE. Ropa de verdad, envío a tu casa.',
+        'COTTENKS: Pagás con plata real. Pero si tenés TENKS, conseguís descuento.',
+        'COTTENKS: No hay excusas para no tener el look.',
+      ],
+      choices: [
+        { label: 'Quiero entrar.', next: endStoreGo },
+        { label: 'Gracias, después entro.', next: endBye },
+      ],
+    };
+
+    // ── Branch: ¿Quién sos? ───────────────────────────────────────────────────
+
+    const branchWhoAreYou: DialogNode = {
+      lines: [
+        'COTTENKS: El fundador. El OG. El que le dio nombre a la moneda.',
+        'COTTENKS: Sin mí, no hay TENKS. Sin TENKS, no hay mundo.',
+        'COTTENKS: No es ego — es historia.',
+      ],
+      choices: [
+        { label: '¿Y para qué sirven los TENKS?', next: branchWhatAreTenks },
+        { label: '¿Qué hay en esa tienda?', next: branchStore },
+        { label: 'Ok, entendido.', next: endBye },
+      ],
+    };
+
+    // ── Root node ────────────────────────────────────────────────────────────
+
+    const root: DialogNode = {
+      lines: [
+        'COTTENKS: Ey... ey vos. Sí, vos.',
+        'COTTENKS: Soy COTTENKS. Los TENKS de este mundo llevan mi nombre.',
+      ],
+      choices: [
+        { label: '¿Quién sos vos?', next: branchWhoAreYou },
+        { label: '¿Qué son los TENKS?', next: branchWhatAreTenks },
+        { label: '¿Qué hay en esa tienda?', next: branchStore },
+        { label: 'Nada, sigo de largo.', next: endBye },
+      ],
+    };
+
+    this.cottenksDialog = new BranchedDialog(this);
+    this.cottenksDialog.start(root);
+  }
+
   private openGunShopPanel() {
     if (this.gunShopOpen) return;
     this.gunShopOpen = true;
@@ -3975,6 +4136,7 @@ export class WorldScene extends Phaser.Scene {
     this.runFrameStep('training combat', () => this.updateDummies());
     this.runFrameStep('interaction highlight', () => this.updateInteractionHighlight());
     this.handleInteraction();
+    this.cottenksDialog?.update();
 
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyQ)) {
       this.switchWeapon();
@@ -4096,6 +4258,13 @@ export class WorldScene extends Phaser.Scene {
       return { x: GUN_DEALER_X, y: GUN_DEALER_Y - 30, w: 160, h: 70, label: 'SPACE HABLAR CON DEALER', color: 0xFF6B35, npcKey: 'gunDealer' };
     }
 
+    const COTTENKS_X = 1615;
+    const COTTENKS_Y = 558;
+    const nearCottenks = Math.abs(this.px - COTTENKS_X) < 90 && Math.abs(this.py - COTTENKS_Y) < 90;
+    if (nearCottenks && !this.cottenksDialog?.isActive()) {
+      return { x: COTTENKS_X, y: COTTENKS_Y - 36, w: 180, h: 70, label: 'SPACE HABLAR CON COTTENKS', color: 0xF5C842, npcKey: 'cottenks' };
+    }
+
     return null;
   }
 
@@ -4131,6 +4300,12 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
 
+    // Advance / confirm COTTENKS dialog
+    if (this.cottenksDialog?.isActive()) {
+      this.cottenksDialog.advance();
+      return;
+    }
+
     // Close gun shop on SPACE if open
     if (this.gunShopOpen) {
       this.closeGunShopPanel();
@@ -4144,6 +4319,10 @@ export class WorldScene extends Phaser.Scene {
     }
     if (target?.npcKey === 'gunDealer') {
       this.openGunDealerDialog();
+      return;
+    }
+    if (target?.npcKey === 'cottenks') {
+      this.openCottenksDialog();
     }
   }
 
