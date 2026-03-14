@@ -91,6 +91,7 @@ type ZombieState = {
   phase: number;
   alive: boolean;
   lastAttackAt: number;
+  lastSpecialAt: number;
   spawnNodeId?: string;
   breachEndsAt: number;
   lastStompAt: number;
@@ -805,10 +806,11 @@ export class ZombiesScene extends Phaser.Scene {
     this.bossAlive = false;
     this.showNotice(this.bossRoundActive ? `BOSS ROUND ${this.round}` : `ROUND ${this.round}`, this.bossRoundActive ? '#FF6A6A' : '#FFB36A');
     if (this.bossRoundActive) {
-      this.showBossIntro(`BOSS ROUND ${this.round}`);
-      this.cameras.main.flash(180, 120, 20, 20, false);
+      this.triggerBossRoundIntro(`BOSS ROUND ${this.round}\nSURVIVE THE HUNT`);
     }
-    this.playZombiesSfx(this.bossRoundActive ? 'boss_round' : 'round_start');
+    if (!this.bossRoundActive) {
+      this.playZombiesSfx('round_start');
+    }
     this.renderHud();
   }
 
@@ -1123,6 +1125,14 @@ export class ZombiesScene extends Phaser.Scene {
     });
   }
 
+  private triggerBossRoundIntro(text: string) {
+    this.showBossIntro(text);
+    this.showNotice('BOSS INCOMING', '#FF6A6A');
+    this.cameras.main.flash(180, 120, 20, 20, false);
+    this.cameras.main.shake(160, 0.0032);
+    this.playZombiesSfx('boss_round');
+  }
+
   private spawnZombie() {
     const candidates = this.getAvailableSpawnNodes();
     if (!candidates.length) return false;
@@ -1156,7 +1166,7 @@ export class ZombiesScene extends Phaser.Scene {
     if (!candidates.length) return false;
     const node = Phaser.Utils.Array.GetRandom(candidates);
     const hp = Math.round(getZombieHpForRound(420, this.round) * 1.35);
-    return this.spawnConfiguredZombie(node, {
+    const spawned = this.spawnConfiguredZombie(node, {
       type: 'brute',
       assetFolder: 'boss',
       displayLabel: 'BOSS',
@@ -1172,6 +1182,10 @@ export class ZombiesScene extends Phaser.Scene {
       isBoss: true,
       noticeColor: '#FF3344',
     });
+    if (spawned) {
+      this.triggerBossRoundIntro('BOSS BREACHED\nTAKE COVER');
+    }
+    return spawned;
   }
 
   private spawnConfiguredZombie(
@@ -1238,6 +1252,7 @@ export class ZombiesScene extends Phaser.Scene {
       phase: Phaser.Math.FloatBetween(0, Math.PI * 2),
       alive: true,
       lastAttackAt: 0,
+      lastSpecialAt: 0,
       spawnNodeId: node.id,
       breachEndsAt: this.time.now + config.breachMs,
       lastStompAt: this.time.now,
@@ -1299,11 +1314,26 @@ export class ZombiesScene extends Phaser.Scene {
       const ny = dy / dist;
 
       if (dist > zombie.attackRange + 2) {
+        const bossCanBurst = zombie.isBoss
+          && dist >= 180
+          && dist <= 460
+          && !this.isLineBlocked(zombie.x, zombie.y, this.px, this.py);
         const canShoot = zombie.assetFolder === 'shooter'
           && dist >= 160
           && dist <= 340
           && !this.isLineBlocked(zombie.x, zombie.y, this.px, this.py);
-        if (canShoot) {
+        if (bossCanBurst) {
+          zombie.state = 'attack';
+          const lateral = Math.sin(this.time.now / 280 + zombie.phase) * 0.2;
+          const driftX = zombie.x + (-ny * lateral) * zombie.speed * 30 * dt;
+          const driftY = zombie.y + (nx * lateral) * zombie.speed * 30 * dt;
+          if (!this.isBlocked(driftX, zombie.y, zombie.radius)) zombie.x = driftX;
+          if (!this.isBlocked(zombie.x, driftY, zombie.radius)) zombie.y = driftY;
+          if (this.time.now - zombie.lastAttackAt >= zombie.attackCooldownMs) {
+            zombie.lastAttackAt = this.time.now;
+            this.spawnBossProjectileBurst(zombie);
+          }
+        } else if (canShoot) {
           zombie.state = 'attack';
           const lateral = Math.sin(this.time.now / 360 + zombie.phase) * 0.3;
           const orbitX = zombie.x + (-ny * lateral) * zombie.speed * 42 * dt;
@@ -1326,7 +1356,10 @@ export class ZombiesScene extends Phaser.Scene {
         }
       } else {
         zombie.state = 'attack';
-        if (this.time.now - zombie.lastAttackAt >= zombie.attackCooldownMs) {
+        if (zombie.isBoss && this.time.now - zombie.lastSpecialAt >= 1500) {
+          zombie.lastSpecialAt = this.time.now;
+          this.performBossSlam(zombie);
+        } else if (this.time.now - zombie.lastAttackAt >= zombie.attackCooldownMs) {
           zombie.lastAttackAt = this.time.now;
           this.applyPlayerDamage(zombie.damage);
         }
@@ -1341,10 +1374,13 @@ export class ZombiesScene extends Phaser.Scene {
     }
   }
 
-  private spawnZombieProjectile(zombie: ZombieState) {
-    const angle = Phaser.Math.Angle.Between(zombie.x, zombie.y - 10, this.px, this.py - 6);
-    const speed = zombie.isBoss ? 260 : 220;
-    const radius = zombie.isBoss ? 7 : 5;
+  private spawnZombieProjectile(
+    zombie: ZombieState,
+    angle = Phaser.Math.Angle.Between(zombie.x, zombie.y - 10, this.px, this.py - 6),
+    speed = zombie.isBoss ? 260 : 220,
+    radius = zombie.isBoss ? 7 : 5,
+    damage = zombie.isBoss ? Math.round(zombie.damage * 0.8) : Math.max(8, Math.round(zombie.damage * 0.7)),
+  ) {
     const id = `zp_${++this.zombieProjectileSeq}`;
     const glowColor = zombie.isBoss ? 0xFF5C7A : 0x9BFF4F;
     const glow = this.add.ellipse(zombie.x, zombie.y - 10, radius * 4.5, radius * 2.8, glowColor, 0.18).setDepth(154);
@@ -1356,12 +1392,36 @@ export class ZombiesScene extends Phaser.Scene {
       y: zombie.y - 10,
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
-      damage: zombie.isBoss ? Math.round(zombie.damage * 0.8) : Math.max(8, Math.round(zombie.damage * 0.7)),
+      damage,
       radius,
       body,
       glow,
       expiresAt: this.time.now + 2400,
     });
+  }
+
+  private spawnBossProjectileBurst(zombie: ZombieState) {
+    const baseAngle = Phaser.Math.Angle.Between(zombie.x, zombie.y - 10, this.px, this.py - 6);
+    for (const offset of [-0.22, 0, 0.22]) {
+      this.spawnZombieProjectile(zombie, baseAngle + offset, 285, 7, Math.max(14, Math.round(zombie.damage * 0.72)));
+    }
+    this.cameras.main.shake(70, 0.0016);
+  }
+
+  private performBossSlam(zombie: ZombieState) {
+    const shock = this.add.circle(zombie.x, zombie.y, zombie.radius + 12, 0xFF5C7A, 0.18).setDepth(150);
+    this.tweens.add({
+      targets: shock,
+      alpha: 0,
+      scale: 2.3,
+      duration: 220,
+      ease: 'Sine.easeOut',
+      onComplete: () => shock.destroy(),
+    });
+    this.cameras.main.shake(110, 0.0024);
+    if (Phaser.Math.Distance.Between(zombie.x, zombie.y, this.px, this.py) <= zombie.attackRange + 34) {
+      this.applyPlayerDamage(Math.round(zombie.damage * 1.2));
+    }
   }
 
   private updateZombieProjectiles(delta: number) {
