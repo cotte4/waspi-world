@@ -416,6 +416,7 @@ export class WorldScene extends Phaser.Scene {
 
   init(data?: { returnX?: number; returnY?: number }) {
     this.inTransition = false;
+    this.inputBlocked = false;
     this.px = data?.returnX ?? PLAYER.SPAWN_X;
     this.py = data?.returnY ?? PLAYER.SPAWN_Y;
     this.runtimeFailures.clear();
@@ -3315,25 +3316,63 @@ export class WorldScene extends Phaser.Scene {
     const newX = Phaser.Math.Clamp(this.px + dx * speed, 20, WORLD.WIDTH - 20);
     const newY = Phaser.Math.Clamp(this.py + dy * speed, 20, WORLD.HEIGHT - 20);
 
-    // Simple building collision: can't enter building zone unless near a door
-    const inBuildingZone = newY < ZONES.BUILDING_BOTTOM && newY > ZONES.BUILDING_TOP;
-
-    const finalX = newX;
+    let finalX = newX;
     let finalY = newY;
 
-    if (inBuildingZone) {
-      // Allow entering the facade band only if we're aligned with a building entrance.
-      const doors = [
-        BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2,
-        BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2,
-        BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2,
-        BUILDINGS.CASINO.x + BUILDINGS.CASINO.w / 2,
-      ];
-      const nearDoor = doors.some(doorX => Math.abs(newX - doorX) < 60);
+    // ── Hard north cap: nothing navigable above the building tops ─────────────
+    finalY = Math.max(finalY, ZONES.BUILDING_TOP + 4);
 
-      if (!nearDoor) {
-        // Allow horizontal movement but clamp vertical
-        finalY = Math.max(this.py, ZONES.BUILDING_BOTTOM);
+    // ── Hard south cap: nothing navigable below training zone bottom ──────────
+    const MAP_SOUTH = ZONES.TRAINING_Y + ZONES.TRAINING_H + 80;
+    finalY = Math.min(finalY, MAP_SOUTH);
+
+    // ── Building facade collision ─────────────────────────────────────────────
+    // Doors are at the horizontal center of each building (±60px tolerance)
+    const DOOR_TOLERANCE = 60;
+    const doorXs = [
+      BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2,
+      BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2,
+      BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2,
+      BUILDINGS.CASINO.x + BUILDINGS.CASINO.w / 2,
+    ];
+
+    const streetBuildings = [BUILDINGS.ARCADE, BUILDINGS.STORE, BUILDINGS.CAFE, BUILDINGS.CASINO];
+    for (const b of streetBuildings) {
+      const inBuildingXRange = finalX > b.x + 8 && finalX < b.x + b.w - 8;
+      const facadeY = b.y + b.h; // bottom edge of building = the facade wall
+
+      // Block walking INTO the facade (approaching from below)
+      if (inBuildingXRange && finalY < facadeY && this.py >= facadeY) {
+        const nearDoor = doorXs.some(doorX => Math.abs(finalX - doorX) < DOOR_TOLERANCE);
+        if (!nearDoor) {
+          finalY = facadeY;
+        }
+      }
+
+      // Block walking through LEFT side of building
+      const playerInBuildingY = finalY < facadeY && finalY > b.y;
+      if (playerInBuildingY && finalX > b.x - 8 && finalX < b.x + 8) {
+        finalX = this.px; // bounce back
+      }
+
+      // Block walking through RIGHT side of building
+      const rightEdge = b.x + b.w;
+      if (playerInBuildingY && finalX > rightEdge - 8 && finalX < rightEdge + 8) {
+        finalX = this.px; // bounce back
+      }
+    }
+
+    // ── HOUSE collision (south zone) ──────────────────────────────────────────
+    {
+      const b = BUILDINGS.HOUSE;
+      const inX = finalX > b.x + 8 && finalX < b.x + b.w - 8;
+      const inY = finalY > b.y - 8 && finalY < b.y + b.h + 8;
+      if (inX && inY) {
+        // Push player out of house bounds (it has no door in WorldScene)
+        const overlapLeft = finalX - b.x;
+        const overlapRight = (b.x + b.w) - finalX;
+        if (overlapLeft < overlapRight) finalX = b.x - 8;
+        else finalX = b.x + b.w + 8;
       }
     }
 
@@ -4136,7 +4175,6 @@ export class WorldScene extends Phaser.Scene {
     this.runFrameStep('training combat', () => this.updateDummies());
     this.runFrameStep('interaction highlight', () => this.updateInteractionHighlight());
     this.handleInteraction();
-    this.cottenksDialog?.update();
 
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyQ)) {
       this.switchWeapon();
