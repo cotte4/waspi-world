@@ -1791,6 +1791,36 @@ export class WorldScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(2);
 
+    // Down-plaza gateway to Stairways to Basement.
+    g.fillStyle(0x0e0a12, 1);
+    g.fillRoundedRect(1185, ZONES.PLAZA_Y + 620, 210, 96, 16);
+    g.lineStyle(3, 0xB48BFF, 0.8);
+    g.strokeRoundedRect(1185, ZONES.PLAZA_Y + 620, 210, 96, 16);
+    g.fillStyle(0x1f1730, 1);
+    g.fillRect(1278, ZONES.PLAZA_Y + 590, 24, 126);
+    g.fillStyle(0x0b0b14, 1);
+    g.fillRect(1210, ZONES.PLAZA_Y + 646, 160, 46);
+    g.lineStyle(2, 0xC8A96E, 0.35);
+    for (let i = 0; i < 5; i++) {
+      g.lineBetween(1222 + i * 30, ZONES.PLAZA_Y + 650, 1222 + i * 30, ZONES.PLAZA_Y + 688);
+    }
+
+    this.add.text(1290, ZONES.PLAZA_Y + 646, 'STAIRWAYS', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#D4BCFF',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+
+    this.add.text(1290, ZONES.PLAZA_Y + 675, 'TO BASEMENT', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+
     // Plaza text
     this.add.text(fx, ZONES.PLAZA_Y + 20, 'PLAZA', {
       fontSize: '8px',
@@ -3415,6 +3445,7 @@ export class WorldScene extends Phaser.Scene {
     const cafeDoorX = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
     const nearVecindad = this.px < 220 && this.py > ZONES.SOUTH_SIDEWALK_Y - 30 && this.py < ZONES.PLAZA_Y + 120;
     const nearPvpBooth = this.px >= 900 && this.px <= 1080 && this.py >= ZONES.PLAZA_Y + 420 && this.py <= ZONES.PLAZA_Y + 550;
+    const nearBasement = this.px >= 1175 && this.px <= 1405 && this.py >= ZONES.PLAZA_Y + 600 && this.py <= ZONES.PLAZA_Y + 740;
     const nearZombies = this.px >= 1490 && this.px <= 1710 && this.py >= ZONES.PLAZA_Y + 600 && this.py <= ZONES.PLAZA_Y + 740;
     const nearArcade = Math.abs(this.px - arcadeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearStore = Math.abs(this.px - storeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
@@ -3422,6 +3453,9 @@ export class WorldScene extends Phaser.Scene {
 
     if (nearVecindad) {
       return { x: 120, y: ZONES.PLAZA_Y + 40, w: 140, h: 80, label: 'SPACE ENTRAR VECINDAD', color: 0xF5C842, sceneKey: 'VecindadScene' };
+    }
+    if (nearBasement) {
+      return { x: 1290, y: ZONES.PLAZA_Y + 668, w: 230, h: 120, label: 'SPACE ENTRAR BASEMENT', color: 0xB48BFF, sceneKey: 'BasementScene' };
     }
     if (nearZombies) {
       return { x: 1600, y: ZONES.PLAZA_Y + 666, w: 220, h: 120, label: 'SPACE ENTRAR ZOMBIES', color: 0xFF6EA8, sceneKey: 'ZombiesScene' };
