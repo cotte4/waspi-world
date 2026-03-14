@@ -1,18 +1,14 @@
 import Phaser from 'phaser';
-import { addTenks } from '../systems/TenksSystem';
+import { addTenks, initTenks } from '../systems/TenksSystem';
 import { announceScene } from '../systems/SceneUi';
+import { eventBus, EVENTS } from '../config/eventBus';
+import { supabase, isConfigured } from '../../lib/supabase';
+import { calculateBasketReward } from '../../lib/basketRewards';
 
 type BasketPhase = 'aiming' | 'flying' | 'result' | 'done' | 'exiting';
 
 const ROUND_MS = 30000;
 const SHOT_COOLDOWN_MS = 420;
-const REWARD_TIERS = [
-  { minScore: 9, tenks: 8 },
-  { minScore: 7, tenks: 6 },
-  { minScore: 5, tenks: 4 },
-  { minScore: 3, tenks: 2 },
-  { minScore: 0, tenks: 0 },
-] as const;
 
 export class BasketMinigame extends Phaser.Scene {
   private phase: BasketPhase = 'aiming';
@@ -32,6 +28,11 @@ export class BasketMinigame extends Phaser.Scene {
   private lastResult = '';
   private lastResultColor = '#FFFFFF';
   private grantedRewardTenks = 0;
+  private rewardPending = false;
+  private rewardResolved = false;
+  private rewardStatus: 'granted' | 'pending' | 'local' = 'local';
+  private rewardRunId = '';
+  private rewardRunPromise: Promise<void> | null = null;
 
   private keySpace!: Phaser.Input.Keyboard.Key;
   private keyEsc!: Phaser.Input.Keyboard.Key;
@@ -166,6 +167,7 @@ export class BasketMinigame extends Phaser.Scene {
     this.cameras.main.resetFX();
     this.cameras.main.setAlpha(1);
     this.cameras.main.fadeIn(220, 0, 0, 0);
+    void this.prepareRewardRun();
   }
 
   update(_time: number, delta: number) {
@@ -212,6 +214,7 @@ export class BasketMinigame extends Phaser.Scene {
     }
 
     if (this.phase === 'done') {
+      if (this.rewardPending) return;
       this.resultTimerMs -= delta;
       if (this.resultTimerMs <= 0) {
         this.finishAndExit();
@@ -427,21 +430,16 @@ export class BasketMinigame extends Phaser.Scene {
   private enterDoneState() {
     if (this.phase === 'done' || this.phase === 'exiting') return;
     this.phase = 'done';
-    this.grantedRewardTenks = this.calculateReward(this.score);
-    if (this.grantedRewardTenks > 0) {
-      addTenks(this.grantedRewardTenks, 'basket_game');
-    }
+    this.grantedRewardTenks = calculateBasketReward(this.score);
     this.resultLabel.setAlpha(1);
     this.resultLabel.setY(322);
     this.resultLabel.setText(this.grantedRewardTenks > 0 ? `+${this.grantedRewardTenks} TENKS` : 'SIN PREMIO');
     this.resultLabel.setColor(this.grantedRewardTenks > 0 ? '#39FF14' : '#F5C842');
-    this.footer.setText(this.grantedRewardTenks > 0 ? 'VOLVIENDO AL ARCADE CON PREMIO...' : 'VOLVIENDO AL ARCADE...');
-    this.footer.setColor(this.grantedRewardTenks > 0 ? '#39FF14' : '#888888');
+    this.footer.setText(this.grantedRewardTenks > 0 ? 'GUARDANDO PREMIO...' : 'VOLVIENDO AL ARCADE...');
+    this.footer.setColor(this.grantedRewardTenks > 0 ? '#46B3FF' : '#888888');
+    this.rewardPending = this.grantedRewardTenks > 0;
+    void this.resolveReward();
     this.resultTimerMs = 1650;
-  }
-
-  private calculateReward(score: number) {
-    return REWARD_TIERS.find(tier => score >= tier.minScore)?.tenks ?? 0;
   }
 
   private refreshHud() {
@@ -462,6 +460,7 @@ export class BasketMinigame extends Phaser.Scene {
 
   private finishAndExit() {
     if (this.isFinished) return;
+    if (this.rewardPending) return;
     this.isFinished = true;
     this.phase = 'exiting';
     this.input.enabled = false;
@@ -474,9 +473,122 @@ export class BasketMinigame extends Phaser.Scene {
           score: this.score,
           shots: this.shotsTaken,
           tenksEarned: this.grantedRewardTenks,
+          status: this.rewardStatus,
         },
       });
     });
+  }
+
+  private async getAuthToken() {
+    if (!supabase || !isConfigured) return null;
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token ?? null;
+  }
+
+  private async prepareRewardRun() {
+    if (this.rewardRunId) return;
+    if (this.rewardRunPromise) {
+      await this.rewardRunPromise;
+      return;
+    }
+
+    this.rewardRunPromise = (async () => {
+      const token = await this.getAuthToken();
+      if (!token) return;
+
+      const res = await fetch('/api/minigames/basket/start', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }).catch(() => null);
+
+      if (!res?.ok) return;
+      const json = await res.json().catch(() => null) as { runId?: string } | null;
+      if (typeof json?.runId === 'string') {
+        this.rewardRunId = json.runId;
+      }
+    })();
+
+    try {
+      await this.rewardRunPromise;
+    } finally {
+      this.rewardRunPromise = null;
+    }
+  }
+
+  private async resolveReward() {
+    if (this.rewardResolved) return;
+    if (this.grantedRewardTenks <= 0) {
+      this.rewardResolved = true;
+      this.rewardPending = false;
+      this.rewardStatus = 'granted';
+      this.footer.setText('VOLVIENDO AL ARCADE...');
+      this.footer.setColor('#888888');
+      return;
+    }
+
+    const token = await this.getAuthToken();
+    if (!token) {
+      addTenks(this.grantedRewardTenks, 'basket_game_local');
+      eventBus.emit(EVENTS.UI_NOTICE, `Basket +${this.grantedRewardTenks} TENKS`);
+      this.rewardStatus = 'local';
+      this.rewardResolved = true;
+      this.rewardPending = false;
+      this.footer.setText('VOLVIENDO AL ARCADE CON PREMIO...');
+      this.footer.setColor('#39FF14');
+      return;
+    }
+
+    await this.prepareRewardRun();
+    if (!this.rewardRunId) {
+      this.rewardStatus = 'pending';
+      this.rewardResolved = true;
+      this.rewardPending = false;
+      this.grantedRewardTenks = 0;
+      this.resultLabel.setText('PREMIO PENDIENTE');
+      this.resultLabel.setColor('#FFB36A');
+      this.footer.setText('NO PUDIMOS RESERVAR LA PARTIDA. PROBA OTRA VEZ.');
+      this.footer.setColor('#FFB36A');
+      return;
+    }
+
+    const res = await fetch('/api/minigames/basket/reward', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        score: this.score,
+        shots: this.shotsTaken,
+        runId: this.rewardRunId,
+      }),
+    }).catch(() => null);
+
+    if (!res?.ok) {
+      this.rewardStatus = 'pending';
+      this.rewardResolved = true;
+      this.rewardPending = false;
+      this.grantedRewardTenks = 0;
+      this.resultLabel.setText('PREMIO PENDIENTE');
+      this.resultLabel.setColor('#FFB36A');
+      this.footer.setText('VOLVE A ENTRAR LUEGO. EL PREMIO NO SE CERRO.');
+      this.footer.setColor('#FFB36A');
+      return;
+    }
+
+    const json = await res.json().catch(() => null) as { tenksEarned?: number; player?: { tenks?: number } } | null;
+    if (typeof json?.player?.tenks === 'number') {
+      initTenks(json.player.tenks);
+    }
+    this.grantedRewardTenks = typeof json?.tenksEarned === 'number' ? json.tenksEarned : this.grantedRewardTenks;
+    eventBus.emit(EVENTS.UI_NOTICE, `Basket +${this.grantedRewardTenks} TENKS`);
+    this.rewardStatus = 'granted';
+    this.rewardResolved = true;
+    this.rewardPending = false;
+    this.footer.setText('VOLVIENDO AL ARCADE CON PREMIO...');
+    this.footer.setColor('#39FF14');
   }
 
   private handleShutdown() {

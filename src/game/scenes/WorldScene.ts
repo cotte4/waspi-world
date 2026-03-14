@@ -1399,9 +1399,37 @@ export class WorldScene extends Phaser.Scene {
     this.drawBench(g, fx - 120, fy - 20);
     this.drawBench(g, fx + 120, fy - 20);
 
+    // PVP bookie booth
+    g.fillStyle(0x1b1107, 0.98);
+    g.fillRoundedRect(900, ZONES.PLAZA_Y + 430, 180, 102, 14);
+    g.lineStyle(2, 0xF5C842, 0.62);
+    g.strokeRoundedRect(900, ZONES.PLAZA_Y + 430, 180, 102, 14);
+    g.fillStyle(0x311d0f, 1);
+    g.fillRoundedRect(920, ZONES.PLAZA_Y + 450, 140, 22, 8);
+    g.fillStyle(0x6c3f1e, 1);
+    g.fillRect(928, ZONES.PLAZA_Y + 474, 124, 26);
+    g.fillStyle(0x140d08, 1);
+    g.fillRect(980, ZONES.PLAZA_Y + 452, 20, 62);
+    g.fillStyle(0xD2A46A, 1);
+    g.fillCircle(992, ZONES.PLAZA_Y + 463, 10);
+    g.fillStyle(0x4a2f80, 1);
+    g.fillRect(982, ZONES.PLAZA_Y + 474, 20, 24);
+
+    this.add.text(990, ZONES.PLAZA_Y + 440, 'PVP PIT', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+    }).setOrigin(0.5).setDepth(2);
+
+    this.add.text(990, ZONES.PLAZA_Y + 518, 'SPACE APOSTAR / PELEAR', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#C0C2CC',
+    }).setOrigin(0.5).setDepth(2);
+
     // Future plaza anchors
-    this.drawConstructionSite(1188, ZONES.PLAZA_Y + 150, 280, 210, 'CASINO', '#FF4466');
-    this.drawConstructionSite(1732, ZONES.PLAZA_Y + 150, 280, 210, 'GUN SHOP', '#46B3FF');
+    this.drawConstructionSite(820, ZONES.PLAZA_Y + 190, 280, 210, 'CASINO', '#FF4466');
+    this.drawConstructionSite(2220, ZONES.PLAZA_Y + 190, 280, 210, 'GUN SHOP', '#46B3FF');
 
     // Plaza text
     this.add.text(fx, ZONES.PLAZA_Y + 20, 'PLAZA', {
@@ -2960,6 +2988,7 @@ export class WorldScene extends Phaser.Scene {
     const storeDoorX = BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2;
     const cafeDoorX = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
     const nearVecindad = this.px < 220 && this.py > ZONES.SOUTH_SIDEWALK_Y - 30 && this.py < ZONES.PLAZA_Y + 120;
+    const nearPvpBooth = this.px >= 900 && this.px <= 1080 && this.py >= ZONES.PLAZA_Y + 420 && this.py <= ZONES.PLAZA_Y + 550;
 
     const nearArcade = Math.abs(this.px - arcadeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearStore = Math.abs(this.px - storeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
@@ -2967,6 +2996,8 @@ export class WorldScene extends Phaser.Scene {
 
     if (nearVecindad) {
       this.transitionToScene('VecindadScene');
+    } else if (nearPvpBooth) {
+      this.transitionToScene('PvpArenaScene');
     } else if (nearArcade) {
       this.transitionToScene('ArcadeInterior');
     } else if (nearStore) {

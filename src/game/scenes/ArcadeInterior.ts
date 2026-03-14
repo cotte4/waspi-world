@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { COLORS, WORLD } from '../config/constants';
+import { BUILDINGS, COLORS, WORLD, ZONES } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
 import { announceScene, createBackButton } from '../systems/SceneUi';
@@ -16,6 +16,7 @@ interface ArcadeBasketReward {
   score?: number;
   shots?: number;
   tenksEarned?: number;
+  status?: 'granted' | 'pending' | 'local';
 }
 
 interface ArcadeInteriorData {
@@ -26,6 +27,8 @@ interface ArcadeInteriorData {
 }
 
 export class ArcadeInterior extends Phaser.Scene {
+  private static readonly RETURN_X = BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2;
+  private static readonly RETURN_Y = ZONES.SOUTH_SIDEWALK_Y + 26;
   private player!: AvatarRenderer;
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private inTransition = false;
@@ -68,6 +71,13 @@ export class ArcadeInterior extends Phaser.Scene {
     const reward = data.penaltyReward;
 
     if (basketReward) {
+      if (basketReward.status === 'pending') {
+        this.rewardMessage = 'BASKET PENDIENTE';
+        this.rewardDetail = `${basketReward.score ?? 0} PTS / ${basketReward.shots ?? 0} TIROS`;
+        this.rewardColor = '#FFB36A';
+        return;
+      }
+
       this.rewardMessage = basketReward.tenksEarned && basketReward.tenksEarned > 0 ? 'BASKET COBRADO' : 'BASKET TERMINADO';
       this.rewardDetail = `${basketReward.score ?? 0} PTS / ${basketReward.shots ?? 0} TIROS${basketReward.tenksEarned ? ` / +${basketReward.tenksEarned} TENKS` : ''}`;
       this.rewardColor = basketReward.tenksEarned && basketReward.tenksEarned > 0 ? '#39FF14' : '#46B3FF';
@@ -326,9 +336,14 @@ export class ArcadeInterior extends Phaser.Scene {
     if (this.inTransition) return;
     this.inTransition = true;
     this.stopArcadeMusic();
+    this.cameras.main.resetFX();
+    this.cameras.main.setAlpha(1);
     this.cameras.main.fadeOut(250, 0, 0, 0);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('WorldScene');
+      this.scene.start('WorldScene', {
+        returnX: ArcadeInterior.RETURN_X,
+        returnY: ArcadeInterior.RETURN_Y,
+      });
     });
   }
 
