@@ -1798,7 +1798,6 @@ export class WorldScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(2);
 
     // Future plaza anchors
-    this.drawConstructionSite(820, ZONES.PLAZA_Y + 190, 280, 210, 'CASINO', '#FF4466');
     this.drawConstructionSite(2220, ZONES.PLAZA_Y + 190, 280, 210, 'GUN SHOP', '#46B3FF');
 
     // Plaza text

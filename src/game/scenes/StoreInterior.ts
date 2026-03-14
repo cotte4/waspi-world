@@ -4,6 +4,7 @@ import { BUILDINGS, SAFE_PLAZA_RETURN, ZONES } from '../config/constants';
 import { CATALOG } from '../config/catalog';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
+import { ChatSystem } from '../systems/ChatSystem';
 import { DialogSystem } from '../systems/DialogSystem';
 import { SceneControls } from '../systems/SceneControls';
 import { supabase, isConfigured } from '../../lib/supabase';
@@ -51,6 +52,7 @@ export class StoreInterior extends Phaser.Scene {
   private localNameplate?: Phaser.GameObjects.Text;
   private remotePlayers = new Map<string, StoreRemotePlayer>();
   private channel: ReturnType<NonNullable<typeof supabase>['channel']> | null = null;
+  private chatSystem?: ChatSystem;
   private lastPosSent = 0;
   private lastMoveDx = 0;
   private lastMoveDy = 0;
@@ -69,9 +71,23 @@ export class StoreInterior extends Phaser.Scene {
     this.playerId = this.getOrCreatePlayerId();
     this.playerUsername = this.getOrCreateUsername();
     this.dialog = new DialogSystem(this);
+    this.chatSystem = new ChatSystem(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     this.cleanupFns.push(eventBus.on(EVENTS.SHOP_OPEN, () => { this.shopOverlayOpen = true; }));
     this.cleanupFns.push(eventBus.on(EVENTS.SHOP_CLOSE, () => { this.shopOverlayOpen = false; }));
+    this.cleanupFns.push(eventBus.on(EVENTS.CHAT_RECEIVED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      const playerId = this.readStringField(payload, 'playerId', 'player_id');
+      const message = this.readStringField(payload, 'message');
+      if (!playerId || !message) return;
+      if (playerId === this.playerId) {
+        this.chatSystem?.showBubble('__player__', message, this.px, this.py, true);
+        return;
+      }
+      const remote = this.remotePlayers.get(playerId);
+      if (!remote) return;
+      this.chatSystem?.showBubble(playerId, message, remote.x, remote.y, false);
+    }));
     this.cleanupFns.push(bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', {
         returnX: SAFE_PLAZA_RETURN.X,
@@ -568,6 +584,8 @@ export class StoreInterior extends Phaser.Scene {
     if (this.inTransition) return;
     this.syncPosition();
     this.updateRemotePlayers();
+    this.chatSystem?.updatePosition('__player__', this.px, this.py);
+    this.chatSystem?.update();
 
     if (this.shopOverlayOpen) {
       if (this.controls.isActionJustDown('back')) {
@@ -656,6 +674,7 @@ export class StoreInterior extends Phaser.Scene {
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(10 + Math.floor(this.py / 10));
     this.localNameplate?.setPosition(this.px, this.py - 44);
+    this.chatSystem?.updatePosition('__player__', this.px, this.py);
     this.lastMoveDx = dx;
     this.lastMoveDy = dy;
     this.lastIsMoving = dx !== 0 || dy !== 0;
@@ -676,6 +695,8 @@ export class StoreInterior extends Phaser.Scene {
       player.nameplate.destroy();
     });
     this.remotePlayers.clear();
+    this.chatSystem?.destroy();
+    this.chatSystem = undefined;
     eventBus.emit(EVENTS.SHOP_CLOSE);
     this.cleanupFns.forEach((cleanup) => cleanup());
     this.cleanupFns = [];
@@ -730,13 +751,14 @@ export class StoreInterior extends Phaser.Scene {
   }
 
   private updateRemotePlayers() {
-    for (const remote of this.remotePlayers.values()) {
+    for (const [playerId, remote] of this.remotePlayers.entries()) {
       remote.x = Phaser.Math.Linear(remote.x, remote.targetX, 0.18);
       remote.y = Phaser.Math.Linear(remote.y, remote.targetY, 0.18);
       remote.avatar.update(remote.isMoving, remote.moveDx, remote.moveDy);
       remote.avatar.setPosition(remote.x, remote.y);
       remote.avatar.setDepth(10 + Math.floor(remote.y / 10));
       remote.nameplate.setPosition(remote.x, remote.y - 44);
+      this.chatSystem?.updatePosition(playerId, remote.x, remote.y);
     }
   }
 
@@ -778,6 +800,7 @@ export class StoreInterior extends Phaser.Scene {
     remote.avatar.destroy();
     remote.nameplate.destroy();
     this.remotePlayers.delete(playerId);
+    this.chatSystem?.clearBubble(playerId);
   }
 
   private spawnRemotePlayer(playerId: string, username: string, x: number, y: number, avatarConfig: AvatarConfig) {

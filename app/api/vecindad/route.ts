@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getAuthenticatedUser, hasServiceRole, isServerSupabaseConfigured } from '@/src/lib/supabaseServer';
 import { grantInventoryItem, normalizePlayerState, syncVecindadDeed, VECINDAD_DEED_ITEM_ID, type PlayerState } from '@/src/lib/playerState';
-import { ensurePlayerRow } from '@/src/lib/commercePersistence';
+import { ensureCatalogSeeded, ensurePlayerRow } from '@/src/lib/commercePersistence';
 import { createVecindadParcel, deleteVecindadParcel, getParcelOccupant, getUserVecindadParcel, listVecindadParcels, loadPlayerUsername, mergePlayerWithVecindad, persistPlayerMetadata, updateVecindadParcelBuildStage } from '@/src/lib/vecindadPersistence';
 import { getNextVecindadBuildCost, getNextVecindadBuildStage, getParcelById, MAX_VECINDAD_STAGE, normalizeVecindadBuildStage } from '@/src/lib/vecindad';
 
@@ -63,6 +63,7 @@ export async function POST(request: NextRequest) {
   let player = normalizePlayerState(user.user_metadata?.[PLAYER_METADATA_KEY]);
 
   try {
+    await ensureCatalogSeeded(admin);
     await ensurePlayerRow(admin, user, player);
     player = await mergePlayerWithVecindad(admin, user.id, player);
 
@@ -195,7 +196,11 @@ export async function POST(request: NextRequest) {
     if (body.action === 'buy' && errorCode === '23505') {
       return NextResponse.json({ error: 'Esa parcela acaba de ser comprada por otro jugador.' }, { status: 409 });
     }
-    const message = error instanceof Error ? error.message : 'Vecindad update failed.';
+    const message = error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as { message?: string }).message)
+        : 'Vecindad update failed.';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

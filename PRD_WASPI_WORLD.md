@@ -1,5 +1,5 @@
 # WASPI WORLD — PRD (Estado Actualizado)
-**Fecha de actualización:** 2026-03-14
+**Fecha de actualización:** 2026-03-14 (sesión 2)
 **Rama activa:** main
 
 ---
@@ -129,11 +129,21 @@ E-commerce gamificado: mundo abierto 2D de vista cenital estilo Binding of Isaac
 - [x] BasketMinigame: tiro libre con power bar + angle needle, 30s por ronda, streaks
   - Recompensas TENKS via `calculateBasketReward` (`lib/basketRewards.ts`)
   - Integración Supabase para guardar score
-- [x] PenaltyMinigame: escena presente (estado de implementación de gameplay no confirmado)
+- [x] PenaltyMinigame: gameplay implementado
 - [x] ArcadeInterior: escena interior del arcade con acceso a minijuegos
 - [x] CafeInterior: escena interior del café
 - [x] HouseInterior: Tu Casa (spawn de jugadores)
 - [x] InteriorRoom system: helper reutilizable para dibujar interiores
+- [x] Chat bubbles en todos los interiores via InteriorRoom + ChatSystem (StoreInterior, VecindadScene, etc.)
+
+### Fase 9: Casino + Zombies (COMPLETA — sesión 2026-03-14)
+
+- [x] CasinoInterior: escena interior del casino con ruleta y mesas de poker
+- [x] ZombiesScene + BasementZombiesScene: modo PvE de oleadas
+- [x] StatsSystem: tracking de stats persistido via Supabase (`player_stats` table)
+- [x] Migración `20260314_player_stats.sql` (zombie_kills, pvp_kills, deaths, tenks_earned, etc.)
+- [x] PvP Pit match start handshake fix
+- [x] Casino entrance collision fix
 
 ### Infraestructura de Soporte (COMPLETA)
 
@@ -233,6 +243,7 @@ E-commerce gamificado: mundo abierto 2D de vista cenital estilo Binding of Isaac
 - **Gun sprites**: solo glock y shotgun activos. 4 armas con assets pero sin implementar.
 - **Touch controls**: implementados pero calidad no validada en dispositivos reales.
 - **MVP target 30 players**: no hay stress test de Supabase Realtime con carga real.
+- **Vecindad buy bug (parcialmente resuelto)**: `ensureCatalogSeeded` + error reporting real agregados a `api/vecindad/route.ts`. Si persiste el error, el mensaje real del DB aparecerá en el toast.
 
 ---
 

@@ -1,6 +1,7 @@
 
 import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
+import { ChatSystem } from '../systems/ChatSystem';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import {
   ensureFallbackRectTexture,
@@ -13,7 +14,9 @@ import {
   safeWithLiveSprite,
 } from '../systems/AnimationSafety';
 import { SceneControls } from '../systems/SceneControls';
+import { eventBus, EVENTS } from '../config/eventBus';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
+import { supabase, isConfigured } from '../../lib/supabase';
 import {
   ZOMBIES_PLAYER,
   ZOMBIES_POINTS,
@@ -163,6 +166,151 @@ type InteractionOption = {
   nodeId?: string;
 };
 
+type ZombiesRemotePlayer = {
+  avatar: AvatarRenderer;
+  nameplate: Phaser.GameObjects.Text;
+  username: string;
+  x: number;
+  y: number;
+  targetX: number;
+  targetY: number;
+  moveDx: number;
+  moveDy: number;
+  isMoving: boolean;
+};
+
+type SharedRunPlayerState = {
+  player_id: string;
+  username: string;
+  x: number;
+  y: number;
+  hp: number;
+  alive: boolean;
+  joinedAt: number;
+  lastDamageAt: number;
+};
+
+type SharedRunPresenceMeta = {
+  player_id?: string;
+  username?: string;
+  joined_at?: number;
+};
+
+type SharedRunZombieSnapshot = {
+  id: string;
+  type: ZombieType;
+  assetFolder: string;
+  displayLabel: string;
+  isBoss: boolean;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  speed: number;
+  damage: number;
+  attackRange: number;
+  attackCooldownMs: number;
+  hitReward: number;
+  killReward: number;
+  radius: number;
+  state: ZombieAnimState;
+  phase: number;
+  alive: boolean;
+  spawnNodeId?: string;
+  breachInMs: number;
+  attackCooldownLeftMs: number;
+  specialCooldownLeftMs: number;
+  stompCooldownLeftMs: number;
+};
+
+type SharedRunProjectileSnapshot = {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  damage: number;
+  radius: number;
+  expiresInMs: number;
+};
+
+type SharedRunPickupSnapshot = {
+  id: string;
+  kind: PickupKind;
+  x: number;
+  y: number;
+  expiresInMs: number;
+};
+
+type SharedRunSpawnNodeSnapshot = {
+  id: string;
+  occupiedBy?: string;
+  boardHealth: number;
+  lastUsedAgoMs: number;
+};
+
+type SharedRunDoorSnapshot = {
+  id: ZombiesSectionId;
+  unlocked: boolean;
+};
+
+type SharedRunStateSnapshot = {
+  host_id: string;
+  round: number;
+  roundTarget: number;
+  spawnedThisRound: number;
+  nextSpawnInMs: number;
+  roundBreakInMs: number;
+  bossRoundActive: boolean;
+  bossSpawnedThisRound: boolean;
+  bossAlive: boolean;
+  depthsUnlocked: boolean;
+  points: number;
+  zombieIdSeq: number;
+  zombieProjectileSeq: number;
+  pickupIdSeq: number;
+  mysteryBoxCooldownInMs: number;
+  boxRollingInMs: number;
+  instaKillInMs: number;
+  doublePointsInMs: number;
+  players: SharedRunPlayerState[];
+  doors: SharedRunDoorSnapshot[];
+  spawnNodes: SharedRunSpawnNodeSnapshot[];
+  zombies: SharedRunZombieSnapshot[];
+  projectiles: SharedRunProjectileSnapshot[];
+  pickups: SharedRunPickupSnapshot[];
+};
+
+type SharedRunShotPayload = {
+  player_id: string;
+  username: string;
+  originX: number;
+  originY: number;
+  targetX: number;
+  targetY: number;
+  pellets: number;
+  spread: number;
+  range: number;
+  damage: number;
+  color: number;
+};
+
+type SharedRunInteractPayload = {
+  player_id: string;
+  kind: 'door' | 'repair' | 'box' | 'upgrade';
+  sectionId?: ZombiesSectionId;
+  nodeId?: string;
+  weaponId?: ZombiesWeaponId;
+};
+
+type SharedRunWeaponGrantPayload = {
+  player_id: string;
+  kind: 'box' | 'upgrade' | 'notice';
+  weaponId?: ZombiesWeaponId;
+  ok: boolean;
+  message?: string;
+};
+
 export class ZombiesScene extends Phaser.Scene {
   private avatarConfig: AvatarConfig = {};
   private player!: AvatarRenderer;
@@ -187,6 +335,7 @@ export class ZombiesScene extends Phaser.Scene {
   private lastShotAt: number = 0;
   private reloadEndsAt: number = 0;
   private lastIsMoving = false;
+  private lastMoveDx = 0;
   private lastMoveDy = 0;
   private lastDamageAt: number = 0;
   private zombies = new Map<string, ZombieState>();
@@ -252,6 +401,17 @@ export class ZombiesScene extends Phaser.Scene {
   private entryLabel: string = 'LA PLAZA';
   private allowDepthsGate = true;
   private modeLabel = 'ZOMBIES';
+  private playerId = '';
+  private playerUsername = '';
+  private remotePlayers = new Map<string, ZombiesRemotePlayer>();
+  private channel: ReturnType<NonNullable<typeof supabase>['channel']> | null = null;
+  private chatSystem?: ChatSystem;
+  private lastPosSent = 0;
+  private cleanupFns: Array<() => void> = [];
+  private sharedRunPlayers = new Map<string, SharedRunPlayerState>();
+  private sharedRunHostId: string | null = null;
+  private lastSharedSnapshotSentAt = 0;
+  private sharedResetPending = false;
 
   constructor(sceneKey = 'ZombiesScene') {
     super({ key: sceneKey });
@@ -272,7 +432,11 @@ export class ZombiesScene extends Phaser.Scene {
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
 
+    this.playerId = this.getOrCreatePlayerId();
+    this.playerUsername = this.getOrCreateUsername();
+    this.initSharedRunPlayerState();
     this.avatarConfig = loadStoredAvatarConfig();
+    this.chatSystem = new ChatSystem(this);
     this.weaponInventory = this.createWeaponInventory();
     this.weaponOrder = ['pistol'];
     this.currentWeapon = 'pistol';
@@ -305,6 +469,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.lastStompSfxAt = 0;
     this.lastShotAt = 0;
     this.reloadEndsAt = 0;
+    this.lastMoveDx = 0;
     this.lastMoveDy = 0;
     this.lastDamageAt = 0;
     this.restartPending = false;
@@ -335,6 +500,8 @@ export class ZombiesScene extends Phaser.Scene {
     this.cameras.main.setAlpha(1);
     this.cameras.main.fadeIn(240, 0, 0, 0);
 
+    this.setupRealtime();
+    this.setupChatBridge();
     this.beginRound();
   }
 
@@ -712,10 +879,55 @@ export class ZombiesScene extends Phaser.Scene {
     });
   }
 
+  private isSharedCoopEnabled() {
+    return this.scene.key === 'BasementZombiesScene';
+  }
+
+  private isSharedRunHost() {
+    return this.isSharedCoopEnabled() && this.sharedRunHostId === this.playerId;
+  }
+
+  private initSharedRunPlayerState() {
+    if (!this.isSharedCoopEnabled()) return;
+    this.sharedRunPlayers.set(this.playerId, {
+      player_id: this.playerId,
+      username: this.playerUsername,
+      x: this.px,
+      y: this.py,
+      hp: this.hp,
+      alive: true,
+      joinedAt: Date.now(),
+      lastDamageAt: 0,
+    });
+  }
+
+  private syncLocalSharedPlayerState() {
+    if (!this.isSharedCoopEnabled()) return;
+    const current = this.sharedRunPlayers.get(this.playerId);
+    this.sharedRunPlayers.set(this.playerId, {
+      player_id: this.playerId,
+      username: this.playerUsername,
+      x: this.px,
+      y: this.py,
+      hp: current?.hp ?? this.hp,
+      alive: current?.alive ?? !this.gameOver,
+      joinedAt: current?.joinedAt ?? Date.now(),
+      lastDamageAt: current?.lastDamageAt ?? 0,
+    });
+  }
+
+  private applySharedPlayerStateToLocal() {
+    if (!this.isSharedCoopEnabled()) return;
+    const local = this.sharedRunPlayers.get(this.playerId);
+    if (!local) return;
+    this.hp = local.hp;
+    this.gameOver = !local.alive;
+  }
+
   private setupPlayer() {
     this.player = new AvatarRenderer(this, this.px, this.py, this.avatarConfig);
     this.player.setDepth(60);
-    this.playerName = this.add.text(this.px, this.py - 44, 'WASPI', {
+    this.playerName = this.add.text(this.px, this.py - 44, this.playerUsername, {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842',
@@ -979,6 +1191,9 @@ export class ZombiesScene extends Phaser.Scene {
     }
     this.updateDepthsAccessVisual();
     this.renderHud();
+    if (this.isSharedRunHost()) {
+      this.lastSharedSnapshotSentAt = 0;
+    }
   }
 
   private isBossRound(round: number) {
@@ -991,7 +1206,7 @@ export class ZombiesScene extends Phaser.Scene {
       return;
     }
 
-    if (this.gameOver) {
+    if (this.gameOver && !this.isSharedCoopEnabled()) {
       if (this.controls.isActionJustDown('interact')) {
         this.restartRun();
       }
@@ -1000,18 +1215,30 @@ export class ZombiesScene extends Phaser.Scene {
       return;
     }
 
-    this.handleMovement();
-    this.handleCombatInput();
-    this.handleRoundFlow();
-    this.updateZombies(delta);
-    this.updateZombieProjectiles(delta);
-    this.updatePickups();
-    this.handleContextInteraction();
+    if (!this.gameOver) {
+      this.handleMovement();
+      this.handleCombatInput();
+      this.handleContextInteraction();
+    }
+
+    if (!this.isSharedCoopEnabled() || this.isSharedRunHost()) {
+      this.handleRoundFlow();
+      this.updateZombies(delta);
+      this.updateZombieProjectiles(delta);
+      this.updatePickups();
+      this.maybeBroadcastSharedSnapshot();
+    }
+
     this.updatePromptHud(this.getNearbyInteraction());
+    this.syncPosition();
+    this.updateRemotePlayers();
+    this.applySharedPlayerStateToLocal();
     this.player.update(this.lastIsMoving, this.input.activePointer.worldX - this.px, this.lastMoveDy);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(Math.floor(this.py / 10));
     this.playerName.setPosition(this.px, this.py - 44);
+    this.chatSystem?.updatePosition('__player__', this.px, this.py);
+    this.chatSystem?.update();
     this.renderHud();
   }
 
@@ -1029,7 +1256,9 @@ export class ZombiesScene extends Phaser.Scene {
     const nextY = this.py + dy * speed * this.game.loop.delta / 1000;
     const moved = this.tryMovePlayer(nextX, nextY);
     this.lastIsMoving = moved;
+    this.lastMoveDx = moved ? dx : 0;
     this.lastMoveDy = moved ? dy : 0;
+    this.syncLocalSharedPlayerState();
   }
 
   private tryMovePlayer(nextX: number, nextY: number) {
@@ -1092,17 +1321,21 @@ export class ZombiesScene extends Phaser.Scene {
     ammo.ammoInMag -= 1;
     this.lastShotAt = this.time.now;
     this.player.playShoot();
-    const baseAngle = Phaser.Math.Angle.Between(this.px, this.py, targetX, targetY);
-
-    for (let i = 0; i < weapon.pellets; i += 1) {
-      const angle = baseAngle + Phaser.Math.FloatBetween(-weapon.spread, weapon.spread);
-      const hit = this.findZombieTarget(angle, weapon.range);
-      const endX = hit ? hit.x : this.px + Math.cos(angle) * weapon.range;
-      const endY = hit ? hit.y : this.py + Math.sin(angle) * weapon.range;
-      this.drawShotFx(endX, endY, weapon.color);
-      if (hit) {
-        this.damageZombie(hit, weapon.damage);
-      }
+    this.fireShotBurst(this.playerId, this.playerUsername, this.px, this.py, targetX, targetY, weapon, !this.isSharedCoopEnabled() || this.isSharedRunHost());
+    if (this.isSharedCoopEnabled()) {
+      this.broadcastSharedShot({
+        player_id: this.playerId,
+        username: this.playerUsername,
+        originX: this.px,
+        originY: this.py,
+        targetX,
+        targetY,
+        pellets: weapon.pellets,
+        spread: weapon.spread,
+        range: weapon.range,
+        damage: weapon.damage,
+        color: weapon.color,
+      });
     }
 
     if (ammo.ammoInMag <= 0 && ammo.reserveAmmo > 0) {
@@ -1140,15 +1373,44 @@ export class ZombiesScene extends Phaser.Scene {
     this.showNotice(`ARMADO ${this.getWeaponStats(next).displayLabel}`, '#7CC9FF');
   }
 
-  private drawShotFx(endX: number, endY: number, color: number) {
-    const tracer = this.add.line(0, 0, this.px, this.py - 8, endX, endY, color, 0.9).setOrigin(0, 0).setDepth(160);
+  private fireShotBurst(
+    shooterId: string,
+    _username: string,
+    originX: number,
+    originY: number,
+    targetX: number,
+    targetY: number,
+    weapon: {
+      pellets: number;
+      spread: number;
+      range: number;
+      damage: number;
+      color: number;
+    },
+    applyDamage: boolean,
+  ) {
+    const baseAngle = Phaser.Math.Angle.Between(originX, originY, targetX, targetY);
+    for (let i = 0; i < weapon.pellets; i += 1) {
+      const angle = baseAngle + Phaser.Math.FloatBetween(-weapon.spread, weapon.spread);
+      const hit = this.findZombieTargetFrom(originX, originY, angle, weapon.range);
+      const endX = hit ? hit.x : originX + Math.cos(angle) * weapon.range;
+      const endY = hit ? hit.y : originY + Math.sin(angle) * weapon.range;
+      this.drawShotFxFrom(originX, originY, endX, endY, weapon.color);
+      if (applyDamage && hit) {
+        this.damageZombie(hit, weapon.damage);
+      }
+    }
+  }
+
+  private drawShotFxFrom(originX: number, originY: number, endX: number, endY: number, color: number) {
+    const tracer = this.add.line(0, 0, originX, originY - 8, endX, endY, color, 0.9).setOrigin(0, 0).setDepth(160);
     tracer.setLineWidth(2, 2);
-    const flash = this.add.circle(this.px, this.py - 10, 8, color, 0.8).setDepth(170);
+    const flash = this.add.circle(originX, originY - 10, 8, color, 0.8).setDepth(170);
     this.tweens.add({ targets: tracer, alpha: 0, duration: 90, onComplete: () => tracer.destroy() });
     this.tweens.add({ targets: flash, alpha: 0, scale: 1.9, duration: 110, onComplete: () => flash.destroy() });
   }
 
-  private findZombieTarget(angle: number, maxRange: number) {
+  private findZombieTargetFrom(originX: number, originY: number, angle: number, maxRange: number) {
     let best: ZombieState | null = null;
     let bestAlong = Number.POSITIVE_INFINITY;
     const cos = Math.cos(angle);
@@ -1156,13 +1418,13 @@ export class ZombiesScene extends Phaser.Scene {
 
     for (const zombie of this.zombies.values()) {
       if (!zombie.alive) continue;
-      const dx = zombie.x - this.px;
-      const dy = zombie.y - this.py;
+      const dx = zombie.x - originX;
+      const dy = zombie.y - originY;
       const along = dx * cos + dy * sin;
       if (along <= 0 || along > maxRange) continue;
       const perp = Math.abs(-sin * dx + cos * dy);
       if (perp > zombie.radius + 10) continue;
-      if (this.isLineBlocked(this.px, this.py, zombie.x, zombie.y)) continue;
+      if (this.isLineBlocked(originX, originY, zombie.x, zombie.y)) continue;
       if (along < bestAlong) {
         best = zombie;
         bestAlong = along;
@@ -1371,6 +1633,89 @@ export class ZombiesScene extends Phaser.Scene {
     return spawned;
   }
 
+  private createZombieEntity(config: {
+    id: string;
+    type: ZombieType;
+    assetFolder: string;
+    displayLabel: string;
+    hp: number;
+    maxHp: number;
+    speed: number;
+    damage: number;
+    attackRange: number;
+    attackCooldownMs: number;
+    hitReward: number;
+    killReward: number;
+    radius: number;
+    isBoss: boolean;
+    x: number;
+    y: number;
+    phase: number;
+    alive: boolean;
+    spawnNodeId?: string;
+    breachEndsAt: number;
+    lastAttackAt: number;
+    lastSpecialAt: number;
+    lastStompAt: number;
+    state: ZombieAnimState;
+  }) {
+    const shadow = this.add.ellipse(config.x, config.y + config.radius + 8, config.radius + 14, 14, 0x000000, 0.28);
+    const fallbackTexture = config.isBoss ? 'zombie_fallback_boss' : this.getZombieFallbackTexture(config.type);
+    const idleTexture = `zombie_${config.assetFolder}_idle`;
+    const body = this.add.sprite(0, 0, this.textures.exists(idleTexture) ? idleTexture : fallbackTexture, 0);
+    body.setOrigin(0.5, 0.7);
+    body.setScale(config.isBoss ? 1.18 : config.type === 'brute' ? 1.15 : config.type === 'runner' ? 0.95 : 1);
+    const hpBg = this.add.rectangle(0, -config.radius - 14, config.radius * 2, 4, 0x000000, 0.9);
+    const hpFill = this.add.rectangle(-config.radius, -config.radius - 14, config.radius * 2, 4, 0x39FF14, 0.95).setOrigin(0, 0.5);
+    const label = this.add.text(0, -config.radius - 26, config.displayLabel, {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: config.isBoss ? '#FF6A6A' : '#F5C842',
+    }).setOrigin(0.5);
+
+    const container = this.add.container(config.x, config.y, [body, hpBg, hpFill, label]);
+    shadow.setDepth(29);
+    container.setDepth(30);
+
+    const zombie: ZombieState = {
+      id: config.id,
+      type: config.type,
+      assetFolder: config.assetFolder,
+      displayLabel: config.displayLabel,
+      isBoss: config.isBoss,
+      container,
+      body,
+      label,
+      hpBg,
+      hpFill,
+      shadow,
+      x: config.x,
+      y: config.y,
+      hp: config.hp,
+      maxHp: config.maxHp,
+      speed: config.speed,
+      damage: config.damage,
+      attackRange: config.attackRange,
+      attackCooldownMs: config.attackCooldownMs,
+      hitReward: config.hitReward,
+      killReward: config.killReward,
+      radius: config.radius,
+      state: config.state,
+      phase: config.phase,
+      alive: config.alive,
+      lastAttackAt: config.lastAttackAt,
+      lastSpecialAt: config.lastSpecialAt,
+      spawnNodeId: config.spawnNodeId,
+      breachEndsAt: config.breachEndsAt,
+      lastStompAt: config.lastStompAt,
+      lastAnimatedState: undefined,
+    };
+
+    this.renderZombieHp(zombie);
+    this.setZombieState(zombie, zombie.state);
+    return zombie;
+  }
+
   private spawnConfiguredZombie(
     node: SpawnNode,
     config: {
@@ -1390,38 +1735,11 @@ export class ZombiesScene extends Phaser.Scene {
       noticeColor: string;
     },
   ) {
-    const shadow = this.add.ellipse(node.x, node.y + config.radius + 8, config.radius + 14, 14, 0x000000, 0.28);
-    const fallbackTexture = config.isBoss ? 'zombie_fallback_boss' : this.getZombieFallbackTexture(config.type);
-    const idleTexture = `zombie_${config.assetFolder}_idle`;
-    const body = this.add.sprite(0, 0, this.textures.exists(idleTexture) ? idleTexture : fallbackTexture, 0);
-    body.setOrigin(0.5, 0.7);
-    body.setScale(config.isBoss ? 1.18 : config.type === 'brute' ? 1.15 : config.type === 'runner' ? 0.95 : 1);
-    const hpBg = this.add.rectangle(0, -config.radius - 14, config.radius * 2, 4, 0x000000, 0.9);
-    const hpFill = this.add.rectangle(-config.radius, -config.radius - 14, config.radius * 2, 4, 0x39FF14, 0.95).setOrigin(0, 0.5);
-    const label = this.add.text(0, -config.radius - 26, config.displayLabel, {
-      fontSize: '6px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: config.isBoss ? '#FF6A6A' : '#F5C842',
-    }).setOrigin(0.5);
-
-    const container = this.add.container(node.x, node.y, [body, hpBg, hpFill, label]);
-    shadow.setDepth(29);
-    container.setDepth(30);
-
-    const zombie: ZombieState = {
+    const zombie = this.createZombieEntity({
       id: `z_${this.zombieIdSeq += 1}`,
       type: config.type,
       assetFolder: config.assetFolder,
       displayLabel: config.displayLabel,
-      isBoss: config.isBoss,
-      container,
-      body,
-      label,
-      hpBg,
-      hpFill,
-      shadow,
-      x: node.x,
-      y: node.y,
       hp: config.hp,
       maxHp: config.hp,
       speed: config.speed,
@@ -1431,16 +1749,18 @@ export class ZombiesScene extends Phaser.Scene {
       hitReward: config.hitReward,
       killReward: config.killReward,
       radius: config.radius,
-      state: 'walk',
+      isBoss: config.isBoss,
+      x: node.x,
+      y: node.y,
       phase: Phaser.Math.FloatBetween(0, Math.PI * 2),
       alive: true,
-      lastAttackAt: 0,
-      lastSpecialAt: 0,
       spawnNodeId: node.id,
       breachEndsAt: this.time.now + config.breachMs,
+      lastAttackAt: 0,
+      lastSpecialAt: 0,
       lastStompAt: this.time.now,
-      lastAnimatedState: undefined,
-    };
+      state: 'walk',
+    });
 
     node.occupiedBy = zombie.id;
     node.lastUsedAt = this.time.now;
@@ -1490,8 +1810,10 @@ export class ZombiesScene extends Phaser.Scene {
         continue;
       }
 
-      const dx = this.px - zombie.x;
-      const dy = this.py - zombie.y;
+      const target = this.getZombieTargetPlayer(zombie.x, zombie.y);
+      if (!target) continue;
+      const dx = target.x - zombie.x;
+      const dy = target.y - zombie.y;
       const dist = Math.hypot(dx, dy) || 1;
       const nx = dx / dist;
       const ny = dy / dist;
@@ -1500,11 +1822,11 @@ export class ZombiesScene extends Phaser.Scene {
         const bossCanBurst = zombie.isBoss
           && dist >= 180
           && dist <= 460
-          && !this.isLineBlocked(zombie.x, zombie.y, this.px, this.py);
+          && !this.isLineBlocked(zombie.x, zombie.y, target.x, target.y);
         const canShoot = zombie.assetFolder === 'shooter'
           && dist >= 160
           && dist <= 340
-          && !this.isLineBlocked(zombie.x, zombie.y, this.px, this.py);
+          && !this.isLineBlocked(zombie.x, zombie.y, target.x, target.y);
         if (bossCanBurst) {
           zombie.state = 'attack';
           const lateral = Math.sin(this.time.now / 280 + zombie.phase) * 0.2;
@@ -1544,7 +1866,7 @@ export class ZombiesScene extends Phaser.Scene {
           this.performBossSlam(zombie);
         } else if (this.time.now - zombie.lastAttackAt >= zombie.attackCooldownMs) {
           zombie.lastAttackAt = this.time.now;
-          this.applyPlayerDamage(zombie.damage);
+          this.applyDamageToPlayer(target.player_id, zombie.damage);
         }
       }
 
@@ -1559,32 +1881,42 @@ export class ZombiesScene extends Phaser.Scene {
 
   private spawnZombieProjectile(
     zombie: ZombieState,
-    angle = Phaser.Math.Angle.Between(zombie.x, zombie.y - 10, this.px, this.py - 6),
+    angle = (() => {
+      const target = this.getZombieTargetPlayer(zombie.x, zombie.y);
+      return Phaser.Math.Angle.Between(zombie.x, zombie.y - 10, target?.x ?? this.px, (target?.y ?? this.py) - 6);
+    })(),
     speed = zombie.isBoss ? 260 : 220,
     radius = zombie.isBoss ? 7 : 5,
     damage = zombie.isBoss ? Math.round(zombie.damage * 0.8) : Math.max(8, Math.round(zombie.damage * 0.7)),
   ) {
-    const id = `zp_${++this.zombieProjectileSeq}`;
-    const glowColor = zombie.isBoss ? 0xFF5C7A : 0x9BFF4F;
-    const glow = this.add.ellipse(zombie.x, zombie.y - 10, radius * 4.5, radius * 2.8, glowColor, 0.18).setDepth(154);
-    glow.setStrokeStyle(1, glowColor, 0.45);
-    const body = this.add.circle(zombie.x, zombie.y - 10, radius, glowColor, 0.92).setDepth(155);
-    this.zombieProjectiles.set(id, {
-      id,
+    const projectile = this.createZombieProjectileEntity({
+      id: `zp_${++this.zombieProjectileSeq}`,
       x: zombie.x,
       y: zombie.y - 10,
       vx: Math.cos(angle) * speed,
       vy: Math.sin(angle) * speed,
       damage,
       radius,
-      body,
-      glow,
       expiresAt: this.time.now + 2400,
     });
+    this.zombieProjectiles.set(projectile.id, projectile);
+  }
+
+  private createZombieProjectileEntity(snapshot: Omit<ZombieProjectile, 'body' | 'glow'>) {
+    const glowColor = snapshot.radius >= 7 ? 0xFF5C7A : 0x9BFF4F;
+    const glow = this.add.ellipse(snapshot.x, snapshot.y, snapshot.radius * 4.5, snapshot.radius * 2.8, glowColor, 0.18).setDepth(154);
+    glow.setStrokeStyle(1, glowColor, 0.45);
+    const body = this.add.circle(snapshot.x, snapshot.y, snapshot.radius, glowColor, 0.92).setDepth(155);
+    return {
+      ...snapshot,
+      body,
+      glow,
+    };
   }
 
   private spawnBossProjectileBurst(zombie: ZombieState) {
-    const baseAngle = Phaser.Math.Angle.Between(zombie.x, zombie.y - 10, this.px, this.py - 6);
+    const target = this.getZombieTargetPlayer(zombie.x, zombie.y);
+    const baseAngle = Phaser.Math.Angle.Between(zombie.x, zombie.y - 10, target?.x ?? this.px, (target?.y ?? this.py) - 6);
     for (const offset of [-0.22, 0, 0.22]) {
       this.spawnZombieProjectile(zombie, baseAngle + offset, 285, 7, Math.max(14, Math.round(zombie.damage * 0.72)));
     }
@@ -1602,8 +1934,10 @@ export class ZombiesScene extends Phaser.Scene {
       onComplete: () => shock.destroy(),
     });
     this.cameras.main.shake(110, 0.0024);
-    if (Phaser.Math.Distance.Between(zombie.x, zombie.y, this.px, this.py) <= zombie.attackRange + 34) {
-      this.applyPlayerDamage(Math.round(zombie.damage * 1.2));
+    for (const player of this.getAliveSharedTargets()) {
+      if (Phaser.Math.Distance.Between(zombie.x, zombie.y, player.x, player.y) <= zombie.attackRange + 34) {
+        this.applyDamageToPlayer(player.player_id, Math.round(zombie.damage * 1.2));
+      }
     }
   }
 
@@ -1627,8 +1961,9 @@ export class ZombiesScene extends Phaser.Scene {
         continue;
       }
 
-      if (Phaser.Math.Distance.Between(projectile.x, projectile.y, this.px, this.py) <= projectile.radius + ZOMBIES_PLAYER.radius) {
-        this.applyPlayerDamage(projectile.damage);
+      const targetPlayer = this.getProjectileHitTarget(projectile);
+      if (targetPlayer) {
+        this.applyDamageToPlayer(targetPlayer.player_id, projectile.damage);
         this.destroyZombieProjectile(projectile.id);
       }
     }
@@ -1666,6 +2001,79 @@ export class ZombiesScene extends Phaser.Scene {
     const progress = Phaser.Math.Clamp(zombie.hp / zombie.maxHp, 0, 1);
     zombie.hpFill.width = zombie.radius * 2 * progress;
     zombie.hpFill.setFillStyle(progress > 0.45 ? 0x39FF14 : progress > 0.2 ? 0xF5C842 : 0xFF5E5E, 0.95);
+  }
+
+  private getAliveSharedTargets() {
+    if (!this.isSharedCoopEnabled()) {
+      return [{
+        player_id: this.playerId,
+        username: this.playerUsername,
+        x: this.px,
+        y: this.py,
+        hp: this.hp,
+        alive: !this.gameOver,
+        joinedAt: Date.now(),
+        lastDamageAt: this.lastDamageAt,
+      }];
+    }
+    return [...this.sharedRunPlayers.values()].filter((player) => player.alive);
+  }
+
+  private getZombieTargetPlayer(zombieX: number, zombieY: number) {
+    const alivePlayers = this.getAliveSharedTargets();
+    if (!alivePlayers.length) return null;
+    let best = alivePlayers[0];
+    let bestDist = Phaser.Math.Distance.Between(zombieX, zombieY, best.x, best.y);
+    for (const player of alivePlayers.slice(1)) {
+      const nextDist = Phaser.Math.Distance.Between(zombieX, zombieY, player.x, player.y);
+      if (nextDist < bestDist) {
+        best = player;
+        bestDist = nextDist;
+      }
+    }
+    return best;
+  }
+
+  private getProjectileHitTarget(projectile: ZombieProjectile) {
+    return this.getAliveSharedTargets().find((player) =>
+      Phaser.Math.Distance.Between(projectile.x, projectile.y, player.x, player.y) <= projectile.radius + ZOMBIES_PLAYER.radius
+    ) ?? null;
+  }
+
+  private applyDamageToPlayer(playerId: string, amount: number) {
+    if (!this.isSharedCoopEnabled()) {
+      this.applyPlayerDamage(amount);
+      return;
+    }
+    const player = this.sharedRunPlayers.get(playerId);
+    if (!player || !player.alive) return;
+    if (this.time.now - player.lastDamageAt < 320) return;
+    player.lastDamageAt = this.time.now;
+    player.hp = Math.max(0, player.hp - amount);
+    if (player.hp <= 0) {
+      player.alive = false;
+    }
+    if (playerId === this.playerId) {
+      this.hp = player.hp;
+      if (player.hp > 0) {
+        this.player.playHurt();
+        this.showFloatingText(`-${amount}`, this.px, this.py - 52, '#FF6A6A');
+        this.cameras.main.shake(90, 0.0028);
+      } else {
+        this.gameOver = true;
+        this.reloadEndsAt = 0;
+        this.boxRollingUntil = 0;
+        this.lastIsMoving = false;
+        this.lastMoveDx = 0;
+        this.player.playDeath();
+        this.showNotice('CAISTE - EL TEAM SIGUE', '#FF6A6A');
+      }
+    }
+    this.sharedRunPlayers.set(playerId, player);
+    if (this.isSharedRunHost()) {
+      this.lastSharedSnapshotSentAt = 0;
+      this.maybeScheduleSharedReset();
+    }
   }
 
   private isZombieRenderable(zombie: ZombieState) {
@@ -1752,9 +2160,15 @@ export class ZombiesScene extends Phaser.Scene {
     this.tryDropPickup(zombie.x, zombie.y);
     const burst = this.add.circle(zombie.x, zombie.y - 8, zombie.radius + 8, 0xFF6A6A, 0.26).setDepth(80);
     this.tweens.add({ targets: burst, alpha: 0, scale: 1.9, duration: 220, onComplete: () => burst.destroy() });
+    if (this.isSharedRunHost()) {
+      this.lastSharedSnapshotSentAt = 0;
+    }
     safeSceneDelayedCall(this, this.getZombieDeathDurationMs(zombie), () => {
       this.safeDestroyZombieVisual(zombie);
       this.zombies.delete(zombie.id);
+      if (this.isSharedRunHost()) {
+        this.lastSharedSnapshotSentAt = 0;
+      }
     }, `zombie-death-cleanup:${zombie.id}`);
   }
 
@@ -1789,6 +2203,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.reloadEndsAt = 0;
     this.boxRollingUntil = 0;
     this.lastIsMoving = false;
+    this.lastMoveDx = 0;
     this.player.playDeath();
     this.showNotice('GAME OVER - SPACE REINICIAR', '#FF6A6A');
   }
@@ -1825,14 +2240,26 @@ export class ZombiesScene extends Phaser.Scene {
       return;
     }
     if (option.kind === 'door' && option.sectionId) {
+      if (this.isSharedCoopEnabled() && !this.isSharedRunHost()) {
+        this.broadcastSharedInteract({ player_id: this.playerId, kind: 'door', sectionId: option.sectionId });
+        return;
+      }
       this.tryUnlockDoor(option.sectionId);
       return;
     }
     if (option.kind === 'box') {
+      if (this.isSharedCoopEnabled() && !this.isSharedRunHost()) {
+        this.broadcastSharedInteract({ player_id: this.playerId, kind: 'box' });
+        return;
+      }
       this.tryRollMysteryBox();
       return;
     }
     if (option.kind === 'upgrade') {
+      if (this.isSharedCoopEnabled() && !this.isSharedRunHost()) {
+        this.broadcastSharedInteract({ player_id: this.playerId, kind: 'upgrade', weaponId: this.currentWeapon });
+        return;
+      }
       this.tryUpgradeCurrentWeapon();
       return;
     }
@@ -1840,7 +2267,12 @@ export class ZombiesScene extends Phaser.Scene {
       this.enterBasementDepths();
       return;
     }
+
     if (option.kind === 'repair' && option.nodeId) {
+      if (this.isSharedCoopEnabled() && !this.isSharedRunHost()) {
+        this.broadcastSharedInteract({ player_id: this.playerId, kind: 'repair', nodeId: option.nodeId });
+        return;
+      }
       this.tryRepairBarricade(option.nodeId);
     }
   }
@@ -1972,6 +2404,9 @@ export class ZombiesScene extends Phaser.Scene {
     door.costText.setColor('#39FF14');
     door.rect = undefined;
     this.showNotice(`ABRISTE ${ZOMBIES_SECTIONS.find((section) => section.id === doorId)?.label}`, '#9EFFB7');
+    if (this.isSharedRunHost()) {
+      this.lastSharedSnapshotSentAt = 0;
+    }
   }
 
   private tryRollMysteryBox() {
@@ -2069,6 +2504,9 @@ export class ZombiesScene extends Phaser.Scene {
         });
       }
       this.showNotice(firstTime ? `BOX: ${config.displayLabel}` : `BOX REFILL ${config.displayLabel}`, '#FF7CCE');
+      if (this.isSharedRunHost()) {
+        this.lastSharedSnapshotSentAt = 0;
+      }
     });
   }
 
@@ -2095,6 +2533,9 @@ export class ZombiesScene extends Phaser.Scene {
     ammo.reserveAmmo = Math.max(ammo.reserveAmmo, upgraded.reserveAmmo);
     this.showNotice(`PACKED ${upgraded.displayLabel}`, '#46B3FF');
     this.cameras.main.flash(120, 30, 120, 255, false);
+    if (this.isSharedRunHost()) {
+      this.lastSharedSnapshotSentAt = 0;
+    }
   }
 
   private tryRepairBarricade(nodeId: string) {
@@ -2154,6 +2595,9 @@ export class ZombiesScene extends Phaser.Scene {
     }
     this.showFloatingText('+20 REPAIR', node.x, node.y - 30, '#46B3FF');
     this.showNotice('BARRICADE REPAIRED', '#7CC9FF');
+    if (this.isSharedRunHost()) {
+      this.lastSharedSnapshotSentAt = 0;
+    }
   }
 
   private tryDropPickup(x: number, y: number) {
@@ -2188,11 +2632,26 @@ export class ZombiesScene extends Phaser.Scene {
           ? 'DOUBLE PTS'
           : 'NUKE';
     const id = `pickup_${++this.pickupIdSeq}`;
-    const glow = this.add.ellipse(x, y + 6, 52, 20, glowColor, 0.12).setDepth(90);
+    this.pickups.set(id, this.createPickupEntity({
+      id,
+      kind,
+      x,
+      y,
+      expiresAt: this.time.now + 12000,
+    }, glowColor, labelColor, labelText));
+  }
+
+  private createPickupEntity(
+    snapshot: Omit<PickupState, 'glow' | 'body' | 'label'>,
+    glowColor: number,
+    labelColor: string,
+    labelText: string,
+  ) {
+    const glow = this.add.ellipse(snapshot.x, snapshot.y + 6, 52, 20, glowColor, 0.12).setDepth(90);
     glow.setStrokeStyle(1, glowColor, 0.45);
-    const body = this.add.rectangle(x, y - 8, 24, 24, glowColor, 0.8).setDepth(91);
+    const body = this.add.rectangle(snapshot.x, snapshot.y - 8, 24, 24, glowColor, 0.8).setDepth(91);
     body.setStrokeStyle(2, 0xffffff, 0.7);
-    const label = this.add.text(x, y - 32, labelText, {
+    const label = this.add.text(snapshot.x, snapshot.y - 32, labelText, {
       fontSize: '6px',
       fontFamily: '"Press Start 2P", monospace',
       color: labelColor,
@@ -2211,16 +2670,12 @@ export class ZombiesScene extends Phaser.Scene {
       ease: 'Sine.easeInOut',
     });
 
-    this.pickups.set(id, {
-      id,
-      kind,
-      x,
-      y,
+    return {
+      ...snapshot,
       glow,
       body,
       label,
-      expiresAt: this.time.now + 12000,
-    });
+    };
   }
 
   private updatePickups() {
@@ -2235,7 +2690,10 @@ export class ZombiesScene extends Phaser.Scene {
         continue;
       }
 
-      if (Phaser.Math.Distance.Between(this.px, this.py, pickup.x, pickup.y) <= 34) {
+      const collector = this.getAliveSharedTargets().find((player) =>
+        Phaser.Math.Distance.Between(player.x, player.y, pickup.x, pickup.y) <= 34
+      );
+      if (collector) {
         this.collectPickup(pickup);
       }
     }
@@ -2248,6 +2706,9 @@ export class ZombiesScene extends Phaser.Scene {
         const ammo = this.weaponInventory[weaponId];
         ammo.ammoInMag = weapon.magazineSize;
         ammo.reserveAmmo = Math.max(ammo.reserveAmmo, weapon.reserveAmmo);
+      }
+      if (this.isSharedRunHost()) {
+        this.broadcastSharedMaxAmmo();
       }
       this.showNotice('MAX AMMO', '#46B3FF');
     } else if (pickup.kind === 'insta_kill') {
@@ -2361,13 +2822,811 @@ export class ZombiesScene extends Phaser.Scene {
 
   private enterBasementDepths() {
     transitionToScene(this, 'BasementZombiesScene', {
-      returnScene: 'ZombiesScene',
-      returnX: DEPTHS_PAD.x,
-      returnY: DEPTHS_PAD.y,
-      entryLabel: this.modeLabel,
+      returnScene: this.returnScene,
+      returnX: this.returnX,
+      returnY: this.returnY,
+      entryLabel: this.entryLabel,
       allowDepthsGate: false,
       modeLabel: 'BASEMENT DEPTHS',
     });
+  }
+
+  private setupRealtime() {
+    if (!supabase || !isConfigured) return;
+
+    this.channel = supabase.channel(`waspi-room-${this.scene.key.toLowerCase()}`, {
+      config: {
+        broadcast: { self: false },
+        presence: this.isSharedCoopEnabled() ? { key: this.playerId } : undefined,
+      },
+    });
+
+    this.channel
+      .on('presence', { event: 'sync' }, () => {
+        this.handleSharedPresenceSync();
+      })
+      .on('broadcast', { event: 'player:join' }, ({ payload }) => {
+        this.handleRemoteState(payload);
+      })
+      .on('broadcast', { event: 'player:move' }, ({ payload }) => {
+        this.handleRemoteState(payload);
+      })
+      .on('broadcast', { event: 'player:leave' }, ({ payload }) => {
+        this.handleRemoteLeave(payload);
+      })
+      .on('broadcast', { event: 'shared:snapshot' }, ({ payload }) => {
+        this.handleSharedSnapshot(payload);
+      })
+      .on('broadcast', { event: 'shared:shot' }, ({ payload }) => {
+        this.handleSharedShot(payload);
+      })
+      .on('broadcast', { event: 'shared:interact' }, ({ payload }) => {
+        this.handleSharedInteractRequest(payload);
+      })
+      .on('broadcast', { event: 'shared:weapon' }, ({ payload }) => {
+        this.handleSharedWeaponGrant(payload);
+      })
+      .on('broadcast', { event: 'shared:max_ammo' }, () => {
+        this.applyMaxAmmoToLocalLoadout();
+      })
+      .on('broadcast', { event: 'shared:reset' }, () => {
+        this.restartRun();
+      })
+      .subscribe(() => {
+        if (this.isSharedCoopEnabled()) {
+          this.channel?.track({
+            player_id: this.playerId,
+            username: this.playerUsername,
+            joined_at: Date.now(),
+          }).catch(() => undefined);
+        }
+        this.broadcastSelfState('player:join');
+      });
+  }
+
+  private broadcastSelfState(event: 'player:join' | 'player:move') {
+    if (!this.channel) return;
+    this.channel.send({
+      type: 'broadcast',
+      event,
+      payload: {
+        player_id: this.playerId,
+        username: this.playerUsername,
+        x: Math.round(this.px),
+        y: Math.round(this.py),
+        dir: this.lastMoveDx,
+        dy: this.lastMoveDy,
+        moving: this.lastIsMoving,
+        avatar: this.avatarConfig,
+      },
+    });
+  }
+
+  private syncPosition() {
+    if (!this.channel) return;
+    const now = Date.now();
+    if (now - this.lastPosSent < 66) return;
+    this.lastPosSent = now;
+    this.syncLocalSharedPlayerState();
+    this.broadcastSelfState('player:move');
+  }
+
+  private handleSharedPresenceSync() {
+    if (!this.isSharedCoopEnabled() || !this.channel) return;
+    const presence = this.channel.presenceState();
+    const players = new Map<string, SharedRunPlayerState>();
+
+    for (const entries of Object.values(presence) as SharedRunPresenceMeta[][]) {
+      for (const entry of entries) {
+        const playerId = typeof entry.player_id === 'string' ? entry.player_id : '';
+        if (!playerId) continue;
+        const existing = this.sharedRunPlayers.get(playerId);
+        players.set(playerId, {
+          player_id: playerId,
+          username: typeof entry.username === 'string' && entry.username.trim() ? entry.username.trim() : existing?.username ?? 'waspi_guest',
+          x: existing?.x ?? this.px,
+          y: existing?.y ?? this.py,
+          hp: existing?.hp ?? ZOMBIES_PLAYER.maxHp,
+          alive: existing?.alive ?? true,
+          joinedAt: typeof entry.joined_at === 'number' && Number.isFinite(entry.joined_at) ? entry.joined_at : existing?.joinedAt ?? Date.now(),
+          lastDamageAt: existing?.lastDamageAt ?? 0,
+        });
+      }
+    }
+
+    this.sharedRunPlayers = players;
+    const nextHost = [...players.values()]
+      .sort((a, b) => (a.joinedAt - b.joinedAt) || a.player_id.localeCompare(b.player_id))[0]?.player_id ?? null;
+    this.sharedRunHostId = nextHost;
+    if (this.isSharedRunHost()) {
+      this.lastSharedSnapshotSentAt = 0;
+    }
+  }
+
+  private maybeBroadcastSharedSnapshot(force = false) {
+    if (!this.isSharedRunHost() || !this.channel) return;
+    if (!force && this.time.now - this.lastSharedSnapshotSentAt < 110) return;
+    this.lastSharedSnapshotSentAt = this.time.now;
+    this.channel.send({
+      type: 'broadcast',
+      event: 'shared:snapshot',
+      payload: this.buildSharedSnapshot(),
+    });
+  }
+
+  private buildSharedSnapshot(): SharedRunStateSnapshot {
+    return {
+      host_id: this.playerId,
+      round: this.round,
+      roundTarget: this.roundTarget,
+      spawnedThisRound: this.spawnedThisRound,
+      nextSpawnInMs: Math.max(0, this.nextSpawnAt - this.time.now),
+      roundBreakInMs: Math.max(0, this.roundBreakUntil - this.time.now),
+      bossRoundActive: this.bossRoundActive,
+      bossSpawnedThisRound: this.bossSpawnedThisRound,
+      bossAlive: this.bossAlive,
+      depthsUnlocked: this.depthsUnlocked,
+      points: this.points,
+      zombieIdSeq: this.zombieIdSeq,
+      zombieProjectileSeq: this.zombieProjectileSeq,
+      pickupIdSeq: this.pickupIdSeq,
+      mysteryBoxCooldownInMs: Math.max(0, this.mysteryBoxCooldownUntil - this.time.now),
+      boxRollingInMs: Math.max(0, this.boxRollingUntil - this.time.now),
+      instaKillInMs: Math.max(0, this.instaKillUntil - this.time.now),
+      doublePointsInMs: Math.max(0, this.doublePointsUntil - this.time.now),
+      players: [...this.sharedRunPlayers.values()].map((player) => ({
+        ...player,
+        x: player.player_id === this.playerId ? this.px : player.x,
+        y: player.player_id === this.playerId ? this.py : player.y,
+      })),
+      doors: [...this.doors.values()].map((door) => ({ id: door.id, unlocked: door.unlocked })),
+      spawnNodes: [...this.spawnNodes.values()].map((node) => ({
+        id: node.id,
+        occupiedBy: node.occupiedBy,
+        boardHealth: node.boardHealth,
+        lastUsedAgoMs: Math.max(0, this.time.now - node.lastUsedAt),
+      })),
+      zombies: [...this.zombies.values()].map((zombie) => ({
+        id: zombie.id,
+        type: zombie.type,
+        assetFolder: zombie.assetFolder,
+        displayLabel: zombie.displayLabel,
+        isBoss: zombie.isBoss,
+        x: zombie.x,
+        y: zombie.y,
+        hp: zombie.hp,
+        maxHp: zombie.maxHp,
+        speed: zombie.speed,
+        damage: zombie.damage,
+        attackRange: zombie.attackRange,
+        attackCooldownMs: zombie.attackCooldownMs,
+        hitReward: zombie.hitReward,
+        killReward: zombie.killReward,
+        radius: zombie.radius,
+        state: zombie.state,
+        phase: zombie.phase,
+        alive: zombie.alive,
+        spawnNodeId: zombie.spawnNodeId,
+        breachInMs: Math.max(0, zombie.breachEndsAt - this.time.now),
+        attackCooldownLeftMs: Math.max(0, zombie.attackCooldownMs - (this.time.now - zombie.lastAttackAt)),
+        specialCooldownLeftMs: Math.max(0, 1500 - (this.time.now - zombie.lastSpecialAt)),
+        stompCooldownLeftMs: Math.max(0, 220 - (this.time.now - zombie.lastStompAt)),
+      })),
+      projectiles: [...this.zombieProjectiles.values()].map((projectile) => ({
+        id: projectile.id,
+        x: projectile.x,
+        y: projectile.y,
+        vx: projectile.vx,
+        vy: projectile.vy,
+        damage: projectile.damage,
+        radius: projectile.radius,
+        expiresInMs: Math.max(0, projectile.expiresAt - this.time.now),
+      })),
+      pickups: [...this.pickups.values()].map((pickup) => ({
+        id: pickup.id,
+        kind: pickup.kind,
+        x: pickup.x,
+        y: pickup.y,
+        expiresInMs: Math.max(0, pickup.expiresAt - this.time.now),
+      })),
+    };
+  }
+
+  private handleSharedSnapshot(payload: unknown) {
+    if (!this.isSharedCoopEnabled() || this.isSharedRunHost()) return;
+    if (!payload || typeof payload !== 'object') return;
+    const snapshot = payload as SharedRunStateSnapshot;
+    if (!snapshot.host_id) return;
+    this.sharedRunHostId = snapshot.host_id;
+    this.round = snapshot.round;
+    this.roundTarget = snapshot.roundTarget;
+    this.spawnedThisRound = snapshot.spawnedThisRound;
+    this.nextSpawnAt = this.time.now + Math.max(0, snapshot.nextSpawnInMs);
+    this.roundBreakUntil = this.time.now + Math.max(0, snapshot.roundBreakInMs);
+    this.bossRoundActive = snapshot.bossRoundActive;
+    this.bossSpawnedThisRound = snapshot.bossSpawnedThisRound;
+    this.bossAlive = snapshot.bossAlive;
+    this.depthsUnlocked = snapshot.depthsUnlocked;
+    this.points = snapshot.points;
+    this.zombieIdSeq = snapshot.zombieIdSeq;
+    this.zombieProjectileSeq = snapshot.zombieProjectileSeq;
+    this.pickupIdSeq = snapshot.pickupIdSeq;
+    this.mysteryBoxCooldownUntil = this.time.now + Math.max(0, snapshot.mysteryBoxCooldownInMs);
+    this.boxRollingUntil = this.time.now + Math.max(0, snapshot.boxRollingInMs);
+    this.instaKillUntil = this.time.now + Math.max(0, snapshot.instaKillInMs);
+    this.doublePointsUntil = this.time.now + Math.max(0, snapshot.doublePointsInMs);
+
+    this.sharedRunPlayers = new Map(snapshot.players.map((player) => ([
+      player.player_id,
+      {
+        ...player,
+        lastDamageAt: player.lastDamageAt ?? 0,
+      },
+    ])));
+    this.applySharedDoors(snapshot.doors);
+    this.applySharedSpawnNodes(snapshot.spawnNodes);
+    this.applySharedZombies(snapshot.zombies);
+    this.applySharedProjectiles(snapshot.projectiles);
+    this.applySharedPickups(snapshot.pickups);
+    this.applySharedPlayerStateToLocal();
+  }
+
+  private applySharedDoors(doors: SharedRunDoorSnapshot[]) {
+    const doorStates = new Map(doors.map((door) => [door.id, door.unlocked]));
+    for (const door of this.doors.values()) {
+      const unlocked = doorStates.get(door.id) ?? false;
+      door.unlocked = unlocked;
+      if (unlocked) {
+        door.panel.setFillStyle(0x1A3525, 0.88);
+        door.panel.setStrokeStyle(2, 0x39FF14, 0.72);
+        door.label.setText('ABIERTO');
+        door.label.setColor('#9EFFB7');
+        door.costText.setText('ACCESO');
+        door.costText.setColor('#39FF14');
+        door.rect = undefined;
+      }
+    }
+    this.updateDepthsAccessVisual();
+  }
+
+  private applySharedSpawnNodes(nodes: SharedRunSpawnNodeSnapshot[]) {
+    const nextNodes = new Map(nodes.map((node) => [node.id, node]));
+    for (const node of this.spawnNodes.values()) {
+      const snapshot = nextNodes.get(node.id);
+      if (!snapshot) continue;
+      node.occupiedBy = snapshot.occupiedBy;
+      node.boardHealth = snapshot.boardHealth;
+      node.lastUsedAt = this.time.now - snapshot.lastUsedAgoMs;
+      this.refreshSpawnNodeVisual(node, 0, Boolean(snapshot.occupiedBy));
+    }
+  }
+
+  private applySharedZombies(zombies: SharedRunZombieSnapshot[]) {
+    const seen = new Set<string>();
+    for (const snapshot of zombies) {
+      seen.add(snapshot.id);
+      let zombie = this.zombies.get(snapshot.id);
+      if (!zombie) {
+        zombie = this.createZombieEntity({
+          id: snapshot.id,
+          type: snapshot.type,
+          assetFolder: snapshot.assetFolder,
+          displayLabel: snapshot.displayLabel,
+          hp: snapshot.hp,
+          maxHp: snapshot.maxHp,
+          speed: snapshot.speed,
+          damage: snapshot.damage,
+          attackRange: snapshot.attackRange,
+          attackCooldownMs: snapshot.attackCooldownMs,
+          hitReward: snapshot.hitReward,
+          killReward: snapshot.killReward,
+          radius: snapshot.radius,
+          isBoss: snapshot.isBoss,
+          x: snapshot.x,
+          y: snapshot.y,
+          phase: snapshot.phase,
+          alive: snapshot.alive,
+          spawnNodeId: snapshot.spawnNodeId,
+          breachEndsAt: this.time.now + snapshot.breachInMs,
+          lastAttackAt: this.time.now - Math.max(0, snapshot.attackCooldownMs - snapshot.attackCooldownLeftMs),
+          lastSpecialAt: this.time.now - Math.max(0, 1500 - snapshot.specialCooldownLeftMs),
+          lastStompAt: this.time.now - Math.max(0, 220 - snapshot.stompCooldownLeftMs),
+          state: snapshot.state,
+        });
+        this.zombies.set(snapshot.id, zombie);
+      }
+      zombie.type = snapshot.type;
+      zombie.assetFolder = snapshot.assetFolder;
+      zombie.displayLabel = snapshot.displayLabel;
+      zombie.isBoss = snapshot.isBoss;
+      zombie.x = snapshot.x;
+      zombie.y = snapshot.y;
+      zombie.hp = snapshot.hp;
+      zombie.maxHp = snapshot.maxHp;
+      zombie.speed = snapshot.speed;
+      zombie.damage = snapshot.damage;
+      zombie.attackRange = snapshot.attackRange;
+      zombie.attackCooldownMs = snapshot.attackCooldownMs;
+      zombie.hitReward = snapshot.hitReward;
+      zombie.killReward = snapshot.killReward;
+      zombie.radius = snapshot.radius;
+      zombie.state = snapshot.state;
+      zombie.phase = snapshot.phase;
+      zombie.alive = snapshot.alive;
+      zombie.spawnNodeId = snapshot.spawnNodeId;
+      zombie.breachEndsAt = this.time.now + snapshot.breachInMs;
+      zombie.lastAttackAt = this.time.now - Math.max(0, snapshot.attackCooldownMs - snapshot.attackCooldownLeftMs);
+      zombie.lastSpecialAt = this.time.now - Math.max(0, 1500 - snapshot.specialCooldownLeftMs);
+      zombie.lastStompAt = this.time.now - Math.max(0, 220 - snapshot.stompCooldownLeftMs);
+      zombie.container.setPosition(zombie.x, zombie.y);
+      zombie.shadow.setPosition(zombie.x, zombie.y + zombie.radius + 8);
+      zombie.container.setDepth(Math.floor(zombie.y / 10));
+      zombie.shadow.setDepth(zombie.container.depth - 1);
+      this.renderZombieHp(zombie);
+      this.setZombieState(zombie, zombie.state);
+    }
+
+    for (const zombie of [...this.zombies.values()]) {
+      if (seen.has(zombie.id)) continue;
+      this.safeDestroyZombieVisual(zombie);
+      this.zombies.delete(zombie.id);
+    }
+  }
+
+  private applySharedProjectiles(projectiles: SharedRunProjectileSnapshot[]) {
+    const seen = new Set<string>();
+    for (const snapshot of projectiles) {
+      seen.add(snapshot.id);
+      let projectile = this.zombieProjectiles.get(snapshot.id);
+      if (!projectile) {
+        projectile = this.createZombieProjectileEntity({
+          id: snapshot.id,
+          x: snapshot.x,
+          y: snapshot.y,
+          vx: snapshot.vx,
+          vy: snapshot.vy,
+          damage: snapshot.damage,
+          radius: snapshot.radius,
+          expiresAt: this.time.now + snapshot.expiresInMs,
+        });
+        this.zombieProjectiles.set(snapshot.id, projectile);
+      }
+      projectile.x = snapshot.x;
+      projectile.y = snapshot.y;
+      projectile.vx = snapshot.vx;
+      projectile.vy = snapshot.vy;
+      projectile.damage = snapshot.damage;
+      projectile.radius = snapshot.radius;
+      projectile.expiresAt = this.time.now + snapshot.expiresInMs;
+      projectile.body.setPosition(projectile.x, projectile.y);
+      projectile.glow.setPosition(projectile.x, projectile.y);
+    }
+
+    for (const projectile of [...this.zombieProjectiles.values()]) {
+      if (seen.has(projectile.id)) continue;
+      this.destroyZombieProjectile(projectile.id);
+    }
+  }
+
+  private applySharedPickups(pickups: SharedRunPickupSnapshot[]) {
+    const seen = new Set<string>();
+    for (const snapshot of pickups) {
+      seen.add(snapshot.id);
+      let pickup = this.pickups.get(snapshot.id);
+      const glowColor = snapshot.kind === 'max_ammo'
+        ? 0x46B3FF
+        : snapshot.kind === 'insta_kill'
+          ? 0xFF3344
+          : snapshot.kind === 'double_points'
+            ? 0xF5C842
+            : 0x9BFF4F;
+      const labelColor = snapshot.kind === 'max_ammo'
+        ? '#7CC9FF'
+        : snapshot.kind === 'insta_kill'
+          ? '#FF6A6A'
+          : snapshot.kind === 'double_points'
+            ? '#FFD36A'
+            : '#C9FF89';
+      const labelText = snapshot.kind === 'max_ammo'
+        ? 'MAX AMMO'
+        : snapshot.kind === 'insta_kill'
+          ? 'INSTA-KILL'
+          : snapshot.kind === 'double_points'
+            ? 'DOUBLE PTS'
+            : 'NUKE';
+      if (!pickup) {
+        pickup = this.createPickupEntity({
+          id: snapshot.id,
+          kind: snapshot.kind,
+          x: snapshot.x,
+          y: snapshot.y,
+          expiresAt: this.time.now + snapshot.expiresInMs,
+        }, glowColor, labelColor, labelText);
+        this.pickups.set(snapshot.id, pickup);
+      }
+      pickup.x = snapshot.x;
+      pickup.y = snapshot.y;
+      pickup.expiresAt = this.time.now + snapshot.expiresInMs;
+      pickup.body.setPosition(pickup.x, pickup.y - 8);
+      pickup.label.setPosition(pickup.x, pickup.y - 32);
+      pickup.glow.setPosition(pickup.x, pickup.y + 6);
+    }
+
+    for (const pickup of [...this.pickups.values()]) {
+      if (seen.has(pickup.id)) continue;
+      this.destroyPickup(pickup.id);
+    }
+  }
+
+  private broadcastSharedShot(payload: SharedRunShotPayload) {
+    if (!this.isSharedCoopEnabled() || !this.channel) return;
+    this.channel.send({
+      type: 'broadcast',
+      event: 'shared:shot',
+      payload,
+    });
+  }
+
+  private handleSharedShot(payload: unknown) {
+    if (!this.isSharedCoopEnabled() || !payload || typeof payload !== 'object') return;
+    const shot = payload as SharedRunShotPayload;
+    if (!shot.player_id || shot.player_id === this.playerId) return;
+    this.fireShotBurst(
+      shot.player_id,
+      shot.username,
+      shot.originX,
+      shot.originY,
+      shot.targetX,
+      shot.targetY,
+      shot,
+      this.isSharedRunHost(),
+    );
+  }
+
+  private broadcastSharedInteract(payload: SharedRunInteractPayload) {
+    if (!this.isSharedCoopEnabled() || !this.channel) return;
+    this.channel.send({
+      type: 'broadcast',
+      event: 'shared:interact',
+      payload,
+    });
+  }
+
+  private handleSharedInteractRequest(payload: unknown) {
+    if (!this.isSharedRunHost() || !payload || typeof payload !== 'object') return;
+    const request = payload as SharedRunInteractPayload;
+    const actor = this.sharedRunPlayers.get(request.player_id);
+    if (!actor || !actor.alive) return;
+
+    if (request.kind === 'door' && request.sectionId) {
+      const door = this.doors.get(request.sectionId);
+      if (!door?.rect || door.unlocked) return;
+      const expandedDoor = new Phaser.Geom.Rectangle(door.rect.x - 35, door.rect.y - 35, door.rect.width + 70, door.rect.height + 70);
+      if (!Phaser.Geom.Rectangle.Contains(expandedDoor, actor.x, actor.y)) return;
+      this.tryUnlockDoor(request.sectionId);
+      this.lastSharedSnapshotSentAt = 0;
+      return;
+    }
+
+    if (request.kind === 'repair' && request.nodeId) {
+      const node = this.spawnNodes.get(request.nodeId);
+      if (!node || Phaser.Math.Distance.Between(actor.x, actor.y, node.x, node.y) > 78) return;
+      this.tryRepairBarricade(request.nodeId);
+      this.lastSharedSnapshotSentAt = 0;
+      return;
+    }
+
+    if (request.kind === 'box') {
+      if (Phaser.Math.Distance.Between(actor.x, actor.y, BOX_POS.x, BOX_POS.y) > 74) return;
+      this.rollSharedMysteryBoxForPlayer(request.player_id);
+      return;
+    }
+
+    if (request.kind === 'upgrade' && request.weaponId) {
+      if (Phaser.Math.Distance.Between(actor.x, actor.y, PACK_POS.x, PACK_POS.y) > 76) return;
+      this.upgradeSharedWeaponForPlayer(request.player_id, request.weaponId);
+    }
+  }
+
+  private rollSharedMysteryBoxForPlayer(playerId: string) {
+    if (this.boxRollingUntil > this.time.now) {
+      this.broadcastSharedWeaponGrant({ player_id: playerId, kind: 'notice', ok: false, message: 'LA BOX ESTA GIRANDO' });
+      return;
+    }
+    if (this.time.now < this.mysteryBoxCooldownUntil) {
+      this.broadcastSharedWeaponGrant({ player_id: playerId, kind: 'notice', ok: false, message: 'LA BOX RECARGA' });
+      return;
+    }
+    if (this.points < ZOMBIES_POINTS.mysteryBoxCost) {
+      this.broadcastSharedWeaponGrant({ player_id: playerId, kind: 'notice', ok: false, message: 'NO ALCANZAN LOS PTS' });
+      return;
+    }
+
+    this.points -= ZOMBIES_POINTS.mysteryBoxCost;
+    this.mysteryBoxCooldownUntil = this.time.now + 3200;
+    this.boxRollingUntil = this.time.now + 1400;
+    const weaponId = this.rollMysteryWeapon();
+    this.lastSharedSnapshotSentAt = 0;
+    this.time.delayedCall(1450, () => {
+      this.boxRollingUntil = 0;
+      const grant: SharedRunWeaponGrantPayload = {
+        player_id: playerId,
+        kind: 'box',
+        weaponId,
+        ok: true,
+        message: `BOX: ${ZOMBIES_WEAPONS[weaponId].label}`,
+      };
+      this.broadcastSharedWeaponGrant(grant);
+      if (playerId === this.playerId) {
+        this.applySharedWeaponGrant(grant);
+      }
+      this.lastSharedSnapshotSentAt = 0;
+    });
+  }
+
+  private upgradeSharedWeaponForPlayer(playerId: string, weaponId: ZombiesWeaponId) {
+    const cost = this.getPackCost(weaponId);
+    if (this.points < cost) {
+      this.broadcastSharedWeaponGrant({ player_id: playerId, kind: 'notice', ok: false, message: 'NO ALCANZAN LOS PTS' });
+      return;
+    }
+    this.points -= cost;
+    const grant: SharedRunWeaponGrantPayload = {
+      player_id: playerId,
+      kind: 'upgrade',
+      weaponId,
+      ok: true,
+      message: `PACKED ${ZOMBIES_WEAPONS[weaponId].label}`,
+    };
+    this.broadcastSharedWeaponGrant(grant);
+    if (playerId === this.playerId) {
+      this.applySharedWeaponGrant(grant);
+    }
+    this.lastSharedSnapshotSentAt = 0;
+  }
+
+  private broadcastSharedWeaponGrant(payload: SharedRunWeaponGrantPayload) {
+    if (!this.isSharedCoopEnabled() || !this.channel) return;
+    this.channel.send({
+      type: 'broadcast',
+      event: 'shared:weapon',
+      payload,
+    });
+  }
+
+  private handleSharedWeaponGrant(payload: unknown) {
+    if (!payload || typeof payload !== 'object') return;
+    this.applySharedWeaponGrant(payload as SharedRunWeaponGrantPayload);
+  }
+
+  private applySharedWeaponGrant(payload: SharedRunWeaponGrantPayload) {
+    if (payload.player_id !== this.playerId) return;
+    if (!payload.ok) {
+      if (payload.message) this.showNotice(payload.message, '#FF6A6A');
+      return;
+    }
+
+    if (payload.kind === 'box' && payload.weaponId) {
+      const ammo = this.weaponInventory[payload.weaponId];
+      const config = this.getWeaponStats(payload.weaponId);
+      ammo.owned = true;
+      ammo.ammoInMag = config.magazineSize;
+      ammo.reserveAmmo = Math.max(ammo.reserveAmmo, config.reserveAmmo);
+      if (!this.weaponOrder.includes(payload.weaponId)) {
+        this.weaponOrder.push(payload.weaponId);
+      }
+      this.currentWeapon = payload.weaponId;
+    } else if (payload.kind === 'upgrade' && payload.weaponId) {
+      const ammo = this.weaponInventory[payload.weaponId];
+      ammo.upgraded = true;
+      const upgraded = this.getWeaponStats(payload.weaponId);
+      ammo.ammoInMag = upgraded.magazineSize;
+      ammo.reserveAmmo = Math.max(ammo.reserveAmmo, upgraded.reserveAmmo);
+      this.currentWeapon = payload.weaponId;
+    }
+
+    if (payload.message) {
+      this.showNotice(payload.message, payload.kind === 'upgrade' ? '#46B3FF' : '#FF7CCE');
+    }
+  }
+
+  private broadcastSharedMaxAmmo() {
+    if (!this.isSharedCoopEnabled() || !this.channel) return;
+    this.channel.send({
+      type: 'broadcast',
+      event: 'shared:max_ammo',
+      payload: { host_id: this.playerId },
+    });
+  }
+
+  private applyMaxAmmoToLocalLoadout() {
+    for (const weaponId of this.weaponOrder) {
+      const weapon = this.getWeaponStats(weaponId);
+      const ammo = this.weaponInventory[weaponId];
+      ammo.ammoInMag = weapon.magazineSize;
+      ammo.reserveAmmo = Math.max(ammo.reserveAmmo, weapon.reserveAmmo);
+    }
+  }
+
+  private maybeScheduleSharedReset() {
+    if (!this.isSharedRunHost() || this.sharedResetPending) return;
+    if ([...this.sharedRunPlayers.values()].some((player) => player.alive)) return;
+    this.sharedResetPending = true;
+    this.showNotice('TEAM WIPE - REINICIANDO', '#FF6A6A');
+    this.time.delayedCall(2200, () => {
+      this.sharedResetPending = false;
+      this.channel?.send({
+        type: 'broadcast',
+        event: 'shared:reset',
+        payload: { host_id: this.playerId },
+      });
+      this.restartRun();
+    });
+  }
+
+  private updateRemotePlayers() {
+    for (const [playerId, remote] of this.remotePlayers.entries()) {
+      remote.x = Phaser.Math.Linear(remote.x, remote.targetX, 0.18);
+      remote.y = Phaser.Math.Linear(remote.y, remote.targetY, 0.18);
+      remote.avatar.update(remote.isMoving, remote.moveDx, remote.moveDy);
+      remote.avatar.setPosition(remote.x, remote.y);
+      remote.avatar.setDepth(Math.floor(remote.y / 10));
+      remote.nameplate.setPosition(remote.x, remote.y - 44);
+      const shared = this.sharedRunPlayers.get(playerId);
+      const alive = shared?.alive ?? true;
+      remote.avatar.getContainer().setAlpha(alive ? 1 : 0.45);
+      remote.nameplate.setAlpha(alive ? 1 : 0.6);
+    }
+  }
+
+  private handleRemoteState(payload: unknown) {
+    const next = this.parseRemoteState(payload);
+    if (!next || next.player_id === this.playerId) return;
+    if (!this.remotePlayers.has(next.player_id)) {
+      this.spawnRemotePlayer(next.player_id, next.username, next.x, next.y, next.avatar ?? {});
+    }
+    const remote = this.remotePlayers.get(next.player_id)!;
+    remote.targetX = next.x;
+    remote.targetY = next.y;
+    remote.moveDx = next.dir ?? 0;
+    remote.moveDy = next.dy ?? 0;
+    remote.isMoving = next.moving ?? false;
+    remote.username = next.username;
+    remote.nameplate.setText(next.username);
+    if (this.isSharedCoopEnabled()) {
+      const current = this.sharedRunPlayers.get(next.player_id);
+      this.sharedRunPlayers.set(next.player_id, {
+        player_id: next.player_id,
+        username: next.username,
+        x: next.x,
+        y: next.y,
+        hp: current?.hp ?? ZOMBIES_PLAYER.maxHp,
+        alive: current?.alive ?? true,
+        joinedAt: current?.joinedAt ?? Date.now(),
+        lastDamageAt: current?.lastDamageAt ?? 0,
+      });
+    }
+  }
+
+  private handleRemoteLeave(payload: unknown) {
+    const playerId = this.readStringField(payload, 'player_id', 'playerId');
+    if (!playerId) return;
+    const remote = this.remotePlayers.get(playerId);
+    if (!remote) return;
+    remote.avatar.destroy();
+    remote.nameplate.destroy();
+    this.remotePlayers.delete(playerId);
+    this.sharedRunPlayers.delete(playerId);
+    if (this.isSharedRunHost()) {
+      this.lastSharedSnapshotSentAt = 0;
+      this.maybeScheduleSharedReset();
+    }
+  }
+
+  private spawnRemotePlayer(playerId: string, username: string, x: number, y: number, avatarConfig: AvatarConfig) {
+    const avatar = new AvatarRenderer(this, x, y, avatarConfig);
+    avatar.setDepth(Math.floor(y / 10));
+    const nameplate = this.add.text(x, y - 44, username, {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#88AAFF',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(100);
+
+    this.remotePlayers.set(playerId, {
+      avatar,
+      nameplate,
+      username,
+      x,
+      y,
+      targetX: x,
+      targetY: y,
+      moveDx: 0,
+      moveDy: 0,
+      isMoving: false,
+    });
+  }
+
+  private parseRemoteState(payload: unknown) {
+    const playerId = this.readStringField(payload, 'player_id', 'playerId');
+    const username = this.readStringField(payload, 'username') ?? 'waspi_guest';
+    const x = this.readNumberField(payload, 'x');
+    const y = this.readNumberField(payload, 'y');
+    if (!playerId || x === null || y === null) return null;
+    const avatar = payload && typeof payload === 'object' && 'avatar' in payload && payload.avatar && typeof payload.avatar === 'object'
+      ? payload.avatar as AvatarConfig
+      : undefined;
+    return {
+      player_id: playerId,
+      username,
+      x,
+      y,
+      dir: this.readNumberField(payload, 'dir', 'dx') ?? 0,
+      dy: this.readNumberField(payload, 'dy') ?? 0,
+      moving: this.readBooleanField(payload, 'moving', 'isMoving') ?? false,
+      avatar,
+    };
+  }
+
+  private readStringField(payload: unknown, ...keys: string[]) {
+    if (!payload || typeof payload !== 'object') return null;
+    for (const key of keys) {
+      const value = (payload as Record<string, unknown>)[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return null;
+  }
+
+  private readNumberField(payload: unknown, ...keys: string[]) {
+    if (!payload || typeof payload !== 'object') return null;
+    for (const key of keys) {
+      const value = (payload as Record<string, unknown>)[key];
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+    }
+    return null;
+  }
+
+  private readBooleanField(payload: unknown, ...keys: string[]) {
+    if (!payload || typeof payload !== 'object') return null;
+    for (const key of keys) {
+      const value = (payload as Record<string, unknown>)[key];
+      if (typeof value === 'boolean') return value;
+    }
+    return null;
+  }
+
+  private getOrCreatePlayerId() {
+    if (typeof window === 'undefined') return crypto.randomUUID();
+    const key = 'waspi_session_id';
+    const stored = window.sessionStorage.getItem(key);
+    if (stored) return stored;
+    const id = crypto.randomUUID();
+    window.sessionStorage.setItem(key, id);
+    return id;
+  }
+
+  private getOrCreateUsername() {
+    if (typeof window === 'undefined') return 'waspi_guest';
+    const stored = window.localStorage.getItem('waspi_username');
+    if (stored) return stored;
+    return 'waspi_guest';
+  }
+
+  private setupChatBridge() {
+    this.cleanupFns.push(eventBus.on(EVENTS.CHAT_RECEIVED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      const playerId = this.readStringField(payload, 'playerId', 'player_id');
+      const message = this.readStringField(payload, 'message');
+      if (!playerId || !message) return;
+      if (playerId === this.playerId) {
+        this.chatSystem?.showBubble('__player__', message, this.px, this.py, true);
+        return;
+      }
+      const remote = this.remotePlayers.get(playerId);
+      if (!remote) return;
+      this.chatSystem?.showBubble(playerId, message, remote.x, remote.y, false);
+    }));
   }
 
   private handleShutdown() {
@@ -2381,6 +3640,24 @@ export class ZombiesScene extends Phaser.Scene {
       this.input.off('pointerdown', this.pointerDownHandler);
       this.pointerDownHandler = undefined;
     }
+    if (this.channel) {
+      this.channel.send({
+        type: 'broadcast',
+        event: 'player:leave',
+        payload: { player_id: this.playerId },
+      });
+      this.channel.unsubscribe();
+      this.channel = null;
+    }
+    this.remotePlayers.forEach((remote) => {
+      remote.avatar.destroy();
+      remote.nameplate.destroy();
+    });
+    this.remotePlayers.clear();
+    this.chatSystem?.destroy();
+    this.chatSystem = undefined;
+    this.cleanupFns.forEach((cleanup) => cleanup());
+    this.cleanupFns = [];
     if (this.audioContext) {
       void this.audioContext.close().catch(() => undefined);
       this.audioContext = undefined;

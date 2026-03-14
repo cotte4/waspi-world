@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarConfig } from './AvatarRenderer';
+import { ChatSystem } from './ChatSystem';
+import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
 
 type InteriorRemotePlayer = {
@@ -43,9 +45,11 @@ export class InteriorRoom {
   private channel: ReturnType<NonNullable<typeof supabase>['channel']> | null = null;
   private remotePlayers = new Map<string, InteriorRemotePlayer>();
   private localNameplate?: Phaser.GameObjects.Text;
+  private chatSystem?: ChatSystem;
   private playerId = '';
   private username = '';
   private lastPosSent = 0;
+  private cleanupFns: Array<() => void> = [];
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -55,6 +59,7 @@ export class InteriorRoom {
   start() {
     this.playerId = this.getOrCreatePlayerId();
     this.username = this.getOrCreateUsername();
+    this.chatSystem = new ChatSystem(this.scene);
 
     const { x, y } = this.options.getPosition();
     this.localNameplate = this.scene.add.text(x, y - (this.options.nameplateOffsetY ?? 44), this.username, {
@@ -64,6 +69,21 @@ export class InteriorRoom {
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5, 1).setDepth((this.options.depthBase ?? 20) + 10);
+
+    this.cleanupFns.push(eventBus.on(EVENTS.CHAT_RECEIVED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      const playerId = this.readStringField(payload, 'playerId', 'player_id');
+      const message = this.readStringField(payload, 'message');
+      if (!playerId || !message) return;
+      if (playerId === this.playerId) {
+        const position = this.options.getPosition();
+        this.chatSystem?.showBubble('__player__', message, position.x, position.y, true);
+        return;
+      }
+      const remote = this.remotePlayers.get(playerId);
+      if (!remote) return;
+      this.chatSystem?.showBubble(playerId, message, remote.x, remote.y, false);
+    }));
 
     if (!supabase || !isConfigured) return;
 
@@ -89,15 +109,18 @@ export class InteriorRoom {
   update() {
     const { x, y } = this.options.getPosition();
     this.localNameplate?.setPosition(x, y - (this.options.nameplateOffsetY ?? 44));
+    this.chatSystem?.updatePosition('__player__', x, y);
     this.syncPosition();
+    this.chatSystem?.update();
 
-    for (const remote of this.remotePlayers.values()) {
+    for (const [playerId, remote] of this.remotePlayers.entries()) {
       remote.x = Phaser.Math.Linear(remote.x, remote.targetX, 0.18);
       remote.y = Phaser.Math.Linear(remote.y, remote.targetY, 0.18);
       remote.avatar.update(remote.isMoving, remote.moveDx, remote.moveDy);
       remote.avatar.setPosition(remote.x, remote.y);
       remote.avatar.setDepth((this.options.depthBase ?? 10) + Math.floor(remote.y / 10));
       remote.nameplate.setPosition(remote.x, remote.y - (this.options.nameplateOffsetY ?? 44));
+      this.chatSystem?.updatePosition(playerId, remote.x, remote.y);
     }
   }
 
@@ -118,6 +141,10 @@ export class InteriorRoom {
       player.nameplate.destroy();
     });
     this.remotePlayers.clear();
+    this.chatSystem?.destroy();
+    this.chatSystem = undefined;
+    this.cleanupFns.forEach((cleanup) => cleanup());
+    this.cleanupFns = [];
   }
 
   private syncPosition() {
@@ -186,6 +213,7 @@ export class InteriorRoom {
     remote.avatar.destroy();
     remote.nameplate.destroy();
     this.remotePlayers.delete(playerId);
+    this.chatSystem?.clearBubble(playerId);
   }
 
   private spawnRemotePlayer(playerId: string, username: string, x: number, y: number, avatarConfig: AvatarConfig) {

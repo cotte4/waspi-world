@@ -70,6 +70,9 @@ export class CasinoInterior extends Phaser.Scene {
   private rouletteState: RouletteState = { betIndex: 0, optionIndex: 0, resultText: 'ELEGI UNA APUESTA Y DALE AL GIRO.', spinning: false, spinToken: 0, lastNumber: null, lastColor: null };
   private blackjackState: BlackjackState = { phase: 'bet', betIndex: 0, playerCards: [], dealerCards: [], dealerHidden: true, actionIndex: 0, resultText: 'ELEGI UNA APUESTA Y REPARTE.', currentBet: 0, deck: [], settled: false, handToken: 0 };
   private pokerState: PokerState = { phase: 'bet', betIndex: 0, cards: [], holds: [false, false, false, false, false], cursorIndex: 0, resultText: 'ELEGI UNA APUESTA Y REPARTE.', currentBet: 0, deck: [], payout: 0 };
+  private casinoVisuals: Phaser.GameObjects.GameObject[] = [];
+  private casinoTweens: Phaser.Tweens.Tween[] = [];
+  private rouletteWheelTween?: Phaser.Tweens.Tween;
 
   constructor() { super({ key: 'CasinoInterior' }); }
 
@@ -211,6 +214,22 @@ export class CasinoInterior extends Phaser.Scene {
     this.cameras.main.resetFX();
     this.cameras.main.setAlpha(1);
     this.cameras.main.fadeIn(300, 0, 0, 0);
+  }
+
+  private clearCasinoVisuals() {
+    for (const obj of this.casinoVisuals) {
+      if (obj && (obj as Phaser.GameObjects.GameObject).active) (obj as Phaser.GameObjects.GameObject).destroy();
+    }
+    this.casinoVisuals = [];
+    for (const tw of this.casinoTweens) { tw.stop(); }
+    this.casinoTweens = [];
+    this.rouletteWheelTween?.stop();
+    this.rouletteWheelTween = undefined;
+  }
+
+  private addV<T extends Phaser.GameObjects.GameObject>(obj: T): T {
+    this.casinoVisuals.push(obj);
+    return obj;
   }
 
   private buildOverlayUi(cx: number, cy: number) {
@@ -368,6 +387,7 @@ export class CasinoInterior extends Phaser.Scene {
     if (this.overlayMode === 'blackjack') {
       this.blackjackState.handToken += 1;
     }
+    this.clearCasinoVisuals();
     this.overlayMode = null;
     this.setOverlayVisible(false);
     this.updateStationProximity();
@@ -375,12 +395,15 @@ export class CasinoInterior extends Phaser.Scene {
 
   private setOverlayVisible(visible: boolean) {
     this.overlayBg?.setVisible(visible); this.overlayFrame?.setVisible(visible); this.overlayTitle?.setVisible(visible); this.overlayBody?.setVisible(visible); this.overlayFooter?.setVisible(visible); this.overlayAccent?.setVisible(visible);
-    if (!visible) { this.overlayBg?.clear(); this.overlayFrame?.clear(); }
+    if (!visible) { this.overlayBg?.clear(); this.overlayFrame?.clear(); this.clearCasinoVisuals(); }
   }
 
   private redrawOverlay() {
     if (!this.overlayMode || !this.overlayBg || !this.overlayFrame || !this.overlayTitle || !this.overlayBody || !this.overlayFooter || !this.overlayAccent) return;
-    const cx = this.scale.width / 2; const cy = this.roomY + this.roomH / 2; const panelW = 500; const panelH = 230; const panelX = cx - panelW / 2; const panelY = cy - panelH / 2;
+    this.clearCasinoVisuals();
+    const cx = this.scale.width / 2; const cy = this.roomY + this.roomH / 2; const panelW = 500;
+    const panelH = this.overlayMode === 'poker' ? 290 : this.overlayMode === 'roulette' ? 270 : 230;
+    const panelX = cx - panelW / 2; const panelY = cy - panelH / 2;
     const accentColor = this.overlayMode === 'slots' ? 0xF5C842 : this.overlayMode === 'roulette' ? 0xFF5A5A : this.overlayMode === 'poker' ? 0x8B5CF6 : 0x22CC88;
     this.overlayBg.clear(); this.overlayBg.fillStyle(0x000000, 0.78); this.overlayBg.fillRect(0, 0, this.scale.width, this.scale.height); this.overlayBg.fillStyle(0x0a0716, 0.96); this.overlayBg.fillRoundedRect(panelX, panelY, panelW, panelH, 12);
     this.overlayFrame.clear(); this.overlayFrame.lineStyle(2, accentColor, 0.95); this.overlayFrame.strokeRoundedRect(panelX, panelY, panelW, panelH, 12); this.overlayFrame.lineStyle(1, 0xF5C842, 0.2); this.overlayFrame.strokeRoundedRect(panelX + 6, panelY + 6, panelW - 12, panelH - 12, 10);
@@ -516,26 +539,110 @@ export class CasinoInterior extends Phaser.Scene {
 
   private renderRouletteOverlay() {
     if (!this.overlayTitle || !this.overlayBody || !this.overlayFooter || !this.overlayAccent) return;
+    const cx = this.scale.width / 2;
+    const cy = this.roomY + this.roomH / 2;
     const balance = getTenksBalance();
-    const bet = ROULETTE_BETS[this.rouletteState.betIndex];
-    const betLine = ROULETTE_BETS.map((value, index) => (index === this.rouletteState.betIndex ? `[${value}]` : `${value}`)).join('  ');
-    const optionLine = ROULETTE_OPTIONS.map((option, index) => (index === this.rouletteState.optionIndex ? `[${option.label}]` : option.label)).join('  ');
-    const lastRoll = this.rouletteState.lastNumber === null ? '--' : `${this.rouletteState.lastNumber} ${this.rouletteState.lastColor?.toUpperCase() ?? ''}`;
-    const option = ROULETTE_OPTIONS[this.rouletteState.optionIndex];
-    this.overlayAccent.setText(`SALDO ${balance} TENKS`);
-    this.overlayTitle.setText('RULETA');
-    this.overlayBody.setText([
-      `ULTIMO GIRO: ${lastRoll}`,
-      '',
-      `APUESTA: ${bet} TENKS`,
-      betLine,
-      '',
-      `TIPO: ${optionLine}`,
-      `PAGA x${option.payout} TOTAL`,
-      '',
-      this.rouletteState.resultText,
-    ].join('\n'));
-    this.overlayFooter.setText(this.rouletteState.spinning ? 'GIRANDO...' : '< > BET   |   ^ v TIPO   |   INTERACT GIRA   |   BACK CIERRA');
+    const { spinning, lastNumber, lastColor, betIndex, optionIndex, resultText } = this.rouletteState;
+    const selectedOption = ROULETTE_OPTIONS[optionIndex];
+
+    this.overlayAccent.setPosition(cx, cy - 112).setText(`SALDO: ${balance} T`).setVisible(true);
+    this.overlayTitle.setPosition(cx, cy - 95).setText('RULETA').setVisible(true);
+    this.overlayBody.setVisible(false);
+
+    // --- Wheel (left side) ---
+    const WHEEL_NUMBERS = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
+    const wCX = cx - 130; const wCY = cy - 20; const wR = 62;
+    const wheelG = this.addV(this.add.graphics().setDepth(33));
+
+    // Outer wood ring
+    wheelG.fillStyle(0x3a2008); wheelG.fillCircle(wCX, wCY, wR + 9);
+    wheelG.lineStyle(2, 0xF5C842, 0.9); wheelG.strokeCircle(wCX, wCY, wR + 9);
+
+    // Number pockets
+    const nCount = WHEEL_NUMBERS.length;
+    WHEEL_NUMBERS.forEach((num, idx) => {
+      const a0 = (idx / nCount) * Math.PI * 2 - Math.PI / 2;
+      const a1 = ((idx + 1) / nCount) * Math.PI * 2 - Math.PI / 2;
+      const isWin = lastNumber === num && lastNumber !== null && !spinning;
+      const col = isWin ? 0xF5C842 : num === 0 ? 0x007700 : ROULETTE_RED_NUMBERS.has(num) ? 0xAA1111 : 0x111111;
+      wheelG.fillStyle(col); wheelG.slice(wCX, wCY, wR, a0, a1, false); wheelG.fillPath();
+      // Thin divider
+      wheelG.lineStyle(1, 0x000000, 0.5); wheelG.slice(wCX, wCY, wR, a0, a1, false); wheelG.strokePath();
+    });
+
+    // Inner felt circle
+    wheelG.fillStyle(0x0d4a1c); wheelG.fillCircle(wCX, wCY, wR * 0.40);
+    wheelG.lineStyle(2, 0xF5C842, 0.6); wheelG.strokeCircle(wCX, wCY, wR * 0.40);
+
+    // Number in center
+    const numStr = lastNumber !== null ? String(lastNumber) : '?';
+    const numColor = lastNumber === null ? '#2a4a2a' : lastColor === 'red' ? '#FF5A5A' : lastColor === 'green' ? '#22CC88' : '#DDDDDD';
+    this.addV(this.add.text(wCX, wCY, numStr, { fontSize: numStr.length > 1 ? '14px' : '18px', fontFamily: '"Press Start 2P", monospace', color: numColor }).setOrigin(0.5).setDepth(35));
+
+    // Ball (Phaser Arc — can be tweened)
+    const ballAngle = lastNumber !== null && !spinning
+      ? (WHEEL_NUMBERS.indexOf(lastNumber) / nCount) * Math.PI * 2 - Math.PI / 2
+      : -Math.PI / 2;
+    const ballR = wR * 0.82;
+    const ball = this.addV(this.add.arc(
+      wCX + Math.cos(ballAngle) * ballR,
+      wCY + Math.sin(ballAngle) * ballR,
+      4, 0, 360, false, 0xfafafa
+    ).setDepth(36));
+
+    if (spinning) {
+      const ballData = { theta: -Math.PI / 2 };
+      this.rouletteWheelTween = this.tweens.add({
+        targets: ballData, theta: ballData.theta + Math.PI * 10,
+        duration: 1500, ease: 'Sine.easeOut',
+        onUpdate: () => {
+          ball.setPosition(wCX + Math.cos(ballData.theta) * ballR, wCY + Math.sin(ballData.theta) * ballR);
+        },
+      });
+      this.casinoTweens.push(this.rouletteWheelTween);
+    }
+
+    // Wheel label below
+    this.addV(this.add.text(wCX, wCY + wR + 16, spinning ? 'GIRANDO...' : (lastNumber !== null ? `${lastNumber} — ${(lastColor ?? '').toUpperCase()}` : 'ELEGÍ Y GIRA'), {
+      fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: spinning ? '#F5C842' : numColor, align: 'center',
+    }).setOrigin(0.5).setDepth(34));
+
+    // --- Right panel controls ---
+    const rx = cx + 20; // right section start x
+
+    // Bet type pills (^ v to navigate)
+    this.addV(this.add.text(rx, cy - 68, 'TIPO DE APUESTA', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#666666' }).setDepth(34));
+    ROULETTE_OPTIONS.forEach((opt, idx) => {
+      const py = cy - 54 + idx * 22;
+      const sel = idx === optionIndex;
+      const pillColor = parseInt(opt.color.replace('#', ''), 16);
+      const bg = this.addV(this.add.graphics().setDepth(34));
+      bg.fillStyle(sel ? pillColor : 0x111111, sel ? 0.85 : 0.6);
+      bg.fillRoundedRect(rx, py - 8, 170, 18, 4);
+      if (sel) { bg.lineStyle(1, 0xF5C842, 0.9); bg.strokeRoundedRect(rx, py - 8, 170, 18, 4); }
+      this.addV(this.add.text(rx + 8, py, `${opt.label}  ×${opt.payout}`, { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: sel ? '#ffffff' : '#555555' }).setOrigin(0, 0.5).setDepth(35));
+      if (sel) this.addV(this.add.text(rx - 10, py, '▶', { fontSize: '7px', color: '#F5C842' }).setOrigin(1, 0.5).setDepth(35));
+    });
+
+    // Bet amount chips
+    const betChipY = cy + 60;
+    this.addV(this.add.text(rx, betChipY - 16, 'APUESTA', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#666666' }).setDepth(34));
+    ROULETTE_BETS.forEach((bv, idx) => {
+      const bx = rx + idx * 44;
+      const sel = idx === betIndex;
+      const bg = this.addV(this.add.graphics().setDepth(34));
+      bg.fillStyle(sel ? 0xFF3A3A : 0x1a0e0e, sel ? 1 : 0.8); bg.fillCircle(bx + 16, betChipY + 4, 16);
+      if (sel) { bg.lineStyle(2, 0xF5C842, 0.9); bg.strokeCircle(bx + 16, betChipY + 4, 16); }
+      this.addV(this.add.text(bx + 16, betChipY + 4, String(bv), { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: sel ? '#ffffff' : '#555555' }).setOrigin(0.5).setDepth(35));
+    });
+
+    // Result text
+    this.addV(this.add.text(cx, cy + 100, resultText, { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: '#F5C842', align: 'center', wordWrap: { width: 460 } }).setOrigin(0.5).setDepth(34));
+
+    // Footer
+    this.overlayFooter.setPosition(cx, cy + 118).setText(
+      spinning ? 'ESPERÁ EL RESULTADO...' : '^ v  TIPO   |   < >  APUESTA   |   INTERACT  GIRA   |   BACK  CIERRA'
+    ).setVisible(true);
   }
 
   private handleBlackjackInput() {
@@ -737,36 +844,104 @@ export class CasinoInterior extends Phaser.Scene {
 
   private renderPokerOverlay() {
     if (!this.overlayTitle || !this.overlayBody || !this.overlayFooter || !this.overlayAccent) return;
+    const cx = this.scale.width / 2;
+    const cy = this.roomY + this.roomH / 2;
     const balance = getTenksBalance();
-    const bet = POKER_BETS[this.pokerState.betIndex];
-    const betLine = POKER_BETS.map((value, index) => (index === this.pokerState.betIndex ? `[${value}]` : `${value}`)).join('  ');
-    const cardsLine = this.pokerState.cards.length === 0
-      ? '[ -- ]  [ -- ]  [ -- ]  [ -- ]  [ -- ]'
-      : this.pokerState.cards.map((card) => `[${this.formatPokerCard(card).padStart(3, ' ')}]`).join('  ');
-    const holdLine = this.pokerState.cards.length === 0
-      ? ''
-      : this.pokerState.holds.map((hold, index) => {
-        const selected = index === this.pokerState.cursorIndex ? '>' : ' ';
-        return `${selected}${hold ? 'HOLD' : '----'}`;
-      }).join('  ');
-    this.overlayAccent.setText(`SALDO ${balance} TENKS`);
-    this.overlayTitle.setText('POKER');
-    this.overlayBody.setText([
-      `APUESTA: ${bet} TENKS`,
-      betLine,
-      '',
-      cardsLine,
-      holdLine,
-      '',
-      this.pokerState.resultText,
-      '',
-      'PAGA: JJ+ x2 | 2P x3 | TRIO x4 | COLOR x6 | FULL x8 | ESCALERA x5',
-    ].join('\n'));
+    const { phase, betIndex, cards, holds, cursorIndex, resultText } = this.pokerState;
+
+    // Reposition persistent text elements for this layout
+    this.overlayAccent.setPosition(cx, cy - 122).setText(`SALDO: ${balance} T`).setVisible(true);
+    this.overlayTitle.setPosition(cx, cy - 104).setText('VIDEO POKER').setVisible(true);
+    this.overlayBody.setVisible(false);
+
+    const CARD_W = 46; const CARD_H = 66; const CARD_GAP = 10;
+    const totalW = 5 * CARD_W + 4 * CARD_GAP;
+    const cardsX = cx - totalW / 2;
+    const cardsY = cy - 68;
+
+    for (let i = 0; i < 5; i++) {
+      const x = cardsX + i * (CARD_W + CARD_GAP);
+      const card = cards[i];
+
+      if (!card) {
+        // Empty placeholder
+        const g = this.addV(this.add.graphics().setDepth(33));
+        g.fillStyle(0x100820, 0.7); g.fillRoundedRect(x, cardsY, CARD_W, CARD_H, 5);
+        g.lineStyle(1, 0x3a2a50, 0.8); g.strokeRoundedRect(x, cardsY, CARD_W, CARD_H, 5);
+        this.addV(this.add.text(x + CARD_W / 2, cardsY + CARD_H / 2, '?', { fontSize: '18px', fontFamily: 'serif', color: '#2a1a40' }).setOrigin(0.5).setDepth(34));
+        continue;
+      }
+
+      const rank = ((card - 1) % 13) + 1;
+      const suitIdx = Math.floor((card - 1) / 13);
+      const rankLabel = rank === 1 ? 'A' : rank === 11 ? 'J' : rank === 12 ? 'Q' : rank === 13 ? 'K' : String(rank);
+      const suitSymbol = ['♠', '♥', '♦', '♣'][suitIdx] ?? '♠';
+      const isRed = suitIdx === 1 || suitIdx === 2;
+      const textColor = isRed ? '#c0392b' : '#111111';
+      const isHeld = holds[i];
+      const isCursor = phase === 'draw' && i === cursorIndex;
+
+      // Card shadow
+      const g = this.addV(this.add.graphics().setDepth(33));
+      g.fillStyle(0x000000, 0.35); g.fillRoundedRect(x + 2, cardsY + 3, CARD_W, CARD_H, 5);
+      // Card body
+      g.fillStyle(0xfaf8f2); g.fillRoundedRect(x, cardsY, CARD_W, CARD_H, 5);
+      // Border
+      if (isHeld) { g.lineStyle(2, 0xF5C842, 1); }
+      else if (isCursor) { g.lineStyle(2, 0x8B5CF6, 1); }
+      else { g.lineStyle(1, 0xc8c4b8, 1); }
+      g.strokeRoundedRect(x, cardsY, CARD_W, CARD_H, 5);
+
+      // Rank top-left
+      this.addV(this.add.text(x + 5, cardsY + 4, rankLabel, { fontSize: '8px', fontFamily: '"Press Start 2P", monospace', color: textColor }).setDepth(34));
+      // Suit top-left small
+      this.addV(this.add.text(x + 5, cardsY + 16, suitSymbol, { fontSize: '8px', fontFamily: 'serif', color: textColor }).setDepth(34));
+      // Suit center large
+      this.addV(this.add.text(x + CARD_W / 2, cardsY + CARD_H / 2 - 2, suitSymbol, { fontSize: '22px', fontFamily: 'serif', color: textColor }).setOrigin(0.5).setDepth(34));
+      // Rank bottom-right
+      this.addV(this.add.text(x + CARD_W - 5, cardsY + CARD_H - 4, rankLabel, { fontSize: '8px', fontFamily: '"Press Start 2P", monospace', color: textColor }).setOrigin(1, 1).setDepth(34));
+
+      // HOLD badge above card
+      if (isHeld) {
+        const hg = this.addV(this.add.graphics().setDepth(34));
+        hg.fillStyle(0xF5C842, 1); hg.fillRoundedRect(x + 5, cardsY - 18, CARD_W - 10, 14, 3);
+        this.addV(this.add.text(x + CARD_W / 2, cardsY - 11, 'HOLD', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#000000' }).setOrigin(0.5).setDepth(35));
+      }
+
+      // Cursor arrow (bouncing)
+      if (isCursor) {
+        const arrow = this.addV(this.add.text(x + CARD_W / 2, cardsY - 24, '▼', { fontSize: '10px', color: '#8B5CF6' }).setOrigin(0.5).setDepth(35));
+        const tw = this.tweens.add({ targets: arrow, y: cardsY - 19, duration: 380, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+        this.casinoTweens.push(tw);
+      }
+    }
+
+    // Result / instruction text
+    const resultY = cardsY + CARD_H + 18;
+    const resultColor = phase === 'result' && this.pokerState.payout > 0 ? '#22CC88' : '#F5C842';
+    this.addV(this.add.text(cx, resultY, resultText, { fontSize: '7px', fontFamily: '"Press Start 2P", monospace', color: resultColor, align: 'center', wordWrap: { width: 460 } }).setOrigin(0.5).setDepth(34));
+
+    // Payout table
+    this.addV(this.add.text(cx, resultY + 20, 'JJ+ ×2  2P ×3  TRIO ×4  ESCALERA ×5  COLOR ×6  FULL ×8  POKER ×12  R.REAL ×40', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#4a3a60', align: 'center', wordWrap: { width: 460 } }).setOrigin(0.5).setDepth(34));
+
+    // Bet selector chips
+    const betY = resultY + 44;
+    this.addV(this.add.text(cx - 150, betY, 'APUESTA', { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: '#555555' }).setOrigin(0, 0.5).setDepth(34));
+    POKER_BETS.forEach((betVal, idx) => {
+      const bx = cx - 60 + idx * 52;
+      const sel = idx === betIndex;
+      const bg = this.addV(this.add.graphics().setDepth(34));
+      bg.fillStyle(sel ? 0x8B5CF6 : 0x1a0e2e, sel ? 1 : 0.8); bg.fillRoundedRect(bx - 22, betY - 11, 44, 22, 4);
+      if (sel) { bg.lineStyle(1, 0xF5C842, 0.8); bg.strokeRoundedRect(bx - 22, betY - 11, 44, 22, 4); }
+      this.addV(this.add.text(bx, betY, String(betVal), { fontSize: '7px', fontFamily: '"Press Start 2P", monospace', color: sel ? '#ffffff' : '#666666' }).setOrigin(0.5).setDepth(35));
+    });
+
+    // Footer
     let footer = 'BACK CIERRA';
-    if (this.pokerState.phase === 'bet') footer = '< > CAMBIA APUESTA   |   INTERACT REPARTE   |   BACK CIERRA';
-    else if (this.pokerState.phase === 'draw') footer = '< > CURSOR   |   ^ v HOLD   |   INTERACT ROBA   |   BACK CIERRA';
-    else if (this.pokerState.phase === 'result') footer = 'INTERACT JUGAR OTRA   |   BACK CIERRA';
-    this.overlayFooter.setText(footer);
+    if (phase === 'bet') footer = '< >  APUESTA   |   INTERACT  REPARTE   |   BACK  CIERRA';
+    else if (phase === 'draw') footer = '< >  CURSOR   |   ^ v  HOLD   |   INTERACT  DESCARTA Y ROBA   |   BACK  CIERRA';
+    else if (phase === 'result') footer = 'INTERACT  JUGAR OTRA   |   BACK  CIERRA';
+    this.overlayFooter.setPosition(cx, cy + 126).setText(footer).setVisible(true);
   }
 
   private randomSlotSymbol() { return Phaser.Utils.Array.GetRandom([...SLOT_SYMBOLS]); }

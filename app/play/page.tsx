@@ -93,8 +93,27 @@ interface VecindadSharedPayload {
   broadcast?: boolean;
 }
 
-const CHAT_SCENES = new Set(['WorldScene', 'VecindadScene', 'StoreInterior', 'CafeInterior', 'ArcadeInterior', 'HouseInterior']);
-const INTERIOR_SOCIAL_SCENES = new Set(['VecindadScene', 'StoreInterior', 'CafeInterior', 'ArcadeInterior', 'HouseInterior']);
+const CHAT_SCENES = new Set([
+  'WorldScene',
+  'VecindadScene',
+  'StoreInterior',
+  'CafeInterior',
+  'ArcadeInterior',
+  'CasinoInterior',
+  'HouseInterior',
+  'ZombiesScene',
+  'BasementZombiesScene',
+]);
+const INTERIOR_SOCIAL_SCENES = new Set([
+  'VecindadScene',
+  'StoreInterior',
+  'CafeInterior',
+  'ArcadeInterior',
+  'CasinoInterior',
+  'HouseInterior',
+  'ZombiesScene',
+  'BasementZombiesScene',
+]);
 const JOYSTICK_SCENES = new Set(['WorldScene', 'VecindadScene', 'StoreInterior', 'PvpArenaScene', 'ZombiesScene', 'BasementZombiesScene']);
 
 export default function PlayPage() {
@@ -1055,16 +1074,12 @@ export default function PlayPage() {
       if (!trimmed || now - lastInteriorChatSentRef.current < CHAT.RATE_LIMIT_MS) return;
 
       const safeMessage = trimmed.replace(/\b(boludo|pelotudo|idiota|mierda|puta|puto)\b/gi, '***');
-      setMessages((prev) => [
-        ...prev.slice(-19),
-        {
-          id: `${Date.now()}-${Math.random()}`,
-          playerId: playerInfo.playerId,
-          username: playerInfo.username,
-          message: safeMessage,
-          isMe: true,
-        },
-      ]);
+      eventBus.emit(EVENTS.CHAT_RECEIVED, {
+        playerId: playerInfo.playerId,
+        username: playerInfo.username,
+        message: safeMessage,
+        isMe: true,
+      });
       lastInteriorChatSentRef.current = now;
       channel.send({
         type: 'broadcast',
