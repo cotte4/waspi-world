@@ -12,7 +12,7 @@ import { addXpToProgression, getMaxProgressionLevel, loadProgressionState, saveP
 import { loadCombatStats, saveCombatStats, type CombatStats } from '../systems/CombatStats';
 import { ensureFallbackRectTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation, safeSetSpriteTexture } from '../systems/AnimationSafety';
 import { announceScene, bindSafeResetToPlaza } from '../systems/SceneUi';
-import { isActionDown, isActionJustDown, loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
+import { SceneControls } from '../systems/SceneControls';
 import type { VecindadState } from '../../lib/playerState';
 import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
 import { EnemySprite, registerZombieAnims, type ZombieType } from '../systems/EnemySprite';
@@ -348,7 +348,7 @@ export class WorldScene extends Phaser.Scene {
   private audioUnlocked = false;
   private audioSettings: AudioSettings = loadAudioSettings();
   private hudSettings: HudSettings = loadHudSettings();
-  private controlSettings: ControlSettings = loadControlSettings();
+  private controls!: SceneControls;
   private audioSettingsCleanup?: () => void;
   private worldPointerShootHandler?: (p: Phaser.Input.Pointer) => void;
   private touchPointerDownHandler?: (p: Phaser.Input.Pointer) => void;
@@ -594,13 +594,6 @@ export class WorldScene extends Phaser.Scene {
         ...next,
       };
       this.applyHudVisibility();
-    }));
-    this.bridgeCleanupFns.push(eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
-      this.controlSettings = {
-        ...this.controlSettings,
-        ...(payload as Partial<ControlSettings>),
-      };
     }));
     this.bridgeCleanupFns.push(bindSafeResetToPlaza(this, () => this.safeResetToPlaza()));
 
@@ -2338,50 +2331,120 @@ export class WorldScene extends Phaser.Scene {
   private drawCafeBuilding() {
     const { x, y, w, h } = BUILDINGS.CAFE;
     const g = this.add.graphics().setDepth(2);
+    const ORANGE = COLORS.NEON_ORANGE;
+    const cx = x + w / 2;
 
-    // Facade (warm)
-    g.fillStyle(COLORS.BUILDING_CAFE);
+    // ── Facade base ─────────────────────────────────────────
+    g.fillStyle(0x1c1008);
     g.fillRect(x, y, w, h);
+    // Brick texture (horizontal courses)
+    for (let by = y + 10; by < y + h; by += 10) {
+      g.lineStyle(1, 0x2a1810, 0.5);
+      g.lineBetween(x, by, x + w, by);
+    }
 
-    // Roof
+    // ── Roof / cornice ───────────────────────────────────────
     g.fillStyle(COLORS.ROOF_DARK);
-    g.fillRect(x - 8, y, w + 16, 32);
+    g.fillRect(x - 10, y, w + 20, 26);
+    g.fillStyle(0x0a0704);
+    g.fillRect(x - 10, y + 24, w + 20, 5);
+    g.lineStyle(2, ORANGE, 0.45);
+    g.lineBetween(x - 10, y + 26, x + w + 10, y + 26);
 
-    // Warm windows
-    const cWins = [[x+50,y+90],[x+160,y+90],[x+270,y+90],[x+100,y+220],[x+220,y+220]];
-    cWins.forEach(([wx, wy]) => {
-      g.fillStyle(COLORS.WINDOW_WARM, 0.18);
-      g.fillRect(wx, wy, 60, 70);
-      g.lineStyle(1.5, COLORS.NEON_ORANGE, 0.6);
-      g.strokeRect(wx, wy, 60, 70);
-    });
+    // ── Neon sign box (on roof strip) ───────────────────────
+    const sigW = 128, sigH = 22, sigX = cx - sigW / 2, sigY = y + 3;
+    g.fillStyle(0x0c0604);
+    g.fillRect(sigX, sigY, sigW, sigH);
+    g.lineStyle(2, ORANGE, 0.9);
+    g.strokeRect(sigX, sigY, sigW, sigH);
+    g.fillStyle(ORANGE, 0.08);
+    g.fillRect(sigX - 4, sigY - 2, sigW + 8, sigH + 4);
 
-    // Entrance
-    g.fillStyle(0x080400);
-    g.fillRect(x + w/2 - 30, y + h - 75, 60, 75);
-    g.lineStyle(2, COLORS.NEON_ORANGE, 0.9);
-    g.strokeRect(x + w/2 - 30, y + h - 75, 60, 75);
-
-    // CAFÉ sign
-    const cafeSign = this.add.text(x + w/2, y + 48, 'CAFÉ', {
-      fontSize: '20px',
+    const cafeSign = this.add.text(cx, sigY + sigH / 2, '★  CAFÉ  ★', {
+      fontSize: '10px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#FF6B00',
-      stroke: '#FF6B00',
+      stroke: '#000000',
       strokeThickness: 2,
     }).setOrigin(0.5).setDepth(3);
-
     this.tweens.add({
       targets: cafeSign,
-      alpha: { from: 1, to: 0.75 },
-      duration: 1500,
+      alpha: { from: 1, to: 0.55 },
+      duration: 1400,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
     });
 
-    // Warm ambient
-    g.fillStyle(COLORS.NEON_ORANGE, 0.03);
+    // ── Windows (upper: 3, lower: 2 flanking door) ──────────
+    [[x + 24, y + 36], [x + 152, y + 36], [x + 296, y + 36]].forEach(([wx, wy]) => {
+      const ww = 66, wh = 68;
+      g.fillStyle(0xffaa44, 0.14);
+      g.fillRect(wx, wy, ww, wh);
+      g.lineStyle(2, ORANGE, 0.62);
+      g.strokeRect(wx, wy, ww, wh);
+      g.lineStyle(1, ORANGE, 0.22);
+      g.lineBetween(wx + ww / 2, wy + 2, wx + ww / 2, wy + wh - 2);
+      g.lineBetween(wx + 2, wy + wh / 2, wx + ww - 2, wy + wh / 2);
+      g.fillStyle(0xff6b00, 0.06);
+      g.fillRect(wx, wy, 12, wh);
+      g.fillRect(wx + ww - 12, wy, 12, wh);
+    });
+    [[x + 24, y + 128], [x + 296, y + 128]].forEach(([wx, wy]) => {
+      const ww = 66, wh = 58;
+      g.fillStyle(0xffaa44, 0.12);
+      g.fillRect(wx, wy, ww, wh);
+      g.lineStyle(2, ORANGE, 0.52);
+      g.strokeRect(wx, wy, ww, wh);
+      g.lineStyle(1, ORANGE, 0.18);
+      g.lineBetween(wx + ww / 2, wy + 2, wx + ww / 2, wy + wh - 2);
+      g.lineBetween(wx + 2, wy + wh / 2, wx + ww - 2, wy + wh / 2);
+    });
+
+    // ── Entrance door (double) ───────────────────────────────
+    const dX = cx - 34, dY = y + h - 78, dW = 68, dH = 78;
+    g.fillStyle(0x060300);
+    g.fillRect(dX, dY, dW, dH);
+    g.lineStyle(2, ORANGE, 0.85);
+    g.strokeRect(dX, dY, dW, dH);
+    g.lineStyle(1, ORANGE, 0.4);
+    g.lineBetween(cx, dY + 4, cx, dY + dH);
+    g.fillStyle(0xffaa44, 0.08);
+    g.fillRect(dX, dY, dW, 16);
+    g.fillStyle(ORANGE, 0.85);
+    g.fillRect(cx - 10, dY + dH / 2 - 3, 4, 7);
+    g.fillRect(cx + 6, dY + dH / 2 - 3, 4, 7);
+    g.fillStyle(ORANGE, 0.05);
+    g.fillRect(dX - 18, dY, dW + 36, dH);
+
+    // ── Awning over entrance ─────────────────────────────────
+    const awX = cx - 50, awY = y + h - 88, awW = 100, awH = 10;
+    for (let ai = 0; ai < 7; ai++) {
+      g.fillStyle(ai % 2 === 0 ? 0xff6b00 : 0x1a0a04, 0.88);
+      g.fillRect(awX + ai * Math.ceil(awW / 7), awY, Math.ceil(awW / 7), awH);
+    }
+    g.lineStyle(1, ORANGE, 0.6);
+    g.strokeRect(awX, awY, awW, awH);
+    for (let fi = 0; fi < 8; fi++) {
+      g.lineStyle(1, ORANGE, 0.35);
+      g.lineBetween(awX + 4 + fi * Math.ceil(awW / 8), awY + awH, awX + 4 + fi * Math.ceil(awW / 8), awY + awH + 5);
+    }
+
+    // ── Sidewalk menu board ──────────────────────────────────
+    const mbX = cx + 50, mbY = y + h - 58;
+    g.fillStyle(0x0d1a0d);
+    g.fillRect(mbX, mbY, 34, 42);
+    g.lineStyle(1, 0x226622, 0.65);
+    g.strokeRect(mbX, mbY, 34, 42);
+    g.lineStyle(1, 0x552200, 0.7);
+    g.lineBetween(mbX + 5, mbY + 42, mbX + 1, mbY + 54);
+    g.lineBetween(mbX + 29, mbY + 42, mbX + 33, mbY + 54);
+    this.add.text(mbX + 17, mbY + 10, 'MENÚ', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#44aa44' }).setOrigin(0.5).setDepth(3);
+    this.add.text(mbX + 17, mbY + 24, 'DEL', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#44aa44' }).setOrigin(0.5).setDepth(3);
+    this.add.text(mbX + 17, mbY + 36, 'DÍA', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#44aa44' }).setOrigin(0.5).setDepth(3);
+
+    // ── Warm ambient ─────────────────────────────────────────
+    g.fillStyle(ORANGE, 0.022);
     g.fillRect(x, y, w, h);
   }
 
@@ -2588,11 +2651,7 @@ export class WorldScene extends Phaser.Scene {
     }
 
     const speed = PLAYER.SPEED * (delta / 1000);
-    let { dx, dy } = readMovementVector({
-      scene: this,
-      settings: this.controlSettings,
-      includeJoystick: true,
-    });
+    let { dx, dy } = this.controls.readMovement(true);
 
     // Touch fallback if no keyboard input
     if (dx === 0 && dy === 0 && this.isTouch) {
@@ -3442,7 +3501,7 @@ export class WorldScene extends Phaser.Scene {
     }
 
     // Gun shoot with keyboard
-    if (this.gunEnabled && isActionDown(this, this.controlSettings, 'shoot') && !this.inputBlocked) {
+    if (this.gunEnabled && this.controls.isActionDown('shoot') && !this.inputBlocked) {
       const p = this.input.activePointer;
       this.shootAt(p.worldX, p.worldY);
     }
@@ -3565,7 +3624,7 @@ export class WorldScene extends Phaser.Scene {
 
   private handleInteraction() {
     if (this.inTransition) return;
-    if (!isActionJustDown(this, this.controlSettings, 'interact')) return;
+    if (!this.controls.isActionJustDown('interact')) return;
 
     const target = this.getInteractionTarget();
     if (target?.sceneKey) {

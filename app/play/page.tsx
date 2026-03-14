@@ -1554,56 +1554,55 @@ export default function PlayPage() {
         </button>
 
         <div
-          className="ww-auth-card absolute right-2"
+          className="ww-auth-card absolute right-2 bottom-2"
           style={{
-            top: 176,
-            width: isAuthenticated ? 156 : 228,
-            background: 'rgba(0,0,0,0.78)',
-            border: '1px solid rgba(245,200,66,0.18)',
-            padding: isAuthenticated ? '6px 8px' : '8px',
-            boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
+            width: isAuthenticated ? 'auto' : 228,
+            background: 'rgba(0,0,0,0.72)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            padding: isAuthenticated ? '5px 10px' : '8px',
+            borderRadius: 4,
+            boxShadow: '0 4px 16px rgba(0,0,0,0.45)',
             zIndex: 12,
           }}
         >
           {isAuthenticated ? (
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span
-                  className="inline-block"
-                  style={{
-                    width: 7,
-                    height: 7,
-                    borderRadius: '999px',
-                    background: '#39FF14',
-                    boxShadow: '0 0 10px rgba(57,255,20,0.5)',
-                    flexShrink: 0,
-                  }}
-                />
-                <div
-                  style={{
-                    fontFamily: '"Silkscreen", monospace',
-                    fontSize: '11px',
-                    color: 'rgba(255,255,255,0.82)',
-                    lineHeight: 1.1,
-                  }}
-                >
-                  Sesion OK
-                </div>
-              </div>
+            <div className="flex items-center gap-3">
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '999px',
+                  background: '#39FF14',
+                  boxShadow: '0 0 8px rgba(57,255,20,0.6)',
+                  flexShrink: 0,
+                  display: 'inline-block',
+                }}
+              />
+              <span
+                style={{
+                  fontFamily: '"Silkscreen", monospace',
+                  fontSize: '10px',
+                  color: 'rgba(255,255,255,0.5)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                sesión activa
+              </span>
               <button
                 onClick={() => void signOut()}
                 disabled={authBusy}
                 style={{
                   fontFamily: '"Press Start 2P", monospace',
-                  fontSize: '7px',
-                  color: authBusy ? 'rgba(255,255,255,0.4)' : '#BBBBBB',
+                  fontSize: '6px',
+                  color: authBusy ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.35)',
                   background: 'transparent',
                   border: 'none',
                   cursor: authBusy ? 'not-allowed' : 'pointer',
                   padding: 0,
+                  letterSpacing: '0.04em',
                 }}
               >
-                {authBusy ? '...' : 'SALIR'}
+                {authBusy ? '...' : 'salir'}
               </button>
             </div>
           ) : (

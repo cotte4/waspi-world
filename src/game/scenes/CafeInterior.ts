@@ -1,10 +1,10 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { BUILDINGS, COLORS, SAFE_PLAZA_RETURN, WORLD, ZONES } from '../config/constants';
+import { BUILDINGS, SAFE_PLAZA_RETURN, ZONES } from '../config/constants';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { eventBus, EVENTS } from '../config/eventBus';
-import { isActionJustDown, loadControlSettings, readMovementVector, type ControlSettings } from '../systems/ControlSettings';
+import { SceneControls } from '../systems/SceneControls';
 
 export class CafeInterior extends Phaser.Scene {
   private static readonly RETURN_X = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
@@ -28,7 +28,7 @@ export class CafeInterior extends Phaser.Scene {
   private lastMoveDx = 0;
   private lastMoveDy = 0;
   private lastIsMoving = false;
-  private controlSettings: ControlSettings = loadControlSettings();
+  private controls!: SceneControls;
 
   constructor() {
     super({ key: 'CafeInterior' });
@@ -38,6 +38,7 @@ export class CafeInterior extends Phaser.Scene {
     const { width, height } = this.scale;
     announceScene(this);
     this.input.enabled = true;
+    this.controls = new SceneControls(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', {
@@ -45,51 +46,230 @@ export class CafeInterior extends Phaser.Scene {
         returnY: SAFE_PLAZA_RETURN.Y,
       });
     });
-    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
-      this.controlSettings = {
-        ...this.controlSettings,
-        ...(payload as Partial<ControlSettings>),
-      };
-    });
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
-
-    const g = this.add.graphics();
-    g.fillStyle(0x0d0505);
-    g.fillRect(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
+    // ── Canvas background ─────────────────────────────────────
+    const bg = this.add.graphics();
+    bg.fillStyle(0x060202);
+    bg.fillRect(0, 0, width, height);
 
     const roomW = 640;
     const roomH = 360;
-    const roomX = (width - roomW) / 2;
-    const roomY = (height - roomH) / 2;
+    const roomX = (width - roomW) / 2;   // 80
+    const roomY = (height - roomH) / 2;  // 120
+    const roomR = roomX + roomW;          // 720
+    const roomB = roomY + roomH;          // 480
+    const cx    = width / 2;             // 400
+    const ORANGE = 0xFF6B00;
+    const AMBER  = 0xffaa44;
 
-    g.fillStyle(0x1a0c0c);
-    g.fillRect(roomX, roomY, roomW, roomH);
-    g.lineStyle(3, COLORS.NEON_ORANGE, 0.55);
-    g.strokeRect(roomX, roomY, roomW, roomH);
+    // ── Room base ────────────────────────────────────────────
+    const room = this.add.graphics();
+    // Main floor fill
+    room.fillStyle(0x1a0c0c);
+    room.fillRect(roomX, roomY, roomW, roomH);
+    // Back wall (top 92px) — darker panel
+    room.fillStyle(0x110808);
+    room.fillRect(roomX, roomY, roomW, 92);
+    room.lineStyle(1, 0x2a1010, 0.7);
+    room.lineBetween(roomX, roomY + 92, roomR, roomY + 92);
+    // Vertical wall paneling lines
+    for (let wx = roomX + 18; wx < roomR; wx += 18) {
+      room.lineStyle(1, 0x1a0c0c, 0.55);
+      room.lineBetween(wx, roomY, wx, roomY + 92);
+    }
+    // Floor zone (bottom 92px) — wood planks
+    room.fillStyle(0x180e0a);
+    room.fillRect(roomX, roomB - 92, roomW, 92);
+    for (let ply = roomB - 92; ply < roomB; ply += 14) {
+      room.lineStyle(1, 0x110905, 0.65);
+      room.lineBetween(roomX, ply, roomR, ply);
+    }
+    // Plank end joints (offset per row)
+    for (let row = 0; row < 6; row++) {
+      const plyBase = roomB - 92 + row * 14;
+      const off = (row % 2 === 0) ? 80 : 200;
+      [off, off + 200, off + 400].forEach((jx) => {
+        if (roomX + jx < roomR) {
+          room.lineStyle(1, 0x110905, 0.45);
+          room.lineBetween(roomX + jx, plyBase, roomX + jx, plyBase + 14);
+        }
+      });
+    }
+    room.lineStyle(1, ORANGE, 0.14);
+    room.lineBetween(roomX, roomB - 92, roomR, roomB - 92);
 
-    // Simple bar counter
-    g.fillStyle(0x2A1510);
-    g.fillRect(roomX + 60, roomY + 90, roomW - 120, 40);
-
-    // Tables
-    const tableCenters = [
-      { x: roomX + 160, y: roomY + 210 },
-      { x: roomX + 320, y: roomY + 240 },
-      { x: roomX + 480, y: roomY + 210 },
-    ];
-    tableCenters.forEach(({ x, y }) => {
-      g.fillStyle(0x1F1410);
-      g.fillCircle(x, y, 20);
+    // ── Room border ──────────────────────────────────────────
+    room.lineStyle(1, ORANGE, 0.08);
+    room.strokeRect(roomX - 3, roomY - 3, roomW + 6, roomH + 6);
+    room.lineStyle(2, ORANGE, 0.65);
+    room.strokeRect(roomX, roomY, roomW, roomH);
+    // Corner L-brackets
+    const bL = 16;
+    [[roomX, roomY],[roomR, roomY],[roomX, roomB],[roomR, roomB]].forEach(([bx, by], i) => {
+      room.lineStyle(2, ORANGE, 1);
+      const sx = i % 2 === 0 ? 1 : -1;
+      const sy = i < 2 ? 1 : -1;
+      room.lineBetween(bx, by, bx + sx * bL, by);
+      room.lineBetween(bx, by, bx, by + sy * bL);
     });
 
-    // Floor warm glow
-    const floor = this.add.rectangle(width / 2, roomY + roomH - 60, roomW - 80, 80, 0x1A0C08, 0.95);
-    floor.setStrokeStyle(2, 0x000000, 0.7);
+    // ── Pendant ceiling lights ───────────────────────────────
+    const pendantG = this.add.graphics();
+    [cx - 190, cx, cx + 190].forEach((px) => {
+      pendantG.lineStyle(1, 0x3a3030, 0.7);
+      pendantG.lineBetween(px, roomY, px, roomY + 20);
+      pendantG.fillStyle(0x1e1616);
+      pendantG.fillRect(px - 9, roomY + 20, 18, 10);
+      pendantG.lineStyle(1, 0x4a3a3a, 0.6);
+      pendantG.strokeRect(px - 9, roomY + 20, 18, 10);
+      pendantG.fillStyle(AMBER, 0.07);
+      pendantG.fillTriangle(px - 10, roomY + 30, px + 10, roomY + 30, px, roomY + 82);
+    });
 
-    // Player avatar
+    // ── Back wall shelves ────────────────────────────────────
+    const shelfG = this.add.graphics();
+    const bottleColors = [0x884400, 0x44aa22, 0x2244aa, 0x993300, 0xaaaa44, 0x226644];
+    const drawShelfSide = (startX: number, shelfWidth: number) => {
+      // Shelf plank 1
+      shelfG.fillStyle(0x2e1610);
+      shelfG.fillRect(startX, roomY + 44, shelfWidth, 6);
+      shelfG.lineStyle(1, 0x4a2218, 0.8);
+      shelfG.strokeRect(startX, roomY + 44, shelfWidth, 6);
+      // Bottles on shelf 1
+      bottleColors.forEach((col, i) => {
+        const bx = startX + 6 + i * Math.floor(shelfWidth / 7);
+        shelfG.fillStyle(col, 0.82);
+        shelfG.fillRect(bx, roomY + 24, 9, 20);
+        shelfG.fillRect(bx + 2, roomY + 18, 5, 7);
+        shelfG.lineStyle(1, 0x000000, 0.25);
+        shelfG.strokeRect(bx, roomY + 24, 9, 20);
+      });
+      // Shelf plank 2
+      shelfG.fillStyle(0x2e1610);
+      shelfG.fillRect(startX, roomY + 74, shelfWidth, 6);
+      shelfG.lineStyle(1, 0x4a2218, 0.8);
+      shelfG.strokeRect(startX, roomY + 74, shelfWidth, 6);
+      // Cups on shelf 2
+      for (let ci = 0; ci < 5; ci++) {
+        const cxx = startX + 6 + ci * Math.floor(shelfWidth / 5.5);
+        shelfG.fillStyle(0xcccccc, 0.65);
+        shelfG.fillRect(cxx, roomY + 60, 12, 14);
+        shelfG.lineStyle(1, 0x888888, 0.45);
+        shelfG.strokeRect(cxx, roomY + 60, 12, 14);
+      }
+    };
+    drawShelfSide(roomX + 10, 200);
+    drawShelfSide(roomR - 210, 200);
+
+    // ── Neon CAFÉ sign (back wall center) ────────────────────
+    const signW = 148, signH = 28;
+    const signX = cx - signW / 2, signY = roomY + 26;
+    const signG = this.add.graphics();
+    signG.fillStyle(0x0c0604);
+    signG.fillRect(signX, signY, signW, signH);
+    signG.lineStyle(2, ORANGE, 0.9);
+    signG.strokeRect(signX, signY, signW, signH);
+    signG.fillStyle(ORANGE, 0.1);
+    signG.fillRect(signX - 5, signY - 3, signW + 10, signH + 6);
+    const neonSign = this.add.text(cx, signY + signH / 2, '★  CAFÉ  ★', {
+      fontSize: '12px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FF6B00',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(5);
+    this.tweens.add({
+      targets: [neonSign, signG],
+      alpha: { from: 1, to: 0.6 },
+      duration: 1600,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    // ── Bar counter ──────────────────────────────────────────
+    const barG = this.add.graphics();
+    const barX = roomX + 44, barY = roomY + 98, barW = roomW - 88, barH = 44;
+    // Front depth face
+    barG.fillStyle(0x180c06);
+    barG.fillRect(barX, barY + barH, barW, 10);
+    // Counter body
+    barG.fillStyle(0x2c1808);
+    barG.fillRect(barX, barY, barW, barH);
+    barG.lineStyle(1, 0x4a2a14, 0.9);
+    barG.strokeRect(barX, barY, barW, barH);
+    // Top surface highlight
+    barG.fillStyle(0x3a1e0a);
+    barG.fillRect(barX, barY, barW, 8);
+    barG.lineStyle(1, 0x6a3a1a, 0.6);
+    barG.lineBetween(barX, barY + 8, barX + barW, barY + 8);
+    // Brass rail top edge
+    barG.lineStyle(2, ORANGE, 0.3);
+    barG.lineBetween(barX, barY, barX + barW, barY);
+    // Bar top items
+    [
+      { bx: barX + 18, type: 'cup' }, { bx: barX + 44, type: 'cup' },
+      { bx: barX + 88, type: 'bottle', col: 0x884400 },
+      { bx: barX + 108, type: 'bottle', col: 0x226644 },
+      { bx: barX + barW - 120, type: 'bottle', col: 0xaa4422 },
+      { bx: barX + barW - 56, type: 'cup' }, { bx: barX + barW - 30, type: 'cup' },
+    ].forEach(({ bx, type, col }) => {
+      if (type === 'cup') {
+        barG.fillStyle(0xcccccc, 0.75);
+        barG.fillRect(bx, barY - 12, 10, 12);
+        barG.lineStyle(1, 0x888888, 0.45);
+        barG.strokeRect(bx, barY - 12, 10, 12);
+      } else {
+        barG.fillStyle((col as number) ?? 0x884400, 0.85);
+        barG.fillRect(bx, barY - 20, 8, 20);
+        barG.fillRect(bx + 2, barY - 26, 4, 7);
+      }
+    });
+    // Bar stools (front of bar)
+    [barX + 64, barX + 180, barX + barW - 180, barX + barW - 64].forEach((sx) => {
+      barG.lineStyle(1, 0x3a1e0a, 0.8);
+      barG.lineBetween(sx + 8, barY + barH + 10, sx + 8, barY + barH + 30);
+      barG.fillStyle(0x3a1e0a);
+      barG.fillRect(sx, barY + barH + 10, 16, 6);
+      barG.lineStyle(1, 0x5a2e14, 0.6);
+      barG.strokeRect(sx, barY + barH + 10, 16, 6);
+    });
+
+    // ── Tables ───────────────────────────────────────────────
+    const tableG = this.add.graphics();
+    [
+      { tx: roomX + 148, ty: roomY + 210 },
+      { tx: roomX + 340, ty: roomY + 232 },
+      { tx: roomX + 524, ty: roomY + 210 },
+    ].forEach(({ tx, ty }) => {
+      const tw = 62, th = 34;
+      // Chair top
+      tableG.fillStyle(0x1e1208);
+      tableG.fillRect(tx - 12, ty - 20, 28, 7);
+      tableG.lineStyle(1, 0x3a2010, 0.5);
+      tableG.strokeRect(tx - 12, ty - 20, 28, 7);
+      // Chair bottom
+      tableG.fillStyle(0x1e1208);
+      tableG.fillRect(tx - 12, ty + th + 4, 28, 7);
+      tableG.lineStyle(1, 0x3a2010, 0.5);
+      tableG.strokeRect(tx - 12, ty + th + 4, 28, 7);
+      // Table surface
+      tableG.fillStyle(0x2a1408);
+      tableG.fillRect(tx - tw / 2, ty, tw, th);
+      tableG.lineStyle(1, 0x4a2218, 0.8);
+      tableG.strokeRect(tx - tw / 2, ty, tw, th);
+      // Top highlight
+      tableG.fillStyle(0x381c0a);
+      tableG.fillRect(tx - tw / 2, ty, tw, 5);
+      // Candle glow
+      tableG.fillStyle(AMBER, 0.65);
+      tableG.fillRect(tx - 3, ty + th / 2 + 4, 6, 10);
+      tableG.fillStyle(AMBER, 0.22);
+      tableG.fillEllipse(tx, ty + th / 2, 22, 14);
+    });
+
+    // ── Player avatar ────────────────────────────────────────
     this.px = width / 2;
-    this.py = roomY + roomH - 80;
+    this.py = roomB - 80;
     this.player = new AvatarRenderer(this, this.px, this.py, loadStoredAvatarConfig());
     this.player.setDepth(10);
     this.room = new InteriorRoom(this, {
@@ -103,26 +283,13 @@ export class CafeInterior extends Phaser.Scene {
     });
     this.room.start();
 
-    // Title
-    this.add.text(width / 2, roomY + 24, 'CAFÉ', {
-      fontSize: '16px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FF6B00',
-    }).setOrigin(0.5);
-
-    this.add.text(width / 2, roomY + 52, 'ESPAClO SOCIAL COMING SOON', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#BBBBBB',
+    // ── UI ───────────────────────────────────────────────────
+    this.add.text(cx, roomB + 16, 'ESC  ·  SALIR', {
+      fontSize: '7px',
+      fontFamily: '"Silkscreen", monospace',
+      color: '#442211',
     }).setOrigin(0.5);
     createBackButton(this, () => this.exitToWorld());
-
-    // Exit hint
-    this.add.text(width / 2, roomY + roomH + 24, 'ESC PARA SALIR', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#777777',
-    }).setOrigin(0.5);
 
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
@@ -144,7 +311,7 @@ export class CafeInterior extends Phaser.Scene {
     if (this.inTransition) return;
     this.handleMovement();
     this.room?.update();
-    if (isActionJustDown(this, this.controlSettings, 'back')) {
+    if (this.controls.isActionJustDown('back')) {
       this.exitToWorld();
     }
   }
@@ -160,10 +327,7 @@ export class CafeInterior extends Phaser.Scene {
 
   private handleMovement() {
     const speed = 180 / 60;
-    let { dx, dy } = readMovementVector({
-      scene: this,
-      settings: this.controlSettings,
-    });
+    let { dx, dy } = this.controls.readMovement();
 
     if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
 
