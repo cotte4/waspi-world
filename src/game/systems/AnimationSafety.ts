@@ -41,15 +41,17 @@ export function safeCreateSpritesheetAnimation(
   frameRate: number,
   repeat: number,
   startFrame = 0,
-  endFrame = 3,
+  endFrame?: number,
 ) {
   if (scene.anims.exists(animationKey)) return true;
   if (!hasUsableTexture(scene, textureKey)) return false;
 
   try {
+    const texture = scene.textures.get(textureKey);
+    const resolvedEndFrame = endFrame ?? Math.max(startFrame, (texture?.frameTotal ?? 2) - 2);
     scene.anims.create({
       key: animationKey,
-      frames: scene.anims.generateFrameNumbers(textureKey, { start: startFrame, end: endFrame }),
+      frames: scene.anims.generateFrameNumbers(textureKey, { start: startFrame, end: resolvedEndFrame }),
       frameRate,
       repeat,
     });

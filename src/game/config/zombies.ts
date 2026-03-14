@@ -175,7 +175,7 @@ export const ZOMBIE_TYPES: Record<ZombieType, ZombieConfig> = {
     attackRange: 26,
     attackCooldownMs: 900,
     minRound: 1,
-    folder: 'basic',
+    folder: 'shooter',
   },
   runner: {
     type: 'runner',
@@ -189,7 +189,7 @@ export const ZOMBIE_TYPES: Record<ZombieType, ZombieConfig> = {
     attackRange: 24,
     attackCooldownMs: 700,
     minRound: 3,
-    folder: 'runner',
+    folder: 'rusher',
   },
   brute: {
     type: 'brute',
