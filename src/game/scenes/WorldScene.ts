@@ -2541,6 +2541,12 @@ export class WorldScene extends Phaser.Scene {
     return hitbox;
   }
 
+  private syncHitboxPosition(hitbox: HitboxArc, x: number, y: number) {
+    hitbox.setPosition(x, y);
+    hitbox.body.updateFromGameObject();
+    hitbox.body.setVelocity(0, 0);
+  }
+
   private destroyArcadeObject(obj: unknown) {
     if (!obj || typeof obj !== 'object') return;
 
@@ -2941,7 +2947,7 @@ export class WorldScene extends Phaser.Scene {
     }
 
     // Update combat hitbox follow
-    this.playerHitbox.setPosition(this.px, this.py);
+    this.syncHitboxPosition(this.playerHitbox, this.px, this.py);
 
     // Training zone enter/exit
     const nowInTraining =
@@ -2972,7 +2978,7 @@ export class WorldScene extends Phaser.Scene {
       rp.avatar.setDepth(Math.floor(rp.y / 10));
       rp.nameplate.setPosition(rp.x, rp.y - 46);
       this.chatSystem.updatePosition(playerId, rp.x, rp.y);
-      rp.hitbox.setPosition(rp.x, rp.y);
+      this.syncHitboxPosition(rp.hitbox, rp.x, rp.y);
     }
   }
 
