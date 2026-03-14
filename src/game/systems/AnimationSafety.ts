@@ -1,5 +1,13 @@
 import Phaser from 'phaser';
 
+function isLiveSprite(sprite: Phaser.GameObjects.Sprite | undefined | null) {
+  return !!sprite
+    && !!sprite.scene
+    && sprite.active !== false
+    && !!sprite.texture
+    && !!sprite.anims;
+}
+
 export function ensureFallbackRectTexture(
   scene: Phaser.Scene,
   key: string,
@@ -68,9 +76,14 @@ export function safeSetSpriteTexture(
   preferredTexture: string,
   fallbackTexture: string,
 ) {
+  if (!isLiveSprite(sprite)) return fallbackTexture;
   const resolved = scene.textures.exists(preferredTexture) ? preferredTexture : fallbackTexture;
-  if (sprite.texture.key !== resolved) {
-    sprite.setTexture(resolved, 0);
+  try {
+    if (sprite.texture.key !== resolved) {
+      sprite.setTexture(resolved, 0);
+    }
+  } catch (error) {
+    console.error(`[Waspi] Failed to set texture ${resolved}`, error);
   }
   return resolved;
 }
@@ -83,6 +96,7 @@ export function safePlaySpriteAnimation(
   fallbackTexture: string,
   ignoreIfPlaying = true,
 ) {
+  if (!isLiveSprite(sprite)) return false;
   if (scene.anims.exists(animationKey)) {
     try {
       sprite.play(animationKey, ignoreIfPlaying);
@@ -93,6 +107,28 @@ export function safePlaySpriteAnimation(
   }
 
   safeSetSpriteTexture(scene, sprite, preferredTexture, fallbackTexture);
-  sprite.stop();
+  try {
+    sprite.stop();
+  } catch (error) {
+    console.error(`[Waspi] Failed to stop sprite after animation fallback ${animationKey}`, error);
+  }
   return false;
+}
+
+export function getSafeAnimationDurationMs(
+  scene: Phaser.Scene,
+  animationKey: string,
+  fallbackMs: number,
+) {
+  try {
+    const anim = scene.anims.get(animationKey);
+    if (!anim) return fallbackMs;
+    const frameTotal = anim.frames?.length ?? 0;
+    const frameRate = anim.frameRate ?? 0;
+    if (frameTotal <= 0 || frameRate <= 0) return fallbackMs;
+    return Math.max(fallbackMs, Math.round((frameTotal / frameRate) * 1000));
+  } catch (error) {
+    console.error(`[Waspi] Failed to estimate animation duration ${animationKey}`, error);
+    return fallbackMs;
+  }
 }

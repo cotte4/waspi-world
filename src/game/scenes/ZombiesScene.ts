@@ -2,7 +2,7 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
-import { ensureFallbackRectTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation } from '../systems/AnimationSafety';
+import { ensureFallbackRectTexture, getSafeAnimationDurationMs, safeCreateSpritesheetAnimation, safePlaySpriteAnimation } from '../systems/AnimationSafety';
 import {
   ZOMBIES_PLAYER,
   ZOMBIES_POINTS,
@@ -1498,12 +1498,31 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private renderZombieHp(zombie: ZombieState) {
+    if (!zombie.hpFill?.scene || zombie.hpFill.active === false) return;
     const progress = Phaser.Math.Clamp(zombie.hp / zombie.maxHp, 0, 1);
     zombie.hpFill.width = zombie.radius * 2 * progress;
     zombie.hpFill.setFillStyle(progress > 0.45 ? 0x39FF14 : progress > 0.2 ? 0xF5C842 : 0xFF5E5E, 0.95);
   }
 
+  private isZombieRenderable(zombie: ZombieState) {
+    return !!zombie.body?.scene
+      && zombie.body.active !== false
+      && !!zombie.body.texture
+      && !!zombie.body.anims
+      && !!zombie.container?.scene
+      && zombie.container.active !== false
+      && !!zombie.shadow?.scene
+      && zombie.shadow.active !== false
+      && !!zombie.label?.scene
+      && zombie.label.active !== false;
+  }
+
+  private getZombieDeathDurationMs(zombie: ZombieState) {
+    return getSafeAnimationDurationMs(this, `zs_${zombie.assetFolder}_death`, zombie.isBoss ? 780 : 420);
+  }
+
   private setZombieState(zombie: ZombieState, state: ZombieAnimState) {
+    if (!this.isZombieRenderable(zombie)) return;
     zombie.state = state;
     const bob = state === 'walk'
       ? Math.sin(this.time.now / 110 + zombie.phase) * 2.4
@@ -1551,6 +1570,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.showFloatingText(`+${hitReward}`, zombie.x, zombie.y - 18, pointMultiplier > 1 ? '#FFB36A' : '#F5C842');
     if (zombie.hp > 0) return;
 
+    this.setZombieState(zombie, 'death');
     zombie.alive = false;
     this.releaseSpawnNode(zombie, true);
     if (zombie.isBoss) {
@@ -1559,15 +1579,19 @@ export class ZombiesScene extends Phaser.Scene {
     }
     const killReward = zombie.killReward * pointMultiplier;
     this.points += killReward;
-    zombie.container.setAlpha(0);
-    zombie.shadow.setAlpha(0);
+    if (zombie.shadow?.scene && zombie.shadow.active !== false) {
+      zombie.shadow.setAlpha(0.18);
+    }
     this.showFloatingText(`+${killReward} ${zombie.displayLabel}`, zombie.x, zombie.y - 34, pointMultiplier > 1 ? '#FFD36A' : '#9EFFB7');
     this.tryDropPickup(zombie.x, zombie.y);
     const burst = this.add.circle(zombie.x, zombie.y - 8, zombie.radius + 8, 0xFF6A6A, 0.26).setDepth(80);
     this.tweens.add({ targets: burst, alpha: 0, scale: 1.9, duration: 220, onComplete: () => burst.destroy() });
-    this.time.delayedCall(180, () => {
-      zombie.container.destroy();
-      zombie.shadow.destroy();
+    this.time.delayedCall(this.getZombieDeathDurationMs(zombie), () => {
+      if (zombie.container?.scene) zombie.container.destroy();
+      if (zombie.shadow?.scene) zombie.shadow.destroy();
+      if (zombie.hpBg?.scene) zombie.hpBg.destroy();
+      if (zombie.hpFill?.scene) zombie.hpFill.destroy();
+      if (zombie.label?.scene) zombie.label.destroy();
       this.zombies.delete(zombie.id);
     });
   }

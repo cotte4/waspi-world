@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { ensureFallbackRectTexture, safeCreateSpritesheetAnimation, safePlaySpriteAnimation } from './AnimationSafety';
+import { ensureFallbackRectTexture, getSafeAnimationDurationMs, safeCreateSpritesheetAnimation, safePlaySpriteAnimation } from './AnimationSafety';
 
 export type ZombieState = 'idle' | 'walk' | 'attack' | 'hurt' | 'death';
 export type ZombieType = 'rusher' | 'shooter' | 'tank' | 'boss';
@@ -25,6 +25,8 @@ export class EnemySprite {
   private currentState: ZombieState = 'idle';
   private dead = false;
   private scene: Phaser.Scene;
+  private stateToken = 0;
+  private stateLockUntil = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number, type: ZombieType) {
     this.scene = scene;
@@ -43,33 +45,36 @@ export class EnemySprite {
     return `zombie_${this.type}_${state}`;
   }
 
+  private canUseSprite() {
+    return !!this.sprite
+      && !!this.sprite.scene
+      && this.sprite.active !== false
+      && !!this.sprite.texture
+      && !!this.sprite.anims;
+  }
+
+  private getAnimDurationMs(state: ZombieState) {
+    const fallback = state === 'death' ? 520 : state === 'attack' ? 280 : state === 'hurt' ? 220 : 180;
+    return getSafeAnimationDurationMs(this.scene, this.animKey(state), fallback);
+  }
+
   private playAnim(state: ZombieState) {
-    if (!this.sprite || !this.sprite.scene) return;
+    if (!this.canUseSprite()) return false;
     try {
       const key = this.animKey(state);
-      const isLooping = state === 'idle' || state === 'walk';
       const fallbackKey = ensureZombieFallbackTexture(this.scene, this.type);
-      safePlaySpriteAnimation(this.scene, this.sprite, key, `zombie_${this.type}_${state}`, fallbackKey, true);
-
-      if (!isLooping) {
-        this.sprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
-          if (!this.sprite || !this.sprite.scene) return;
-          if (this.dead) return;
-          if (this.currentState === state) {
-            this.currentState = 'idle';
-            this.playAnim('idle');
-          }
-        });
-      }
+      return safePlaySpriteAnimation(this.scene, this.sprite, key, `zombie_${this.type}_${state}`, fallbackKey, true);
     } catch (error) {
       console.error(`[Waspi] EnemySprite playAnim failed for ${this.type}:${state}`, error);
+      return false;
     }
   }
 
   setState(state: ZombieState) {
-    if (!this.sprite || !this.sprite.scene) return;
+    if (!this.canUseSprite()) return;
     try {
       if (this.dead && state !== 'death') return;
+      if ((state === 'idle' || state === 'walk') && this.scene.time.now < this.stateLockUntil) return;
 
       // Avoid re-triggering looping anims every frame
       if (
@@ -78,49 +83,91 @@ export class EnemySprite {
       ) return;
 
       this.currentState = state;
+      const token = ++this.stateToken;
 
       if (state === 'death') {
         this.dead = true;
+        this.stateLockUntil = Number.POSITIVE_INFINITY;
         this.playAnim('death');
-        // Hide after death animation completes
-        this.sprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
-          if (!this.sprite || !this.sprite.scene) return;
+        const delay = this.getAnimDurationMs('death');
+        this.scene.time.delayedCall(delay, () => {
+          if (!this.canUseSprite()) return;
+          if (token !== this.stateToken) return;
           this.sprite.setAlpha(0);
         });
         return;
       }
 
       this.playAnim(state);
+      if (state === 'attack' || state === 'hurt') {
+        const delay = this.getAnimDurationMs(state);
+        this.stateLockUntil = this.scene.time.now + delay;
+        this.scene.time.delayedCall(delay, () => {
+          if (!this.canUseSprite()) return;
+          if (token !== this.stateToken || this.dead) return;
+          if (this.currentState !== state) return;
+          this.currentState = 'idle';
+          this.stateLockUntil = 0;
+          this.playAnim('idle');
+        });
+        return;
+      }
+
+      this.stateLockUntil = 0;
     } catch (error) {
       console.error(`[Waspi] EnemySprite setState failed for ${this.type}:${state}`, error);
     }
   }
 
   setPosition(x: number, y: number) {
-    if (!this.sprite || !this.sprite.scene) return;
-    this.sprite.setPosition(x, y + ZOMBIE_Y_OFFSET[this.type]);
+    if (!this.canUseSprite()) return;
+    try {
+      this.sprite.setPosition(x, y + ZOMBIE_Y_OFFSET[this.type]);
+    } catch (error) {
+      console.error(`[Waspi] EnemySprite setPosition failed for ${this.type}`, error);
+    }
   }
 
   revive() {
-    if (!this.sprite || !this.sprite.scene) return;
+    if (!this.canUseSprite()) return;
     this.dead = false;
     this.currentState = 'idle';
-    this.sprite.setAlpha(1);
-    this.playAnim('idle');
+    this.stateLockUntil = 0;
+    this.stateToken += 1;
+    try {
+      this.sprite.setAlpha(1);
+      this.playAnim('idle');
+    } catch (error) {
+      console.error(`[Waspi] EnemySprite revive failed for ${this.type}`, error);
+    }
   }
 
   setAlpha(alpha: number) {
-    if (!this.sprite || !this.sprite.scene) return;
-    this.sprite.setAlpha(alpha);
+    if (!this.canUseSprite()) return;
+    try {
+      this.sprite.setAlpha(alpha);
+    } catch (error) {
+      console.error(`[Waspi] EnemySprite setAlpha failed for ${this.type}`, error);
+    }
   }
 
   setFlipX(flip: boolean) {
-    if (!this.sprite || !this.sprite.scene) return;
-    this.sprite.setFlipX(flip);
+    if (!this.canUseSprite()) return;
+    try {
+      this.sprite.setFlipX(flip);
+    } catch (error) {
+      console.error(`[Waspi] EnemySprite setFlipX failed for ${this.type}`, error);
+    }
   }
 
   destroy() {
-    this.sprite?.destroy();
+    this.dead = true;
+    this.stateToken += 1;
+    try {
+      this.sprite?.destroy();
+    } catch (error) {
+      console.error(`[Waspi] EnemySprite destroy failed for ${this.type}`, error);
+    }
   }
 }
 
