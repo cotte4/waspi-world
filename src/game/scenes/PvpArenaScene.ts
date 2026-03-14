@@ -4,6 +4,7 @@ import { COLORS, SAFE_PLAZA_RETURN } from '../config/constants';
 import { getTenksBalance, initTenks } from '../systems/TenksSystem';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { SceneControls } from '../systems/SceneControls';
+import { formatMovementBindingLabel } from '../systems/ControlSettings';
 import { supabase, isConfigured } from '../../lib/supabase';
 
 type ArenaRemotePlayer = {
@@ -143,6 +144,9 @@ export class PvpArenaScene extends Phaser.Scene {
   private observedMatchResultId = '';
   private startThrottleUntil = 0;
   private opponentReadyDeadline = 0;
+  private pendingMatchStart: MatchStartPayload | null = null;
+  private pendingMatchStartSentAt = 0;
+  private startingMatchId = '';
   private inTransition = false;
   private arenaStatus!: Phaser.GameObjects.Text;
   private rosterText!: Phaser.GameObjects.Text;
@@ -462,7 +466,7 @@ export class PvpArenaScene extends Phaser.Scene {
       fontFamily: '"Press Start 2P", monospace',
       color: '#B2B4C6',
     }).setOrigin(1, 0);
-    this.add.text(742, 106, 'SPACE LISTO', {
+    this.add.text(742, 106, `${this.getInteractHint()} LISTO`, {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#B2B4C6',
@@ -571,7 +575,7 @@ export class PvpArenaScene extends Phaser.Scene {
   }
 
   private handleReadyInput() {
-    if (this.inMatch || !this.controls.isActionJustDown('interact') || this.readyBusy) return;
+    if (this.inMatch || !this.isReadyToggleJustPressed() || this.readyBusy) return;
     void this.toggleReady();
   }
 
@@ -596,7 +600,12 @@ export class PvpArenaScene extends Phaser.Scene {
   }
 
   private maybeStartMatch() {
-    if (!this.ready || this.inMatch || this.time.now < this.startThrottleUntil) return;
+    if (!this.ready || this.inMatch) {
+      this.pendingMatchStart = null;
+      this.pendingMatchStartSentAt = 0;
+      return;
+    }
+    if (this.time.now < this.startThrottleUntil) return;
     const readyPlayers = [
       { playerId: this.playerId, bet: this.selectedBet, ready: this.ready },
       ...Array.from(this.remotePlayers.entries()).map(([playerId, player]) => ({
@@ -608,39 +617,66 @@ export class PvpArenaScene extends Phaser.Scene {
       .filter((player) => player.ready && player.bet === this.selectedBet)
       .sort((a, b) => a.playerId.localeCompare(b.playerId));
 
-    if (readyPlayers.length < 2) return;
+    if (readyPlayers.length < 2) {
+      this.pendingMatchStart = null;
+      this.pendingMatchStartSentAt = 0;
+      return;
+    }
     if (readyPlayers[0].playerId !== this.playerId) return;
 
     const players = readyPlayers.slice(0, 2).map((player) => player.playerId);
-    const payload: MatchStartPayload = {
-      match_id: `${Date.now()}-${this.playerId}`,
-      bet: this.selectedBet,
-      players,
-      leader_id: this.playerId,
-    };
-    this.startThrottleUntil = this.time.now + 1500;
+    const pending = this.pendingMatchStart;
+    const samePending = pending
+      && pending.bet === this.selectedBet
+      && pending.players.length === players.length
+      && pending.players.every((playerId, index) => playerId === players[index]);
+
+    const payload = samePending
+      ? pending
+      : {
+          match_id: `${Date.now()}-${this.playerId}`,
+          bet: this.selectedBet,
+          players,
+          leader_id: this.playerId,
+        } satisfies MatchStartPayload;
+
+    if (!samePending) {
+      this.pendingMatchStart = payload;
+      this.pendingMatchStartSentAt = 0;
+    }
+
+    if (this.time.now - this.pendingMatchStartSentAt < 500) return;
+
+    this.startThrottleUntil = this.time.now + 120;
+    this.pendingMatchStartSentAt = this.time.now;
     this.channel?.send({ type: 'broadcast', event: 'pvp:match_start', payload });
-    this.handleMatchStart(payload);
+    void this.handleMatchStart(payload);
   }
 
-  private handleMatchStart(payload: unknown) {
+  private async handleMatchStart(payload: unknown) {
     const next = parseMatchStartPayload(payload);
     if (!next) return;
     if (!next.players.includes(this.playerId)) return;
     if (this.matchId === next.match_id && this.inMatch) return;
+    if (this.startingMatchId === next.match_id) return;
     const localReadyForThisBet = this.ready && this.selectedBet === next.bet;
     if (!localReadyForThisBet) return;
     const opponentId = next.players.find((playerId) => playerId !== this.playerId) ?? '';
     const opponent = this.remotePlayers.get(opponentId);
     if (!opponent || !opponent.ready || opponent.bet !== next.bet) return;
-    void this.beginMatchStart(next);
+    await this.beginMatchStart(next);
   }
 
   private async beginMatchStart(next: MatchStartPayload) {
+    this.startingMatchId = next.match_id;
+
     if (getTenksBalance() < next.bet) {
       this.ready = false;
       this.broadcastState('player:move');
       this.flashNotice('NO ALCANZA PARA ENTRAR AL MATCH', '#FF7A7A');
+      this.pendingMatchStart = null;
+      this.pendingMatchStartSentAt = 0;
+      this.startingMatchId = '';
       return;
     }
 
@@ -650,6 +686,9 @@ export class PvpArenaScene extends Phaser.Scene {
     if (!reserved) {
       this.ready = false;
       this.broadcastState('player:move');
+      this.pendingMatchStart = null;
+      this.pendingMatchStartSentAt = 0;
+      this.startingMatchId = '';
       return;
     }
 
@@ -667,6 +706,9 @@ export class PvpArenaScene extends Phaser.Scene {
     this.respawnAt = 0;
     this.countdownEndsAt = this.time.now + COUNTDOWN_MS;
     this.opponentReadyDeadline = this.time.now + COUNTDOWN_MS + 1600;
+    this.pendingMatchStart = null;
+    this.pendingMatchStartSentAt = 0;
+    this.startingMatchId = '';
     this.teleportToSpawn(this.slot);
     this.flashNotice(`MATCH POR ${next.bet} TENKS`, '#39FF14');
     this.broadcastState('player:move');
@@ -899,6 +941,9 @@ export class PvpArenaScene extends Phaser.Scene {
     this.observedMatchResultId = '';
     this.paidEntryForMatch = '';
     this.lossReportedMatchId = '';
+    this.pendingMatchStart = null;
+    this.pendingMatchStartSentAt = 0;
+    this.startingMatchId = '';
     this.px = LOBBY_BOUNDS.centerX;
     this.py = LOBBY_BOUNDS.bottom - 26;
     this.player.setPosition(this.px, this.py);
@@ -1024,7 +1069,9 @@ export class PvpArenaScene extends Phaser.Scene {
       : 0;
 
     this.betText.setText(`APUESTA ${this.selectedBet} TENKS  /  SALDO ${getTenksBalance()}`);
-    this.readyText.setText(this.inMatch ? `MATCH ${this.matchBet} TENKS` : (this.ready ? 'ESTAS LISTO' : 'SPACE PARA LISTO'));
+    this.readyText.setText(
+      this.inMatch ? `MATCH ${this.matchBet} TENKS` : (this.ready ? 'ESTAS LISTO' : `${this.getInteractHint()} PARA LISTO`)
+    );
     this.rosterText.setText([
       'JUGADORES EN LA FILA',
       ...readyPlayers.slice(0, 5).map((player) => {
@@ -1332,6 +1379,14 @@ export class PvpArenaScene extends Phaser.Scene {
   private getOrCreateUsername() {
     if (typeof window === 'undefined') return 'waspi_guest';
     return window.localStorage.getItem('waspi_username') ?? 'waspi_guest';
+  }
+
+  private isReadyToggleJustPressed() {
+    return this.controls.isActionJustDown('interact') || Phaser.Input.Keyboard.JustDown(this.keySpace);
+  }
+
+  private getInteractHint() {
+    return formatMovementBindingLabel(this.controls.settings.actionBindings.interact);
   }
 }
 
