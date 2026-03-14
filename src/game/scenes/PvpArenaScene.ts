@@ -664,6 +664,7 @@ export class PvpArenaScene extends Phaser.Scene {
     if (slot === null) return;
     this.px = SPAWNS[slot].x;
     this.py = SPAWNS[slot].y;
+    this.player.clearActionState();
     this.player.setPosition(this.px, this.py);
     this.playerNameplate.setPosition(this.px, this.py - 46);
   }

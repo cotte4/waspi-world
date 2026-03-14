@@ -41,6 +41,7 @@ export const DEFAULT_AVATAR_CONFIG: Required<AvatarConfig> = {
 type AnimatedAvatarKind = 'trap_a' | 'trap_b' | 'trap_c' | 'trap_d';
 type AnimatedMovementState = 'idle' | 'walk_side' | 'walk_up' | 'walk_down';
 type AnimatedAvatarState = AnimatedMovementState | AvatarAction;
+const ACTION_PRIORITY: Record<AvatarAction, number> = { shoot: 1, hurt: 2, death: 3 };
 
 const AVATAR_KINDS: AvatarKind[] = ['procedural', 'gengar', 'buho', 'piplup', 'chacha', 'trap_a', 'trap_b', 'trap_c', 'trap_d'];
 const ANIMATED_AVATAR_KINDS: AnimatedAvatarKind[] = ['trap_a', 'trap_b', 'trap_c', 'trap_d'];
@@ -359,8 +360,24 @@ export class AvatarRenderer {
     this.playAnimatedAction('death', 620);
   }
 
+  clearActionState() {
+    this.activeAnimatedAction = undefined;
+    this.animatedActionTimer?.remove(false);
+    this.animatedActionTimer = undefined;
+    this.lastAnimatedState = undefined;
+    this.update(this.lastIsMoving, this.lastDx, this.lastDy);
+  }
+
   private playAnimatedAction(action: AvatarAction, durationMs: number) {
     if (!this.animatedKind || !this.specialSprite) return;
+    if (this.activeAnimatedAction) {
+      const currentPriority = ACTION_PRIORITY[this.activeAnimatedAction];
+      const nextPriority = ACTION_PRIORITY[action];
+      if (currentPriority > nextPriority) return;
+      if (currentPriority === nextPriority && this.activeAnimatedAction === action) {
+        this.animatedActionTimer?.remove(false);
+      }
+    }
     const textureKey = getCharacterTextureKey(this.animatedKind, action);
     const fallbackKey = `character_${this.animatedKind}_fallback`;
     safePlaySpriteAnimation(
@@ -410,8 +427,7 @@ export class AvatarRenderer {
   get y() { return this.container.y; }
 
   destroy() {
-    this.animatedActionTimer?.remove(false);
-    this.animatedActionTimer = undefined;
+    this.clearActionState();
     this.container.destroy();
   }
 }

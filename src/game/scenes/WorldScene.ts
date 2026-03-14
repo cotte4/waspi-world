@@ -1333,6 +1333,7 @@ export class WorldScene extends Phaser.Scene {
     this.renderHpHud();
     this.px = PLAZA_RESPAWN_X;
     this.py = PLAZA_RESPAWN_Y;
+    this.playerAvatar.clearActionState();
     this.playerBody.setPosition(this.px, this.py);
     this.playerAvatar.setPosition(this.px, this.py);
     this.playerNameplate.setPosition(this.px, this.py - 46);
@@ -2560,7 +2561,9 @@ export class WorldScene extends Phaser.Scene {
     this.px = finalX;
     this.py = finalY;
 
-    this.playerAvatar.update(isMoving, dx, dy);
+    const facingDx = isMoving ? dx : (this.gunEnabled ? Math.cos(this.weaponAimAngle) : dx);
+    const facingDy = isMoving ? dy : (this.gunEnabled ? Math.sin(this.weaponAimAngle) : dy);
+    this.playerAvatar.update(isMoving, facingDx, facingDy);
     this.playerAvatar.setPosition(this.px, this.py);
     this.playerAvatar.setDepth(Math.floor(this.py / 10));
 
@@ -3388,8 +3391,8 @@ export class WorldScene extends Phaser.Scene {
         const deltaX = rp.targetX - rp.x;
         const deltaY = rp.targetY - rp.y;
         const isMoving = rp.isMoving || Math.abs(deltaX) > 0.8 || Math.abs(deltaY) > 0.8;
-        const visualDx = Math.abs(deltaX) > 0.1 ? deltaX : rp.moveDx;
-        const visualDy = Math.abs(deltaY) > 0.1 ? deltaY : rp.moveDy;
+        const visualDx = Math.abs(deltaX) > 0.1 ? deltaX : (isMoving ? rp.moveDx : Math.cos(rp.aimAngle));
+        const visualDy = Math.abs(deltaY) > 0.1 ? deltaY : (isMoving ? rp.moveDy : Math.sin(rp.aimAngle));
         rp.avatar.update(isMoving, visualDx, visualDy);
         rp.avatar.setPosition(rp.x, rp.y);
         rp.avatar.setDepth(Math.floor(rp.y / 10));
