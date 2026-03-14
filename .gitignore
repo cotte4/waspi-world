@@ -25,6 +25,7 @@
 *.pem
 .claude/
 planning/
+supabase/.temp/
 
 # debug
 npm-debug.log*
