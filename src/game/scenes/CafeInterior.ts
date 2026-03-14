@@ -4,6 +4,7 @@ import { BUILDINGS, COLORS, SAFE_PLAZA_RETURN, WORLD, ZONES } from '../config/co
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { eventBus, EVENTS } from '../config/eventBus';
+import { isActionJustDown, loadControlSettings, type ControlSettings } from '../systems/ControlSettings';
 
 export class CafeInterior extends Phaser.Scene {
   private static readonly RETURN_X = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
@@ -23,6 +24,7 @@ export class CafeInterior extends Phaser.Scene {
   private lastMoveDx = 0;
   private lastMoveDy = 0;
   private lastIsMoving = false;
+  private controlSettings: ControlSettings = loadControlSettings();
 
   constructor() {
     super({ key: 'CafeInterior' });
@@ -39,6 +41,14 @@ export class CafeInterior extends Phaser.Scene {
         returnY: SAFE_PLAZA_RETURN.Y,
       });
     });
+    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      this.controlSettings = {
+        ...this.controlSettings,
+        ...(payload as Partial<ControlSettings>),
+      };
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
 
     const g = this.add.graphics();
     g.fillStyle(0x0d0505);
@@ -126,7 +136,7 @@ export class CafeInterior extends Phaser.Scene {
     if (this.inTransition) return;
     this.handleMovement();
     this.room?.update();
-    if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
+    if (isActionJustDown(this, this.controlSettings, 'back')) {
       this.exitToWorld();
     }
   }

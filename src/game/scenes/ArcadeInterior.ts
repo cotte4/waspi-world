@@ -5,6 +5,7 @@ import { eventBus, EVENTS } from '../config/eventBus';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
+import { isActionJustDown, loadControlSettings, type ControlSettings } from '../systems/ControlSettings';
 
 interface ArcadePenaltyReward {
   won?: boolean;
@@ -60,6 +61,7 @@ export class ArcadeInterior extends Phaser.Scene {
   private lastMoveDx = 0;
   private lastMoveDy = 0;
   private lastIsMoving = false;
+  private controlSettings: ControlSettings = loadControlSettings();
 
   constructor() {
     super({ key: 'ArcadeInterior' });
@@ -131,6 +133,14 @@ export class ArcadeInterior extends Phaser.Scene {
       };
       this.applyMusicSettings();
     });
+    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      this.controlSettings = {
+        ...this.controlSettings,
+        ...(payload as Partial<ControlSettings>),
+      };
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
 
     const roomW = 700;
     const roomH = 400;
@@ -277,7 +287,7 @@ export class ArcadeInterior extends Phaser.Scene {
     this.updateMachineState();
     this.room?.update();
 
-    if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
+    if (isActionJustDown(this, this.controlSettings, 'back')) {
       this.exitToWorld();
     }
   }

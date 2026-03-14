@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import { BUILDINGS, SAFE_PLAZA_RETURN } from '../config/constants';
+import { eventBus, EVENTS } from '../config/eventBus';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { isActionJustDown, loadControlSettings, type ControlSettings } from '../systems/ControlSettings';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -80,6 +82,7 @@ export class BasementScene extends Phaser.Scene {
   private keySpace!: Phaser.Input.Keyboard.Key;
   private interactionText?: Phaser.GameObjects.Text;
   private interactionGlow?: Phaser.GameObjects.Ellipse;
+  private controlSettings: ControlSettings = loadControlSettings();
 
   constructor() {
     super({ key: 'BasementScene' });
@@ -97,6 +100,14 @@ export class BasementScene extends Phaser.Scene {
         returnY: SAFE_PLAZA_RETURN.Y,
       });
     });
+    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      this.controlSettings = {
+        ...this.controlSettings,
+        ...(payload as Partial<ControlSettings>),
+      };
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
     this.cameras.main.setBackgroundColor('#0E0E14');
     this.cameras.main.setBounds(0, 0, SCENE_W, SCENE_H);
     this.cameras.main.setZoom(0.94);
@@ -145,12 +156,12 @@ export class BasementScene extends Phaser.Scene {
 
     this.updateInteractionUi();
 
-    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
+    if (isActionJustDown(this, this.controlSettings, 'interact')) {
       this.enterZombieDepths();
       return;
     }
 
-    if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
+    if (isActionJustDown(this, this.controlSettings, 'back')) {
       this.exitToWorld();
     }
   }

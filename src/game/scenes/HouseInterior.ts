@@ -4,6 +4,7 @@ import { SAFE_PLAZA_RETURN, WORLD } from '../config/constants';
 import { announceScene, bindSafeResetToPlaza, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { InteriorRoom } from '../systems/InteriorRoom';
+import { isActionJustDown, loadControlSettings, type ControlSettings } from '../systems/ControlSettings';
 
 type HouseInteriorData = {
   returnScene?: string;
@@ -61,6 +62,7 @@ export class HouseInterior extends Phaser.Scene {
   private returnX?: number;
   private returnY?: number;
   private layout!: RoomLayout;
+  private controlSettings: ControlSettings = loadControlSettings();
 
   constructor() {
     super({ key: 'HouseInterior' });
@@ -146,14 +148,30 @@ export class HouseInterior extends Phaser.Scene {
         returnY: SAFE_PLAZA_RETURN.Y,
       });
     });
+    const offControls = eventBus.on(EVENTS.CONTROL_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!payload || typeof payload !== 'object') return;
+      this.controlSettings = {
+        ...this.controlSettings,
+        ...(payload as Partial<ControlSettings>),
+      };
+    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, offControls);
   }
 
   update() {
     if (this.inTransition) return;
     this.handleMovement();
     this.room?.update();
-    if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
+    if (isActionJustDown(this, this.controlSettings, 'interact')) {
       this.handleInteraction();
+      return;
+    }
+    if (isActionJustDown(this, this.controlSettings, 'back')) {
+      this.inTransition = true;
+      transitionToScene(this, this.returnScene, {
+        returnX: this.returnX,
+        returnY: this.returnY,
+      });
     }
   }
 
