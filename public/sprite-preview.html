@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WASPI Zombie Sprites</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0E0E14; font-family: monospace; padding: 30px; }
+    h1 { color: #F5C842; text-align: center; margin-bottom: 30px; font-size: 20px; letter-spacing: 3px; }
+    .zombie-block { margin-bottom: 40px; border: 1px solid #222; border-radius: 8px; padding: 20px; }
+    .zombie-title { color: #F5C842; font-size: 16px; margin-bottom: 16px; text-transform: uppercase; }
+    .anim-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .anim-label { color: #666; width: 60px; font-size: 11px; }
+    .anim-row img { image-rendering: pixelated; height: 64px; border: 1px solid #333; background: #111; }
+    .boss-row img { height: 96px; }
+    .tank-row img { height: 80px; }
+  </style>
+</head>
+<body>
+  <h1>🧟 WASPI ZOMBIE SPRITES — ALL ANIMATIONS</h1>
+
+  <div class="zombie-block">
+    <div class="zombie-title">A — RUSHER (64px)</div>
+    <div class="anim-row"><span class="anim-label">idle</span><img src="/assets/sprites/enemies/zombies/rusher/idle_strip.png"></div>
+    <div class="anim-row"><span class="anim-label">walk</span><img src="/assets/sprites/enemies/zombies/rusher/walk_strip.png"></div>
+    <div class="anim-row"><span class="anim-label">attack</span><img src="/assets/sprites/enemies/zombies/rusher/attack_strip.png"></div>
+    <div class="anim-row"><span class="anim-label">hurt</span><img src="/assets/sprites/enemies/zombies/rusher/hurt_strip.png"></div>
+    <div class="anim-row"><span class="anim-label">death</span><img src="/assets/sprites/enemies/zombies/rusher/death_strip.png"></div>
+  </div>
+
+  <div class="zombie-block">
+    <div class="zombie-title">B — SHOOTER (64px)</div>
+    <div class="anim-row"><span class="anim-label">idle</span><img src="/assets/sprites/enemies/zombies/shooter/idle_strip.png"></div>
+    <div class="anim-row"><span class="anim-label">walk</span><img src="/assets/sprites/enemies/zombies/shooter/walk_strip.png"></div>
+    <div class="anim-row"><span class="anim-label">attack</span><img src="/assets/sprites/enemies/zombies/shooter/attack_strip.png"></div>
+    <div class="anim-row"><span class="anim-label">hurt</span><img src="/assets/sprites/enemies/zombies/shooter/hurt_strip.png"></div>
+    <div class="anim-row"><span class="anim-label">death</span><img src="/assets/sprites/enemies/zombies/shooter/death_strip.png"></div>
+  </div>
+
+  <div class="zombie-block">
+    <div class="zombie-title">C — TANK (96px)</div>
+    <div class="anim-row tank-row"><span class="anim-label">idle</span><img src="/assets/sprites/enemies/zombies/tank/idle_strip.png"></div>
+    <div class="anim-row tank-row"><span class="anim-label">walk</span><img src="/assets/sprites/enemies/zombies/tank/walk_strip.png"></div>
+    <div class="anim-row tank-row"><span class="anim-label">attack</span><img src="/assets/sprites/enemies/zombies/tank/attack_strip.png"></div>
+    <div class="anim-row tank-row"><span class="anim-label">hurt</span><img src="/assets/sprites/enemies/zombies/tank/hurt_strip.png"></div>
+    <div class="anim-row tank-row"><span class="anim-label">death</span><img src="/assets/sprites/enemies/zombies/tank/death_strip.png"></div>
+  </div>
+
+  <div class="zombie-block">
+    <div class="zombie-title">D — BOSS (128px)</div>
+    <div class="anim-row boss-row"><span class="anim-label">idle</span><img src="/assets/sprites/enemies/zombies/boss/idle_strip.png"></div>
+    <div class="anim-row boss-row"><span class="anim-label">walk</span><img src="/assets/sprites/enemies/zombies/boss/walk_strip.png"></div>
+    <div class="anim-row boss-row"><span class="anim-label">attack</span><img src="/assets/sprites/enemies/zombies/boss/attack_strip.png"></div>
+    <div class="anim-row boss-row"><span class="anim-label">hurt</span><img src="/assets/sprites/enemies/zombies/boss/hurt_strip.png"></div>
+    <div class="anim-row boss-row"><span class="anim-label">death</span><img src="/assets/sprites/enemies/zombies/boss/death_strip.png"></div>
+  </div>
+</body>
+</html>
