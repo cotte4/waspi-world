@@ -104,6 +104,7 @@ const COVER_RECTS = [
 
 export class PvpArenaScene extends Phaser.Scene {
   private playerId = '';
+  private authUserId = '';
   private username = '';
   private avatarConfig: AvatarConfig = {};
   private channel: ReturnType<NonNullable<typeof supabase>['channel']> | null = null;
@@ -207,6 +208,7 @@ export class PvpArenaScene extends Phaser.Scene {
     this.input.on('pointerdown', this.pointerShootHandler);
 
     this.setupChannel();
+    void this.syncAuthenticatedIdentity();
     this.refreshUi();
     this.cameras.main.resetFX();
     this.cameras.main.setAlpha(1);
@@ -556,12 +558,13 @@ export class PvpArenaScene extends Phaser.Scene {
 
   private async toggleReady() {
     this.readyBusy = true;
-    const token = await this.getAuthToken();
-    if (!token) {
+    const auth = await this.getAuthSessionInfo();
+    if (!auth) {
       this.flashNotice('INICIA SESION PARA APOSTAR EN PVP', '#FF7A7A');
       this.readyBusy = false;
       return;
     }
+    this.applyAuthenticatedIdentity(auth.userId);
     if (getTenksBalance() < this.selectedBet) {
       this.flashNotice('NO TENES TENKS PARA ESA APUESTA', '#FF7A7A');
       this.readyBusy = false;
@@ -1070,10 +1073,42 @@ export class PvpArenaScene extends Phaser.Scene {
     });
   }
 
-  private async getAuthToken() {
+  private async getAuthSessionInfo() {
     if (!supabase || !isConfigured) return null;
     const { data } = await supabase.auth.getSession();
-    return data.session?.access_token ?? null;
+    if (!data.session) return null;
+    return {
+      token: data.session.access_token,
+      userId: data.session.user.id,
+    };
+  }
+
+  private async getAuthToken() {
+    const auth = await this.getAuthSessionInfo();
+    return auth?.token ?? null;
+  }
+
+  private async syncAuthenticatedIdentity() {
+    const auth = await this.getAuthSessionInfo();
+    if (!auth) return;
+    this.applyAuthenticatedIdentity(auth.userId);
+  }
+
+  private applyAuthenticatedIdentity(userId: string) {
+    this.authUserId = userId;
+    if (this.playerId === userId) return;
+
+    const previousId = this.playerId;
+    if (this.channel && previousId) {
+      this.channel.send({
+        type: 'broadcast',
+        event: 'player:leave',
+        payload: { player_id: previousId },
+      });
+    }
+
+    this.playerId = userId;
+    this.broadcastState('player:join');
   }
 
   private async reserveStake(matchId: string, bet: number, opponentId: string) {
