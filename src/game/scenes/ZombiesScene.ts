@@ -179,6 +179,9 @@ export class ZombiesScene extends Phaser.Scene {
   private instaKillUntil: number = 0;
   private doublePointsUntil: number = 0;
   private boxRollingUntil = 0;
+  private boxLid?: Phaser.GameObjects.Rectangle;
+  private boxBase?: Phaser.GameObjects.Rectangle;
+  private boxGlow?: Phaser.GameObjects.Ellipse;
   private boxPreviewText?: Phaser.GameObjects.Text;
   private packPad?: Phaser.GameObjects.Rectangle;
   private packLabel?: Phaser.GameObjects.Text;
@@ -703,15 +706,17 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private setupMysteryBox() {
-    const lid = this.add.rectangle(BOX_POS.x, BOX_POS.y - 8, 88, 30, 0x6F2B78, 1).setDepth(22);
-    lid.setStrokeStyle(2, 0xFF7CCE, 0.72);
-    const base = this.add.rectangle(BOX_POS.x, BOX_POS.y + 18, 96, 42, 0x31183E, 1).setDepth(21);
-    base.setStrokeStyle(2, 0xF5C842, 0.55);
+    this.boxGlow = this.add.ellipse(BOX_POS.x, BOX_POS.y + 30, 116, 38, 0xff7cce, 0.08).setDepth(20);
+    this.boxGlow.setStrokeStyle(1, 0xFF7CCE, 0.24);
+    this.boxLid = this.add.rectangle(BOX_POS.x, BOX_POS.y - 8, 88, 30, 0x6F2B78, 1).setDepth(22);
+    this.boxLid.setStrokeStyle(2, 0xFF7CCE, 0.72);
+    this.boxBase = this.add.rectangle(BOX_POS.x, BOX_POS.y + 18, 96, 42, 0x31183E, 1).setDepth(21);
+    this.boxBase.setStrokeStyle(2, 0xF5C842, 0.55);
     this.tweens.add({
-      targets: [lid, base],
+      targets: [this.boxLid, this.boxBase, this.boxGlow],
       scaleX: { from: 0.99, to: 1.02 },
       scaleY: { from: 0.99, to: 1.02 },
-      alpha: { from: 0.92, to: 1 },
+      alpha: { from: 0.82, to: 1 },
       yoyo: true,
       repeat: -1,
       duration: 850,
@@ -753,12 +758,21 @@ export class ZombiesScene extends Phaser.Scene {
       this.doublePointsUntil > this.time.now ? `2X ${Math.ceil((this.doublePointsUntil - this.time.now) / 1000)}s` : '',
       this.instaKillUntil > this.time.now ? `INSTA ${Math.ceil((this.instaKillUntil - this.time.now) / 1000)}s` : '',
     ].filter(Boolean).join('  ');
+    const roundState = this.roundBreakUntil > this.time.now
+      ? `INTER ${Math.ceil((this.roundBreakUntil - this.time.now) / 1000)}s`
+      : this.nextSpawnAt > this.time.now && this.spawnedThisRound === 0
+        ? `WAVE ${Math.ceil((this.nextSpawnAt - this.time.now) / 1000)}s`
+        : this.boxRollingUntil > this.time.now
+          ? 'BOX GIRANDO'
+          : this.reloadEndsAt > this.time.now
+            ? 'RECARGANDO'
+            : 'EN PIE';
     this.roundText?.setText(`ROUND ${this.round}`);
     this.pointsText?.setText(`PTS ${this.points}`);
     this.hpText?.setText(`HP ${Math.max(0, Math.round(this.hp))}`);
     this.ammoText?.setText(`${weapon.displayLabel}\n${ammo.ammoInMag}/${ammo.reserveAmmo}`);
     this.statusText?.setText([
-      this.gameOver ? 'GAME OVER' : timedBuffs || (this.boxRollingUntil > this.time.now ? 'BOX GIRANDO' : this.reloadEndsAt > this.time.now ? 'RECARGANDO' : 'EN PIE'),
+      this.gameOver ? 'GAME OVER' : timedBuffs || roundState,
       `ZOMBIES ${this.countAliveZombies()}/${this.roundTarget}`,
       `SPAWN ${this.spawnedThisRound}`,
       this.bossAlive ? 'BOSS ACTIVE' : this.bossRoundActive && !this.bossSpawnedThisRound ? 'BOSS INCOMING' : '',
@@ -1028,7 +1042,7 @@ export class ZombiesScene extends Phaser.Scene {
       return;
     }
 
-    if (this.countAliveZombies() === 0 && !this.bossAlive && this.roundBreakUntil === 0) {
+    if (this.countAliveZombies() === 0 && !this.bossAlive && this.zombieProjectiles.size === 0 && this.roundBreakUntil === 0) {
       this.roundBreakUntil = this.time.now + ZOMBIES_POINTS.roundBreakMs;
       this.showNotice(`LIMPIASTE LA RONDA ${this.round}`, '#9EFFB7');
     }
@@ -1162,7 +1176,8 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private spawnBossZombie() {
-    const candidates = this.getAvailableSpawnNodes().filter((node) => node.sectionId === 'street' || node.sectionId === 'workshop');
+    const preferred = this.getAvailableSpawnNodes().filter((node) => node.sectionId === 'street' || node.sectionId === 'workshop');
+    const candidates = preferred.length ? preferred : this.getAvailableSpawnNodes();
     if (!candidates.length) return false;
     const node = Phaser.Utils.Array.GetRandom(candidates);
     const hp = Math.round(getZombieHpForRound(420, this.round) * 1.35);
@@ -1743,6 +1758,29 @@ export class ZombiesScene extends Phaser.Scene {
     this.points -= ZOMBIES_POINTS.mysteryBoxCost;
     this.mysteryBoxCooldownUntil = this.time.now + 3200;
     this.boxRollingUntil = this.time.now + 1400;
+    if (this.boxLid) {
+      this.tweens.killTweensOf(this.boxLid);
+      this.tweens.add({
+        targets: this.boxLid,
+        y: BOX_POS.y - 26,
+        angle: -7,
+        duration: 160,
+        ease: 'Back.Out',
+      });
+    }
+    if (this.boxGlow) {
+      this.tweens.killTweensOf(this.boxGlow);
+      this.tweens.add({
+        targets: this.boxGlow,
+        alpha: { from: 0.14, to: 0.32 },
+        scaleX: { from: 1, to: 1.16 },
+        scaleY: { from: 1, to: 1.16 },
+        yoyo: true,
+        repeat: 6,
+        duration: 110,
+        ease: 'Sine.easeInOut',
+      });
+    }
     this.boxPreviewText?.setAlpha(1);
     this.boxPreviewText?.setColor('#FFD36A');
     this.boxPreviewText?.setText('ROLLING...');
@@ -1775,6 +1813,25 @@ export class ZombiesScene extends Phaser.Scene {
           targets: this.boxPreviewText,
           alpha: { from: 1, to: 0 },
           duration: 800,
+          ease: 'Sine.easeOut',
+        });
+      }
+      if (this.boxLid) {
+        this.tweens.add({
+          targets: this.boxLid,
+          y: BOX_POS.y - 8,
+          angle: 0,
+          duration: 180,
+          ease: 'Sine.easeOut',
+        });
+      }
+      if (this.boxGlow) {
+        this.tweens.add({
+          targets: this.boxGlow,
+          alpha: { from: this.boxGlow.alpha, to: 0.08 },
+          scaleX: 1,
+          scaleY: 1,
+          duration: 220,
           ease: 'Sine.easeOut',
         });
       }
@@ -1814,6 +1871,21 @@ export class ZombiesScene extends Phaser.Scene {
     node.boardHealth += 1;
     this.points += 20;
     this.refreshSpawnNodeVisual(node, 0, false);
+    const repairedIndex = Phaser.Math.Clamp(node.boardHealth - 1, 0, node.planks.length - 1);
+    const repairedPlank = node.planks[repairedIndex];
+    repairedPlank.setVisible(true);
+    repairedPlank.setScale(0.42, 0.42);
+    repairedPlank.setAlpha(0.18);
+    repairedPlank.setAngle(Phaser.Math.Between(-18, 18));
+    this.tweens.add({
+      targets: repairedPlank,
+      scaleX: 1,
+      scaleY: 1,
+      alpha: 0.94,
+      angle: 0,
+      duration: 180,
+      ease: 'Back.Out',
+    });
     const repairFx = this.add.rectangle(node.x, node.y - 4, 42, 52, 0x46B3FF, 0.12).setDepth(19);
     this.tweens.add({
       targets: repairFx,
@@ -1822,6 +1894,18 @@ export class ZombiesScene extends Phaser.Scene {
       scaleY: 1.04,
       duration: 150,
       onComplete: () => repairFx.destroy(),
+    });
+    const sparks = Array.from({ length: 4 }, () => this.add.rectangle(node.x, node.y - 4, 5, 3, 0x9edbff, 0.9).setDepth(20));
+    sparks.forEach((spark, index) => {
+      this.tweens.add({
+        targets: spark,
+        x: node.x + Phaser.Math.Between(-18, 18),
+        y: node.y - 18 + Phaser.Math.Between(-10, 10),
+        alpha: 0,
+        duration: 180 + index * 30,
+        ease: 'Sine.easeOut',
+        onComplete: () => spark.destroy(),
+      });
     });
     for (const plank of node.planks) {
       if (plank.visible) {
