@@ -1553,9 +1553,12 @@ export default function PlayPage() {
           {rescueArmed ? 'CONFIRMAR PLAZA' : 'VOLVER A PLAZA'}
         </button>
 
+        {activeScene !== 'CreatorScene' && (
         <div
-          className="ww-auth-card absolute right-2 bottom-2"
+          className="ww-auth-card absolute"
           style={{
+            bottom: 8,
+            right: 8,
             width: isAuthenticated ? 'auto' : 228,
             background: 'rgba(0,0,0,0.72)',
             border: '1px solid rgba(255,255,255,0.08)',
@@ -1646,6 +1649,7 @@ export default function PlayPage() {
             </>
           )}
         </div>
+        )}
 
         {shopOpen && (
           <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
