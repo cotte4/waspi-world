@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { COLORS } from '../config/constants';
 import { getTenksBalance, initTenks } from '../systems/TenksSystem';
-import { announceScene, createBackButton } from '../systems/SceneUi';
+import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { supabase, isConfigured } from '../../lib/supabase';
 
 type ArenaRemotePlayer = {
@@ -168,6 +168,7 @@ export class PvpArenaScene extends Phaser.Scene {
   }
 
   create() {
+    this.input.enabled = true;
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
 
@@ -1252,12 +1253,7 @@ export class PvpArenaScene extends Phaser.Scene {
   private exitToWorld() {
     if (this.inTransition) return;
     this.inTransition = true;
-    this.cameras.main.resetFX();
-    this.cameras.main.setAlpha(1);
-    this.cameras.main.fadeOut(220, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('WorldScene', { returnX: RETURN_WORLD_X, returnY: RETURN_WORLD_Y });
-    });
+    transitionToScene(this, 'WorldScene', { returnX: RETURN_WORLD_X, returnY: RETURN_WORLD_Y }, 220);
   }
 
   private handleShutdown() {

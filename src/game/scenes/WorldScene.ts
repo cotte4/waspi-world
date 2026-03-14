@@ -347,8 +347,72 @@ export class WorldScene extends Phaser.Scene {
     this.py = data?.returnY ?? PLAYER.SPAWN_Y;
   }
 
+  private runBootStep(label: string, fn: () => void) {
+    try {
+      fn();
+    } catch (error) {
+      console.error(`[Waspi][WorldScene] Boot step failed: ${label}`, error);
+    }
+  }
+
+  private safeSetupRealtime(): 'multiplayer' | 'solo' {
+    try {
+      return this.setupRealtime();
+    } catch (error) {
+      console.error('[Waspi][WorldScene] Boot step failed: realtime', error);
+      return 'solo';
+    }
+  }
+
+  private createSafeAvatarRenderer(x: number, y: number, config: AvatarConfig, label: string) {
+    try {
+      return new AvatarRenderer(this, x, y, config);
+    } catch (error) {
+      console.error(`[Waspi][WorldScene] Avatar rebuild failed: ${label}`, error);
+      return new AvatarRenderer(this, x, y, {
+        ...config,
+        avatarKind: 'procedural',
+      });
+    }
+  }
+
+  private recreateCombatHud() {
+    this.combatHud?.destroy();
+    this.combatHud = this.add.text(8, 74, '', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      lineSpacing: 5,
+    }).setScrollFactor(0).setDepth(9999);
+  }
+
+  private recreateProgressionHud() {
+    this.progressionHud?.destroy();
+    this.progressionHud = this.add.text(8, 116, '', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#46B3FF',
+      lineSpacing: 5,
+    }).setScrollFactor(0).setDepth(9999);
+  }
+
+  private guardHudRender(label: string, recreate: () => void, render: () => void) {
+    try {
+      render();
+    } catch (error) {
+      console.error(`[Waspi][WorldScene] HUD render failed: ${label}`, error);
+      recreate();
+      try {
+        render();
+      } catch (retryError) {
+        console.error(`[Waspi][WorldScene] HUD render retry failed: ${label}`, retryError);
+      }
+    }
+  }
+
   create() {
     announceScene(this);
+    this.input.enabled = true;
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
 
     // Generate player ID and username
@@ -381,7 +445,7 @@ export class WorldScene extends Phaser.Scene {
     this.playerHitbox = this.createHitbox(this.px, this.py);
 
     // Player avatar
-    this.playerAvatar = new AvatarRenderer(this, this.px, this.py, this.getCurrentAvatarConfig());
+    this.playerAvatar = this.createSafeAvatarRenderer(this.px, this.py, this.getCurrentAvatarConfig(), 'local-player');
     this.playerAvatar.setDepth(50);
 
     // Player nameplate
@@ -423,10 +487,10 @@ export class WorldScene extends Phaser.Scene {
     this.chatSystem = new ChatSystem(this);
 
     // Bridge events from React
-    this.setupReactBridge();
+    this.runBootStep('react bridge', () => this.setupReactBridge());
 
     // Supabase Realtime
-    const mode = this.setupRealtime();
+    const mode = this.safeSetupRealtime();
     statusText.setText(mode === 'multiplayer' ? 'MULTI: ONLINE' : 'MULTI: SOLO MODE');
 
     // Notify React that player is ready
@@ -439,12 +503,12 @@ export class WorldScene extends Phaser.Scene {
     this.emitPresence();
 
     // Ambient NPC
-    this.spawnAmbientNPCs();
+    this.runBootStep('ambient npcs', () => this.spawnAmbientNPCs());
 
     // HP/Combat/Utilities
-    this.setupHpHud();
-    this.setupCombat();
-    this.refreshUtilitiesFromInventory();
+    this.runBootStep('hp hud', () => this.setupHpHud());
+    this.runBootStep('combat', () => this.setupCombat());
+    this.runBootStep('utility refresh', () => this.refreshUtilitiesFromInventory());
     this.audioSettingsCleanup = eventBus.on(EVENTS.AUDIO_SETTINGS_CHANGED, (payload: unknown) => {
       if (!payload || typeof payload !== 'object') return;
       const next = payload as Partial<AudioSettings>;
@@ -464,7 +528,7 @@ export class WorldScene extends Phaser.Scene {
     }));
 
     // Training arena
-    this.setupTrainingZone();
+    this.runBootStep('training zone', () => this.setupTrainingZone());
   }
 
   private setupTrainingZone() {
@@ -562,33 +626,43 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private renderCombatHud() {
-    if (!this.combatHud) return;
-    if (!this.gunEnabled) {
+    this.guardHudRender('combat', () => this.recreateCombatHud(), () => {
+      if (!this.combatHud) {
+        this.recreateCombatHud();
+      }
+      if (!this.combatHud) return;
+      if (!this.gunEnabled) {
+        this.combatHud.setText([
+          'WEAPON OFFLINE',
+          'ACTIVA GUN EN INVENTARIO',
+        ]);
+        this.combatHud.setColor('#888888');
+        return;
+      }
+      const weapon = WEAPON_STATS[this.currentWeapon];
+      this.combatHud.setColor(this.currentWeapon === 'shotgun' ? '#FF8B3D' : '#F5C842');
       this.combatHud.setText([
-        'WEAPON OFFLINE',
-        'ACTIVA GUN EN INVENTARIO',
+        `WEAPON ${weapon.label} | 1/2 CAMBIA`,
+        'F / CLICK DISPARA | R1 S2 T3 B5',
       ]);
-      this.combatHud.setColor('#888888');
-      return;
-    }
-    const weapon = WEAPON_STATS[this.currentWeapon];
-    this.combatHud.setColor(this.currentWeapon === 'shotgun' ? '#FF8B3D' : '#F5C842');
-    this.combatHud.setText([
-      `WEAPON ${weapon.label} | 1/2 CAMBIA`,
-      'F / CLICK DISPARA | R1 S2 T3 B5',
-    ]);
+    });
   }
 
   private renderProgressionHud() {
-    if (!this.progressionHud) return;
-    const nextLabel = this.progression.nextLevelAt === null
-      ? 'MAX'
-      : `${this.progression.nextLevelAt - this.progression.xp} XP`;
+    this.guardHudRender('progression', () => this.recreateProgressionHud(), () => {
+      if (!this.progressionHud) {
+        this.recreateProgressionHud();
+      }
+      if (!this.progressionHud) return;
+      const nextLabel = this.progression.nextLevelAt === null
+        ? 'MAX'
+        : `${this.progression.nextLevelAt - this.progression.xp} XP`;
 
-    this.progressionHud.setText([
-      `LVL ${this.progression.level}/11 | XP ${this.progression.xp}`,
-      `KOs ${this.progression.kills} | NEXT ${nextLabel}`,
-    ]);
+      this.progressionHud.setText([
+        `LVL ${this.progression.level}/11 | XP ${this.progression.xp}`,
+        `KOs ${this.progression.kills} | NEXT ${nextLabel}`,
+      ]);
+    });
   }
 
   private applyHudVisibility() {
@@ -2124,7 +2198,7 @@ export class WorldScene extends Phaser.Scene {
 
     npcPositions.forEach((pos, i) => {
       const cfg = npcConfigs[i % npcConfigs.length];
-      const npc = new AvatarRenderer(this, pos.x, pos.y, cfg);
+      const npc = this.createSafeAvatarRenderer(pos.x, pos.y, cfg, `ambient-npc:${i}`);
       npc.setDepth(40);
 
       // Simple wander tween
@@ -2381,7 +2455,7 @@ export class WorldScene extends Phaser.Scene {
       rp.avatarConfig = { ...rp.avatarConfig, ...cfg };
       const depth = rp.avatar.getContainer().depth;
       rp.avatar.destroy();
-      rp.avatar = new AvatarRenderer(this, rp.x, rp.y, rp.avatarConfig);
+      rp.avatar = this.createSafeAvatarRenderer(rp.x, rp.y, rp.avatarConfig, `remote-state:${next.player_id}`);
       rp.avatar.setDepth(depth);
     }
     if (next.equipped) {
@@ -2444,7 +2518,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private spawnRemotePlayer(id: string, username: string, x: number, y: number, cfg: AvatarConfig) {
-    const avatar = new AvatarRenderer(this, x, y, cfg);
+    const avatar = this.createSafeAvatarRenderer(x, y, cfg, `remote-spawn:${id}`);
     avatar.setDepth(40);
 
     const nameplate = this.add.text(x, y - 46, username, {
@@ -2511,7 +2585,7 @@ export class WorldScene extends Phaser.Scene {
       const y = rp.y;
       const depth = rp.avatar.getContainer().depth;
       rp.avatar.destroy();
-      rp.avatar = new AvatarRenderer(this, x, y, rp.avatarConfig);
+      rp.avatar = this.createSafeAvatarRenderer(x, y, rp.avatarConfig, `remote-join:${next.player_id}`);
       rp.avatar.setDepth(depth);
     }
 
@@ -2854,10 +2928,10 @@ export class WorldScene extends Phaser.Scene {
     const y = this.py;
     const depth = this.playerAvatar.getContainer().depth;
     this.playerAvatar.destroy();
-    this.playerAvatar = new AvatarRenderer(this, x, y, {
+    this.playerAvatar = this.createSafeAvatarRenderer(x, y, {
       ...this.getCurrentAvatarConfig(),
       ...nextConfig,
-    });
+    }, 'local-rebuild');
     this.playerAvatar.setDepth(depth);
   }
 

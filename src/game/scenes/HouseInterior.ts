@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { WORLD } from '../config/constants';
-import { announceScene } from '../systems/SceneUi';
+import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { InteriorRoom } from '../systems/InteriorRoom';
 
@@ -78,6 +78,7 @@ export class HouseInterior extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
     announceScene(this);
+    this.input.enabled = true;
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
 
     this.layout = {
@@ -198,12 +199,9 @@ export class HouseInterior extends Phaser.Scene {
 
     if (nearDoor) {
       this.inTransition = true;
-      this.cameras.main.fadeOut(250, 0, 0, 0);
-      this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-        this.scene.start(this.returnScene, {
-          returnX: this.returnX,
-          returnY: this.returnY,
-        });
+      transitionToScene(this, this.returnScene, {
+        returnX: this.returnX,
+        returnY: this.returnY,
       });
     }
   }

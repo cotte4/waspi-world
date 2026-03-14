@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { AvatarRenderer, AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { BUILDINGS, COLORS, WORLD, ZONES } from '../config/constants';
 import { CATALOG } from '../config/catalog';
-import { announceScene, createBackButton } from '../systems/SceneUi';
+import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { DialogSystem } from '../systems/DialogSystem';
 import { supabase, isConfigured } from '../../lib/supabase';
@@ -56,6 +56,7 @@ export class StoreInterior extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
     announceScene(this);
+    this.input.enabled = true;
     this.playerId = this.getOrCreatePlayerId();
     this.playerUsername = this.getOrCreateUsername();
     this.dialog = new DialogSystem(this);
@@ -251,14 +252,9 @@ export class StoreInterior extends Phaser.Scene {
     this.shopOverlayOpen = false;
     eventBus.emit(EVENTS.SHOP_CLOSE);
     this.inTransition = true;
-    this.cameras.main.resetFX();
-    this.cameras.main.setAlpha(1);
-    this.cameras.main.fadeOut(250, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('WorldScene', {
-        returnX: StoreInterior.RETURN_X,
-        returnY: StoreInterior.RETURN_Y,
-      });
+    transitionToScene(this, 'WorldScene', {
+      returnX: StoreInterior.RETURN_X,
+      returnY: StoreInterior.RETURN_Y,
     });
   }
 

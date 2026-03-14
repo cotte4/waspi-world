@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { announceScene, createBackButton } from '../systems/SceneUi';
+import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import {
@@ -78,6 +78,7 @@ export class VecindadScene extends Phaser.Scene {
 
   create() {
     announceScene(this);
+    this.input.enabled = true;
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     this.loadVecindadState();
 
@@ -694,13 +695,10 @@ export class VecindadScene extends Phaser.Scene {
   private leaveToWorld() {
     if (this.inTransition) return;
     this.inTransition = true;
-    this.cameras.main.fadeOut(240, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('WorldScene', {
-        returnX: VECINDAD_MAP.RETURN_WORLD_X,
-        returnY: VECINDAD_MAP.RETURN_WORLD_Y,
-      });
-    });
+    transitionToScene(this, 'WorldScene', {
+      returnX: VECINDAD_MAP.RETURN_WORLD_X,
+      returnY: VECINDAD_MAP.RETURN_WORLD_Y,
+    }, 240);
   }
 
   private handleMovement(delta: number) {

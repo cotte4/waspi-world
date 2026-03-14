@@ -3,7 +3,7 @@ import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRendere
 import { BUILDINGS, COLORS, WORLD, ZONES } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
-import { announceScene, createBackButton } from '../systems/SceneUi';
+import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
 
 interface ArcadePenaltyReward {
@@ -343,14 +343,9 @@ export class ArcadeInterior extends Phaser.Scene {
     if (this.inTransition) return;
     this.inTransition = true;
     this.stopArcadeMusic();
-    this.cameras.main.resetFX();
-    this.cameras.main.setAlpha(1);
-    this.cameras.main.fadeOut(250, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('WorldScene', {
-        returnX: ArcadeInterior.RETURN_X,
-        returnY: ArcadeInterior.RETURN_Y,
-      });
+    transitionToScene(this, 'WorldScene', {
+      returnX: ArcadeInterior.RETURN_X,
+      returnY: ArcadeInterior.RETURN_Y,
     });
   }
 

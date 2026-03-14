@@ -7,7 +7,7 @@ import {
   saveStoredAvatarConfig,
 } from '../systems/AvatarRenderer';
 import { COLORS } from '../config/constants';
-import { announceScene } from '../systems/SceneUi';
+import { announceScene, transitionToScene } from '../systems/SceneUi';
 
 const USERNAME_KEY = 'waspi_username';
 type CreatorControl = 'seed' | 'bodyColor' | 'eyeColor' | 'hairColor' | 'hairStyle' | 'pp' | 'tt' | 'save';
@@ -61,6 +61,7 @@ export class CreatorScene extends Phaser.Scene {
 
   create() {
     const { width, height } = this.scale;
+    this.input.enabled = true;
     const storedConfig = loadStoredAvatarConfig();
     this.config = { ...storedConfig };
     this.selectedSeed = storedConfig.avatarKind;
@@ -508,10 +509,7 @@ export class CreatorScene extends Phaser.Scene {
         avatarKind: this.selectedSeed,
       });
     }
-    this.cameras.main.fadeOut(250, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('WorldScene');
-    });
+    transitionToScene(this, 'WorldScene');
   }
 
   private cycleInList<T>(values: T[], current: T, direction: -1 | 1) {

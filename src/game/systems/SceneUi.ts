@@ -77,3 +77,19 @@ export function createBackButton(scene: Phaser.Scene, onClick: () => void, label
 
   return { bg, text };
 }
+
+export function transitionToScene(
+  scene: Phaser.Scene,
+  targetKey: string,
+  data: Record<string, unknown> = {},
+  duration = 250,
+) {
+  const camera = scene.cameras.main;
+  scene.input.enabled = false;
+  camera.resetFX();
+  camera.setAlpha(1);
+  camera.fadeOut(duration, 0, 0, 0);
+  camera.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+    scene.scene.start(targetKey, data);
+  });
+}
