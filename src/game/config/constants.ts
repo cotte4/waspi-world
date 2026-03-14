@@ -67,6 +67,9 @@ export const ZONES = {
   TRAINING_Y: 960,
   TRAINING_W: 900,
   TRAINING_H: 420,
+  CAMARA_X: 2550,
+  CAMARA_Y: 1100,
+  CAMARA_R: 110, // radius of the chamber circle
 } as const;
 
 export const SAFE_PLAZA_RETURN = {

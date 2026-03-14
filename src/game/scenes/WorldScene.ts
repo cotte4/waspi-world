@@ -409,6 +409,16 @@ export class WorldScene extends Phaser.Scene {
   // COTTENKS NPC
   private cottenksDialog: BranchedDialog | null = null;
 
+  // Sprint
+  private shiftKey?: Phaser.Input.Keyboard.Key;
+
+  // Camara del Tiempo
+  private inCamara = false;
+  private camaraTimer = 0;       // ms accumulated inside
+  private camaraTickMs = 15000;  // earn every 15s
+  private camaraTenksPerTick = 10;
+  private camaraHud?: Phaser.GameObjects.Text;
+
   constructor() {
     super({ key: 'WorldScene' });
   }
@@ -500,6 +510,7 @@ export class WorldScene extends Phaser.Scene {
     announceScene(this);
     this.input.enabled = true;
     this.controls = new SceneControls(this);
+    this.shiftKey = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
 
     // Generate player ID and username
@@ -517,7 +528,17 @@ export class WorldScene extends Phaser.Scene {
     this.drawBuildings();
     this.drawStreet();
     this.drawLampPosts();
+    this.drawCamaraDelTiempo();
     this.drawVignette();
+
+    // CAMARA DEL TIEMPO hud (hidden by default)
+    this.camaraHud = this.add.text(0, 0, '', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#B388FF',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setScrollFactor(0).setDepth(9500).setAlpha(0);
 
     // Multiplayer status indicator (tiny debug text)
     const statusText = this.add.text(8, 8, '', {
@@ -2254,58 +2275,158 @@ export class WorldScene extends Phaser.Scene {
   private drawArcadeBuilding() {
     const { x, y, w, h } = BUILDINGS.ARCADE;
     const g = this.add.graphics().setDepth(2);
+    const cx = x + w / 2;
 
-    // Main facade
-    g.fillStyle(COLORS.BUILDING_ARCADE);
+    // ── Base facade ──────────────────────────────────────────────────────────
+    g.fillStyle(0x0a0a1e);
     g.fillRect(x, y, w, h);
 
-    // Roof overhang
-    g.fillStyle(COLORS.ROOF_DARK);
-    g.fillRect(x - 8, y, w + 16, 30);
+    // Subtle side pillar panels
+    g.fillStyle(0x0d0d22);
+    g.fillRect(x, y, 28, h);
+    g.fillRect(x + w - 28, y, 28, h);
 
-    // Windows (glowing blue)
-    const winPositions = [[x+40,y+80],[x+120,y+80],[x+200,y+80],[x+280,y+80],[x+40,y+180],[x+120,y+180],[x+200,y+180],[x+280,y+180]];
-    winPositions.forEach(([wx, wy]) => {
-      g.fillStyle(COLORS.WINDOW_COOL, 0.15);
-      g.fillRect(wx, wy, 55, 65);
-      g.lineStyle(1.5, COLORS.NEON_BLUE, 0.7);
-      g.strokeRect(wx, wy, 55, 65);
+    // ── Roof marquee bar ─────────────────────────────────────────────────────
+    g.fillStyle(0x06061a);
+    g.fillRect(x - 10, y, w + 20, 36);
+    // LED strip top edge (hot pink)
+    g.lineStyle(3, 0xFF006E, 1);
+    g.lineBetween(x - 10, y + 1, x + w + 10, y + 1);
+    // LED strip bottom of marquee
+    g.lineStyle(2, 0xFF006E, 0.6);
+    g.lineBetween(x - 10, y + 36, x + w + 10, y + 36);
+
+    // Marquee dot lights
+    for (let lx = x; lx < x + w; lx += 18) {
+      g.fillStyle(0xFF006E, 0.7);
+      g.fillCircle(lx + 9, y + 6, 2);
+    }
+
+    // ── Main sign area ────────────────────────────────────────────────────────
+    // Dark sign panel background
+    g.fillStyle(0x04040f);
+    g.fillRect(x + 50, y + 38, w - 100, 38);
+    g.lineStyle(1.5, 0xFF006E, 0.4);
+    g.strokeRect(x + 50, y + 38, w - 100, 38);
+
+    // ── Arcade cabinet screen panels (3 panels) ───────────────────────────────
+    const panels = [
+      { px: x + 34, py: y + 90 },
+      { px: x + 160, py: y + 90 },
+      { px: x + 286, py: y + 90 },
+    ];
+    panels.forEach(({ px, py }) => {
+      // Screen bezel
+      g.fillStyle(0x111122);
+      g.fillRoundedRect(px, py, 88, 70, 4);
+      g.lineStyle(2, 0x334466, 0.9);
+      g.strokeRoundedRect(px, py, 88, 70, 4);
+      // Screen glow fill (cyan/blue CRT feel)
+      g.fillStyle(0x001833, 0.9);
+      g.fillRect(px + 4, py + 4, 80, 62);
+      // Scanlines (alternating rows)
+      g.lineStyle(1, 0x003366, 0.5);
+      for (let sy = py + 8; sy < py + 66; sy += 6) {
+        g.lineBetween(px + 4, sy, px + 84, sy);
+      }
+      // Pixel "game" sprite — simple cross/star pattern
+      g.fillStyle(0x46b3ff, 0.9);
+      g.fillRect(px + 36, py + 22, 6, 20);
+      g.fillRect(px + 28, py + 28, 22, 6);
+      g.fillStyle(0xff006e, 0.8);
+      g.fillRect(px + 18, py + 14, 6, 6);
+      g.fillRect(px + 60, py + 42, 6, 6);
+      g.fillStyle(0xFFFF00, 0.7);
+      g.fillRect(px + 50, py + 14, 4, 4);
     });
 
-    // Entrance
-    g.fillStyle(0x050510);
-    g.fillRect(x + w/2 - 35, y + h - 80, 70, 80);
-    g.lineStyle(2, COLORS.NEON_BLUE, 0.9);
-    g.strokeRect(x + w/2 - 35, y + h - 80, 70, 80);
+    // ── Entrance ──────────────────────────────────────────────────────────────
+    const doorX = cx - 38;
+    const doorY = y + h - 82;
+    // Door frame glowing surround
+    g.fillStyle(0x001a33);
+    g.fillRect(doorX - 4, doorY - 4, 84, 86);
+    g.lineStyle(3, 0x46b3ff, 1);
+    g.strokeRect(doorX - 4, doorY - 4, 84, 86);
+    // Door interior dark
+    g.fillStyle(0x000008);
+    g.fillRect(doorX, doorY, 76, 82);
+    // Door frame inner glow line
+    g.lineStyle(1, 0x46b3ff, 0.4);
+    g.strokeRect(doorX + 4, doorY + 4, 68, 74);
+    // Floor reflection strip at bottom of door
+    g.fillStyle(0x46b3ff, 0.18);
+    g.fillRect(doorX, doorY + 72, 76, 10);
 
-    // ARCADE neon sign
-    const signText = this.add.text(x + w/2, y + 40, 'ARCADE', {
-      fontSize: '18px',
+    // Neon vertical tubes on entrance sides
+    g.lineStyle(3, 0xFF006E, 0.9);
+    g.lineBetween(doorX - 4, doorY - 4, doorX - 4, y + h);
+    g.lineBetween(doorX + 80, doorY - 4, doorX + 80, y + h);
+    g.lineStyle(1, 0xFF006E, 0.3);
+    g.lineBetween(doorX - 8, doorY - 4, doorX - 8, y + h);
+    g.lineBetween(doorX + 84, doorY - 4, doorX + 84, y + h);
+
+    // Corner accent diamonds
+    [[x + 14, y + h - 14], [x + w - 14, y + h - 14]].forEach(([dx, dy]) => {
+      g.fillStyle(0xFF006E, 0.7);
+      g.fillTriangle(dx, dy - 6, dx - 6, dy, dx, dy + 6);
+      g.fillTriangle(dx, dy - 6, dx + 6, dy, dx, dy + 6);
+    });
+
+    // ── Animated elements ─────────────────────────────────────────────────────
+    // Main ARCADE sign — layered glow effect
+    const signGlow = this.add.text(cx, y + 52, 'ARCADE', {
+      fontSize: '16px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#FF006E',
       stroke: '#FF006E',
-      strokeThickness: 2,
+      strokeThickness: 8,
+      alpha: 0.25,
     }).setOrigin(0.5).setDepth(3);
 
-    // Glow flicker tween
+    const signText = this.add.text(cx, y + 52, 'ARCADE', {
+      fontSize: '16px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FFFFFF',
+      stroke: '#FF006E',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(4);
+
+    // Flicker: main sign
     this.tweens.add({
-      targets: signText,
-      alpha: { from: 1, to: 0.7 },
-      duration: 800 + Math.random() * 400,
+      targets: [signText, signGlow],
+      alpha: { from: 1, to: 0.55 },
+      duration: 120 + Math.random() * 80,
       yoyo: true,
       repeat: -1,
-      ease: 'Sine.easeInOut',
+      ease: 'Stepped',
+      hold: 900 + Math.random() * 600,
     });
 
-    // Screen glow on facade
-    g.fillStyle(COLORS.NEON_PINK, 0.05);
-    g.fillRect(x, y, w, h);
+    // Sub-label "EST. WASPI"
+    this.add.text(cx, y + 72, '— EST. WASPI —', {
+      fontSize: '5px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#46b3ff',
+      alpha: 0.7,
+    }).setOrigin(0.5).setDepth(4);
 
-    // Column separators
-    g.lineStyle(1, 0x1A1A30, 0.9);
-    for (let cx = x + 100; cx < x + w; cx += 100) {
-      g.lineBetween(cx, y, cx, y + h);
-    }
+    // Screen glow pulse on panels (separate graphics for animation)
+    const glowG = this.add.graphics().setDepth(2);
+    let glowPhase = 0;
+    this.time.addEvent({
+      delay: 80,
+      loop: true,
+      callback: () => {
+        glowPhase += 0.12;
+        glowG.clear();
+        panels.forEach(({ px, py }, i) => {
+          const a = 0.06 + Math.abs(Math.sin(glowPhase + i * 1.1)) * 0.1;
+          glowG.fillStyle(0x46b3ff, a);
+          glowG.fillRect(px + 4, py + 4, 80, 62);
+        });
+      },
+    });
   }
 
   private drawStoreBuilding() {
@@ -2785,6 +2906,130 @@ export class WorldScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(3);
+  }
+
+  // ─── CAMARA DEL TIEMPO ───────────────────────────────────────────────────
+
+  private drawCamaraDelTiempo() {
+    const { CAMARA_X: cx, CAMARA_Y: cy, CAMARA_R: r } = ZONES;
+    const g = this.add.graphics().setDepth(4);
+
+    // Outer ring — deep purple aura
+    g.lineStyle(6, 0x6a0dad, 0.35);
+    g.strokeCircle(cx, cy, r + 14);
+
+    // Floor circle
+    g.fillStyle(0x0d001a, 0.92);
+    g.fillCircle(cx, cy, r);
+
+    // Inner ring
+    g.lineStyle(3, 0x9c27b0, 0.8);
+    g.strokeCircle(cx, cy, r);
+
+    // Second ring
+    g.lineStyle(1.5, 0xB388FF, 0.5);
+    g.strokeCircle(cx, cy, r - 18);
+
+    // Rune lines (8 spoke marks)
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      const inner = r - 28;
+      const outer = r - 6;
+      g.lineStyle(1.5, 0xB388FF, 0.4);
+      g.lineBetween(
+        cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner,
+        cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer,
+      );
+    }
+
+    // Center glow orb
+    g.fillStyle(0x6a0dad, 0.6);
+    g.fillCircle(cx, cy, 14);
+    g.fillStyle(0xce93d8, 0.8);
+    g.fillCircle(cx, cy, 7);
+    g.fillStyle(0xffffff, 0.9);
+    g.fillCircle(cx, cy, 3);
+
+    // Title label
+    this.add.text(cx, cy - r - 20, 'CAMARA DEL TIEMPO', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#B388FF',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(9000);
+
+    this.add.text(cx, cy - r - 8, 'quedate quieto y acumulá TENKS', {
+      fontSize: '6px',
+      fontFamily: '"Silkscreen", monospace',
+      color: '#7c4dff',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5, 1).setDepth(9000);
+
+    // Pulsing aura (animated graphics layer)
+    const auraG = this.add.graphics().setDepth(3);
+    let auraPhase = 0;
+    this.time.addEvent({
+      delay: 60,
+      loop: true,
+      callback: () => {
+        auraPhase += 0.06;
+        auraG.clear();
+        const a = 0.06 + Math.abs(Math.sin(auraPhase)) * 0.1;
+        auraG.fillStyle(0x9c27b0, a);
+        auraG.fillCircle(cx, cy, r - 4);
+        // Orbiting particle
+        const ox = cx + Math.cos(auraPhase * 0.7) * (r - 22);
+        const oy = cy + Math.sin(auraPhase * 0.7) * (r - 22);
+        auraG.fillStyle(0xce93d8, 0.85);
+        auraG.fillCircle(ox, oy, 3);
+        // Second particle (opposite)
+        const ox2 = cx + Math.cos(auraPhase * 0.7 + Math.PI) * (r - 22);
+        const oy2 = cy + Math.sin(auraPhase * 0.7 + Math.PI) * (r - 22);
+        auraG.fillStyle(0xce93d8, 0.6);
+        auraG.fillCircle(ox2, oy2, 2);
+      },
+    });
+  }
+
+  private updateCamaraDelTiempo(delta: number) {
+    const { CAMARA_X: cx, CAMARA_Y: cy, CAMARA_R: r } = ZONES;
+    const dx = this.px - cx;
+    const dy = this.py - cy;
+    const inside = Math.sqrt(dx * dx + dy * dy) < r;
+
+    if (inside !== this.inCamara) {
+      this.inCamara = inside;
+      if (!inside) {
+        // Reset timer on exit
+        this.camaraTimer = 0;
+        this.camaraHud?.setAlpha(0);
+      } else {
+        this.showArenaNotice('CAMARA DEL TIEMPO', '#B388FF');
+      }
+    }
+
+    if (!inside) return;
+
+    this.camaraTimer += delta;
+    const progress = Math.min(this.camaraTimer / this.camaraTickMs, 1);
+    const secsLeft = Math.ceil((this.camaraTickMs - this.camaraTimer) / 1000);
+
+    // Show HUD
+    if (this.camaraHud) {
+      const cam = this.cameras.main;
+      this.camaraHud.setPosition(cam.width / 2, cam.height - 52);
+      this.camaraHud.setOrigin(0.5, 1);
+      this.camaraHud.setText(`⏳ TENKS en ${secsLeft}s  [${'█'.repeat(Math.floor(progress * 10))}${'░'.repeat(10 - Math.floor(progress * 10))}]`);
+      this.camaraHud.setAlpha(1);
+    }
+
+    if (this.camaraTimer >= this.camaraTickMs) {
+      this.camaraTimer = 0;
+      addTenks(this.camaraTenksPerTick, 'camara_del_tiempo');
+      this.showArenaNotice(`+${this.camaraTenksPerTick} TENKS`, '#B388FF');
+    }
   }
 
   private drawLampPosts() {
@@ -3297,7 +3542,8 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
 
-    const speed = PLAYER.SPEED * (delta / 1000);
+    const isSprinting = !!(this.shiftKey?.isDown) && !this.inputBlocked;
+    const speed = PLAYER.SPEED * (isSprinting ? 2 : 1) * (delta / 1000);
     let { dx, dy } = this.controls.readMovement(true);
 
     // Touch fallback if no keyboard input
@@ -4175,6 +4421,7 @@ export class WorldScene extends Phaser.Scene {
     this.runFrameStep('training combat', () => this.updateDummies());
     this.runFrameStep('interaction highlight', () => this.updateInteractionHighlight());
     this.handleInteraction();
+    this.updateCamaraDelTiempo(delta);
 
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyQ)) {
       this.switchWeapon();
