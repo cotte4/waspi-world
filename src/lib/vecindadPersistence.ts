@@ -1,5 +1,5 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js';
-import type { PlayerState } from '@/src/lib/playerState';
+import { syncVecindadDeed, type PlayerState } from '@/src/lib/playerState';
 import type { SharedParcelState } from '@/src/lib/vecindad';
 
 type Json = string | number | boolean | null | { [key: string]: Json } | Json[];
@@ -129,24 +129,24 @@ export async function loadPlayerUsername(admin: SupabaseClient, userId: string) 
 export async function mergePlayerWithVecindad(admin: SupabaseClient, userId: string, player: PlayerState): Promise<PlayerState> {
   const parcel = await getUserVecindadParcel(admin, userId);
   if (!parcel) {
-    return {
+    return syncVecindadDeed({
       ...player,
       vecindad: {
         ...player.vecindad,
         ownedParcelId: undefined,
         buildStage: 0,
       },
-    };
+    });
   }
 
-  return {
+  return syncVecindadDeed({
     ...player,
     vecindad: {
       ...player.vecindad,
       ownedParcelId: parcel.parcelId,
       buildStage: parcel.buildStage,
     },
-  };
+  });
 }
 
 export async function persistPlayerMetadata(admin: SupabaseClient, user: User, player: PlayerState) {

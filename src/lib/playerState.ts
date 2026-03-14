@@ -2,6 +2,7 @@ import type { AvatarConfig } from '../game/systems/AvatarRenderer';
 import { getItem } from '../game/config/catalog';
 
 const DEFAULT_UTILITY_ID = 'UTIL-GUN-01';
+export const VECINDAD_DEED_ITEM_ID = 'UTIL-DEED-01';
 
 export type InventoryState = {
   owned: string[];
@@ -120,9 +121,11 @@ export function grantInventoryItem(state: PlayerState, itemId: string): PlayerSt
 
   const equipped = { ...state.inventory.equipped };
   if (item.slot === 'utility') {
-    const utility = new Set(equipped.utility ?? []);
-    utility.add(itemId);
-    equipped.utility = [...utility];
+    if (item.autoEquip !== false) {
+      const utility = new Set(equipped.utility ?? []);
+      utility.add(itemId);
+      equipped.utility = [...utility];
+    }
   } else {
     equipped[item.slot] = itemId;
   }
@@ -139,6 +142,40 @@ export function grantInventoryItem(state: PlayerState, itemId: string): PlayerSt
       ...(item.slot === 'bottom' ? { bottomColor: item.color ?? state.avatar.bottomColor } : {}),
     },
   };
+}
+
+export function revokeInventoryItem(state: PlayerState, itemId: string): PlayerState {
+  const item = getItem(itemId);
+  if (!item) return state;
+
+  const owned = state.inventory.owned.filter((id) => id !== itemId);
+  const equipped = { ...state.inventory.equipped };
+
+  if (item.slot === 'utility') {
+    equipped.utility = (equipped.utility ?? []).filter((id) => id !== itemId);
+  } else if (equipped[item.slot] === itemId) {
+    delete equipped[item.slot];
+  }
+
+  return {
+    ...state,
+    inventory: {
+      owned,
+      equipped,
+    },
+  };
+}
+
+export function syncVecindadDeed(state: PlayerState): PlayerState {
+  if (state.vecindad.ownedParcelId) {
+    return state.inventory.owned.includes(VECINDAD_DEED_ITEM_ID)
+      ? state
+      : grantInventoryItem(state, VECINDAD_DEED_ITEM_ID);
+  }
+
+  return state.inventory.owned.includes(VECINDAD_DEED_ITEM_ID)
+    ? revokeInventoryItem(state, VECINDAD_DEED_ITEM_ID)
+    : state;
 }
 
 export function mutePlayer(state: PlayerState, playerId: string): PlayerState {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getAuthenticatedUser, hasServiceRole, isServerSupabaseConfigured } from '@/src/lib/supabaseServer';
-import { normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
+import { grantInventoryItem, normalizePlayerState, syncVecindadDeed, VECINDAD_DEED_ITEM_ID, type PlayerState } from '@/src/lib/playerState';
 import { ensurePlayerRow } from '@/src/lib/commercePersistence';
 import { createVecindadParcel, deleteVecindadParcel, getParcelOccupant, getUserVecindadParcel, listVecindadParcels, loadPlayerUsername, mergePlayerWithVecindad, persistPlayerMetadata, updateVecindadParcelBuildStage } from '@/src/lib/vecindadPersistence';
 import { getBuildCost, getParcelById, MAX_VECINDAD_STAGE } from '@/src/lib/vecindad';
@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
       }
 
       const nextBuildStage = myParcel?.buildStage ?? player.vecindad.buildStage ?? 0;
-      player = {
+      player = syncVecindadDeed({
         ...player,
         tenks: Math.max(0, player.tenks - parcel.cost),
         vecindad: {
@@ -102,7 +102,11 @@ export async function POST(request: NextRequest) {
           ownedParcelId: parcel.id,
           buildStage: nextBuildStage,
         },
-      };
+      });
+
+      if (!player.inventory.owned.includes(VECINDAD_DEED_ITEM_ID)) {
+        player = grantInventoryItem(player, VECINDAD_DEED_ITEM_ID);
+      }
 
       if (!myParcel) {
         const username = await loadPlayerUsername(admin, user.id) ?? `player_${user.id.slice(0, 8)}`;
@@ -128,7 +132,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           player: await mergePlayerWithVecindad(admin, user.id, player),
           parcels,
-          notice: `Compraste la parcela ${parcel.id}. Ahora junta materiales y empeza a construir.`,
+          notice: `Compraste la parcela ${parcel.id}. La escritura ya esta en tu inventario. Ahora junta materiales y empeza a construir.`,
         });
       }
 

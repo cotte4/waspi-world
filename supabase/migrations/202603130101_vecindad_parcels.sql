@@ -2,7 +2,7 @@ create table if not exists public.vecindad_parcels (
   parcel_id text primary key,
   owner_id uuid not null unique references public.players(id) on delete cascade,
   owner_username text not null,
-  build_stage integer not null default 1 check (build_stage between 1 and 4),
+  build_stage integer not null default 0 check (build_stage between 0 and 4),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

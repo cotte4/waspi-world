@@ -846,6 +846,7 @@ export default function PlayPage() {
     if (shopSource !== 'store_interior') return;
     if (activeScene === 'StoreInterior') return;
     const closeTimer = window.setTimeout(() => {
+      eventBus.emit(EVENTS.SHOP_CLOSE);
       setShopOpen(false);
       setShopSource('');
     }, 0);
@@ -973,6 +974,13 @@ export default function PlayPage() {
   const progressPct = progression.nextLevelAt === null
     ? 1
     : Math.max(0, Math.min(1, progression.xp / progression.nextLevelAt));
+  const passiveUtilityItems = useMemo(
+    () => owned
+      .map((id) => CATALOG.find((i) => i.id === id))
+      .filter((item): item is CatalogItem => Boolean(item))
+      .filter((item) => item.slot === 'utility' && item.id !== 'UTIL-GUN-01' && item.id !== 'UTIL-BALL-01'),
+    [owned],
+  );
 
   return (
     <>
@@ -1699,6 +1707,38 @@ export default function PlayPage() {
                     >
                       {ballOn ? 'ON' : 'OFF'}
                     </button>
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>DOCUMENTOS</div>
+                  <div className="mt-2 space-y-1">
+                    {passiveUtilityItems.length === 0 && (
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>
+                        No tenes documentos especiales todavia.
+                      </div>
+                    )}
+                    {passiveUtilityItems.map((item) => (
+                      <div key={item.id} className="flex items-center justify-between">
+                        <div>
+                          <div style={{ fontSize: '13px' }}>{item.name}</div>
+                          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
+                            {item.description ?? 'Documento de propiedad.'}
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            fontFamily: '"Press Start 2P", monospace',
+                            fontSize: '7px',
+                            color: '#F5C842',
+                            border: '1px solid rgba(245,200,66,0.28)',
+                            padding: '7px 9px',
+                          }}
+                        >
+                          TUYO
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 

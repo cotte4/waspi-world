@@ -11,6 +11,7 @@ export type CatalogItem = {
   sizes?: string[];
   stripePriceEnv?: string;
   isLimited?: boolean;
+  autoEquip?: boolean;
 };
 
 // MVP virtual catalog (TENKS-only for now)
@@ -18,6 +19,7 @@ export const CATALOG: CatalogItem[] = [
   // Cotte Shop utilities (requested: cost 5k)
   { id: 'UTIL-GUN-01', name: 'GUN', slot: 'utility', category: 'accessory', virtualType: 'accessory', description: 'Utilidad cosmetica para disparar.', priceTenks: 5000 },
   { id: 'UTIL-BALL-01', name: 'FOOTBALL', slot: 'utility', category: 'accessory', virtualType: 'accessory', description: 'Pelota cosmetica con bote.', priceTenks: 5000 },
+  { id: 'UTIL-DEED-01', name: 'ESCRITURA', slot: 'utility', category: 'accessory', virtualType: 'accessory', description: 'Escritura oficial de tu parcela en La Vecindad.', priceTenks: 0, autoEquip: false },
 
   // Clothing (colors apply to avatar)
   { id: 'TEE-BLK-01', name: 'REMERA WASPI NEGRA', slot: 'top', category: 'tee', virtualType: 'tee', description: 'Remera streetwear negra de WASPI.', color: 0x1A1A1A, priceTenks: 800, priceArs: 15000, sizes: ['S', 'M', 'L', 'XL'], stripePriceEnv: 'STRIPE_PRICE_TEE_BLK_01' },
