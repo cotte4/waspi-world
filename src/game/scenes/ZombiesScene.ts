@@ -27,6 +27,7 @@ import {
 const BOX_POS = { x: 435, y: 698 } as const;
 const PACK_POS = { x: 1278, y: 610 } as const;
 const EXIT_PAD = { x: 182, y: 878, radius: 42 } as const;
+const DEPTHS_PAD = { x: 1586, y: 918, radius: 46 } as const;
 const PLAYER_RETURN = { x: 1600, y: 1540 } as const;
 const WALL_THICKNESS = 36;
 
@@ -35,6 +36,8 @@ type ZombiesSceneInitData = {
   returnX?: number;
   returnY?: number;
   entryLabel?: string;
+  allowDepthsGate?: boolean;
+  modeLabel?: string;
 };
 
 type DoorState = {
@@ -139,7 +142,7 @@ type ZombieProjectile = {
 };
 
 type InteractionOption = {
-  kind: 'exit' | 'door' | 'box' | 'repair' | 'upgrade';
+  kind: 'exit' | 'door' | 'box' | 'repair' | 'upgrade' | 'depths';
   x: number;
   y: number;
   radius: number;
@@ -208,6 +211,8 @@ export class ZombiesScene extends Phaser.Scene {
   private bossIntroText?: Phaser.GameObjects.Text;
   private controlsText?: Phaser.GameObjects.Text;
   private reticle?: Phaser.GameObjects.Graphics;
+  private depthsRing?: Phaser.GameObjects.Ellipse;
+  private depthsLabel?: Phaser.GameObjects.Text;
   private keyW!: Phaser.Input.Keyboard.Key;
   private keyA!: Phaser.Input.Keyboard.Key;
   private keyS!: Phaser.Input.Keyboard.Key;
@@ -227,9 +232,11 @@ export class ZombiesScene extends Phaser.Scene {
   private returnX: number = PLAYER_RETURN.x;
   private returnY: number = PLAYER_RETURN.y;
   private entryLabel: string = 'LA PLAZA';
+  private allowDepthsGate = true;
+  private modeLabel = 'ZOMBIES';
 
-  constructor() {
-    super({ key: 'ZombiesScene' });
+  constructor(sceneKey = 'ZombiesScene') {
+    super({ key: sceneKey });
   }
 
   init(data?: ZombiesSceneInitData) {
@@ -237,6 +244,8 @@ export class ZombiesScene extends Phaser.Scene {
     this.returnX = typeof data?.returnX === 'number' ? data.returnX : PLAYER_RETURN.x;
     this.returnY = typeof data?.returnY === 'number' ? data.returnY : PLAYER_RETURN.y;
     this.entryLabel = data?.entryLabel ?? 'LA PLAZA';
+    this.allowDepthsGate = data?.allowDepthsGate ?? true;
+    this.modeLabel = data?.modeLabel ?? 'ZOMBIES';
   }
 
   create() {
@@ -490,6 +499,7 @@ export class ZombiesScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(20);
 
     this.drawExitPad();
+    this.drawDepthsPad();
     this.buildObstacles();
     this.buildSpawnNodes();
   }
@@ -500,6 +510,40 @@ export class ZombiesScene extends Phaser.Scene {
     g.strokeCircle(EXIT_PAD.x, EXIT_PAD.y, EXIT_PAD.radius);
     g.lineBetween(EXIT_PAD.x - 20, EXIT_PAD.y, EXIT_PAD.x + 20, EXIT_PAD.y);
     g.lineBetween(EXIT_PAD.x, EXIT_PAD.y - 20, EXIT_PAD.x, EXIT_PAD.y + 20);
+  }
+
+  private drawDepthsPad() {
+    this.depthsRing = this.add.ellipse(DEPTHS_PAD.x, DEPTHS_PAD.y, DEPTHS_PAD.radius * 2.4, DEPTHS_PAD.radius * 1.3, 0xB05CFF, 0.05).setDepth(15);
+    this.depthsRing.setStrokeStyle(2, 0xB05CFF, 0.2);
+    this.tweens.add({
+      targets: this.depthsRing,
+      alpha: { from: 0.05, to: 0.18 },
+      scaleX: 1.06,
+      scaleY: 1.08,
+      yoyo: true,
+      repeat: -1,
+      duration: 980,
+      ease: 'Sine.easeInOut',
+    });
+    this.depthsLabel = this.add.text(DEPTHS_PAD.x, DEPTHS_PAD.y - 58, 'DEPTHS LOCKED', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#9B7BBF',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(20);
+    this.updateDepthsAccessVisual();
+  }
+
+  private updateDepthsAccessVisual() {
+    if (!this.depthsRing || !this.depthsLabel) return;
+    const open = this.allowDepthsGate && this.bossSpawnedThisRound && !this.bossAlive && this.round >= 10;
+    this.depthsRing.setFillStyle(open ? 0xFF6EA8 : 0xB05CFF, open ? 0.12 : 0.05);
+    this.depthsRing.setStrokeStyle(2, open ? 0xFF6EA8 : 0xB05CFF, open ? 0.58 : 0.2);
+    this.depthsLabel.setText(open ? 'BASEMENT DEPTHS' : 'DEPTHS LOCKED');
+    this.depthsLabel.setColor(open ? '#FF9DC8' : '#9B7BBF');
+    this.depthsRing.setVisible(this.allowDepthsGate);
+    this.depthsLabel.setVisible(this.allowDepthsGate);
   }
 
   private buildObstacles() {
@@ -795,6 +839,7 @@ export class ZombiesScene extends Phaser.Scene {
       this.gameOver ? 'GAME OVER' : timedBuffs || roundState,
       `ZOMBIES ${this.countAliveZombies()}/${this.roundTarget}`,
       `SPAWN ${this.spawnedThisRound}`,
+      this.allowDepthsGate && this.bossSpawnedThisRound && !this.bossAlive && this.round >= 10 ? 'DEPTHS OPEN' : '',
       this.bossAlive ? 'BOSS ACTIVE' : this.bossRoundActive && !this.bossSpawnedThisRound ? 'BOSS INCOMING' : '',
     ].filter(Boolean).join('\n'));
     this.inventoryText?.setText(`ARMAS ${this.weaponOrder.map((id) => {
@@ -845,6 +890,7 @@ export class ZombiesScene extends Phaser.Scene {
     if (!this.bossRoundActive) {
       this.playZombiesSfx('round_start');
     }
+    this.updateDepthsAccessVisual();
     this.renderHud();
   }
 
@@ -1594,12 +1640,16 @@ export class ZombiesScene extends Phaser.Scene {
     if (zombie.isBoss) {
       this.bossAlive = false;
       this.playZombiesSfx('boss_round');
+      if (this.allowDepthsGate) {
+        this.showNotice('DEPTHS UNLOCKED', '#FF9DC8');
+      }
     }
     const killReward = zombie.killReward * pointMultiplier;
     this.points += killReward;
     if (zombie.shadow?.scene && zombie.shadow.active !== false) {
       zombie.shadow.setAlpha(0.18);
     }
+    this.updateDepthsAccessVisual();
     this.showFloatingText(`+${killReward} ${zombie.displayLabel}`, zombie.x, zombie.y - 34, pointMultiplier > 1 ? '#FFD36A' : '#9EFFB7');
     this.tryDropPickup(zombie.x, zombie.y);
     const burst = this.add.circle(zombie.x, zombie.y - 8, zombie.radius + 8, 0xFF6A6A, 0.26).setDepth(80);
@@ -1667,6 +1717,10 @@ export class ZombiesScene extends Phaser.Scene {
       this.tryUpgradeCurrentWeapon();
       return;
     }
+    if (option.kind === 'depths') {
+      this.enterBasementDepths();
+      return;
+    }
     if (option.kind === 'repair' && option.nodeId) {
       this.tryRepairBarricade(option.nodeId);
     }
@@ -1709,6 +1763,18 @@ export class ZombiesScene extends Phaser.Scene {
           ? `${weaponStats.displayLabel} AL MAX`
           : `E PACK ${weaponStats.displayLabel} ${this.getPackCost(this.currentWeapon)} PTS`,
         color: 0x46B3FF,
+      });
+    }
+
+    const depthsOpen = this.allowDepthsGate && this.bossSpawnedThisRound && !this.bossAlive && this.round >= 10;
+    if (depthsOpen && Phaser.Math.Distance.Between(this.px, this.py, DEPTHS_PAD.x, DEPTHS_PAD.y) <= DEPTHS_PAD.radius + 34) {
+      options.push({
+        kind: 'depths',
+        x: DEPTHS_PAD.x,
+        y: DEPTHS_PAD.y,
+        radius: DEPTHS_PAD.radius + 18,
+        label: 'E BAJAR AL BASEMENT',
+        color: 0xFF6EA8,
       });
     }
 
@@ -2171,6 +2237,17 @@ export class ZombiesScene extends Phaser.Scene {
     transitionToScene(this, this.returnScene, {
       returnX: this.returnX,
       returnY: this.returnY,
+    });
+  }
+
+  private enterBasementDepths() {
+    transitionToScene(this, 'BasementZombiesScene', {
+      returnScene: 'ZombiesScene',
+      returnX: DEPTHS_PAD.x,
+      returnY: DEPTHS_PAD.y,
+      entryLabel: this.modeLabel,
+      allowDepthsGate: false,
+      modeLabel: 'BASEMENT DEPTHS',
     });
   }
 
