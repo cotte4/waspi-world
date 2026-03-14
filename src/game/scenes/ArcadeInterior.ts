@@ -65,6 +65,11 @@ export class ArcadeInterior extends Phaser.Scene {
   }
 
   init(data: ArcadeInteriorData = {}) {
+    this.inTransition = false;
+    this.wasInsideBasketZone = false;
+    this.wasInsidePenaltyZone = false;
+    this.lastMoveDx = 0;
+    this.lastIsMoving = false;
     this.basketCooldownMs = data.basketCooldownMs ?? 0;
     this.penaltyCooldownMs = data.penaltyCooldownMs ?? 0;
     const basketReward = data.basketReward;
@@ -105,6 +110,8 @@ export class ArcadeInterior extends Phaser.Scene {
 
   create() {
     const { width, height } = this.scale;
+    this.inTransition = false;
+    this.input.enabled = true;
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     this.audioSettingsCleanup = eventBus.on(EVENTS.AUDIO_SETTINGS_CHANGED, (payload: unknown) => {
