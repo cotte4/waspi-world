@@ -41,3 +41,29 @@ export function initTenks(initial: number, options?: { preferStored?: boolean })
   eventBus.emit(EVENTS.TENKS_CHANGED, { balance, delta: 0, reason: 'init' });
 }
 
+/**
+ * Fetch the server-authoritative balance and overwrite the local state.
+ * Requires the caller to pass the player's JWT so the API can authenticate.
+ * Falls back silently to the existing localStorage value if the request fails.
+ */
+export async function initTenksFromServer(playerId: string, authToken?: string): Promise<void> {
+  // playerId is kept for future per-player cache invalidation; the API
+  // identifies the user via the Authorization header.
+  void playerId;
+  try {
+    const headers: Record<string, string> = {};
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+    const res = await fetch('/api/player/tenks', { headers });
+    if (!res.ok) return; // graceful fallback — keep localStorage value
+
+    const json = await res.json() as { balance?: number };
+    if (typeof json.balance !== 'number') return;
+
+    // Override localStorage with the server value.
+    initTenks(json.balance, { preferStored: false });
+  } catch {
+    // Network error or parse failure — keep current localStorage balance.
+  }
+}
+

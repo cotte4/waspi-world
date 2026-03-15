@@ -42,17 +42,57 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  if (currentPlayer.tenks < item.priceTenks) {
+  // --- Server-validated TENKS balance ---
+  // Read the authoritative balance from player_tenks_balance.
+  // If no row exists yet, seed it from players.tenks (back-compat).
+  const { data: balanceRow, error: balanceError } = await admin
+    .from('player_tenks_balance')
+    .select('balance')
+    .eq('player_id', user.id)
+    .single<{ balance: number }>();
+
+  let serverBalance: number;
+
+  if (balanceError && balanceError.code === 'PGRST116') {
+    // Row missing — seed from players.tenks or fall back to client state.
+    const { data: playerRow } = await admin
+      .from('players')
+      .select('tenks')
+      .eq('id', user.id)
+      .single<{ tenks: number }>();
+    serverBalance = playerRow?.tenks ?? currentPlayer.tenks;
+
+    await admin
+      .from('player_tenks_balance')
+      .insert({ player_id: user.id, balance: serverBalance });
+  } else if (balanceError) {
+    return NextResponse.json({ error: balanceError.message }, { status: 500 });
+  } else {
+    serverBalance = balanceRow.balance;
+  }
+
+  if (serverBalance < item.priceTenks) {
     return NextResponse.json({
       error: `Necesitas ${item.priceTenks.toLocaleString('es-AR')} TENKS para comprar ${item.name}.`,
     }, { status: 400 });
+  }
+
+  const newBalance = serverBalance - item.priceTenks;
+
+  // Deduct from the authoritative table atomically before updating metadata.
+  const { error: deductError } = await admin
+    .from('player_tenks_balance')
+    .upsert({ player_id: user.id, balance: newBalance });
+
+  if (deductError) {
+    return NextResponse.json({ error: deductError.message }, { status: 500 });
   }
 
   const nextPlayer = syncVecindadDeed(
     grantInventoryItem(
       {
         ...currentPlayer,
-        tenks: currentPlayer.tenks - item.priceTenks,
+        tenks: newBalance,
       },
       item.id
     )

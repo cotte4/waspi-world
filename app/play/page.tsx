@@ -27,8 +27,9 @@ import {
 import { getLevelFloorXp, getMaxProgressionLevel, loadProgressionState, type ProgressionState } from '@/src/game/systems/ProgressionSystem';
 import { supabase } from '@/src/lib/supabase';
 import { getTenksBalance, initTenks } from '@/src/game/systems/TenksSystem';
-import { mutePlayer, normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
+import { mutePlayer, normalizePlayerState, grantInventoryItem, type PlayerState } from '@/src/lib/playerState';
 import type { SharedParcelState } from '@/src/lib/vecindad';
+import { reconcileInventoryFromDB } from '@/src/lib/commercePersistence';
 
 const PhaserGame = dynamic(() => import('@/app/components/PhaserGame'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
@@ -698,13 +699,18 @@ export default function PlayPage() {
 
   const refreshPlayerState = useCallback(async () => {
     let token = tokenRef.current;
+    let playerId: string | null = null;
     if (!token && supabase) {
       const { data } = await supabase.auth.getSession();
       token = data.session?.access_token ?? null;
       if (data.session) {
         tokenRef.current = data.session.access_token;
         setAuthEmail(data.session.user.email ?? null);
+        playerId = data.session.user.id;
       }
+    } else if (supabase) {
+      const { data } = await supabase.auth.getSession();
+      playerId = data.session?.user.id ?? null;
     }
     if (!token) return;
 
@@ -718,7 +724,37 @@ export default function PlayPage() {
     if (!res?.ok) return;
     const json = await res.json();
     const player = json.player as PlayerState | undefined;
-    if (player) applyPlayerState(normalizePlayerState(player));
+
+    if (player) {
+      let normalized = normalizePlayerState(player);
+
+      // Reconcile: if the webhook wrote to DB but user_metadata update failed,
+      // items will be in player_inventory but missing from the player state.
+      // Merge them back in so the player gets their purchases.
+      if (playerId && supabase) {
+        const reconciledOwned = await reconcileInventoryFromDB(supabase, playerId, normalized.inventory.owned);
+        if (reconciledOwned.length > normalized.inventory.owned.length) {
+          const newItemIds = reconciledOwned.filter((id) => !normalized.inventory.owned.includes(id));
+          let reconciledState = normalized;
+          for (const itemId of newItemIds) {
+            reconciledState = grantInventoryItem(reconciledState, itemId);
+          }
+          normalized = reconciledState;
+        }
+      }
+
+      applyPlayerState(normalized);
+    }
+
+    // Clean up checkout query param from URL so the polling effect doesn't re-trigger on navigation
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('checkout')) {
+        url.searchParams.delete('checkout');
+        window.history.replaceState({}, '', url.toString());
+      }
+    }
+
     await loadVecindadSharedState();
   }, [applyPlayerState, loadVecindadSharedState]);
 

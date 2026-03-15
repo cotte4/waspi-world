@@ -299,3 +299,42 @@ export async function appendTenksTransaction(admin: SupabaseClient, input: { pla
 
   if (error) throw error;
 }
+
+/**
+ * Compares the player's owned items in user_metadata against the durable
+ * player_inventory table and returns a merged array. Any item present in DB
+ * but missing from metadata is added — this covers the case where the Stripe
+ * webhook wrote to DB successfully but the user_metadata update failed.
+ */
+export async function reconcileInventoryFromDB(
+  admin: SupabaseClient,
+  playerId: string,
+  currentOwnedItems: string[]
+): Promise<string[]> {
+  try {
+    const { data: dbItems, error } = await admin
+      .from('player_inventory')
+      .select('product_id')
+      .eq('player_id', playerId);
+
+    if (error) {
+      console.warn('[Waspi] reconcileInventoryFromDB: query failed, keeping current inventory', error.message);
+      return currentOwnedItems;
+    }
+
+    if (!dbItems || dbItems.length === 0) return currentOwnedItems;
+
+    const dbItemIds = (dbItems as { product_id: string }[]).map((r) => r.product_id);
+    const merged = Array.from(new Set([...currentOwnedItems, ...dbItemIds]));
+
+    const added = merged.length - currentOwnedItems.length;
+    if (added > 0) {
+      console.log(`[Waspi] reconcileInventoryFromDB: reconciled ${added} item(s) from DB for player ${playerId}`);
+    }
+
+    return merged;
+  } catch (err) {
+    console.warn('[Waspi] reconcileInventoryFromDB: unexpected error, keeping current inventory', err);
+    return currentOwnedItems;
+  }
+}

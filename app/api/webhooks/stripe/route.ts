@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
       if (purchaseType === 'product') {
         const itemId = session.metadata?.itemId;
         if (itemId) {
-          next = grantInventoryItem(next, itemId);
+          // --- DB FIRST: write durable records before touching user_metadata ---
           const subtotalArs = Number(session.metadata?.subtotalArs ?? 0);
           const discountCode = session.metadata?.discountCode || null;
           const discountPercent = Number(session.metadata?.discountPercent ?? 0) || null;
@@ -107,11 +107,16 @@ export async function POST(request: NextRequest) {
           if (discountCode) {
             await markDiscountCodeUsed(admin, discountCode);
           }
+
+          // --- METADATA SECOND: grant item in memory state after DB is safe ---
+          next = grantInventoryItem(next, itemId);
         }
       }
 
       await ensurePlayerRow(admin, user, next);
 
+      // Mark session processed and update user_metadata. If this fails, the item
+      // is already in player_inventory (DB) and will be reconciled on next player load.
       const { error: updateError } = await admin.auth.admin.updateUserById(userId, {
         user_metadata: {
           ...(user.user_metadata ?? {}),
@@ -121,6 +126,8 @@ export async function POST(request: NextRequest) {
       });
 
       if (updateError) {
+        console.error('[Waspi] Webhook: user_metadata update failed for user', userId, 'session', sessionId, updateError.message);
+        // Return 500 so Stripe retries — DB records are already written and idempotent.
         return NextResponse.json({ error: updateError.message }, { status: 500 });
       }
     }
