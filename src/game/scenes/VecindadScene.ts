@@ -806,11 +806,19 @@ export class VecindadScene extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
-    void this.realtimeChannel?.unsubscribe();
-    this.realtimeChannel = null;
-    this.room?.shutdown();
-    this.room = undefined;
-    this.bridgeCleanupFns.forEach((cleanup) => cleanup());
-    this.bridgeCleanupFns = [];
+    try {
+      void this.realtimeChannel?.unsubscribe();
+      this.realtimeChannel = null;
+    } catch (e) { console.error('[VecindadScene] realtimeChannel cleanup failed', e); }
+
+    try {
+      this.room?.shutdown();
+      this.room = undefined;
+    } catch (e) { console.error('[VecindadScene] room shutdown failed', e); }
+
+    try {
+      this.bridgeCleanupFns.forEach((cleanup) => cleanup());
+      this.bridgeCleanupFns = [];
+    } catch (e) { console.error('[VecindadScene] bridgeCleanupFns failed', e); }
   }
 }

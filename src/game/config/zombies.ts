@@ -162,13 +162,16 @@ export const ZOMBIES_WEAPONS: Record<ZombiesWeaponId, ZombiesWeaponConfig> = {
   },
 };
 
+// Speed source-of-truth: WorldScene ENEMY_PROFILES (rusher=2.45, shooter=1.7, tank=1.1).
+// ZombiesScene uses getZombieSpeedForRound(base, round) which adds round*0.03 on top,
+// so base speeds below target round-1 parity with WorldScene values.
 export const ZOMBIE_TYPES: Record<ZombieType, ZombieConfig> = {
   walker: {
     type: 'walker',
     label: 'WALKER',
     tint: 0x87A86B,
     baseHp: 80,
-    speed: 0.9,
+    speed: 1.7,   // synced with WorldScene shooter preferredDistance profile (was 0.9)
     damage: 14,
     hitReward: 10,
     killReward: 60,
@@ -182,7 +185,7 @@ export const ZOMBIE_TYPES: Record<ZombieType, ZombieConfig> = {
     label: 'RUNNER',
     tint: 0xC78452,
     baseHp: 58,
-    speed: 1.55,
+    speed: 2.45,  // synced with WorldScene rusher profile (was 1.55)
     damage: 12,
     hitReward: 10,
     killReward: 75,
@@ -196,7 +199,7 @@ export const ZOMBIE_TYPES: Record<ZombieType, ZombieConfig> = {
     label: 'BRUTE',
     tint: 0x8456C2,
     baseHp: 180,
-    speed: 0.62,
+    speed: 1.1,   // synced with WorldScene tank profile (was 0.62)
     damage: 24,
     hitReward: 15,
     killReward: 130,

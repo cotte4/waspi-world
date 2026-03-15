@@ -1346,24 +1346,32 @@ export class PvpArenaScene extends Phaser.Scene {
   }
 
   private handleShutdown() {
-    if (this.pointerShootHandler) {
-      this.input.off('pointerdown', this.pointerShootHandler);
-      this.pointerShootHandler = undefined;
-    }
-    if (this.channel) {
-      this.channel.send({
-        type: 'broadcast',
-        event: 'player:leave',
-        payload: { player_id: this.playerId },
+    try {
+      if (this.pointerShootHandler) {
+        this.input.off('pointerdown', this.pointerShootHandler);
+        this.pointerShootHandler = undefined;
+      }
+    } catch (e) { console.error('[PvpArenaScene] pointerShootHandler cleanup failed', e); }
+
+    try {
+      if (this.channel) {
+        this.channel.send({
+          type: 'broadcast',
+          event: 'player:leave',
+          payload: { player_id: this.playerId },
+        });
+        this.channel.unsubscribe();
+        this.channel = null;
+      }
+    } catch (e) { console.error('[PvpArenaScene] channel cleanup failed', e); }
+
+    try {
+      this.remotePlayers.forEach((remote) => {
+        remote.avatar?.destroy?.();
+        remote.nameplate?.destroy?.();
       });
-      this.channel.unsubscribe();
-      this.channel = null;
-    }
-    this.remotePlayers.forEach((remote) => {
-      remote.avatar.destroy();
-      remote.nameplate.destroy();
-    });
-    this.remotePlayers.clear();
+      this.remotePlayers.clear();
+    } catch (e) { console.error('[PvpArenaScene] remotePlayers cleanup failed', e); }
   }
 
   private getOrCreatePlayerId() {

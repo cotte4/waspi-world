@@ -27,6 +27,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Ese item no se puede comprar en la tienda.' }, { status: 400 });
   }
 
+  if (item.comingSoon) {
+    return NextResponse.json({ error: 'Este item estará disponible próximamente.' }, { status: 400 });
+  }
+
   const currentPlayer = syncVecindadDeed(
     normalizePlayerState(user.user_metadata?.[PLAYER_METADATA_KEY] ?? DEFAULT_PLAYER_STATE)
   );

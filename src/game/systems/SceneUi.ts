@@ -4,6 +4,8 @@ import { safeSceneDelayedCall } from './AnimationSafety';
 import { clearVirtualJoystickState } from './ControlSettings';
 
 const transitioningScenes = new WeakSet<Phaser.Scene>();
+let lastTransitionTime = 0;
+const TRANSITION_THROTTLE_MS = 300;
 
 export function announceScene(scene: Phaser.Scene) {
   eventBus.emit(EVENTS.SCENE_CHANGED, scene.scene.key);
@@ -88,6 +90,12 @@ export function transitionToScene(
   data: Record<string, unknown> = {},
   duration = 250,
 ) {
+  const now = Date.now();
+  if (now - lastTransitionTime < TRANSITION_THROTTLE_MS) {
+    console.warn('[Waspi] transitionToScene throttled');
+    return;
+  }
+  lastTransitionTime = now;
   if (transitioningScenes.has(scene)) return;
   transitioningScenes.add(scene);
   const camera = scene.cameras.main;

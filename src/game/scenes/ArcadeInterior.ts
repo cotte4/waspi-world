@@ -470,14 +470,25 @@ export class ArcadeInterior extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
-    this.room?.shutdown();
-    this.room = undefined;
-    if (this.unlockMusicHandler) {
-      this.sound.off(Phaser.Sound.Events.UNLOCKED, this.unlockMusicHandler);
-      this.unlockMusicHandler = undefined;
-    }
-    this.audioSettingsCleanup?.();
-    this.audioSettingsCleanup = undefined;
-    this.stopArcadeMusic();
+    try {
+      this.room?.shutdown();
+      this.room = undefined;
+    } catch (e) { console.error('[ArcadeInterior] room shutdown failed', e); }
+
+    try {
+      if (this.unlockMusicHandler) {
+        this.sound.off(Phaser.Sound.Events.UNLOCKED, this.unlockMusicHandler);
+        this.unlockMusicHandler = undefined;
+      }
+    } catch (e) { console.error('[ArcadeInterior] unlockMusicHandler cleanup failed', e); }
+
+    try {
+      this.audioSettingsCleanup?.();
+      this.audioSettingsCleanup = undefined;
+    } catch (e) { console.error('[ArcadeInterior] audioSettingsCleanup failed', e); }
+
+    try {
+      this.stopArcadeMusic();
+    } catch (e) { console.error('[ArcadeInterior] stopArcadeMusic failed', e); }
   }
 }

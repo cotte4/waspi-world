@@ -681,25 +681,39 @@ export class StoreInterior extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
-    if (this.channel) {
-      this.channel.send({
-        type: 'broadcast',
-        event: 'player:leave',
-        payload: { player_id: this.playerId },
+    try {
+      if (this.channel) {
+        this.channel.send({
+          type: 'broadcast',
+          event: 'player:leave',
+          payload: { player_id: this.playerId },
+        });
+        this.channel.unsubscribe();
+        this.channel = null;
+      }
+    } catch (e) { console.error('[StoreInterior] channel cleanup failed', e); }
+
+    try {
+      this.remotePlayers.forEach((player) => {
+        player.avatar?.destroy?.();
+        player.nameplate?.destroy?.();
       });
-      this.channel.unsubscribe();
-      this.channel = null;
-    }
-    this.remotePlayers.forEach((player) => {
-      player.avatar.destroy();
-      player.nameplate.destroy();
-    });
-    this.remotePlayers.clear();
-    this.chatSystem?.destroy();
-    this.chatSystem = undefined;
-    eventBus.emit(EVENTS.SHOP_CLOSE);
-    this.cleanupFns.forEach((cleanup) => cleanup());
-    this.cleanupFns = [];
+      this.remotePlayers.clear();
+    } catch (e) { console.error('[StoreInterior] remotePlayers cleanup failed', e); }
+
+    try {
+      this.chatSystem?.destroy();
+      this.chatSystem = undefined;
+    } catch (e) { console.error('[StoreInterior] chatSystem cleanup failed', e); }
+
+    try {
+      eventBus.emit(EVENTS.SHOP_CLOSE);
+    } catch (e) { console.error('[StoreInterior] SHOP_CLOSE emit failed', e); }
+
+    try {
+      this.cleanupFns.forEach((cleanup) => cleanup());
+      this.cleanupFns = [];
+    } catch (e) { console.error('[StoreInterior] cleanupFns failed', e); }
   }
 
   private setupRealtime() {

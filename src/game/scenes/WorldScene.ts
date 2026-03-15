@@ -46,6 +46,9 @@ interface RemotePlayer {
   aimAngle: number;
   avatarConfig: AvatarConfig;
   hitbox: HitboxArc;
+  lastVx?: number;
+  lastVy?: number;
+  lastMoveTime?: number;
 }
 
 type HitboxArc = Phaser.GameObjects.Arc & { body: Phaser.Physics.Arcade.Body };
@@ -87,6 +90,8 @@ type RemoteHitEvent = {
   target_id: string;
   source_id: string;
   dmg: number;
+  kx?: number;
+  ky?: number;
 };
 
 type WeaponMode = 'pistol' | 'shotgun';
@@ -1509,16 +1514,17 @@ export class WorldScene extends Phaser.Scene {
       onComplete: () => flash.destroy(),
     });
 
-    // Subtle recoil on hands/weapon
+    // Subtle recoil on hands/weapon — duration synced to weapon cooldown (cap 150ms)
     const recoilX = Math.cos(ang) * -2;
     const recoilY = Math.sin(ang) * -2;
     const container = this.playerAvatar.getContainer();
+    const recoilDuration = Math.min(weapon.cooldownMs, 150);
     this.tweens.add({
       targets: container,
       x: container.x + recoilX,
       y: container.y + recoilY,
       yoyo: true,
-      duration: this.currentWeapon === 'shotgun' ? 110 : 80,
+      duration: recoilDuration,
       ease: 'Sine.easeOut',
     });
 
@@ -1579,10 +1585,20 @@ export class WorldScene extends Phaser.Scene {
     if (!bestRemote) return;
 
     bullet.resolvedHit = true;
+    const remoteForKnockback = this.remotePlayers.get(bestRemote);
+    const hitAngle = remoteForKnockback
+      ? Phaser.Math.Angle.Between(this.px, this.py, remoteForKnockback.x, remoteForKnockback.y)
+      : angle;
     this.channel?.send({
       type: 'broadcast',
       event: 'player:hit',
-      payload: { target_id: bestRemote, source_id: this.playerId, dmg: weapon.damage },
+      payload: {
+        target_id: bestRemote,
+        source_id: this.playerId,
+        dmg: weapon.damage,
+        kx: Math.cos(hitAngle) * weapon.knockback * 0.5,
+        ky: Math.sin(hitAngle) * weapon.knockback * 0.5,
+      },
     });
     this.destroyArcadeObject(bullet);
   }
@@ -2381,8 +2397,7 @@ export class WorldScene extends Phaser.Scene {
       color: '#FF006E',
       stroke: '#FF006E',
       strokeThickness: 8,
-      alpha: 0.25,
-    }).setOrigin(0.5).setDepth(3);
+    }).setOrigin(0.5).setDepth(3).setAlpha(0.25);
 
     const signText = this.add.text(cx, y + 52, 'ARCADE', {
       fontSize: '16px',
@@ -2408,8 +2423,7 @@ export class WorldScene extends Phaser.Scene {
       fontSize: '5px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#46b3ff',
-      alpha: 0.7,
-    }).setOrigin(0.5).setDepth(4);
+    }).setOrigin(0.5).setDepth(4).setAlpha(0.7);
 
     // Screen glow pulse on panels (separate graphics for animation)
     const glowG = this.add.graphics().setDepth(2);
@@ -3624,12 +3638,28 @@ export class WorldScene extends Phaser.Scene {
       const playerInBuildingY = finalY < facadeY && finalY > b.y;
       if (playerInBuildingY && finalX > b.x - 8 && finalX < b.x + 8) {
         finalX = this.px; // bounce back
+        // Corner fix: if near top/bottom edge of building, push Y out to avoid sticky corner
+        const distToTop = finalY - b.y;
+        const distToBottom = facadeY - finalY;
+        if (distToTop < 24) {
+          finalY = b.y - 1;
+        } else if (distToBottom < 24) {
+          finalY = facadeY + 1;
+        }
       }
 
       // Block walking through RIGHT side of building
       const rightEdge = b.x + b.w;
       if (playerInBuildingY && finalX > rightEdge - 8 && finalX < rightEdge + 8) {
         finalX = this.px; // bounce back
+        // Corner fix: if near top/bottom edge of building, push Y out to avoid sticky corner
+        const distToTop = finalY - b.y;
+        const distToBottom = facadeY - finalY;
+        if (distToTop < 24) {
+          finalY = b.y - 1;
+        } else if (distToBottom < 24) {
+          finalY = facadeY + 1;
+        }
       }
     }
 
@@ -3753,6 +3783,14 @@ export class WorldScene extends Phaser.Scene {
       const dx = p.x - this.touchStartX;
       const dy = p.y - this.touchStartY;
       const max = 44;
+      if (Math.hypot(dx, dy) < 8) {
+        this.touchDx = 0;
+        this.touchDy = 0;
+        if (this.joyKnob) {
+          this.joyKnob.setPosition(this.touchStartX, this.touchStartY);
+        }
+        return;
+      }
       const len = Math.min(max, Math.hypot(dx, dy));
       const ang = Math.atan2(dy, dx);
       const nx = (len / max) * Math.cos(ang);
@@ -3827,10 +3865,31 @@ export class WorldScene extends Phaser.Scene {
     if (!this.allowRemoteEvent(this.remoteHitTimes, next.source_id, REMOTE_HIT_MIN_MS)) return;
     if (!this.inTraining || !this.pvpEnabled) return;
     if (this.time.now - this.lastDamageAt < LOCAL_HIT_COOLDOWN_MS) return;
+
+    // FIX 4: Client-side distance validation — reject hits from impossibly far sources
+    const MAX_HIT_DISTANCE = 600;
+    const sourcePlayer = this.remotePlayers.get(next.source_id);
+    if (sourcePlayer) {
+      const dist = Phaser.Math.Distance.Between(sourcePlayer.x, sourcePlayer.y, this.px, this.py);
+      if (dist > MAX_HIT_DISTANCE) {
+        console.warn(`[Waspi] RemoteHit from ${next.source_id} rejected: distance ${dist.toFixed(0)}px exceeds max ${MAX_HIT_DISTANCE}px`);
+        return;
+      }
+    }
+
     this.lastDamageAt = this.time.now;
     const dmg = Math.max(1, Math.min(40, Math.floor(next.dmg ?? 10)));
-    const source = this.remotePlayers.get(next.source_id);
+    const source = sourcePlayer;
     this.applyLocalDamage(dmg, source?.x ?? this.px - 1, source?.y ?? this.py);
+
+    // FIX 3b: Apply PvP knockback from the hit payload
+    if (next.kx !== undefined && next.ky !== undefined) {
+      this.px = Phaser.Math.Clamp(this.px + next.kx, 20, WORLD.WIDTH - 20);
+      this.py = Phaser.Math.Clamp(this.py + next.ky, 20, WORLD.HEIGHT - 20);
+      this.playerBody.setPosition(this.px, this.py);
+      this.playerAvatar.setPosition(this.px, this.py);
+      this.playerNameplate.setPosition(this.px, this.py - 46);
+    }
   }
 
   private handleRemoteJoin(payload: unknown) {
@@ -3895,6 +3954,14 @@ export class WorldScene extends Phaser.Scene {
       this.spawnRemotePlayer(next.player_id, next.username, next.x, next.y, {}, next.weapon, next.aim);
     }
     const rp = this.remotePlayers.get(next.player_id)!;
+    // Track velocity for extrapolation
+    const now = Date.now();
+    const dt = now - (rp.lastMoveTime ?? now);
+    if (dt > 0 && dt < 200) {
+      rp.lastVx = (next.x - rp.targetX) / (dt / 1000);
+      rp.lastVy = (next.y - rp.targetY) / (dt / 1000);
+    }
+    rp.lastMoveTime = now;
     rp.targetX = next.x;
     rp.targetY = next.y;
     rp.username = next.username;
@@ -3960,10 +4027,21 @@ export class WorldScene extends Phaser.Scene {
       if (bullet.resolvedHit) return;
       bullet.resolvedHit = true;
       this.destroyArcadeObject(bObj);
+      const rp = this.remotePlayers.get(id);
+      const hitAngle = rp
+        ? Phaser.Math.Angle.Between(this.px, this.py, rp.x, rp.y)
+        : 0;
+      const kb = bullet.knockback ?? WEAPON_STATS[this.currentWeapon].knockback;
       this.channel?.send({
         type: 'broadcast',
         event: 'player:hit',
-        payload: { target_id: id, source_id: this.playerId, dmg: bullet.damage ?? WEAPON_STATS[this.currentWeapon].damage },
+        payload: {
+          target_id: id,
+          source_id: this.playerId,
+          dmg: bullet.damage ?? WEAPON_STATS[this.currentWeapon].damage,
+          kx: Math.cos(hitAngle) * kb * 0.5,
+          ky: Math.sin(hitAngle) * kb * 0.5,
+        },
       });
     });
 
@@ -4495,6 +4573,11 @@ export class WorldScene extends Phaser.Scene {
         this.trainingBanner.setText(this.inTraining ? 'TRAINING: PVP + PVE - F DISPARA - 1/2 CAMBIAN ARMA' : '');
       }
       if (this.inTraining) {
+        // Force pvpEnabled true on zone entry — cannot be self-disabled inside training zone
+        if (!this.pvpEnabled) {
+          console.warn('[WorldScene] pvpEnabled was false on training zone entry — forcing true. Possible abuse attempt.');
+        }
+        this.pvpEnabled = true;
         this.showArenaNotice('TRAINING HOT ZONE', '#39FF14');
       }
     }
@@ -4502,8 +4585,14 @@ export class WorldScene extends Phaser.Scene {
     // Interpolate remote players
     this.runFrameStep('remote players', () => {
       for (const [playerId, rp] of this.remotePlayers) {
-        rp.x = Phaser.Math.Linear(rp.x, rp.targetX, 0.18);
-        rp.y = Phaser.Math.Linear(rp.y, rp.targetY, 0.18);
+        // Extrapolation: if far from target and velocity is known, nudge target forward
+        const dist = Phaser.Math.Distance.Between(rp.x, rp.y, rp.targetX, rp.targetY);
+        if (dist > 60 && rp.lastVx !== undefined && rp.lastVy !== undefined) {
+          rp.targetX += rp.lastVx * (delta / 1000);
+          rp.targetY += rp.lastVy * (delta / 1000);
+        }
+        rp.x = Phaser.Math.Linear(rp.x, rp.targetX, 0.25);
+        rp.y = Phaser.Math.Linear(rp.y, rp.targetY, 0.25);
         const deltaX = rp.targetX - rp.x;
         const deltaY = rp.targetY - rp.y;
         const isMoving = rp.isMoving || Math.abs(deltaX) > 0.8 || Math.abs(deltaY) > 0.8;
@@ -4739,6 +4828,24 @@ export class WorldScene extends Phaser.Scene {
     this.interactionHighlight = undefined;
     this.interactionHint?.destroy();
     this.interactionHint = undefined;
+
+    // Cleanup Maps to avoid memory leaks
+    try {
+      this.remotePlayers.forEach((rp) => {
+        rp.avatar?.destroy?.();
+        rp.nameplate?.destroy?.();
+        rp.gunSprite?.destroy?.();
+      });
+      this.remotePlayers.clear();
+    } catch (e) { console.error('[WorldScene] remotePlayers cleanup failed', e); }
+
+    try { this.dummyStates.clear(); } catch (e) { /* noop */ }
+    try { this.sharedParcelState.clear(); } catch (e) { /* noop */ }
+    try { this.parcelVisuals.clear(); } catch (e) { /* noop */ }
+    try { this.remoteMoveTimes.clear(); } catch (e) { /* noop */ }
+    try { this.remoteChatTimes.clear(); } catch (e) { /* noop */ }
+    try { this.remoteHitTimes.clear(); } catch (e) { /* noop */ }
+    try { this.mutedPlayerIds.clear(); } catch (e) { /* noop */ }
   }
 
   private emitPresence() {
@@ -4863,10 +4970,14 @@ export class WorldScene extends Phaser.Scene {
     const sourceId = this.readStringField(payload, 'source_id', 'sourceId');
     const dmg = this.readNumberField(payload, 'dmg');
     if (!targetId || !sourceId || dmg === null) return null;
+    const kx = this.readNumberField(payload, 'kx') ?? undefined;
+    const ky = this.readNumberField(payload, 'ky') ?? undefined;
     return {
       target_id: targetId,
       source_id: sourceId,
       dmg,
+      kx,
+      ky,
     };
   }
 }
