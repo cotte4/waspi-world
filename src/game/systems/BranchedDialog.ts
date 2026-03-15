@@ -55,10 +55,6 @@ export class BranchedDialog {
 
   // choice navigation
   private selectedChoice = 0;
-  private upKey?: Phaser.Input.Keyboard.Key;
-  private downKey?: Phaser.Input.Keyboard.Key;
-  private wKey?: Phaser.Input.Keyboard.Key;
-  private sKey?: Phaser.Input.Keyboard.Key;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -121,30 +117,7 @@ export class BranchedDialog {
     }
   }
 
-  /**
-   * Must be called from WorldScene.update() every frame.
-   * Handles ↑↓ navigation during choice mode.
-   */
-  update(): void {
-    if (!this.active || !this.choiceMode) return;
-
-    const up = this.upKey && Phaser.Input.Keyboard.JustDown(this.upKey);
-    const down = this.downKey && Phaser.Input.Keyboard.JustDown(this.downKey);
-    const w = this.wKey && Phaser.Input.Keyboard.JustDown(this.wKey);
-    const s = this.sKey && Phaser.Input.Keyboard.JustDown(this.sKey);
-
-    const choices = this.currentNode?.choices ?? [];
-    if (!choices.length) return;
-
-    if (up || w) {
-      this.selectedChoice = (this.selectedChoice - 1 + choices.length) % choices.length;
-      this._renderChoices();
-    }
-    if (down || s) {
-      this.selectedChoice = (this.selectedChoice + 1) % choices.length;
-      this._renderChoices();
-    }
-  }
+  // No per-frame update needed — navigation is event-driven via _grabKeys()
 
   destroy(): void {
     this._stopTimer();
@@ -357,19 +330,31 @@ export class BranchedDialog {
     }
   }
 
+  // Event handlers stored as arrow fns so we can remove the exact same reference
+  private readonly _onUp = () => {
+    if (!this.choiceMode) return;
+    const n = this.currentNode?.choices?.length ?? 0;
+    if (!n) return;
+    this.selectedChoice = (this.selectedChoice - 1 + n) % n;
+    this._renderChoices();
+  };
+
+  private readonly _onDown = () => {
+    if (!this.choiceMode) return;
+    const n = this.currentNode?.choices?.length ?? 0;
+    if (!n) return;
+    this.selectedChoice = (this.selectedChoice + 1) % n;
+    this._renderChoices();
+  };
+
   private _grabKeys(): void {
-    if (!this.scene.input.keyboard) return;
-    this.upKey = this.scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP);
-    this.downKey = this.scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
-    this.wKey = this.scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W);
-    this.sKey = this.scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+    // Use keyboard events — never addKey/removeKey so WASD movement is untouched
+    this.scene.input.keyboard?.on('keydown-UP', this._onUp, this);
+    this.scene.input.keyboard?.on('keydown-DOWN', this._onDown, this);
   }
 
   private _releaseKeys(): void {
-    if (!this.scene.input.keyboard) return;
-    if (this.upKey) { this.scene.input.keyboard.removeKey(this.upKey); this.upKey = undefined; }
-    if (this.downKey) { this.scene.input.keyboard.removeKey(this.downKey); this.downKey = undefined; }
-    if (this.wKey) { this.scene.input.keyboard.removeKey(this.wKey); this.wKey = undefined; }
-    if (this.sKey) { this.scene.input.keyboard.removeKey(this.sKey); this.sKey = undefined; }
+    this.scene.input.keyboard?.off('keydown-UP', this._onUp, this);
+    this.scene.input.keyboard?.off('keydown-DOWN', this._onDown, this);
   }
 }

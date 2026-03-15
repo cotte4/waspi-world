@@ -2967,6 +2967,31 @@ export class WorldScene extends Phaser.Scene {
       strokeThickness: 2,
     }).setOrigin(0.5, 1).setDepth(9000);
 
+    // ── Directional guide on the south sidewalk ────────────────────────────
+    // Sits between the Cafe and Casino buildings so players walking east spot it.
+    const signX = 2490;
+    const signY = ZONES.SOUTH_SIDEWALK_Y + 40; // mid-south-sidewalk
+    const sg = this.add.graphics().setDepth(4);
+    // Post
+    sg.fillStyle(0x3a1e6e, 1);
+    sg.fillRect(signX - 2, signY - 22, 4, 50);
+    // Board background
+    sg.fillStyle(0x0d001a, 0.95);
+    sg.fillRoundedRect(signX - 56, signY - 48, 112, 26, 6);
+    sg.lineStyle(1.5, 0x7c4dff, 0.85);
+    sg.strokeRoundedRect(signX - 56, signY - 48, 112, 26, 6);
+    // Down arrow
+    sg.fillStyle(0xb388ff, 0.9);
+    sg.fillTriangle(signX - 8, signY + 30, signX + 8, signY + 30, signX, signY + 44);
+    sg.fillRect(signX - 3, signY + 10, 6, 20);
+    this.add.text(signX, signY - 35, 'CAMARA DEL TIEMPO', {
+      fontSize: '5px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#B388FF',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(9001);
+
     // Pulsing aura (animated graphics layer)
     const auraG = this.add.graphics().setDepth(3);
     let auraPhase = 0;

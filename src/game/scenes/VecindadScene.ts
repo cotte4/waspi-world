@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
@@ -16,6 +17,7 @@ import {
   VECINDAD_PARCELS,
 } from '../../lib/vecindad';
 import type { VecindadState } from '../../lib/playerState';
+import { supabase } from '../../lib/supabase';
 
 type ParcelVisual = {
   title: Phaser.GameObjects.Text;
@@ -75,6 +77,7 @@ export class VecindadScene extends Phaser.Scene {
   private hudText?: Phaser.GameObjects.Text;
   private bridgeCleanupFns: Array<() => void> = [];
   private controls!: SceneControls;
+  private realtimeChannel: RealtimeChannel | null = null;
 
   constructor() {
     super({ key: 'VecindadScene' });
@@ -100,6 +103,7 @@ export class VecindadScene extends Phaser.Scene {
     this.setupUi();
     this.setupBridge();
     void this.loadSharedParcels();
+    this.subscribeToParcelChanges();
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.keyW = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.W);
@@ -295,6 +299,44 @@ export class VecindadScene extends Phaser.Scene {
     this.sharedParcels.clear();
     parcels.forEach((parcel) => {
       this.sharedParcels.set(parcel.parcelId, parcel);
+    });
+    this.refreshParcelVisuals();
+  }
+
+  private subscribeToParcelChanges() {
+    if (!supabase) return;
+    this.realtimeChannel = supabase
+      .channel('vecindad-parcels-live')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'vecindad_parcels' },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          this.handleParcelRealtimeEvent(payload);
+        },
+      )
+      .subscribe();
+  }
+
+  private handleParcelRealtimeEvent(payload: RealtimePostgresChangesPayload<Record<string, unknown>>) {
+    if (payload.eventType === 'DELETE') {
+      const parcelId = String((payload.old as Record<string, unknown>).parcel_id ?? '');
+      if (parcelId) {
+        this.sharedParcels.delete(parcelId);
+        this.refreshParcelVisuals();
+      }
+      return;
+    }
+
+    const row = payload.new as Record<string, unknown>;
+    const parcelId = String(row.parcel_id ?? '');
+    const ownerId = String(row.owner_id ?? '');
+    if (!parcelId || !ownerId) return;
+
+    this.sharedParcels.set(parcelId, {
+      parcelId,
+      ownerId,
+      ownerUsername: String(row.owner_username ?? 'player'),
+      buildStage: normalizeVecindadBuildStage(typeof row.build_stage === 'number' ? row.build_stage : 0),
     });
     this.refreshParcelVisuals();
   }
@@ -764,6 +806,8 @@ export class VecindadScene extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
+    void this.realtimeChannel?.unsubscribe();
+    this.realtimeChannel = null;
     this.room?.shutdown();
     this.room = undefined;
     this.bridgeCleanupFns.forEach((cleanup) => cleanup());
