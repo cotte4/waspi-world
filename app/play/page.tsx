@@ -103,6 +103,7 @@ const CHAT_SCENES = new Set([
   'ArcadeInterior',
   'CasinoInterior',
   'HouseInterior',
+  'PvpArenaScene',
   'ZombiesScene',
   'BasementZombiesScene',
 ]);
@@ -179,7 +180,8 @@ export default function PlayPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const joystickRef = useRef<HTMLDivElement>(null);
   const rescueTimeoutRef = useRef<number | null>(null);
-  const chatVisible = CHAT_SCENES.has(activeScene);
+  const [chatEnabled, setChatEnabled] = useState(true);
+  const chatVisible = chatEnabled && CHAT_SCENES.has(activeScene);
   const isAuthenticated = Boolean(authEmail);
 
   const clothingItems = useMemo(
@@ -1093,6 +1095,16 @@ export default function PlayPage() {
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
+      // Toggle chat visibility (keeps ENTER for focusing the input)
+      if (CHAT_SCENES.has(activeScene) && e.code === 'KeyT' && document.activeElement !== inputRef.current) {
+        e.preventDefault();
+        setChatEnabled((v) => !v);
+        if (chatEnabled) {
+          inputRef.current?.blur();
+        }
+        return;
+      }
+
       if (!chatVisible) return;
       if (e.code === controlSettings.actionBindings.chat && document.activeElement !== inputRef.current) {
         e.preventDefault();
@@ -1105,7 +1117,7 @@ export default function PlayPage() {
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [chatVisible, controlSettings.actionBindings.chat, controlSettings.actionBindings.inventory]);
+  }, [activeScene, chatEnabled, chatVisible, controlSettings.actionBindings.chat, controlSettings.actionBindings.inventory]);
 
   useEffect(() => {
     if (!chatVisible) {
@@ -1665,7 +1677,8 @@ export default function PlayPage() {
             }}
           >
             WASD / FLECHAS MOVER<br />
-            {chatVisible ? 'ENTER CHATEAR' : 'ENTER CHAT OFF'}<br />
+          {chatVisible ? 'ENTER CHATEAR' : 'ENTER CHAT OFF'}<br />
+          {CHAT_SCENES.has(activeScene) ? (chatEnabled ? 'T CHAT OFF' : 'T CHAT ON') : ''}<br />
             I INVENTARIO
           </div>
         )}

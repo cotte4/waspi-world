@@ -81,6 +81,11 @@ export class CasinoInterior extends Phaser.Scene {
     announceScene(this);
     showSceneTitle(this, 'CASINO', 0xB74DFF);
     this.input.enabled = true;
+    // transitionToScene() disables keyboard input during fades; ensure it is re-enabled
+    // when entering the interior so controls don't freeze after re-entry.
+    if (this.input.keyboard) {
+      this.input.keyboard.enabled = true;
+    }
     this.controls = new SceneControls(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     bindSafeResetToPlaza(this, () => {
