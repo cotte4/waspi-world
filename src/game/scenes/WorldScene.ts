@@ -887,33 +887,36 @@ export class WorldScene extends Phaser.Scene {
 
   private setupVoiceHud() {
     const camH = this.cameras.main.height;
+    // Y offset: 118px above bottom keeps buttons above the React chat overlay
+    // which covers the bottom ~100px of the canvas.
+    const BY = camH - 118;
     const btnStyle = {
-      fontSize: '7px',
+      fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
-      backgroundColor: '#0E0E14',
-      padding: { x: 4, y: 2 },
+      backgroundColor: '#0A0A14',
+      padding: { x: 5, y: 3 },
     };
 
     // [MIC OFF] — main toggle button
-    this.voiceMuteBtn = this.add.text(10, camH - 22, '[MIC OFF]', {
+    this.voiceMuteBtn = this.add.text(10, BY, '[MIC OFF]', {
       ...btnStyle,
       color: '#9999BB',
     }).setScrollFactor(0).setDepth(9999).setInteractive({ useHandCursor: true });
 
     // [DEV] — device picker
-    this.voiceDeviceBtn = this.add.text(90, camH - 22, '[DEV]', {
+    this.voiceDeviceBtn = this.add.text(10, BY + 18, '[DEV]', {
       ...btnStyle,
       color: '#7777AA',
     }).setScrollFactor(0).setDepth(9999).setInteractive({ useHandCursor: true });
 
     // [OFF] — fully disable voice
-    this.voiceOffBtn = this.add.text(122, camH - 22, '[OFF]', {
+    this.voiceOffBtn = this.add.text(58, BY + 18, '[OFF]', {
       ...btnStyle,
       color: '#7777AA',
     }).setScrollFactor(0).setDepth(9999).setInteractive({ useHandCursor: true });
 
     // Peer count indicator
-    this.voiceStatusText = this.add.text(10, camH - 9, '', {
+    this.voiceStatusText = this.add.text(10, BY + 36, '', {
       fontSize: '6px',
       fontFamily: 'Silkscreen, monospace',
       color: '#7777AA',
