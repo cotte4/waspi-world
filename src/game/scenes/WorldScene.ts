@@ -3948,10 +3948,9 @@ export class WorldScene extends Phaser.Scene {
     container.add(closeBtn);
 
     // Also close on SPACE/ESC (next press)
-    const escKey = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
-    if (escKey) {
-      escKey.once('down', () => this.closeGunShopPanel());
-    }
+    this.input.keyboard
+      ?.addKey(Phaser.Input.Keyboard.KeyCodes.ESC)
+      ?.once('down', () => this.closeGunShopPanel());
   }
 
   private buildGunShopRow(
