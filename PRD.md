@@ -696,7 +696,7 @@ waspi-world/
 
 ## 19. Estado del Desarrollo
 
-> Última actualización: **2026-03-13**
+> Última actualización: **2026-03-16**
 
 ### ✅ Completado (Semanas 1–2)
 
@@ -713,12 +713,33 @@ waspi-world/
 - **Landing page:** Pantalla de entrada al mundo
 - **Build:** Pasa TypeScript + Turbopack sin errores
 
+### ✅ Completado (2026-03-16) — Proximity Voice Chat
+
+- **VoiceChatManager** (`src/game/systems/VoiceChatManager.ts`): sistema P2P completo
+  - PeerJS (WebRTC) — full mesh, hasta 6 jugadores (15 conexiones)
+  - VAD (Voice Activity Detection) via Web Audio API — indicadores visuales de quién habla
+  - Volumen por proximidad — falloff logarítmico, minDist 150px / maxDist 600px
+  - Selector de micrófono — `RTCRtpSender.replaceTrack()` sin renegociación
+  - Mute/unmute, master volume, cleanup completo
+- **voiceChatInstance** (`src/game/systems/voiceChatInstance.ts`): singleton persistente entre escenas
+- **WorldScene integración:**
+  - Señalización de peer IDs via Supabase Presence (late-joiner safe, auto-cleanup)
+  - HUD en-game: `[MIC OFF]`, `[DEV]` (selector mic), `[OFF]` (desactivar voz)
+  - Indicadores circulares sobre avatares cuando están hablando (VAD threshold 0.04)
+  - Onboarding con dialog in-game, mensajes de error específicos por tipo
+  - Auto-init si el jugador ya había dado permiso de mic (localStorage pref)
+  - Botones posicionados sobre el overlay de chat React (`camH - 118`) — fix Vercel
+- **tsconfig.json:** excluye `tiled/` para evitar que archivos XML de Tiled se interpreten como TypeScript
+- **package.json:** dependencia `peerjs` agregada
+
 ### 🔄 En progreso
 
 - Supabase Realtime configurado y conectado (env vars listas)
+- Voice chat deployado en Vercel — pendiente QA con múltiples jugadores reales
 
 ### ⏳ Próximos pasos
 
+- QA de voice chat con 2+ usuarios reales en Vercel
 - Interiores de edificios (Store, Arcade, Café, Casa)
 - Sistema de diálogo NPC typewriter
 - Panel de shop + Stripe Checkout
