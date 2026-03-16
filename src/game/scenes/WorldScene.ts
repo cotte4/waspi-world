@@ -897,26 +897,26 @@ export class WorldScene extends Phaser.Scene {
     // [MIC OFF] — main toggle button
     this.voiceMuteBtn = this.add.text(10, camH - 22, '[MIC OFF]', {
       ...btnStyle,
-      color: '#555577',
+      color: '#9999BB',
     }).setScrollFactor(0).setDepth(9999).setInteractive({ useHandCursor: true });
 
     // [DEV] — device picker
     this.voiceDeviceBtn = this.add.text(90, camH - 22, '[DEV]', {
       ...btnStyle,
-      color: '#444466',
+      color: '#7777AA',
     }).setScrollFactor(0).setDepth(9999).setInteractive({ useHandCursor: true });
 
     // [OFF] — fully disable voice
     this.voiceOffBtn = this.add.text(122, camH - 22, '[OFF]', {
       ...btnStyle,
-      color: '#444466',
+      color: '#7777AA',
     }).setScrollFactor(0).setDepth(9999).setInteractive({ useHandCursor: true });
 
     // Peer count indicator
     this.voiceStatusText = this.add.text(10, camH - 9, '', {
       fontSize: '6px',
       fontFamily: 'Silkscreen, monospace',
-      color: '#444466',
+      color: '#7777AA',
     }).setScrollFactor(0).setDepth(9999);
 
     // Local speaking indicator (world space, follows player avatar)
@@ -1059,7 +1059,7 @@ export class WorldScene extends Phaser.Scene {
     btnSinVoz.on('pointerdown', () => {
       this.closeVoicePrompt();
       this.setVoicePref('off');
-      this.voiceStatusText?.setText('sin voz').setStyle({ color: '#444466' });
+      this.voiceStatusText?.setText('sin voz').setStyle({ color: '#7777AA' });
     });
 
     this.voicePromptPanel = this.add.container(panelX, panelY, [bg, title, desc, btnActivar, btnSinVoz])
@@ -1117,7 +1117,7 @@ export class WorldScene extends Phaser.Scene {
       this.voiceStatusText?.setText(hint).setStyle({ color: '#FF6666' });
       // Clear the hint after 4 seconds
       this.time.delayedCall(4000, () => {
-        this.voiceStatusText?.setText('').setStyle({ color: '#444466' });
+        this.voiceStatusText?.setText('').setStyle({ color: '#7777AA' });
       });
     } finally {
       this.isActivatingVoice = false;
@@ -1220,10 +1220,10 @@ export class WorldScene extends Phaser.Scene {
     await this.channel?.track({ player_id: this.playerId });
     // destroyVoiceChat() nulls the singleton so next activation starts fresh
     destroyVoiceChat();
-    this.voiceMuteBtn?.setText('[MIC OFF]').setStyle({ color: '#555577' });
-    this.voiceDeviceBtn?.setStyle({ color: '#444466' });
-    this.voiceOffBtn?.setStyle({ color: '#444466' });
-    this.voiceStatusText?.setText('').setStyle({ color: '#444466' });
+    this.voiceMuteBtn?.setText('[MIC OFF]').setStyle({ color: '#9999BB' });
+    this.voiceDeviceBtn?.setStyle({ color: '#7777AA' });
+    this.voiceOffBtn?.setStyle({ color: '#7777AA' });
+    this.voiceStatusText?.setText('').setStyle({ color: '#7777AA' });
     this.localSpeakingIndicator?.setAlpha(0);
     for (const [, arc] of this.speakingIndicators) arc.setAlpha(0);
   }
