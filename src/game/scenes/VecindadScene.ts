@@ -559,6 +559,10 @@ export class VecindadScene extends Phaser.Scene {
       node.crate.setVisible(true);
       node.band.setVisible(true);
       node.label.setVisible(true);
+      eventBus.emit(EVENTS.UI_NOTICE, {
+        msg: `+${node.value} materiales disponibles en La Vecindad`,
+        color: '#46B3FF',
+      });
     }
   }
 

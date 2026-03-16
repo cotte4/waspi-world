@@ -9,11 +9,13 @@ export type HudSettings = {
   showArenaHud: boolean;
 };
 
+const _isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+
 export const DEFAULT_HUD_SETTINGS: HudSettings = {
-  showSocialPanel: true,
-  socialCollapsed: false,
-  showProgressPanel: true,
-  progressCollapsed: false,
+  showSocialPanel: !_isMobile,
+  socialCollapsed: _isMobile,
+  showProgressPanel: !_isMobile,
+  progressCollapsed: _isMobile,
   showControlsPanel: true,
   showArenaHud: true,
 };

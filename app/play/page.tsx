@@ -146,7 +146,7 @@ export default function PlayPage() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authStatus, setAuthStatus] = useState('');
   const [magicLinkCooldownUntil, setMagicLinkCooldownUntil] = useState(getInitialMagicLinkCooldownUntil);
-  const [uiNotice, setUiNotice] = useState('');
+  const [uiNotice, setUiNotice] = useState<{ msg: string; color?: string } | null>(null);
   const [shopOpen, setShopOpen] = useState(initialCheckout.open);
   const [shopSource, setShopSource] = useState(initialCheckout.open ? 'checkout_return' : '');
   const [shopItems, setShopItems] = useState<CatalogItem[]>([]);
@@ -405,7 +405,7 @@ export default function PlayPage() {
       const result = payload as PenaltyResultPayload;
       if (!result?.won) return;
       if (!tokenRef.current) {
-        setUiNotice('Ganaste el minijuego. Inicia sesion para guardar el descuento.');
+        setUiNotice({ msg: 'Ganaste el minijuego. Inicia sesion para guardar el descuento.', color: '#46B3FF' });
         return;
       }
 
@@ -424,7 +424,7 @@ export default function PlayPage() {
 
         if (!res?.ok) {
           setShopStatus('Ganaste el minijuego, pero no pude guardar el premio todavia.');
-          setUiNotice('Ganaste el minijuego, pero el premio no se guardo todavia.');
+          setUiNotice({ msg: 'Ganaste el minijuego, pero el premio no se guardo todavia.', color: '#FF4444' });
           return;
         }
 
@@ -434,7 +434,7 @@ export default function PlayPage() {
         }
         if (json.reward?.code) {
           setShopStatus(`Ganaste ${json.reward.percentOff}% OFF. Codigo: ${json.reward.code}`);
-          setUiNotice(`Premio guardado: ${json.reward.percentOff}% OFF · Codigo ${json.reward.code}`);
+          setUiNotice({ msg: `Premio guardado: ${json.reward.percentOff}% OFF · Codigo ${json.reward.code}` });
         }
       })();
     });
@@ -445,7 +445,7 @@ export default function PlayPage() {
 
       void (async () => {
         if (!tokenRef.current) {
-          setUiNotice('Inicia sesion para comprar una parcela unica en La Vecindad.');
+          setUiNotice({ msg: 'Inicia sesion para comprar una parcela unica en La Vecindad.', color: '#46B3FF' });
           return;
         }
 
@@ -469,7 +469,7 @@ export default function PlayPage() {
         } | null;
 
         if (!res?.ok || !json?.player) {
-          setUiNotice(json?.error ?? 'No pude comprar esa parcela.');
+          setUiNotice({ msg: json?.error ?? 'No pude comprar esa parcela.', color: '#FF4444' });
           return;
         }
 
@@ -480,14 +480,14 @@ export default function PlayPage() {
             broadcast: true,
           } satisfies VecindadSharedPayload);
         }
-        setUiNotice(json.notice ?? `Compraste la parcela ${next.parcelId}.`);
+        setUiNotice({ msg: json.notice ?? `Compraste la parcela ${next.parcelId}.` });
       })();
     });
 
     const unsubParcelBuild = eventBus.on(EVENTS.PARCEL_BUILD_REQUEST, () => {
       void (async () => {
         if (!tokenRef.current) {
-          setUiNotice('Inicia sesion para construir en tu parcela.');
+          setUiNotice({ msg: 'Inicia sesion para construir en tu parcela.', color: '#46B3FF' });
           return;
         }
 
@@ -508,7 +508,7 @@ export default function PlayPage() {
         } | null;
 
         if (!res?.ok || !json?.player) {
-          setUiNotice(json?.error ?? 'No pude mejorar la casa.');
+          setUiNotice({ msg: json?.error ?? 'No pude mejorar la casa.', color: '#FF4444' });
           return;
         }
 
@@ -519,7 +519,7 @@ export default function PlayPage() {
             broadcast: true,
           } satisfies VecindadSharedPayload);
         }
-        setUiNotice(json.notice ?? 'Casa mejorada.');
+        setUiNotice({ msg: json.notice ?? 'Casa mejorada.' });
       })();
     });
 
@@ -535,12 +535,15 @@ export default function PlayPage() {
 
       applyPlayerState(updatedPlayer);
       void syncPlayerState(updatedPlayer);
-      if (next.notice) setUiNotice(next.notice);
+      if (next.notice) setUiNotice({ msg: next.notice });
     });
 
     const unsubUiNotice = eventBus.on(EVENTS.UI_NOTICE, (payload: unknown) => {
       if (typeof payload === 'string' && payload.trim()) {
-        setUiNotice(payload);
+        setUiNotice({ msg: payload });
+      } else if (payload && typeof payload === 'object' && typeof (payload as { msg?: unknown }).msg === 'string') {
+        const p = payload as { msg: string; color?: string };
+        if (p.msg.trim()) setUiNotice({ msg: p.msg, color: p.color });
       }
     });
 
@@ -567,7 +570,7 @@ export default function PlayPage() {
 
   useEffect(() => {
     if (!uiNotice) return;
-    const timer = window.setTimeout(() => setUiNotice(''), 4200);
+    const timer = window.setTimeout(() => setUiNotice(null), 4200);
     return () => window.clearTimeout(timer);
   }, [uiNotice]);
 
@@ -612,17 +615,17 @@ export default function PlayPage() {
       if (event.code === 'Escape') {
         setBindingCaptureDirection(null);
         setBindingCaptureAction(null);
-        setUiNotice('Remapeo cancelado.');
+        setUiNotice({ msg: 'Remapeo cancelado.' });
         return;
       }
 
       if (bindingCaptureDirection && !isSupportedMovementBindingCode(event.code)) {
-        setUiNotice('Tecla no soportada para movimiento.');
+        setUiNotice({ msg: 'Tecla no soportada para movimiento.', color: '#FF4444' });
         return;
       }
 
       if (bindingCaptureAction && !isSupportedActionBindingCode(event.code)) {
-        setUiNotice('Tecla no soportada para accion.');
+        setUiNotice({ msg: 'Tecla no soportada para accion.', color: '#FF4444' });
         return;
       }
 
@@ -633,7 +636,7 @@ export default function PlayPage() {
           movementBindings: assignMovementBinding(current.movementBindings, bindingCaptureDirection, event.code),
         }));
         setBindingCaptureDirection(null);
-        setUiNotice(`Movimiento ${directionLabel(bindingCaptureDirection)}: ${formatMovementBindingLabel(event.code)}`);
+        setUiNotice({ msg: `Movimiento ${directionLabel(bindingCaptureDirection)}: ${formatMovementBindingLabel(event.code)}` });
         return;
       }
 
@@ -643,7 +646,7 @@ export default function PlayPage() {
           actionBindings: assignActionBinding(current.actionBindings, bindingCaptureAction, event.code),
         }));
         setBindingCaptureAction(null);
-        setUiNotice(`Accion ${actionLabel(bindingCaptureAction)}: ${formatMovementBindingLabel(event.code)}`);
+        setUiNotice({ msg: `Accion ${actionLabel(bindingCaptureAction)}: ${formatMovementBindingLabel(event.code)}` });
       }
     };
 
@@ -1158,7 +1161,7 @@ export default function PlayPage() {
   const joystickVisible = controlSettings.showVirtualJoystick && JOYSTICK_SCENES.has(activeScene);
   const armSafeReset = useCallback(() => {
     setRescueArmed(true);
-    setUiNotice('Volver a plaza armado. Toca de nuevo para confirmar.');
+    setUiNotice({ msg: 'Volver a plaza armado. Toca de nuevo para confirmar.', color: '#46B3FF' });
     window.setTimeout(() => {
       setRescueArmed(false);
     }, 4000);
@@ -1175,7 +1178,7 @@ export default function PlayPage() {
   const confirmSafeReset = useCallback(() => {
     setRescueArmed(false);
     closeSettings();
-    setUiNotice('Rescate a plaza...');
+    setUiNotice({ msg: 'Rescate a plaza...', color: '#46B3FF' });
     eventBus.emit(EVENTS.SAFE_RESET_TO_PLAZA);
     if (rescueTimeoutRef.current) {
       window.clearTimeout(rescueTimeoutRef.current);
@@ -2407,17 +2410,17 @@ export default function PlayPage() {
             className="ww-notice absolute top-14 left-1/2 -translate-x-1/2 px-3 py-2"
             style={{
               background: 'rgba(0,0,0,0.82)',
-              border: '1px solid rgba(57,255,20,0.35)',
+              border: `1px solid ${(uiNotice.color ?? '#39FF14')}55`,
               fontFamily: '"Press Start 2P", monospace',
               fontSize: '8px',
-              color: '#39FF14',
+              color: uiNotice.color ?? '#39FF14',
               boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
               zIndex: 30,
               maxWidth: isMobile ? '92%' : 420,
               textAlign: 'center',
             }}
           >
-            {uiNotice}
+            {uiNotice.msg}
           </div>
         )}
       </div>
