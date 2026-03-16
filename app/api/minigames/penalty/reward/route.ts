@@ -25,10 +25,10 @@ export async function POST(request: NextRequest) {
   let discount: { code: string; percent_off: number; expires_at: string } | null = null;
 
   if (won) {
-    next = creditTenks(current, 300);
+    next = creditTenks(current, 220);
     await appendTenksTransaction(admin, {
       playerId: user.id,
-      amount: 300,
+      amount: 220,
       reason: 'penalty_win',
       balanceAfter: next.tenks,
     });
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
     minigame: 'penalty',
     score: goals,
     result: won ? 'win' : 'lose',
-    tenksEarned: won ? 300 : 0,
+    tenksEarned: won ? 220 : 0,
     rewardCode: discount?.code ?? null,
   });
 

@@ -25,11 +25,11 @@ const CANNABIS_FARM_UNLOCK_KEY = 'cannabis_farm';
 const FARM_UNLOCK_COST = 11000;
 const FARM_SLOT_COUNT = 6;
 const FARM_SEED_CONFIG = {
-  basica: { cost: 200, growthMs: 30 * 60 * 1000, rewardBase: 350 },
-  indica: { cost: 350, growthMs: 60 * 60 * 1000, rewardBase: 600 },
-  sativa: { cost: 500, growthMs: 2 * 60 * 60 * 1000, rewardBase: 1000 },
-  purple_haze: { cost: 800, growthMs: 3 * 60 * 60 * 1000, rewardBase: 1800 },
-  og_kush: { cost: 1200, growthMs: 5 * 60 * 60 * 1000, rewardBase: 3000 },
+  basica: { cost: 200, growthMs: 30 * 60 * 1000, rewardBase: 280 },
+  indica: { cost: 350, growthMs: 60 * 60 * 1000, rewardBase: 480 },
+  sativa: { cost: 500, growthMs: 2 * 60 * 60 * 1000, rewardBase: 800 },
+  purple_haze: { cost: 800, growthMs: 3 * 60 * 60 * 1000, rewardBase: 1440 },
+  og_kush: { cost: 1200, growthMs: 5 * 60 * 60 * 1000, rewardBase: 2400 },
 } as const;
 type FarmSeedType = keyof typeof FARM_SEED_CONFIG;
 type FarmPlantState = NonNullable<PlayerState['vecindad']['farmPlants']>[number];

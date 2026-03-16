@@ -1,8 +1,8 @@
 export const BASKET_STREAK_REWARDS = [
-  { minStreak: 4, tenks: 300 },
-  { minStreak: 3, tenks: 200 },
-  { minStreak: 2, tenks: 150 },
-  { minStreak: 1, tenks: 100 },
+  { minStreak: 4, tenks: 100 },
+  { minStreak: 3, tenks: 70 },
+  { minStreak: 2, tenks: 50 },
+  { minStreak: 1, tenks: 35 },
 ] as const;
 
 export function calculateBasketShotReward(streak: number) {
@@ -12,5 +12,5 @@ export function calculateBasketShotReward(streak: number) {
 
 export function calculateBasketReward(score: number) {
   const safeScore = Math.max(0, Math.floor(score));
-  return safeScore * 100;
+  return safeScore * 35;
 }

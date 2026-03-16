@@ -201,13 +201,13 @@ export class DartsMinigame extends Phaser.Scene {
   }
 
   private computeReward() {
-    let reward = 50;
-    if (this.score > 200) reward = 500;
-    else if (this.score >= 151) reward = 350;
-    else if (this.score >= 101) reward = 200;
-    else if (this.score >= 51) reward = 100;
-    reward += this.bullseyes * 75;
-    return reward;
+    let reward = 30;
+    if (this.score > 200) reward = 250;
+    else if (this.score >= 151) reward = 200;
+    else if (this.score >= 101) reward = 130;
+    else if (this.score >= 51) reward = 70;
+    reward += this.bullseyes * 40;
+    return Math.min(450, reward);
   }
 
   private refreshHud() {

@@ -70,15 +70,21 @@ const FARM_SEEDS: Array<{
   growthMs: number;
   rewardBase: number;
 }> = [
-  { type: 'basica', label: 'BASICA', cost: 200, growthMs: 30 * 60 * 1000, rewardBase: 350 },
-  { type: 'indica', label: 'INDICA', cost: 350, growthMs: 60 * 60 * 1000, rewardBase: 600 },
-  { type: 'sativa', label: 'SATIVA', cost: 500, growthMs: 2 * 60 * 60 * 1000, rewardBase: 1000 },
-  { type: 'purple_haze', label: 'PURPLE HAZE', cost: 800, growthMs: 3 * 60 * 60 * 1000, rewardBase: 1800 },
-  { type: 'og_kush', label: 'OG KUSH', cost: 1200, growthMs: 5 * 60 * 60 * 1000, rewardBase: 3000 },
+  { type: 'basica', label: 'BASICA', cost: 200, growthMs: 30 * 60 * 1000, rewardBase: 280 },
+  { type: 'indica', label: 'INDICA', cost: 350, growthMs: 60 * 60 * 1000, rewardBase: 480 },
+  { type: 'sativa', label: 'SATIVA', cost: 500, growthMs: 2 * 60 * 60 * 1000, rewardBase: 800 },
+  { type: 'purple_haze', label: 'PURPLE HAZE', cost: 800, growthMs: 3 * 60 * 60 * 1000, rewardBase: 1440 },
+  { type: 'og_kush', label: 'OG KUSH', cost: 1200, growthMs: 5 * 60 * 60 * 1000, rewardBase: 2400 },
 ];
 
 export class VecindadScene extends Phaser.Scene {
   private static readonly MOVE_SPEED = 145;
+  private static readonly FOREST_BOUNDS = {
+    x: 140,
+    y: 128,
+    w: 2520,
+    h: 360,
+  } as const;
   private player!: AvatarRenderer;
   private room?: InteriorRoom;
   private keySpace!: Phaser.Input.Keyboard.Key;
@@ -206,6 +212,23 @@ export class VecindadScene extends Phaser.Scene {
     g.fillStyle(0x0b1a0b, 1);
     g.fillRect(0, 0, VECINDAD_MAP.WIDTH, VECINDAD_MAP.HEIGHT);
 
+    g.fillStyle(0x0a130a, 0.8);
+    g.fillRect(0, 0, VECINDAD_MAP.WIDTH, 180);
+
+    const forest = VecindadScene.FOREST_BOUNDS;
+    g.fillStyle(0x0f2a11, 0.98);
+    g.fillRoundedRect(forest.x, forest.y, forest.w, forest.h, 36);
+    g.lineStyle(4, 0x315a2f, 0.88);
+    g.strokeRoundedRect(forest.x, forest.y, forest.w, forest.h, 36);
+    this.drawForestCanopy(g, forest.x, forest.y, forest.w, forest.h);
+
+    g.fillStyle(0x203318, 0.95);
+    g.fillRoundedRect(1040, 430, 720, 76, 24);
+    g.lineStyle(2, 0x47663a, 0.7);
+    for (let x = 1080; x < 1710; x += 38) {
+      g.lineBetween(x, 468, x + 18, 468);
+    }
+
     g.fillStyle(0x1a2b14, 1);
     g.fillRoundedRect(60, 60, VECINDAD_MAP.WIDTH - 120, VECINDAD_MAP.HEIGHT - 120, 28);
     g.lineStyle(4, 0x32512a, 0.9);
@@ -233,6 +256,20 @@ export class VecindadScene extends Phaser.Scene {
     g.lineStyle(3, 0xf5c842, 0.8);
     g.strokeRoundedRect(70, 794, 170, 64, 10);
 
+    g.fillStyle(0x233424, 0.9);
+    g.fillRoundedRect(1160, 860, 480, 200, 20);
+    g.lineStyle(3, 0x4f7752, 0.75);
+    g.strokeRoundedRect(1160, 860, 480, 200, 20);
+    g.fillStyle(0x172217, 0.9);
+    g.fillCircle(1400, 960, 62);
+    g.lineStyle(2, 0x335039, 0.8);
+    g.strokeCircle(1400, 960, 62);
+    for (let ring = 1; ring <= 3; ring += 1) {
+      g.lineStyle(1, 0x45634b, 0.45);
+      g.strokeCircle(1400, 960, 62 + ring * 20);
+    }
+    this.drawDistrictLights(g);
+
     this.add.text(155, 822, 'LA VECINDAD', {
       fontSize: '10px',
       fontFamily: '"Press Start 2P", monospace',
@@ -254,6 +291,18 @@ export class VecindadScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5);
+    this.add.text(VECINDAD_MAP.WIDTH / 2, 165, 'BOSQUE NORTE = RECOLECCION DE MATERIALES', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#8DE17A',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5);
+    this.add.text(VECINDAD_MAP.WIDTH / 2, 194, 'SUBI POR EL CAMINO CENTRAL Y LEVANTA CACHES', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#B6C19C',
+    }).setOrigin(0.5);
 
     g.fillStyle(0x132113, 0.95);
     g.fillRoundedRect(1200, 820, 400, 116, 14);
@@ -271,6 +320,61 @@ export class VecindadScene extends Phaser.Scene {
       fontFamily: '"Press Start 2P", monospace',
       color: '#C9D8B7',
     }).setOrigin(0.5);
+  }
+
+  private drawForestCanopy(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ) {
+    g.lineStyle(1, 0x1f3f1f, 0.35);
+    for (let gy = y + 24; gy <= y + h - 24; gy += 26) {
+      g.lineBetween(x + 24, gy, x + w - 24, gy);
+    }
+    for (let gx = x + 24; gx <= x + w - 24; gx += 28) {
+      g.lineBetween(gx, y + 24, gx, y + h - 24);
+    }
+
+    const trees = [
+      { x: 320, y: 220, r: 28 },
+      { x: 520, y: 300, r: 30 },
+      { x: 760, y: 210, r: 34 },
+      { x: 970, y: 315, r: 30 },
+      { x: 1250, y: 240, r: 32 },
+      { x: 1520, y: 300, r: 30 },
+      { x: 1770, y: 220, r: 32 },
+      { x: 2010, y: 310, r: 30 },
+      { x: 2260, y: 230, r: 30 },
+      { x: 2470, y: 300, r: 28 },
+    ];
+
+    trees.forEach((tree) => {
+      g.fillStyle(0x5e3f22, 0.95);
+      g.fillRoundedRect(tree.x - 6, tree.y + 18, 12, 26, 4);
+      g.fillStyle(0x2c5a2e, 0.95);
+      g.fillCircle(tree.x, tree.y, tree.r);
+      g.fillStyle(0x3a7d3e, 0.35);
+      g.fillCircle(tree.x - 6, tree.y - 6, Math.max(12, tree.r * 0.58));
+    });
+  }
+
+  private drawDistrictLights(g: Phaser.GameObjects.Graphics) {
+    const lights = [
+      { x: 1090, y: 960 },
+      { x: 1400, y: 770 },
+      { x: 1400, y: 1150 },
+      { x: 1710, y: 960 },
+    ];
+    lights.forEach((light) => {
+      g.fillStyle(0x2a1a10, 1);
+      g.fillRect(light.x - 3, light.y - 26, 6, 42);
+      g.fillStyle(0xf5c842, 0.92);
+      g.fillCircle(light.x, light.y - 34, 5);
+      g.fillStyle(0xf5c842, 0.12);
+      g.fillCircle(light.x, light.y - 34, 28);
+    });
   }
 
   private createPlayer() {
@@ -577,12 +681,14 @@ export class VecindadScene extends Phaser.Scene {
 
   private setupMaterialNodes() {
     const defs = [
-      { x: 640, y: 960 },
-      { x: 760, y: 960 },
-      { x: 880, y: 960 },
-      { x: 1920, y: 960 },
-      { x: 2040, y: 960 },
-      { x: 2160, y: 960 },
+      { x: 360, y: 250, value: 3 },
+      { x: 590, y: 328, value: 4 },
+      { x: 860, y: 245, value: 3 },
+      { x: 1150, y: 320, value: 5 },
+      { x: 1450, y: 252, value: 3 },
+      { x: 1730, y: 326, value: 4 },
+      { x: 2030, y: 255, value: 3 },
+      { x: 2320, y: 320, value: 5 },
     ];
 
     defs.forEach((def, index) => {
@@ -590,10 +696,10 @@ export class VecindadScene extends Phaser.Scene {
         .setStrokeStyle(2, 0x3c2412, 1)
         .setDepth(2.6);
       const band = this.add.rectangle(def.x, def.y, 42, 6, 0xf5c842, 0.8).setDepth(2.7);
-      const label = this.add.text(def.x, def.y - 26, '+MAT', {
+      const label = this.add.text(def.x, def.y - 26, `+${def.value}`, {
         fontSize: '6px',
         fontFamily: '"Press Start 2P", monospace',
-        color: '#B9FF9E',
+        color: '#8DE17A',
         stroke: '#000000',
         strokeThickness: 2,
       }).setOrigin(0.5).setDepth(2.8);
@@ -602,7 +708,7 @@ export class VecindadScene extends Phaser.Scene {
         id: `cache_${index + 1}`,
         x: def.x,
         y: def.y,
-        value: 4,
+        value: def.value,
         available: true,
         respawnAt: 0,
         crate,
@@ -634,10 +740,10 @@ export class VecindadScene extends Phaser.Scene {
     const objective = !this.vecindadState.ownedParcelId
       ? 'OBJETIVO COMPRA UNA PARCELA'
       : stage <= 0
-        ? `OBJETIVO LEVANTAR BASE ${nextCost} MATS`
+        ? `OBJETIVO FARMEA EN BOSQUE Y LEVANTA BASE ${nextCost} MATS`
         : stage >= MAX_VECINDAD_STAGE
           ? 'OBJETIVO CASA COMPLETA'
-          : `OBJETIVO STAGE ${stage + 1} ${nextCost} MATS`;
+          : `OBJETIVO STAGE ${stage + 1} ${nextCost} MATS EN BOSQUE`;
     const farmLine = this.vecindadState.cannabisFarmUnlocked
       ? `FARM ON | PLANTAS ${(this.vecindadState.farmPlants ?? []).length}/${FARM_SLOTS}`
       : 'FARM LOCKED';
@@ -662,7 +768,7 @@ export class VecindadScene extends Phaser.Scene {
       node.band.setVisible(true);
       node.label.setVisible(true);
       eventBus.emit(EVENTS.UI_NOTICE, {
-        msg: `+${node.value} materiales disponibles en La Vecindad`,
+        msg: `+${node.value} materiales disponibles en Bosque Norte`,
         color: '#46B3FF',
       });
     }
@@ -685,7 +791,7 @@ export class VecindadScene extends Phaser.Scene {
 
     const material = this.getNearbyMaterialNode();
     if (material) {
-      this.promptText.setText(`E RECOGER TU CACHE +${material.value} MATS`);
+      this.promptText.setText(`E RECOGER CACHE DEL BOSQUE +${material.value} MATS`);
       this.promptText.setColor('#B9FF9E');
       return;
     }
@@ -1128,7 +1234,8 @@ export class VecindadScene extends Phaser.Scene {
 
   private collectMaterial(node: MaterialNode) {
     node.available = false;
-    node.respawnAt = this.time.now + 14000;
+    // Slight respawn variance keeps routes dynamic and avoids robotic loops.
+    node.respawnAt = this.time.now + Phaser.Math.Between(18000, 26000);
     node.crate.setVisible(false);
     node.band.setVisible(false);
     node.label.setVisible(false);
@@ -1141,7 +1248,7 @@ export class VecindadScene extends Phaser.Scene {
     this.refreshParcelVisuals();
     eventBus.emit(EVENTS.VECINDAD_UPDATE_REQUEST, {
       vecindad: nextState,
-      notice: `Cache personal +${node.value} materiales`,
+      notice: `Cache del bosque +${node.value} materiales`,
     });
   }
 

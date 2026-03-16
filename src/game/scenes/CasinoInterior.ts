@@ -583,21 +583,21 @@ export class CasinoInterior extends Phaser.Scene {
     const roll = Phaser.Math.Between(1, 1000) / 10;
     if (roll <= 2) {
       const symbol = Phaser.Math.RND.pick(['7', 'WASP']);
-      return { reels: [symbol, symbol, symbol], payoutMultiplier: 10, label: 'JACKPOT!' };
+      return { reels: [symbol, symbol, symbol], payoutMultiplier: 8, label: 'JACKPOT!' };
     }
     if (roll <= 7) {
       const symbol = this.randomSlotSymbol();
-      return { reels: [symbol, symbol, symbol], payoutMultiplier: 5, label: 'TRIPLE MATCH!' };
+      return { reels: [symbol, symbol, symbol], payoutMultiplier: 4, label: 'TRIPLE MATCH!' };
     }
     if (roll <= 17) {
       const symbol = this.randomSlotSymbol();
       const special = Phaser.Math.RND.pick(['7', 'STAR']);
-      return { reels: [symbol, symbol, special], payoutMultiplier: 3, label: 'CASI JACKPOT!' };
+      return { reels: [symbol, symbol, special], payoutMultiplier: 2.5, label: 'CASI JACKPOT!' };
     }
-    if (roll <= 42) {
+    if (roll <= 40) {
       const symbol = this.randomSlotSymbol();
       const other = this.randomSlotSymbol();
-      return { reels: [symbol, symbol, other], payoutMultiplier: 1.5, label: 'PAREJA!' };
+      return { reels: [symbol, symbol, other], payoutMultiplier: 1.25, label: 'PAREJA!' };
     }
     return { reels: this.buildLosingReels(), payoutMultiplier: 0, label: 'NADA' };
   }
@@ -664,7 +664,7 @@ export class CasinoInterior extends Phaser.Scene {
     const reelsLine = this.slotsState.reels.map((symbol) => `[ ${symbol.padEnd(4, ' ')} ]`).join('   ');
     this.overlayAccent.setText(`SALDO ${balance} TENKS`);
     this.overlayTitle.setText('SLOTS');
-    this.overlayBody.setText([reelsLine, '', `APUESTA: ${bet} TENKS`, betLine, '', this.slotsState.resultText, '', 'TRIPLE 7 x8  |  TRIPLE x5  |  PAREJA x2'].join('\n'));
+    this.overlayBody.setText([reelsLine, '', `APUESTA: ${bet} TENKS`, betLine, '', this.slotsState.resultText, '', 'JACKPOT x8 | TRIPLE x4 | CASI x2.5 | PAREJA x1.25'].join('\n'));
     this.overlayFooter.setText(this.slotsState.spinning ? 'ESPERA EL GIRO...' : '< > CAMBIA APUESTA   |   INTERACT GIRA   |   BACK CIERRA');
   }
 

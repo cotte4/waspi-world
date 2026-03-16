@@ -748,13 +748,14 @@ export class BasketMinigame extends Phaser.Scene {
 
     const token = await this.getAuthToken();
     if (!token) {
-      addTenks(this.grantedRewardTenks, 'basket_game_local');
-      eventBus.emit(EVENTS.UI_NOTICE, `Basket +${this.grantedRewardTenks} TENKS`);
-      this.rewardStatus = 'local';
+      this.rewardStatus = 'pending';
       this.rewardResolved = true;
       this.rewardPending = false;
-      this.footer.setText('VOLVIENDO AL ARCADE CON PREMIO...');
-      this.footer.setColor('#39FF14');
+      this.grantedRewardTenks = 0;
+      this.resultLabel.setText('PREMIO PENDIENTE');
+      this.resultLabel.setColor('#FFB36A');
+      this.footer.setText('INICIA SESION PARA ACREDITAR EL PREMIO.');
+      this.footer.setColor('#FFB36A');
       return;
     }
 

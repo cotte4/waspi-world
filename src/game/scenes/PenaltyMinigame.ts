@@ -1,5 +1,4 @@
 import Phaser from 'phaser';
-import { addTenks } from '../systems/TenksSystem';
 import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { SceneControls } from '../systems/SceneControls';
@@ -598,9 +597,6 @@ export class PenaltyMinigame extends Phaser.Scene {
   private showFinalSummary() {
     this.phase = 'done';
     const won = this.goals >= 3;
-    if (won) {
-      addTenks(300, 'penalty_win');
-    }
 
     this.summaryLabel.setText([
       'RESULTADO FINAL',

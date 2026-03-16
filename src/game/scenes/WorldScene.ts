@@ -197,6 +197,9 @@ const REMOTE_HIT_MIN_MS = 120;
 const MAX_REMOTE_CHAT_DISTANCE = 2600;
 const LOCAL_HIT_COOLDOWN_MS = 180;
 const DUMMY_RESPAWN_MS = 1800;
+const TRAINING_SURVIVAL_STEP_MS = 25000;
+const TRAINING_SURVIVAL_STEP_BONUS = 0.1;
+const TRAINING_SURVIVAL_MAX_MULTIPLIER = 2;
 const PLAZA_RESPAWN_X = 980;
 const PLAZA_RESPAWN_Y = ZONES.PLAZA_Y + 72;
 const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
@@ -328,7 +331,7 @@ const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
     maxHp: 220,
     radius: 28,
     xpReward: 20,
-    tenksReward: 5,
+    tenksReward: 4,
     speed: 1.45,
     preferredDistance: 180,
     strafe: 0.95,
@@ -447,6 +450,8 @@ export class WorldScene extends Phaser.Scene {
   // Training zone (PVE + PVP)
   private inTraining = false;
   private trainingBanner?: Phaser.GameObjects.Text;
+  private trainingSurvivalStartAt = 0;
+  private trainingHudLastRefreshAt = 0;
   private pvpEnabled = true;
   private pveEnabled = true;
   private dummies!: Phaser.Physics.Arcade.Group;
@@ -491,8 +496,8 @@ export class WorldScene extends Phaser.Scene {
   // Camara del Tiempo
   private inCamara = false;
   private camaraTimer = 0;       // ms accumulated inside
-  private camaraTickMs = 15000;  // earn every 15s
-  private camaraTenksPerTick = 10;
+  private camaraTickMs = 20000;  // earn every 20s
+  private camaraTenksPerTick = 6;
   private camaraHud?: Phaser.GameObjects.Text;
 
   // Minimap
@@ -770,11 +775,12 @@ export class WorldScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setScrollFactor(0).setDepth(10001).setOrigin(0.5);
 
-    this.trainingHud = this.add.text(8, 58, 'TRAINING KOs 0', {
+    this.trainingHud = this.add.text(8, 58, '', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#39FF14',
     }).setScrollFactor(0).setDepth(9999);
+    this.renderTrainingHud();
 
     this.arenaNotice = this.add.text(this.scale.width / 2, 88, '', {
       fontSize: '9px',
@@ -1568,12 +1574,15 @@ export class WorldScene extends Phaser.Scene {
     saveProgressionState(this.progression);
     this.renderProgressionHud();
     eventBus.emit(EVENTS.PLAYER_PROGRESSION, this.progression);
-    addTenks(state.tenksReward, `training_${state.archetype}`);
+    const tenksReward = this.getScaledTrainingTenksReward(state.tenksReward);
+    const multiplier = this.getTrainingTenksMultiplier();
+    addTenks(tenksReward, `training_${state.archetype}`);
     if (state.isBoss) {
-      this.showArenaNotice(`BOSS DOWN +${state.xpReward} XP +${state.tenksReward} TENKS`, '#39FF14');
+      this.showArenaNotice(`BOSS DOWN +${state.xpReward} XP +${tenksReward} TENKS x${multiplier.toFixed(1)}`, '#39FF14');
     } else {
-      this.showArenaNotice(`+${state.xpReward} XP +${state.tenksReward} TENKS ${state.label}`, '#F5C842');
+      this.showArenaNotice(`+${state.xpReward} XP +${tenksReward} TENKS x${multiplier.toFixed(1)} ${state.label}`, '#F5C842');
     }
+    this.renderTrainingHud();
 
     // Pulse progressionHud on TENKS gain
     if (this.progressionHud) {
@@ -5157,6 +5166,10 @@ export class WorldScene extends Phaser.Scene {
     this.runFrameStep('interaction highlight', () => this.updateInteractionHighlight());
     this.handleInteraction();
     this.updateCamaraDelTiempo(delta);
+    if (this.inTraining && this.time.now - this.trainingHudLastRefreshAt >= 1000) {
+      this.trainingHudLastRefreshAt = this.time.now;
+      this.renderTrainingHud();
+    }
 
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyQ))     { this.switchWeapon(); }
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyOne))   { this.switchWeapon('pistol'); }
@@ -5204,6 +5217,8 @@ export class WorldScene extends Phaser.Scene {
         this.trainingBanner.setText(this.inTraining ? 'TRAINING: PVP + PVE - F DISPARA - 1/2 CAMBIAN ARMA' : '');
       }
       if (this.inTraining) {
+        this.trainingSurvivalStartAt = this.time.now;
+        this.trainingHudLastRefreshAt = 0;
         // Force pvpEnabled true on zone entry — cannot be self-disabled inside training zone
         if (!this.pvpEnabled) {
           console.warn('[WorldScene] pvpEnabled was false on training zone entry — forcing true. Possible abuse attempt.');
@@ -5216,12 +5231,16 @@ export class WorldScene extends Phaser.Scene {
           dummy.setVisible(true);
         });
       } else {
+        this.trainingSurvivalStartAt = 0;
+        this.trainingHudLastRefreshAt = 0;
+        this.showArenaNotice('BONO PVE RESETEADO AL SALIR', '#FF8B3D');
         // Pause dummies when leaving training zone to save CPU
         this.dummyStates.forEach((_state, dummy) => {
           dummy.setActive(false);
           dummy.setVisible(false);
         });
       }
+      this.renderTrainingHud();
     }
 
     // Interpolate remote players
@@ -5512,6 +5531,38 @@ export class WorldScene extends Phaser.Scene {
     try { this.remoteChatTimes.clear(); } catch { /* noop */ }
     try { this.remoteHitTimes.clear(); } catch { /* noop */ }
     try { this.mutedPlayerIds.clear(); } catch { /* noop */ }
+  }
+
+  private getTrainingSurvivalElapsedMs() {
+    if (!this.inTraining || this.trainingSurvivalStartAt <= 0) return 0;
+    return Math.max(0, this.time.now - this.trainingSurvivalStartAt);
+  }
+
+  private getTrainingTenksMultiplier() {
+    const steps = Math.floor(this.getTrainingSurvivalElapsedMs() / TRAINING_SURVIVAL_STEP_MS);
+    return Math.min(TRAINING_SURVIVAL_MAX_MULTIPLIER, 1 + (steps * TRAINING_SURVIVAL_STEP_BONUS));
+  }
+
+  private getScaledTrainingTenksReward(baseReward: number) {
+    return Math.max(1, Math.round(baseReward * this.getTrainingTenksMultiplier()));
+  }
+
+  private renderTrainingHud() {
+    if (!this.trainingHud) return;
+    if (!this.inTraining) {
+      this.trainingHud.setText(`TRAINING KOs ${this.trainingScore} | BONO TENKS x1.0 | PROX +20% EN 20s`);
+      return;
+    }
+
+    const elapsedMs = this.getTrainingSurvivalElapsedMs();
+    const elapsedSec = Math.floor(elapsedMs / 1000);
+    const multiplier = this.getTrainingTenksMultiplier();
+    const maxed = multiplier >= TRAINING_SURVIVAL_MAX_MULTIPLIER;
+    const msIntoStep = elapsedMs % TRAINING_SURVIVAL_STEP_MS;
+    const nextStepMs = maxed ? 0 : (TRAINING_SURVIVAL_STEP_MS - msIntoStep);
+    const nextStepSec = maxed ? 0 : Math.max(1, Math.ceil(nextStepMs / 1000));
+    const nextLabel = maxed ? 'MAX' : `PROX +20% EN ${nextStepSec}s`;
+    this.trainingHud.setText(`TRAINING KOs ${this.trainingScore} | BONO TENKS x${multiplier.toFixed(1)} | ${nextLabel} | ${elapsedSec}s`);
   }
 
   private emitPresence() {
