@@ -3,7 +3,7 @@ import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRendere
 import { BUILDINGS, COLORS, SAFE_PLAZA_RETURN, WORLD, ZONES } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
-import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { SceneControls } from '../systems/SceneControls';
 
@@ -122,6 +122,7 @@ export class ArcadeInterior extends Phaser.Scene {
     this.input.enabled = true;
     this.controls = new SceneControls(this);
     announceScene(this);
+    showSceneTitle(this, 'ARCADE', 0xFF006E);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', {
@@ -147,6 +148,42 @@ export class ArcadeInterior extends Phaser.Scene {
     const g = this.add.graphics();
     g.fillStyle(0x050511);
     g.fillRect(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
+
+    // ── Fondo de circuito neon rosa (líneas tenues) ───────────────
+    try {
+      const circuitG = this.add.graphics().setDepth(0);
+      const PINK = 0xFF006E;
+      circuitG.lineStyle(1, PINK, 0.06);
+      // Horizontal traces
+      for (let cy2 = 30; cy2 < height; cy2 += 48) {
+        circuitG.lineBetween(0, cy2, width, cy2);
+      }
+      // Vertical traces
+      for (let cx2 = 30; cx2 < width; cx2 += 64) {
+        circuitG.lineBetween(cx2, 0, cx2, height);
+      }
+      // Corner junction dots
+      circuitG.fillStyle(PINK, 0.12);
+      for (let jx = 30; jx < width; jx += 64) {
+        for (let jy = 30; jy < height; jy += 48) {
+          circuitG.fillRect(jx - 1, jy - 1, 3, 3);
+        }
+      }
+      // A few L-shaped traces for circuit feel
+      const traces = [
+        { x1: 60, y1: 78, x2: 60, y2: 126, x3: 124, y3: 126 },
+        { x1: width - 60, y1: 78, x2: width - 60, y2: 126, x3: width - 124, y3: 126 },
+        { x1: 60, y1: height - 78, x2: 60, y2: height - 126, x3: 124, y3: height - 126 },
+        { x1: width - 60, y1: height - 78, x2: width - 60, y2: height - 126, x3: width - 124, y3: height - 126 },
+      ];
+      circuitG.lineStyle(1, PINK, 0.18);
+      traces.forEach(({ x1, y1, x2, y2, x3, y3 }) => {
+        circuitG.lineBetween(x1, y1, x2, y2);
+        circuitG.lineBetween(x2, y2, x3, y3);
+        circuitG.fillStyle(PINK, 0.35);
+        circuitG.fillRect(x2 - 2, y2 - 2, 4, 4);
+      });
+    } catch (e) { console.error('[ArcadeInterior] circuit lines failed', e); }
 
     g.fillGradientStyle(0x111127, 0x111127, 0x090914, 0x090914, 1);
     g.fillRoundedRect(roomX, roomY, roomW, roomH, 18);
@@ -216,6 +253,155 @@ export class ArcadeInterior extends Phaser.Scene {
         }).setOrigin(0.5);
       }
     });
+
+    // ── Máquinas arcade decorativas en paredes laterales ─────────
+    try {
+      const propMachineG = this.add.graphics().setDepth(2);
+      const PINK_HEX = 0xFF006E;
+      const NBLUE = 0x46B3FF;
+      // Left wall machines (2 props)
+      const leftProps = [
+        { mx: roomX + 10, color: PINK_HEX, label: 'FIGHT' },
+        { mx: roomX + 10, color: NBLUE, label: 'RACE' },
+      ];
+      leftProps.forEach(({ mx, color, label }, pi) => {
+        const my = roomY + 80 + pi * 116;
+        const mw = 36; const mh = 80;
+        propMachineG.fillStyle(0x09091a, 1);
+        propMachineG.fillRect(mx, my, mw, mh);
+        propMachineG.lineStyle(2, color, 0.55);
+        propMachineG.strokeRect(mx, my, mw, mh);
+        // CRT screen
+        propMachineG.fillStyle(color === PINK_HEX ? 0x1a0014 : 0x001020, 1);
+        propMachineG.fillRect(mx + 4, my + 8, mw - 8, 28);
+        propMachineG.lineStyle(1, color, 0.7);
+        propMachineG.strokeRect(mx + 4, my + 8, mw - 8, 28);
+        // CRT scan lines
+        propMachineG.lineStyle(1, 0x000000, 0.4);
+        for (let sl = my + 12; sl < my + 36; sl += 4) {
+          propMachineG.lineBetween(mx + 4, sl, mx + mw - 4, sl);
+        }
+        // Glowing screen content (just colored rect)
+        propMachineG.fillStyle(color, 0.25);
+        propMachineG.fillRect(mx + 5, my + 9, mw - 10, 26);
+        // Controls panel
+        propMachineG.fillStyle(0x141428, 1);
+        propMachineG.fillRect(mx + 2, my + 40, mw - 4, 20);
+        propMachineG.fillStyle(color, 0.8);
+        propMachineG.fillCircle(mx + 10, my + 52, 4);
+        propMachineG.fillStyle(0xFF3A3A, 0.8);
+        propMachineG.fillCircle(mx + 22, my + 48, 3);
+        propMachineG.fillStyle(0xFFFF00, 0.8);
+        propMachineG.fillCircle(mx + 28, my + 54, 3);
+        // Base
+        propMachineG.fillStyle(0x07070f, 1);
+        propMachineG.fillRect(mx - 2, my + mh, mw + 4, 8);
+        // Label above
+        this.add.text(mx + mw / 2, my - 10, label, {
+          fontSize: '5px',
+          fontFamily: '"Press Start 2P", monospace',
+          color: `#${color.toString(16).padStart(6, '0')}`,
+        }).setOrigin(0.5).setDepth(3);
+      });
+
+      // Right wall machines (2 props)
+      const rightProps = [
+        { mx: roomX + roomW - 46, color: 0x39FF14, label: 'SHOOT' },
+        { mx: roomX + roomW - 46, color: 0xF5C842, label: 'DANCE' },
+      ];
+      rightProps.forEach(({ mx, color, label }, pi) => {
+        const my = roomY + 80 + pi * 116;
+        const mw = 36; const mh = 80;
+        propMachineG.fillStyle(0x09091a, 1);
+        propMachineG.fillRect(mx, my, mw, mh);
+        propMachineG.lineStyle(2, color, 0.55);
+        propMachineG.strokeRect(mx, my, mw, mh);
+        propMachineG.fillStyle(color === 0x39FF14 ? 0x001400 : 0x1a1400, 1);
+        propMachineG.fillRect(mx + 4, my + 8, mw - 8, 28);
+        propMachineG.lineStyle(1, color, 0.7);
+        propMachineG.strokeRect(mx + 4, my + 8, mw - 8, 28);
+        propMachineG.lineStyle(1, 0x000000, 0.4);
+        for (let sl = my + 12; sl < my + 36; sl += 4) {
+          propMachineG.lineBetween(mx + 4, sl, mx + mw - 4, sl);
+        }
+        propMachineG.fillStyle(color, 0.22);
+        propMachineG.fillRect(mx + 5, my + 9, mw - 10, 26);
+        propMachineG.fillStyle(0x141428, 1);
+        propMachineG.fillRect(mx + 2, my + 40, mw - 4, 20);
+        propMachineG.fillStyle(color, 0.8);
+        propMachineG.fillCircle(mx + 10, my + 52, 4);
+        propMachineG.fillStyle(0xFF3A3A, 0.8);
+        propMachineG.fillCircle(mx + 22, my + 48, 3);
+        propMachineG.fillStyle(0x4444ff, 0.8);
+        propMachineG.fillCircle(mx + 28, my + 54, 3);
+        propMachineG.fillStyle(0x07070f, 1);
+        propMachineG.fillRect(mx - 2, my + mh, mw + 4, 8);
+        this.add.text(mx + mw / 2, my - 10, label, {
+          fontSize: '5px',
+          fontFamily: '"Press Start 2P", monospace',
+          color: `#${color.toString(16).padStart(6, '0')}`,
+        }).setOrigin(0.5).setDepth(3);
+      });
+    } catch (e) { console.error('[ArcadeInterior] prop machines failed', e); }
+
+    // ── Luces intermitentes en el techo ──────────────────────────
+    try {
+      const blinkColors = [0xFF006E, 0x46B3FF, 0x39FF14, 0xF5C842, 0xFF006E, 0x46B3FF];
+      blinkColors.forEach((col, bi) => {
+        const bx = roomX + 80 + bi * 100;
+        const by = roomY + 12;
+        const bulb = this.add.graphics().setDepth(2);
+        bulb.fillStyle(col, 0.9);
+        bulb.fillCircle(bx, by, 4);
+        bulb.fillStyle(col, 0.18);
+        bulb.fillCircle(bx, by, 10);
+        // Individual staggered blink tweens
+        this.tweens.add({
+          targets: bulb,
+          alpha: { from: 0.2, to: 1 },
+          duration: 400 + bi * 180,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Stepped',
+          easeParams: [2],
+          delay: bi * 120,
+        });
+      });
+    } catch (e) { console.error('[ArcadeInterior] blink lights failed', e); }
+
+    // ── Cartel de juegos disponibles ──────────────────────────────
+    try {
+      const signData = [
+        { label: 'BASKET', color: 0x46B3FF },
+        { label: 'PENALES', color: 0xF5C842 },
+      ];
+      signData.forEach(({ label, color }, si) => {
+        const sx = roomX + 80 + si * 160;
+        const sy = roomY + 26;
+        const sw = 96; const sh = 18;
+        const sgnG = this.add.graphics().setDepth(3);
+        sgnG.fillStyle(0x050511, 1);
+        sgnG.fillRect(sx - sw / 2, sy, sw, sh);
+        sgnG.lineStyle(2, color, 0.8);
+        sgnG.strokeRect(sx - sw / 2, sy, sw, sh);
+        sgnG.fillStyle(color, 0.08);
+        sgnG.fillRect(sx - sw / 2 + 1, sy + 1, sw - 2, sh - 2);
+        this.add.text(sx, sy + sh / 2, label, {
+          fontSize: '6px',
+          fontFamily: '"Press Start 2P", monospace',
+          color: `#${color.toString(16).padStart(6, '0')}`,
+        }).setOrigin(0.5).setDepth(4);
+        // Blink the frame
+        this.tweens.add({
+          targets: sgnG,
+          alpha: { from: 0.7, to: 1 },
+          duration: 1200 + si * 400,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+        });
+      });
+    } catch (e) { console.error('[ArcadeInterior] game signs failed', e); }
 
     this.add.text(width / 2, roomY + 30, 'ARCADE', {
       fontSize: '16px',

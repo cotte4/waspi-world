@@ -1,10 +1,11 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { BUILDINGS, SAFE_PLAZA_RETURN, ZONES } from '../config/constants';
-import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { SceneControls } from '../systems/SceneControls';
+import { safeSceneDelayedCall } from '../systems/AnimationSafety';
 
 export class CafeInterior extends Phaser.Scene {
   private static readonly RETURN_X = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
@@ -37,6 +38,7 @@ export class CafeInterior extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
     announceScene(this);
+    showSceneTitle(this, 'CAFÉ', 0xFF8B3D);
     this.input.enabled = true;
     this.controls = new SceneControls(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
@@ -48,8 +50,17 @@ export class CafeInterior extends Phaser.Scene {
     });
     // ── Canvas background ─────────────────────────────────────
     const bg = this.add.graphics();
-    bg.fillStyle(0x060202);
+    bg.fillStyle(0x1a1209);  // paleta cálida oscura
     bg.fillRect(0, 0, width, height);
+    // Warm vignette overlay (darker corners)
+    try {
+      const vigG = this.add.graphics().setDepth(0);
+      vigG.fillStyle(0x0a0604, 0.55);
+      vigG.fillRect(0, 0, 60, height);
+      vigG.fillRect(width - 60, 0, 60, height);
+      vigG.fillRect(0, 0, width, 40);
+      vigG.fillRect(0, height - 40, width, 40);
+    } catch (e) { console.error('[CafeInterior] vignette failed', e); }
 
     const roomW = 640;
     const roomH = 360;
@@ -266,6 +277,62 @@ export class CafeInterior extends Phaser.Scene {
       tableG.fillStyle(AMBER, 0.22);
       tableG.fillEllipse(tx, ty + th / 2, 22, 14);
     });
+
+    // ── Partículas de vapor/humo (círculos alpha bajo que flotan) ─
+    try {
+      // Steam sources: cups on bar top + candles on tables
+      const steamSources = [
+        { sx: barX + 23, sy: barY - 14 },
+        { sx: barX + 49, sy: barY - 14 },
+        { sx: barX + barW - 51, sy: barY - 14 },
+        { sx: barX + barW - 25, sy: barY - 14 },
+        { sx: roomX + 148, sy: roomY + 210 + 17 - 8 },
+        { sx: roomX + 340, sy: roomY + 232 + 17 - 8 },
+        { sx: roomX + 524, sy: roomY + 210 + 17 - 8 },
+      ];
+      steamSources.forEach(({ sx, sy }) => {
+        // Create multiple steam puffs per source, staggered
+        for (let pi = 0; pi < 3; pi++) {
+          const steamCirc = this.add.graphics().setDepth(6);
+          const radius = 4 + Math.random() * 4;
+          steamCirc.fillStyle(AMBER, 0.08 + Math.random() * 0.06);
+          steamCirc.fillCircle(0, 0, radius);
+          steamCirc.setPosition(sx + (Math.random() - 0.5) * 6, sy);
+          steamCirc.setAlpha(0);
+          steamCirc.setScale(0.5);
+          const delay = pi * 700 + Math.random() * 400;
+          // Float up and fade out, loop
+          const animateSteam = () => {
+            if (!steamCirc.active) return;
+            steamCirc.setPosition(sx + (Math.random() - 0.5) * 8, sy);
+            steamCirc.setAlpha(0);
+            steamCirc.setScale(0.5);
+            this.tweens.add({
+              targets: steamCirc,
+              y: steamCirc.y - 22 - Math.random() * 14,
+              alpha: { from: 0, to: 0.55 },
+              scale: { from: 0.5, to: 1.4 },
+              duration: 900,
+              ease: 'Sine.easeOut',
+              onComplete: () => {
+                if (!steamCirc.active) return;
+                this.tweens.add({
+                  targets: steamCirc,
+                  alpha: 0,
+                  scale: 2,
+                  duration: 700,
+                  ease: 'Sine.easeIn',
+                  onComplete: () => {
+                    safeSceneDelayedCall(this, 300 + Math.random() * 600, animateSteam);
+                  },
+                });
+              },
+            });
+          };
+          safeSceneDelayedCall(this, delay, animateSteam);
+        }
+      });
+    } catch (e) { console.error('[CafeInterior] steam particles failed', e); }
 
     // ── Player avatar ────────────────────────────────────────
     this.px = width / 2;

@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { BUILDINGS, SAFE_PLAZA_RETURN, ZONES } from '../config/constants';
-import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { SceneControls } from '../systems/SceneControls';
@@ -79,6 +79,7 @@ export class CasinoInterior extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
     announceScene(this);
+    showSceneTitle(this, 'CASINO', 0xB74DFF);
     this.input.enabled = true;
     this.controls = new SceneControls(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
@@ -101,6 +102,57 @@ export class CasinoInterior extends Phaser.Scene {
     const bg = this.add.graphics();
     bg.fillStyle(0x020008);
     bg.fillRect(0, 0, width, height);
+
+    // ── Marquesina de puntos parpadeantes en bordes de la sala ────
+    try {
+      const marqueeColors = [0xF5C842, 0xFF3A3A, 0xF5C842, 0xFFFFFF, 0xF5C842, 0xFF3A3A];
+      const marqueeDots: Phaser.GameObjects.Graphics[] = [];
+      const marqueeSpacing = 24;
+      // Top edge
+      for (let mx2 = (width - this.roomW) / 2; mx2 <= (width + this.roomW) / 2; mx2 += marqueeSpacing) {
+        const dot = this.add.graphics().setDepth(2);
+        const col = marqueeColors[Math.floor(mx2 / marqueeSpacing) % marqueeColors.length];
+        dot.fillStyle(col, 0.9);
+        dot.fillCircle(mx2, (height - this.roomH) / 2 + 4, 3);
+        dot.fillStyle(col, 0.15);
+        dot.fillCircle(mx2, (height - this.roomH) / 2 + 4, 6);
+        marqueeDots.push(dot);
+      }
+      // Bottom edge
+      for (let mx2 = (width - this.roomW) / 2; mx2 <= (width + this.roomW) / 2; mx2 += marqueeSpacing) {
+        const dot = this.add.graphics().setDepth(2);
+        const col = marqueeColors[Math.floor(mx2 / marqueeSpacing) % marqueeColors.length];
+        dot.fillStyle(col, 0.9);
+        dot.fillCircle(mx2, (height + this.roomH) / 2 - 4, 3);
+        dot.fillStyle(col, 0.15);
+        dot.fillCircle(mx2, (height + this.roomH) / 2 - 4, 6);
+        marqueeDots.push(dot);
+      }
+      // Left + right edges
+      for (let my2 = (height - this.roomH) / 2 + marqueeSpacing; my2 < (height + this.roomH) / 2 - marqueeSpacing; my2 += marqueeSpacing) {
+        const dotL = this.add.graphics().setDepth(2);
+        const dotR = this.add.graphics().setDepth(2);
+        const col = marqueeColors[Math.floor(my2 / marqueeSpacing) % marqueeColors.length];
+        dotL.fillStyle(col, 0.9); dotL.fillCircle((width - this.roomW) / 2 + 4, my2, 3);
+        dotL.fillStyle(col, 0.15); dotL.fillCircle((width - this.roomW) / 2 + 4, my2, 6);
+        dotR.fillStyle(col, 0.9); dotR.fillCircle((width + this.roomW) / 2 - 4, my2, 3);
+        dotR.fillStyle(col, 0.15); dotR.fillCircle((width + this.roomW) / 2 - 4, my2, 6);
+        marqueeDots.push(dotL, dotR);
+      }
+      // Animate marquee in wave pattern
+      marqueeDots.forEach((dot, di) => {
+        this.tweens.add({
+          targets: dot,
+          alpha: { from: 0.2, to: 1 },
+          duration: 300,
+          yoyo: true,
+          repeat: -1,
+          delay: (di * 60) % 900,
+          ease: 'Stepped',
+          easeParams: [2],
+        });
+      });
+    } catch (e) { console.error('[CasinoInterior] marquee lights failed', e); }
 
     const room = this.add.graphics();
     room.fillStyle(0x0c0820);
@@ -181,6 +233,54 @@ export class CasinoInterior extends Phaser.Scene {
     this.drawRoulette(roomX + 280, roomY + 260, GOLD);
     this.drawBlackjack(roomX + 460, roomY + 260, GOLD);
     this.drawPokerTable(cx, roomY + 170, GOLD);
+
+    // ── Glow ambiental bajo la mesa de poker ──────────────────────
+    try {
+      const pokerGlow = this.add.graphics().setDepth(1);
+      pokerGlow.fillStyle(0x0d4a1c, 0.18);
+      pokerGlow.fillEllipse(cx, roomY + 170, 260, 120);
+      pokerGlow.fillStyle(GOLD, 0.04);
+      pokerGlow.fillEllipse(cx, roomY + 170, 240, 100);
+      this.tweens.add({
+        targets: pokerGlow,
+        alpha: { from: 0.7, to: 1 },
+        duration: 3000,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+    } catch (e) { console.error('[CasinoInterior] poker glow failed', e); }
+
+    // ── Fichas / chips decorativos ────────────────────────────────
+    try {
+      const chipData = [
+        { x: cx - 80, y: roomY + 340, col: 0xF5C842 },
+        { x: cx - 60, y: roomY + 348, col: 0xFF3A3A },
+        { x: cx + 70, y: roomY + 338, col: 0x4444ff },
+        { x: cx + 90, y: roomY + 345, col: 0xF5C842 },
+        { x: roomX + 90, y: roomY + 340, col: 0x22CC88 },
+        { x: roomX + 104, y: roomY + 348, col: 0xFF3A3A },
+        { x: roomX + this.roomW - 90, y: roomY + 340, col: 0xF5C842 },
+        { x: roomX + this.roomW - 106, y: roomY + 348, col: 0x8B5CF6 },
+      ];
+      const chipG = this.add.graphics().setDepth(2);
+      chipData.forEach(({ x, y, col }) => {
+        chipG.lineStyle(2, col, 0.85);
+        chipG.strokeCircle(x, y, 7);
+        chipG.lineStyle(1, col, 0.4);
+        chipG.strokeCircle(x, y, 5);
+        chipG.fillStyle(col, 0.2);
+        chipG.fillCircle(x, y, 7);
+        chipG.lineStyle(1, col, 0.7);
+        for (let ca = 0; ca < 360; ca += 45) {
+          const rad = Phaser.Math.DegToRad(ca);
+          chipG.lineBetween(
+            x + Math.cos(rad) * 4, y + Math.sin(rad) * 4,
+            x + Math.cos(rad) * 6, y + Math.sin(rad) * 6,
+          );
+        }
+      });
+    } catch (e) { console.error('[CasinoInterior] chips failed', e); }
 
     this.stations.forEach((station) => {
       const hint = this.createStationHint(station.label, station.color);

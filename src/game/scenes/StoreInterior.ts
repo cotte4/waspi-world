@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { AvatarRenderer, AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { BUILDINGS, SAFE_PLAZA_RETURN, ZONES } from '../config/constants';
 import { CATALOG } from '../config/catalog';
-import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { ChatSystem } from '../systems/ChatSystem';
 import { DialogSystem } from '../systems/DialogSystem';
@@ -68,6 +68,7 @@ export class StoreInterior extends Phaser.Scene {
   create() {
     const { width, height } = this.scale;
     announceScene(this);
+    showSceneTitle(this, 'WASPI STORE', 0xF5C842);
     this.input.enabled = true;
     this.controls = new SceneControls(this);
     this.playerId = this.getOrCreatePlayerId();
@@ -120,6 +121,17 @@ export class StoreInterior extends Phaser.Scene {
     bg.lineStyle(1, 0x1a1a2e, 0.25);
     for (let gx = 0; gx < width; gx += 40) bg.lineBetween(gx, 0, gx, height);
     for (let gy = 0; gy < height; gy += 40) bg.lineBetween(0, gy, width, gy);
+
+    // ── Dorado dot pattern (muy tenue) sobre el fondo ─────────────
+    try {
+      const dotPat = this.add.graphics().setDepth(0);
+      dotPat.fillStyle(GOLD, 0.06);
+      for (let dpx = 20; dpx < width; dpx += 40) {
+        for (let dpy = 20; dpy < height; dpy += 40) {
+          dotPat.fillRect(dpx - 1, dpy - 1, 2, 2);
+        }
+      }
+    } catch (e) { console.error('[StoreInterior] dot pattern failed', e); }
 
     // ── Room fill ─────────────────────────────────────────────────
     const room = this.add.graphics();
@@ -305,6 +317,24 @@ export class StoreInterior extends Phaser.Scene {
     this.vendorX = vx;
     this.vendorY = vy;
 
+    // Focal light glow behind vendor
+    try {
+      const focalGlow = this.add.graphics().setDepth(2);
+      focalGlow.fillStyle(GOLD, 0.07);
+      focalGlow.fillEllipse(vx, vy + 10, 110, 90);
+      focalGlow.fillStyle(GOLD, 0.04);
+      focalGlow.fillEllipse(vx, vy - 10, 80, 120);
+      // Animated pulse
+      this.tweens.add({
+        targets: focalGlow,
+        alpha: { from: 0.7, to: 1 },
+        duration: 2200,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+    } catch (e) { console.error('[StoreInterior] focal glow failed', e); }
+
     const npc = this.add.graphics();
 
     // Shadow ellipse
@@ -367,6 +397,37 @@ export class StoreInterior extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(9);
 
+    // ── Mostrador del vendedor ────────────────────────────────────
+    try {
+      const counterG = this.add.graphics().setDepth(3);
+      const ctrX = vx - 44;
+      const ctrY = vy + 58;
+      const ctrW = 88;
+      const ctrH = 18;
+      // Depth face
+      counterG.fillStyle(0x0a0016, 1);
+      counterG.fillRect(ctrX, ctrY + ctrH, ctrW, 7);
+      // Counter surface
+      counterG.fillStyle(0x1a0e38, 1);
+      counterG.fillRect(ctrX, ctrY, ctrW, ctrH);
+      counterG.lineStyle(1, GOLD, 0.6);
+      counterG.strokeRect(ctrX, ctrY, ctrW, ctrH);
+      // Top edge highlight
+      counterG.lineStyle(1, GOLD, 0.9);
+      counterG.lineBetween(ctrX, ctrY, ctrX + ctrW, ctrY);
+      // Small items on counter
+      counterG.fillStyle(GOLD, 0.55);
+      counterG.fillRect(ctrX + 8, ctrY - 8, 10, 8);  // folded item
+      counterG.lineStyle(1, 0x000000, 0.3);
+      counterG.strokeRect(ctrX + 8, ctrY - 8, 10, 8);
+      counterG.fillStyle(0xffffff, 0.35);
+      counterG.fillRect(ctrX + 24, ctrY - 6, 6, 6);   // small card/receipt
+      counterG.fillStyle(NEON, 0.5);
+      counterG.fillRect(ctrX + ctrW - 20, ctrY - 7, 14, 7);  // small bag
+      counterG.lineStyle(1, 0x000000, 0.25);
+      counterG.strokeRect(ctrX + ctrW - 20, ctrY - 7, 14, 7);
+    } catch (e) { console.error('[StoreInterior] counter failed', e); }
+
     // SPACE prompt badge
     const spaceG = this.add.graphics();
     spaceG.fillStyle(0x000000, 0.85);
@@ -389,6 +450,33 @@ export class StoreInterior extends Phaser.Scene {
       repeat: -1,
       ease: 'Sine.easeInOut',
     });
+
+    // ── Extra wall shelves (right wall, behind product list area) ─
+    try {
+      const rshelfG = this.add.graphics().setDepth(1);
+      const rsX = roomR - 20;  // right wall
+      const shelfStartY = roomY + 72;
+      const shelfCount = 4;
+      const shelfSpacing = 52;
+      for (let si = 0; si < shelfCount; si++) {
+        const sy = shelfStartY + si * shelfSpacing;
+        const sw = 16;
+        const sd = 48;
+        // Shelf bracket protruding from right wall
+        rshelfG.fillStyle(0x17173a, 1);
+        rshelfG.fillRect(rsX - sw, sy, sw, 5);
+        rshelfG.lineStyle(1, GOLD, 0.25);
+        rshelfG.strokeRect(rsX - sw, sy, sw, 5);
+        // Items stacked on shelf (small rectangles)
+        const stackColors = [0x1a1a1a, 0xD94444, 0x556B2F, 0xE8E8E8, 0x222266];
+        for (let ii = 0; ii < 3; ii++) {
+          rshelfG.fillStyle(stackColors[(si * 3 + ii) % stackColors.length], 0.6);
+          rshelfG.fillRect(rsX - sw + ii * 5, sy - 8 - ii * 2, 4, 8 + ii * 2);
+          rshelfG.lineStyle(1, 0x000000, 0.2);
+          rshelfG.strokeRect(rsX - sw + ii * 5, sy - 8 - ii * 2, 4, 8 + ii * 2);
+        }
+      }
+    } catch (e) { console.error('[StoreInterior] right wall shelves failed', e); }
 
     // ── Product list ─────────────────────────────────────────────
     const listCX  = roomX + 460;  // center x of cards

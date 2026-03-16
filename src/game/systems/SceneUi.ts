@@ -129,6 +129,68 @@ export function transitionToScene(
   });
 }
 
+/**
+ * showSceneTitle — shows a large centered title overlay on scene fade-in.
+ * Fade in 200ms → hold 800ms → fade out 400ms, then self-destructs.
+ * Depth 15000, scrollFactor 0 (always on screen).
+ */
+export function showSceneTitle(scene: Phaser.Scene, title: string, color = 0xF5C842) {
+  const W = 800;
+  const H = 600;
+  const cx = W / 2;
+  const cy = H / 2;
+
+  // Semi-transparent dark backdrop
+  const bg = scene.add.rectangle(cx, cy, W, 80, 0x000000, 0.72)
+    .setScrollFactor(0)
+    .setDepth(15000)
+    .setAlpha(0);
+
+  // Convert hex number to CSS color string (#RRGGBB)
+  const hexStr = `#${color.toString(16).padStart(6, '0')}`;
+
+  const text = scene.add.text(cx, cy, title, {
+    fontSize: '18px',
+    fontFamily: '"Press Start 2P", monospace',
+    color: hexStr,
+    stroke: '#000000',
+    strokeThickness: 4,
+  })
+    .setOrigin(0.5)
+    .setScrollFactor(0)
+    .setDepth(15001)
+    .setAlpha(0);
+
+  const destroy = () => {
+    bg.destroy();
+    text.destroy();
+  };
+
+  // Fade in
+  scene.tweens.add({
+    targets: [bg, text],
+    alpha: 1,
+    duration: 200,
+    ease: 'Sine.easeOut',
+    onComplete: () => {
+      // Hold
+      scene.time.delayedCall(800, () => {
+        // Fade out
+        scene.tweens.add({
+          targets: [bg, text],
+          alpha: 0,
+          duration: 400,
+          ease: 'Sine.easeIn',
+          onComplete: destroy,
+        });
+      });
+    },
+  });
+
+  // Safety cleanup if scene shuts down early
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, destroy);
+}
+
 export function bindSafeResetToPlaza(scene: Phaser.Scene, onReset: () => void) {
   const handler = () => {
     try {

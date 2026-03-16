@@ -133,6 +133,7 @@ type DummyState = {
   archetype: EnemyArchetype;
   nameplate: Phaser.GameObjects.Text;
   hpBar: Phaser.GameObjects.Graphics;
+  shapeGfx: Phaser.GameObjects.Graphics; // procedural shape visual
   sprite?: EnemySprite;
   hp: number;
   maxHp: number;
@@ -143,6 +144,8 @@ type DummyState = {
   alive: boolean;
   tint: number;
   lastShotAt: number;
+  lastHurtAt: number;   // timestamp of last damage received (for hurt flash)
+  hpBarShowUntil: number; // hp bar only visible after being hit
   speed: number;
   preferredDistance: number;
   strafe: number;
@@ -413,6 +416,12 @@ export class WorldScene extends Phaser.Scene {
   private combatHud?: Phaser.GameObjects.Text;
   private progressionHud?: Phaser.GameObjects.Text;
   private weaponHud?: Phaser.GameObjects.Text;
+  // HUD visual upgrades
+  private xpBar?: Phaser.GameObjects.Graphics;
+  private levelBadgeBg?: Phaser.GameObjects.Rectangle;
+  private levelBadgeText?: Phaser.GameObjects.Text;
+  private weaponCooldownBar?: Phaser.GameObjects.Graphics;
+  private hpDamagedAt = -9999; // timestamp for HP bar border flash
   private gunSprite?: Phaser.GameObjects.Sprite;
   private dummyStates = new Map<CombatDummy, DummyState>();
   private currentWeapon: WeaponMode = 'pistol';
@@ -484,6 +493,13 @@ export class WorldScene extends Phaser.Scene {
   private camaraTickMs = 15000;  // earn every 15s
   private camaraTenksPerTick = 10;
   private camaraHud?: Phaser.GameObjects.Text;
+
+  // Minimap
+  private minimapGraphics?: Phaser.GameObjects.Graphics;
+  private minimapPlayerDot?: Phaser.GameObjects.Arc;
+  private minimapRemoteDots = new Map<string, Phaser.GameObjects.Arc>();
+  private minimapContainer?: Phaser.GameObjects.Container;
+  private minimapTitle?: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'WorldScene' });
@@ -596,6 +612,7 @@ export class WorldScene extends Phaser.Scene {
     this.drawLampPosts();
     this.drawCamaraDelTiempo();
     this.drawVignette();
+    this.runBootStep('ambient particles', () => this.setupAmbientParticles());
 
     // CAMARA DEL TIEMPO hud (hidden by default)
     this.camaraHud = this.add.text(0, 0, '', {
@@ -721,6 +738,9 @@ export class WorldScene extends Phaser.Scene {
     // Training arena
     this.runBootStep('training zone', () => this.setupTrainingZone());
 
+    // Minimap
+    this.runBootStep('minimap', () => this.setupMinimap());
+
     // Scene music
     this.sceneMusic = startSceneMusic(this, 'world_ambient', 0.35);
   }
@@ -807,29 +827,87 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private setupHpHud() {
+    // Level badge — small pill in the top-left corner
+    this.levelBadgeBg = this.add.rectangle(8 + 52, 12, 108, 14, 0x0A0A12, 0.88)
+      .setScrollFactor(0)
+      .setDepth(9998)
+      .setStrokeStyle(1, 0xF5C842, 0.55)
+      .setOrigin(0, 0.5);
+    this.levelBadgeText = this.add.text(12, 12, '', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+    }).setScrollFactor(0).setDepth(9999).setOrigin(0, 0.5);
+
     this.hpBar = this.add.graphics().setScrollFactor(0).setDepth(9999);
     this.hpText = this.add.text(8, 28, '', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#FF6666',
     }).setScrollFactor(0).setDepth(9999);
+
+    // XP bar — thin, below the HP bar
+    this.xpBar = this.add.graphics().setScrollFactor(0).setDepth(9998);
+
     this.renderHpHud();
   }
 
   private renderHpHud() {
-    const w = 120;
-    const h = 8;
+    const w = 140;
+    const h = 9;
     const x = 8;
-    const y = 44;
+    const y = 40;
     const pct = Phaser.Math.Clamp(this.hp / 100, 0, 1);
+
+    // HP bar background + fill
     this.hpBar.clear();
-    this.hpBar.fillStyle(0x000000, 0.55);
-    this.hpBar.fillRoundedRect(x, y, w, h, 2);
-    this.hpBar.fillStyle(0xFF4444, 0.85);
+    this.hpBar.fillStyle(0x050508, 0.78);
+    this.hpBar.fillRoundedRect(x, y, w, h, 3);
+
+    // Fill color: green when healthy, yellow when hurt, red when critical
+    const fillColor = pct > 0.5 ? 0xFF3333 : pct > 0.25 ? 0xFF6B1A : 0xFF1111;
+    this.hpBar.fillStyle(fillColor, 0.9);
     this.hpBar.fillRoundedRect(x + 1, y + 1, Math.max(0, (w - 2) * pct), h - 2, 2);
-    this.hpBar.lineStyle(1, 0xFFFFFF, 0.12);
-    this.hpBar.strokeRoundedRect(x, y, w, h, 2);
+
+    // Neon border: flashes red on damage, otherwise gold
+    const isDamageFlash = this.time && (this.time.now - this.hpDamagedAt < 220);
+    const borderColor = isDamageFlash ? 0xFF3333 : 0xF5C842;
+    const borderAlpha = isDamageFlash ? 0.95 : 0.7;
+    this.hpBar.lineStyle(2, borderColor, borderAlpha);
+    this.hpBar.strokeRoundedRect(x, y, w, h, 3);
+
     this.hpText.setText(`HP ${this.hp}`);
+    this.hpText.setPosition(x, y - 13);
+
+    // Sync level badge
+    if (this.levelBadgeText) {
+      const lvl = this.progression?.level ?? 1;
+      const maxLvl = getMaxProgressionLevel();
+      this.levelBadgeText.setText(`LVL ${lvl}/${maxLvl}`);
+    }
+
+    // Render XP bar (thin bar below HP)
+    this.renderXpBar();
+  }
+
+  private renderXpBar() {
+    if (!this.xpBar) return;
+    const w = 140;
+    const h = 4;
+    const x = 8;
+    const y = 52; // just below HP bar
+    const prog = this.progression;
+    const pct = prog.nextLevelAt === null
+      ? 1
+      : Phaser.Math.Clamp(prog.xp / prog.nextLevelAt, 0, 1);
+
+    this.xpBar.clear();
+    this.xpBar.fillStyle(0x050508, 0.6);
+    this.xpBar.fillRoundedRect(x, y, w, h, 2);
+    this.xpBar.fillStyle(0x46B3FF, 0.8);
+    this.xpBar.fillRoundedRect(x + 1, y + 1, Math.max(0, (w - 2) * pct), h - 2, 1);
+    this.xpBar.lineStyle(1, 0x46B3FF, 0.3);
+    this.xpBar.strokeRoundedRect(x, y, w, h, 2);
   }
 
   private ensureWeaponAnimations() {
@@ -878,6 +956,9 @@ export class WorldScene extends Phaser.Scene {
       color: '#F5C842',
     }).setScrollFactor(0).setDepth(9999);
 
+    // Weapon cooldown bar — thin bar below weapon text, refills as cooldown expires
+    this.weaponCooldownBar = this.add.graphics().setScrollFactor(0).setDepth(9998);
+
     this.syncWeaponVisual();
   }
 
@@ -904,6 +985,34 @@ export class WorldScene extends Phaser.Scene {
     this.weaponHud.setColor(this.currentWeapon === 'shotgun' ? '#FF8B3D' : '#F5C842');
     this.weaponHud.setText(`ARMA ${weapon.label} | Q CAMBIA`);
     this.updateWeaponSpritePosition();
+  }
+
+  private renderWeaponCooldownBar() {
+    if (!this.weaponCooldownBar || !this.gunEnabled) {
+      this.weaponCooldownBar?.clear();
+      return;
+    }
+    const weapon = WEAPON_STATS[this.currentWeapon];
+    const elapsed = this.time.now - this.lastShotAt;
+    const pct = Phaser.Math.Clamp(elapsed / weapon.cooldownMs, 0, 1);
+    const w = 140;
+    const h = 3;
+    const x = 8;
+    const y = this.scale.height - 28;
+    const weaponColor = weapon.color;
+
+    this.weaponCooldownBar.clear();
+    this.weaponCooldownBar.fillStyle(0x050508, 0.6);
+    this.weaponCooldownBar.fillRoundedRect(x, y, w, h, 1);
+    // Fill with weapon color — full when ready, shorter when cooling down
+    if (pct > 0) {
+      this.weaponCooldownBar.fillStyle(weaponColor, pct >= 1 ? 0.9 : 0.55);
+      this.weaponCooldownBar.fillRoundedRect(x + 1, y, Math.max(0, (w - 2) * pct), h, 1);
+    }
+    // Glow border when fully ready
+    this.weaponCooldownBar.lineStyle(1, weaponColor, pct >= 1 ? 0.5 : 0.15);
+    this.weaponCooldownBar.strokeRoundedRect(x, y, w, h, 1);
+    this.weaponCooldownBar.setVisible(this.hudSettings.showArenaHud);
   }
 
   private updateWeaponSpritePosition() {
@@ -1056,6 +1165,11 @@ export class WorldScene extends Phaser.Scene {
         `LVL ${this.progression.level}/${getMaxProgressionLevel()} | XP ${this.progression.xp}`,
         `KOs ${this.progression.kills} | NEXT ${nextLabel}`,
       ]);
+      // Sync XP bar and level badge whenever progression changes
+      this.renderXpBar();
+      if (this.levelBadgeText) {
+        this.levelBadgeText.setText(`LVL ${this.progression.level}/${getMaxProgressionLevel()}`);
+      }
     });
   }
 
@@ -1065,6 +1179,16 @@ export class WorldScene extends Phaser.Scene {
     this.combatHud?.setVisible(visible);
     this.progressionHud?.setVisible(visible);
     this.weaponHud?.setVisible(visible && this.gunEnabled);
+    // HP/XP/level badge always visible (not gated by arena HUD toggle)
+    this.hpBar?.setVisible(true);
+    this.hpText?.setVisible(true);
+    this.xpBar?.setVisible(true);
+    this.levelBadgeBg?.setVisible(true);
+    this.levelBadgeText?.setVisible(true);
+    this.weaponCooldownBar?.setVisible(visible && this.gunEnabled);
+    // Minimap follows arena HUD toggle
+    this.minimapContainer?.setVisible(visible);
+    this.minimapTitle?.setVisible(visible);
   }
 
   private getEnemyNameColor(archetype: EnemyArchetype) {
@@ -1159,11 +1283,14 @@ export class WorldScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(32);
 
     const hpBar = this.add.graphics().setDepth(31);
+    // Procedural shape graphics — drawn each frame with shape per archetype
+    const shapeGfx = this.add.graphics().setDepth(30.5);
     const state: DummyState = {
       label,
       archetype,
       nameplate,
       hpBar,
+      shapeGfx,
       sprite: zombieSprite,
       hp: profile.maxHp,
       maxHp: profile.maxHp,
@@ -1174,6 +1301,8 @@ export class WorldScene extends Phaser.Scene {
       alive: true,
       tint: profile.tint,
       lastShotAt: 0,
+      lastHurtAt: -9999,
+      hpBarShowUntil: -9999,
       speed: profile.speed,
       preferredDistance: profile.preferredDistance,
       strafe: profile.strafe,
@@ -1197,24 +1326,146 @@ export class WorldScene extends Phaser.Scene {
 
   private renderDummyState(dummy: CombatDummy, state: DummyState) {
     if (!isLiveGameObject(dummy) || !state.nameplate?.scene || !state.hpBar?.scene) return;
-    const nameplateOffset = state.archetype === 'boss' ? -76 : state.archetype === 'tank' ? -58 : -42;
-    state.nameplate.setPosition(dummy.x, dummy.y + nameplateOffset);
-    state.sprite?.setPosition(dummy.x, dummy.y);
-    try {
-      state.hpBar.clear();
-    } catch (error) {
-      console.error('[Waspi] Failed to clear dummy hp bar safely.', error);
+
+    // Clear graphics
+    try { state.hpBar.clear(); } catch { return; }
+    try { state.shapeGfx.clear(); } catch { /* ignore */ }
+
+    if (!state.alive) {
+      state.nameplate.setPosition(dummy.x, dummy.y - 42);
+      state.sprite?.setPosition(dummy.x, dummy.y);
       return;
     }
-    if (!state.alive) return;
 
-    const width = state.archetype === 'tank' ? 52 : 42;
-    const height = 5;
-    const pct = Phaser.Math.Clamp(state.hp / state.maxHp, 0, 1);
-    state.hpBar.fillStyle(0x000000, 0.55);
-    state.hpBar.fillRoundedRect(dummy.x - width / 2, dummy.y - 24, width, height, 2);
-    state.hpBar.fillStyle(state.archetype === 'tank' ? 0xB74DFF : state.archetype === 'shooter' ? 0xFF8B3D : 0x39FF14, 0.85);
-    state.hpBar.fillRoundedRect(dummy.x - width / 2 + 1, dummy.y - 23, (width - 2) * pct, height - 2, 2);
+    // Idle bob — each enemy offset by phase so they don't sync
+    const bob = Math.sin(this.time.now / 280 + state.phase) * 2.5;
+    const cx = dummy.x;
+    const cy = dummy.y + bob;
+    const r = state.radius;
+
+    const nameplateOffset = state.archetype === 'boss' ? -76 : state.archetype === 'tank' ? -58 : -42;
+    state.nameplate.setPosition(cx, cy + nameplateOffset);
+    state.sprite?.setPosition(cx, cy);
+
+    const now = this.time.now;
+    const isHurt = (now - state.lastHurtAt) < 180;
+
+    // ── Proximity agro glow ──────────────────────────────────────────────────
+    const distToPlayer = Phaser.Math.Distance.Between(cx, cy, this.px, this.py);
+    if (distToPlayer < 220) {
+      const agroAlpha = Phaser.Math.Clamp((1 - distToPlayer / 220) * 0.35, 0, 0.35);
+      const agroScale = 1 + Math.sin(now / 160) * 0.08;
+      state.shapeGfx.lineStyle(2, state.tint, agroAlpha);
+      state.shapeGfx.strokeCircle(cx, cy, r * agroScale + 8);
+    }
+
+    // ── Procedural shape per archetype ───────────────────────────────────────
+    const fillColor = isHurt ? 0xFFFFFF : state.tint;
+    const fillAlpha = isHurt ? 0.95 : 0.92;
+    state.shapeGfx.fillStyle(fillColor, fillAlpha);
+
+    if (state.archetype === 'rusher') {
+      // Upward-pointing triangle — fast and aggressive
+      state.shapeGfx.fillTriangle(
+        cx, cy - r,                    // apex
+        cx - r * 0.82, cy + r * 0.6,  // bottom-left
+        cx + r * 0.82, cy + r * 0.6,  // bottom-right
+      );
+      // Dark inner detail
+      if (!isHurt) {
+        state.shapeGfx.fillStyle(0x000000, 0.3);
+        state.shapeGfx.fillTriangle(cx, cy - r * 0.3, cx - r * 0.3, cy + r * 0.35, cx + r * 0.3, cy + r * 0.35);
+      }
+      // Border
+      state.shapeGfx.lineStyle(isHurt ? 2 : 1.5, isHurt ? 0xFFFFFF : 0xFF8B8B, isHurt ? 0.9 : 0.6);
+      state.shapeGfx.strokeTriangle(cx, cy - r, cx - r * 0.82, cy + r * 0.6, cx + r * 0.82, cy + r * 0.6);
+
+    } else if (state.archetype === 'shooter') {
+      // Rounded square body + barrel stub pointing toward player
+      state.shapeGfx.fillRoundedRect(cx - r, cy - r, r * 2, r * 2, 4);
+      // Eye / sensor circle
+      if (!isHurt) {
+        state.shapeGfx.fillStyle(0x000000, 0.55);
+        state.shapeGfx.fillCircle(cx, cy, r * 0.38);
+        state.shapeGfx.fillStyle(0xFF8B3D, 0.9);
+        state.shapeGfx.fillCircle(cx, cy, r * 0.18);
+      }
+      // Barrel stub toward player
+      const barrelAngle = Phaser.Math.Angle.Between(cx, cy, this.px, this.py);
+      const bx = cx + Math.cos(barrelAngle) * (r + 2);
+      const by = cy + Math.sin(barrelAngle) * (r + 2);
+      state.shapeGfx.fillStyle(isHurt ? 0xFFFFFF : 0xFF8B3D, 0.85);
+      state.shapeGfx.fillRect(bx - 3, by - 3, 6 + r * 0.5, 6);
+      // Border
+      state.shapeGfx.lineStyle(1.5, isHurt ? 0xFFFFFF : 0xFFC38D, isHurt ? 0.9 : 0.5);
+      state.shapeGfx.strokeRoundedRect(cx - r, cy - r, r * 2, r * 2, 4);
+
+    } else if (state.archetype === 'tank') {
+      // Hexagon — solid and heavy
+      const hexPoints: Phaser.Types.Math.Vector2Like[] = [];
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 3) * i - Math.PI / 6;
+        hexPoints.push({ x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r });
+      }
+      state.shapeGfx.fillPoints(hexPoints, true);
+      // Inner hex detail
+      if (!isHurt) {
+        state.shapeGfx.fillStyle(0x000000, 0.25);
+        const innerHex: Phaser.Types.Math.Vector2Like[] = [];
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i - Math.PI / 6;
+          innerHex.push({ x: cx + Math.cos(angle) * r * 0.55, y: cy + Math.sin(angle) * r * 0.55 });
+        }
+        state.shapeGfx.fillPoints(innerHex, true);
+      }
+      // Border
+      state.shapeGfx.lineStyle(2, isHurt ? 0xFFFFFF : 0xD8A8FF, isHurt ? 0.9 : 0.6);
+      state.shapeGfx.strokePoints(hexPoints, true);
+
+    } else if (state.archetype === 'boss') {
+      // 8-pointed star — intimidating
+      const outerR = r;
+      const innerR = r * 0.44;
+      const starPoints: Phaser.Types.Math.Vector2Like[] = [];
+      for (let i = 0; i < 16; i++) {
+        const angle = (Math.PI * 2 * i) / 16 - Math.PI / 2;
+        const rad = i % 2 === 0 ? outerR : innerR;
+        starPoints.push({ x: cx + Math.cos(angle) * rad, y: cy + Math.sin(angle) * rad });
+      }
+      // Pulsing outer glow for boss
+      const bossGlowR = outerR + 6 + Math.sin(now / 180) * 4;
+      state.shapeGfx.fillStyle(state.tint, 0.08 + Math.sin(now / 180) * 0.04);
+      state.shapeGfx.fillCircle(cx, cy, bossGlowR);
+      // Star body
+      state.shapeGfx.fillStyle(fillColor, fillAlpha);
+      state.shapeGfx.fillPoints(starPoints, true);
+      // Center eye
+      if (!isHurt) {
+        state.shapeGfx.fillStyle(0x000000, 0.6);
+        state.shapeGfx.fillCircle(cx, cy, r * 0.28);
+        state.shapeGfx.fillStyle(0x3DD6FF, 0.9);
+        state.shapeGfx.fillCircle(cx, cy, r * 0.14);
+      }
+      // Border
+      state.shapeGfx.lineStyle(2, isHurt ? 0xFFFFFF : 0x7FE8FF, isHurt ? 0.9 : 0.65);
+      state.shapeGfx.strokePoints(starPoints, true);
+    }
+
+    // ── HP bar — only visible after being hit ────────────────────────────────
+    if (now < state.hpBarShowUntil) {
+      const width = state.archetype === 'boss' ? 56 : state.archetype === 'tank' ? 52 : 42;
+      const height = 5;
+      const pct = Phaser.Math.Clamp(state.hp / state.maxHp, 0, 1);
+      const barColor = state.archetype === 'tank' ? 0xB74DFF : state.archetype === 'shooter' ? 0xFF8B3D : state.archetype === 'boss' ? 0x3DD6FF : 0x39FF14;
+      const barY = cy - r - 10;
+      state.hpBar.fillStyle(0x000000, 0.65);
+      state.hpBar.fillRoundedRect(cx - width / 2, barY, width, height, 2);
+      state.hpBar.fillStyle(barColor, 0.9);
+      state.hpBar.fillRoundedRect(cx - width / 2 + 1, barY + 1, Math.max(0, (width - 2) * pct), height - 2, 1);
+      // Gold border
+      state.hpBar.lineStyle(1, 0xF5C842, 0.35);
+      state.hpBar.strokeRoundedRect(cx - width / 2, barY, width, height, 2);
+    }
   }
 
   private damageDummy(dummy: CombatDummy, damage: number, knockback: number) {
@@ -1224,6 +1475,9 @@ export class WorldScene extends Phaser.Scene {
     this.ensureAudioReady();
     this.playCombatTone(state.isBoss ? 220 : 260, 0.045, 'triangle', 0.05);
     state.hp = Math.max(0, state.hp - damage);
+    // Trigger hurt flash and make HP bar visible for 2.5s
+    state.lastHurtAt = this.time.now;
+    state.hpBarShowUntil = this.time.now + 2500;
     const pushAngle = Phaser.Math.Angle.Between(this.px, this.py, dummy.x, dummy.y);
     try {
       dummy.setPosition(
@@ -1238,10 +1492,19 @@ export class WorldScene extends Phaser.Scene {
     flash.setDepth(5000);
     this.tweens.add({ targets: flash, alpha: 0, scale: 1.8, duration: 180, onComplete: () => safeDestroyGameObject(flash) });
 
+    // Floating damage number — color by weapon, size by damage magnitude
+    const dmgColor = this.currentWeapon === 'shotgun'
+      ? '#FF8B3D'
+      : this.currentWeapon === 'blaster'
+        ? '#46B3FF'
+        : (this.currentWeapon === 'uzi' || this.currentWeapon === 'cannon')
+          ? '#39FF14'
+          : '#F5C842'; // pistol / deagle / fallback → dorado
+    const dmgFontSize = damage >= 30 ? '10px' : damage >= 15 ? '9px' : '8px';
     const hitNumber = this.add.text(dummy.x, dummy.y - 8, `-${damage}`, {
-      fontSize: '8px',
+      fontSize: dmgFontSize,
       fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
+      color: dmgColor,
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(5001);
@@ -1253,6 +1516,30 @@ export class WorldScene extends Phaser.Scene {
       ease: 'Sine.easeOut',
       onComplete: () => safeDestroyGameObject(hitNumber),
     });
+
+    // Critical hit label for high damage
+    if (damage >= 30) {
+      try {
+        const critText = this.add.text(dummy.x, dummy.y - 22, 'CRIT!', {
+          fontSize: '9px',
+          fontFamily: '"Press Start 2P", monospace',
+          color: '#FF3333',
+          stroke: '#000000',
+          strokeThickness: 3,
+        }).setOrigin(0.5).setDepth(5002);
+        this.tweens.add({
+          targets: critText,
+          y: dummy.y - 46,
+          alpha: { from: 1, to: 0 },
+          scale: { from: 1.1, to: 0.9 },
+          duration: 560,
+          ease: 'Sine.easeOut',
+          onComplete: () => safeDestroyGameObject(critText),
+        });
+      } catch (e) {
+        console.error('[Waspi] CRIT text failed', e);
+      }
+    }
 
     state.sprite?.setState('hurt');
     this.renderDummyState(dummy, state);
@@ -1377,6 +1664,8 @@ export class WorldScene extends Phaser.Scene {
         if (this.time.now < state.respawnAt) continue;
         state.alive = true;
         state.hp = state.maxHp;
+        state.lastHurtAt = -9999;
+        state.hpBarShowUntil = -9999;
         dummy.body.enable = true;
         dummy.setAlpha(0);
         state.sprite?.revive();
@@ -1528,6 +1817,7 @@ export class WorldScene extends Phaser.Scene {
 
   private applyLocalDamage(dmg: number, sourceX: number, sourceY: number) {
     this.lastDamageAt = this.time.now;
+    this.hpDamagedAt = this.time.now; // triggers HP bar border flash
     this.hp = Math.max(0, this.hp - dmg);
     this.renderHpHud();
     this.playCombatTone(90, 0.08, 'triangle', 0.045);
@@ -1551,6 +1841,32 @@ export class WorldScene extends Phaser.Scene {
       ease: 'Sine.easeOut',
       onComplete: () => avatarFlash.destroy(),
     });
+
+    // Hit tint flash — tint all container children red briefly
+    try {
+      const avatarContainer = this.playerAvatar.getContainer();
+      if (avatarContainer?.active) {
+        type Tintable = { setTint?: (c: number) => void; clearTint?: () => void };
+        avatarContainer.each((child: Phaser.GameObjects.GameObject) => {
+          try {
+            (child as unknown as Tintable).setTint?.(0xFF3333);
+          } catch (_e) { /* child may not support setTint */ }
+        });
+        this.time.delayedCall(100, () => {
+          try {
+            if (avatarContainer.active) {
+              avatarContainer.each((child: Phaser.GameObjects.GameObject) => {
+                try {
+                  (child as unknown as Tintable).clearTint?.();
+                } catch (_e) { /* ignore */ }
+              });
+            }
+          } catch (_e) { /* ignore */ }
+        });
+      }
+    } catch (_e) {
+      console.error('[Waspi] Avatar hit tint failed', _e);
+    }
 
     const pushAngle = Phaser.Math.Angle.Between(sourceX, sourceY, this.px, this.py);
     this.px += Math.cos(pushAngle) * 20;
@@ -1665,8 +1981,10 @@ export class WorldScene extends Phaser.Scene {
 
     const ang = Phaser.Math.Angle.Between(this.px, this.py, wx, wy);
 
-    // Muzzle flash
-    const flash = this.add.circle(this.px + Math.cos(ang) * 14, this.py + Math.sin(ang) * 14, this.currentWeapon === 'shotgun' ? 10 : 7, weapon.color, 0.95);
+    // Muzzle flash — colored outer ring expanding
+    const muzzleX = this.px + Math.cos(ang) * 14;
+    const muzzleY = this.py + Math.sin(ang) * 14;
+    const flash = this.add.circle(muzzleX, muzzleY, this.currentWeapon === 'shotgun' ? 10 : 7, weapon.color, 0.95);
     flash.setDepth(2100);
     this.tweens.add({
       targets: flash,
@@ -1675,6 +1993,21 @@ export class WorldScene extends Phaser.Scene {
       duration: 120,
       onComplete: () => flash.destroy(),
     });
+    // Muzzle flash — inner white/yellow bright spot, alpha 0→1→0 over ~80ms
+    try {
+      const innerFlash = this.add.circle(muzzleX, muzzleY, this.currentWeapon === 'shotgun' ? 5 : 4, 0xFFFAB0, 0);
+      innerFlash.setDepth(2101);
+      this.tweens.add({
+        targets: innerFlash,
+        alpha: { from: 0, to: 1 },
+        duration: 20,
+        yoyo: true,
+        hold: 40,
+        onComplete: () => innerFlash.destroy(),
+      });
+    } catch (_e) {
+      console.error('[Waspi] Inner muzzle flash failed', _e);
+    }
 
     // Subtle recoil on hands/weapon — duration synced to weapon cooldown (cap 150ms)
     const recoilX = Math.cos(ang) * -2;
@@ -2433,6 +2766,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private drawBuildings() {
+    this.drawBuildingShadows();
     // ARCADE
     this.drawArcadeBuilding();
     // WASPI STORE
@@ -2441,6 +2775,39 @@ export class WorldScene extends Phaser.Scene {
     this.drawCafeBuilding();
     // CASINO
     this.drawCasinoBuilding();
+    this.drawBuildingEntranceMarkers();
+  }
+
+  /** Drop shadows: dark offset rects drawn just above the ground, behind each building facade */
+  private drawBuildingShadows() {
+    const g = this.add.graphics().setDepth(1.5);
+    const ox = 14;
+    const oy = 14;
+    [BUILDINGS.ARCADE, BUILDINGS.STORE, BUILDINGS.CAFE, BUILDINGS.CASINO].forEach(({ x, y, w, h }) => {
+      g.fillStyle(0x000000, 0.38);
+      g.fillRect(x + ox, y + oy, w, h);
+    });
+  }
+
+  /** Permanent floor marker + chevron in front of each entrance — always visible, subtle */
+  private drawBuildingEntranceMarkers() {
+    const markerG = this.add.graphics().setDepth(1.8);
+    const doors: Array<{ cx: number; floorY: number; color: number }> = [
+      { cx: BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2, floorY: BUILDINGS.ARCADE.y + BUILDINGS.ARCADE.h, color: 0x46B3FF },
+      { cx: BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2,  floorY: BUILDINGS.STORE.y + BUILDINGS.STORE.h,  color: 0xF5C842 },
+      { cx: BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2,    floorY: BUILDINGS.CAFE.y + BUILDINGS.CAFE.h,    color: 0xFF8B3D },
+      { cx: BUILDINGS.CASINO.x + BUILDINGS.CASINO.w / 2, floorY: BUILDINGS.CASINO.y + BUILDINGS.CASINO.h, color: 0xF5C842 },
+    ];
+    doors.forEach(({ cx, floorY, color }) => {
+      // Soft colored floor zone in front of door
+      markerG.fillStyle(color, 0.07);
+      markerG.fillRoundedRect(cx - 48, floorY + 2, 96, 34, 6);
+      markerG.lineStyle(1, color, 0.22);
+      markerG.strokeRoundedRect(cx - 48, floorY + 2, 96, 34, 6);
+      // Small downward chevron pointing into the door
+      markerG.fillStyle(color, 0.4);
+      markerG.fillTriangle(cx, floorY + 30, cx - 11, floorY + 16, cx + 11, floorY + 16);
+    });
   }
 
   private drawArcadeBuilding() {
@@ -3266,6 +3633,41 @@ export class WorldScene extends Phaser.Scene {
       g.fillStyle(0xFFFFAA);
       g.fillCircle(lx + 179, southY - 117, 4);
     }
+  }
+
+  /** Floating ambient dust/firefly particles — neon dots that drift slowly across the world */
+  private setupAmbientParticles() {
+    // Spread across the world in clusters near active areas
+    const spawnAreas = [
+      { x: 0,    y: ZONES.PLAZA_Y,  w: WORLD.WIDTH, h: WORLD.HEIGHT - ZONES.PLAZA_Y },  // lower world / plaza
+      { x: 0,    y: ZONES.STREET_Y, w: WORLD.WIDTH / 2, h: 200 },                         // street left half
+    ];
+    const neonColors = [0x46B3FF, 0x39FF14, 0xFF006E, 0xF5C842, 0xB388FF];
+
+    spawnAreas.forEach(({ x, y, w, h }) => {
+      const count = Math.floor((w * h) / 40000); // density ~1 per 40k px²
+      for (let i = 0; i < Math.min(count, 18); i++) {
+        const px = x + Phaser.Math.Between(0, w);
+        const py = y + Phaser.Math.Between(0, h);
+        const color = neonColors[Math.floor(Math.random() * neonColors.length)];
+        const r = Phaser.Math.Between(1, 2);
+        const particle = this.add.circle(px, py, r, color, Phaser.Math.FloatBetween(0.08, 0.25))
+          .setDepth(0.5);
+
+        // Slow drift tween — each particle moves independently
+        this.tweens.add({
+          targets: particle,
+          x: px + Phaser.Math.Between(-50, 50),
+          y: py + Phaser.Math.Between(-35, 35),
+          alpha: { from: particle.fillAlpha, to: 0 },
+          duration: Phaser.Math.Between(4000, 9000),
+          ease: 'Sine.easeInOut',
+          yoyo: true,
+          repeat: -1,
+          delay: Phaser.Math.Between(0, 6000),
+        });
+      }
+    });
   }
 
   private spawnAmbientNPCs() {
@@ -4731,6 +5133,7 @@ export class WorldScene extends Phaser.Scene {
     }
 
     this.runFrameStep('weapon visuals', () => this.updateWeaponSpritePosition());
+    this.runFrameStep('weapon cooldown bar', () => this.renderWeaponCooldownBar());
 
     // Football follow animation
     if (this.football && this.ballEnabled) {
@@ -4803,6 +5206,8 @@ export class WorldScene extends Phaser.Scene {
         this.syncHitboxPosition(rp.hitbox, rp.x, rp.y);
       }
     });
+
+    this.runFrameStep('minimap', () => this.renderMinimap());
   }
 
   // ─── Interaction ───────────────────────────────────────────────────────────────
@@ -4881,7 +5286,9 @@ export class WorldScene extends Phaser.Scene {
     const rgb = Phaser.Display.Color.IntegerToRGB(target.color);
     this.interactionHint.setText(target.label);
     this.interactionHint.setColor(`rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`);
-    this.interactionHint.setPosition(target.x, target.y - target.h / 2 - 10);
+    // Gentle bob: ±4px on a ~1.8s cycle
+    const bobY = Math.sin(this.time.now / 280) * 4;
+    this.interactionHint.setPosition(target.x, target.y - target.h / 2 - 12 + bobY);
     this.interactionHint.setAlpha(1);
   }
 
@@ -5179,6 +5586,116 @@ export class WorldScene extends Phaser.Scene {
   private readAvatarAction(payload: unknown): AvatarAction | undefined {
     const action = this.readStringField(payload, 'action');
     return action === 'shoot' || action === 'hurt' || action === 'death' ? action : undefined;
+  }
+
+  // ─── Minimap ──────────────────────────────────────────────────────────────────
+
+  private setupMinimap() {
+    const mapW = 160;
+    const mapH = 100;
+    const marginRight = 10;
+    const marginTop = 10;
+    const x = this.scale.width - marginRight - mapW;
+    const y = marginTop;
+
+    // Static background + building rects drawn once
+    this.minimapGraphics = this.add.graphics()
+      .setScrollFactor(0)
+      .setDepth(9990);
+    this.minimapGraphics.fillStyle(0x000000, 0.72);
+    this.minimapGraphics.fillRect(x, y, mapW, mapH);
+    this.minimapGraphics.lineStyle(1.5, 0x46B3FF, 0.6);
+    this.minimapGraphics.strokeRect(x, y, mapW, mapH);
+
+    const scaleX = mapW / WORLD.WIDTH;
+    const scaleY = mapH / WORLD.HEIGHT;
+
+    // Buildings
+    const buildingDefs: Array<{ b: { x: number; y: number; w: number; h: number }; color: number }> = [
+      { b: BUILDINGS.ARCADE, color: 0x46B3FF },
+      { b: BUILDINGS.STORE,  color: 0xF5C842 },
+      { b: BUILDINGS.CAFE,   color: 0xFF8B3D },
+      { b: BUILDINGS.CASINO, color: 0xB74DFF },
+    ];
+    for (const { b, color } of buildingDefs) {
+      this.minimapGraphics.fillStyle(color, 0.55);
+      this.minimapGraphics.fillRect(
+        x + b.x * scaleX,
+        y + b.y * scaleY,
+        b.w * scaleX,
+        b.h * scaleY,
+      );
+    }
+
+    // Player dot (will be repositioned each frame)
+    this.minimapPlayerDot = this.add.circle(x, y, 2.5, 0xF5C842, 1)
+      .setScrollFactor(0)
+      .setDepth(9993) as Phaser.GameObjects.Arc;
+
+    // "MAP" title label
+    this.minimapTitle = this.add.text(x + mapW / 2, y + 3, 'MAP', {
+      fontSize: '5px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#46B3FF',
+    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(9994);
+
+    // Container for easy show/hide (graphics & title)
+    this.minimapContainer = this.add.container(0, 0, [
+      this.minimapGraphics,
+      this.minimapPlayerDot,
+      this.minimapTitle,
+    ]).setScrollFactor(0).setDepth(9990);
+
+    // Apply initial visibility
+    const visible = this.hudSettings.showArenaHud;
+    this.minimapContainer.setVisible(visible);
+    this.minimapTitle.setVisible(visible);
+  }
+
+  private renderMinimap() {
+    if (!this.minimapContainer || !this.minimapPlayerDot) return;
+    if (!this.minimapContainer.visible) return;
+
+    const mapW = 160;
+    const mapH = 100;
+    const marginRight = 10;
+    const marginTop = 10;
+    const originX = this.scale.width - marginRight - mapW;
+    const originY = marginTop;
+    const scaleX = mapW / WORLD.WIDTH;
+    const scaleY = mapH / WORLD.HEIGHT;
+
+    // Update local player dot
+    this.minimapPlayerDot.setPosition(
+      originX + this.px * scaleX,
+      originY + this.py * scaleY,
+    );
+
+    // Sync remote player dots
+    const activeIds = new Set<string>();
+    for (const [id, rp] of this.remotePlayers) {
+      activeIds.add(id);
+      let dot = this.minimapRemoteDots.get(id);
+      if (!dot || !dot.active) {
+        dot = this.add.circle(0, 0, 2, 0x46B3FF, 1)
+          .setScrollFactor(0)
+          .setDepth(9992) as Phaser.GameObjects.Arc;
+        this.minimapRemoteDots.set(id, dot);
+      }
+      dot.setPosition(
+        originX + rp.x * scaleX,
+        originY + rp.y * scaleY,
+      );
+      dot.setVisible(this.minimapContainer.visible);
+    }
+
+    // Remove dots for players that have left
+    for (const [id, dot] of this.minimapRemoteDots) {
+      if (!activeIds.has(id)) {
+        dot.destroy();
+        this.minimapRemoteDots.delete(id);
+      }
+    }
   }
 
   private parseRemoteHit(payload: unknown): RemoteHitEvent | null {

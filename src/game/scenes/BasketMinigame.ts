@@ -35,6 +35,8 @@ export class BasketMinigame extends Phaser.Scene {
   private rewardRunId = '';
   private rewardRunPromise: Promise<void> | null = null;
 
+  private countdownActive = false;
+
   private keySpace!: Phaser.Input.Keyboard.Key;
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private hud!: Phaser.GameObjects.Text;
@@ -50,6 +52,8 @@ export class BasketMinigame extends Phaser.Scene {
   private ball!: Phaser.GameObjects.Arc;
   private shadow!: Phaser.GameObjects.Ellipse;
   private scoreText!: Phaser.GameObjects.Text;
+  private timerBarBg!: Phaser.GameObjects.Rectangle;
+  private timerBar!: Phaser.GameObjects.Rectangle;
   private controls!: SceneControls;
 
   private hoopBaseX = 0;
@@ -64,6 +68,7 @@ export class BasketMinigame extends Phaser.Scene {
   private resetSceneState() {
     this.phase = 'aiming';
     this.isFinished = false;
+    this.countdownActive = false;
     this.roundTimerMs = ROUND_MS;
     this.resultTimerMs = 0;
     this.cooldownMs = 0;
@@ -171,13 +176,24 @@ export class BasketMinigame extends Phaser.Scene {
     this.shadow = this.add.ellipse(this.ballStartX, this.ballStartY + 16, 26, 10, 0x000000, 0.28);
     this.ball = this.add.circle(this.ballStartX, this.ballStartY, 11, 0xf2872f, 1).setStrokeStyle(2, 0x5b2e0a, 1);
 
-    this.scoreText = this.add.text(width - 20, 18, '', {
-      fontSize: '8px',
+    // Score text — larger with neon stroke
+    this.scoreText = this.add.text(width - 16, 16, '', {
+      fontSize: '14px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842',
+      stroke: '#46B3FF',
+      strokeThickness: 3,
       align: 'right',
-      lineSpacing: 6,
+      lineSpacing: 8,
     }).setOrigin(1, 0);
+
+    // Timer bar — below HUD
+    const timerBarW = width - 36;
+    this.timerBarBg = this.add.rectangle(18, height - 16, timerBarW, 8, 0x111111, 1)
+      .setStrokeStyle(1, 0x333344, 1)
+      .setOrigin(0, 0.5);
+    this.timerBar = this.add.rectangle(18, height - 16, timerBarW, 8, 0x46B3FF, 1)
+      .setOrigin(0, 0.5);
 
     this.resultLabel = this.add.text(width / 2, 334, '', {
       fontSize: '14px',
@@ -197,10 +213,63 @@ export class BasketMinigame extends Phaser.Scene {
     this.cameras.main.setAlpha(1);
     this.cameras.main.fadeIn(220, 0, 0, 0);
     void this.prepareRewardRun();
+    this.runCountdown();
+  }
+
+  private runCountdown() {
+    this.countdownActive = true;
+    const cx = this.scale.width / 2;
+    const cy = this.scale.height / 2;
+    const steps = ['3', '2', '1', 'GO!'];
+    const colors = ['#F5C842', '#F5C842', '#39FF14', '#46B3FF'];
+    let idx = 0;
+
+    const showNext = () => {
+      if (idx >= steps.length) {
+        this.countdownActive = false;
+        return;
+      }
+      const label = this.add.text(cx, cy, steps[idx], {
+        fontSize: idx === steps.length - 1 ? '28px' : '36px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: colors[idx],
+        stroke: '#000000',
+        strokeThickness: 5,
+      }).setOrigin(0.5).setAlpha(0).setDepth(14000).setScrollFactor(0);
+
+      this.tweens.add({
+        targets: label,
+        alpha: { from: 0, to: 1 },
+        scaleX: { from: 1.6, to: 1 },
+        scaleY: { from: 1.6, to: 1 },
+        duration: 180,
+        ease: 'Back.easeOut',
+        onComplete: () => {
+          this.time.delayedCall(idx === steps.length - 1 ? 320 : 600, () => {
+            this.tweens.add({
+              targets: label,
+              alpha: 0,
+              scaleX: 0.7,
+              scaleY: 0.7,
+              duration: 180,
+              ease: 'Sine.easeIn',
+              onComplete: () => {
+                label.destroy();
+                idx += 1;
+                showNext();
+              },
+            });
+          });
+        },
+      });
+    };
+
+    showNext();
   }
 
   update(_time: number, delta: number) {
     if (this.isFinished) return;
+    if (this.countdownActive) return;
 
     if (this.controls.isActionJustDown('back')) {
       this.finishAndExit();
@@ -209,6 +278,18 @@ export class BasketMinigame extends Phaser.Scene {
 
     if (this.phase !== 'done' && this.phase !== 'exiting') {
       this.roundTimerMs = Math.max(0, this.roundTimerMs - delta);
+      // Update timer bar width
+      const timerBarW = this.scale.width - 36;
+      this.timerBar.width = timerBarW * (this.roundTimerMs / ROUND_MS);
+      // Color shifts red as time runs low
+      const pct = this.roundTimerMs / ROUND_MS;
+      if (pct < 0.25) {
+        this.timerBar.fillColor = 0xFF006E;
+      } else if (pct < 0.5) {
+        this.timerBar.fillColor = 0xF5C842;
+      } else {
+        this.timerBar.fillColor = 0x46B3FF;
+      }
       if (this.roundTimerMs === 0 && this.phase !== 'flying' && this.phase !== 'result') {
         this.enterDoneState();
         return;
@@ -391,6 +472,26 @@ export class BasketMinigame extends Phaser.Scene {
       this.lastResult = this.streak >= 3 ? 'HEAT CHECK!' : 'SWISH!';
       this.lastResultColor = '#39FF14';
       this.animateNet(true);
+      // Score punch-scale animation
+      this.tweens.add({
+        targets: this.scoreText,
+        scaleX: 1.4,
+        scaleY: 1.4,
+        duration: 80,
+        ease: 'Sine.easeOut',
+        yoyo: true,
+        onComplete: () => {
+          this.tweens.add({
+            targets: this.scoreText,
+            scaleX: 1,
+            scaleY: 1,
+            duration: 120,
+            ease: 'Back.easeOut',
+          });
+        },
+      });
+      // "NICE SHOT!" floating text
+      this.showFloatingLabel('NICE SHOT!', '#39FF14');
     } else if (isRim) {
       this.streak = 0;
       this.lastResult = 'ARO!';
@@ -419,6 +520,37 @@ export class BasketMinigame extends Phaser.Scene {
     this.phase = 'result';
     this.resultTimerMs = 460;
     this.refreshHud();
+  }
+
+  private showFloatingLabel(text: string, color: string) {
+    const cx = this.scale.width / 2;
+    const label = this.add.text(cx, 290, text, {
+      fontSize: '16px',
+      fontFamily: '"Press Start 2P", monospace',
+      color,
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setAlpha(0).setDepth(13000).setScrollFactor(0);
+
+    this.tweens.add({
+      targets: label,
+      alpha: 1,
+      y: 270,
+      duration: 180,
+      ease: 'Sine.easeOut',
+      onComplete: () => {
+        this.time.delayedCall(240, () => {
+          this.tweens.add({
+            targets: label,
+            alpha: 0,
+            y: 250,
+            duration: 380,
+            ease: 'Sine.easeIn',
+            onComplete: () => label.destroy(),
+          });
+        });
+      },
+    });
   }
 
   private animateNet(made: boolean) {

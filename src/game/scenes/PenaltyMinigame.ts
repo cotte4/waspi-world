@@ -27,6 +27,8 @@ export class PenaltyMinigame extends Phaser.Scene {
   private ballStartX = 0;
   private ballStartY = 0;
 
+  private countdownActive = false;
+
   private goalie!: Phaser.GameObjects.Container;
   private ball!: Phaser.GameObjects.Arc;
   private aimMarker!: Phaser.GameObjects.Arc;
@@ -35,6 +37,7 @@ export class PenaltyMinigame extends Phaser.Scene {
   private footer!: Phaser.GameObjects.Text;
   private resultLabel!: Phaser.GameObjects.Text;
   private summaryLabel!: Phaser.GameObjects.Text;
+  private shotsBar!: Phaser.GameObjects.Graphics;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private controls!: SceneControls;
@@ -45,6 +48,7 @@ export class PenaltyMinigame extends Phaser.Scene {
 
   private resetSceneState() {
     this.isFinished = false;
+    this.countdownActive = false;
     this.goals = 0;
     this.shotsTaken = 0;
     this.phase = 'aiming';
@@ -161,6 +165,10 @@ export class PenaltyMinigame extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5).setAlpha(0);
 
+    // Shot progress bar (shows remaining shots as dots/pips)
+    this.shotsBar = this.add.graphics().setDepth(200).setScrollFactor(0);
+    this.drawShotsBar();
+
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.input.on('pointerdown', this.handleShootInput, this);
@@ -170,10 +178,87 @@ export class PenaltyMinigame extends Phaser.Scene {
     this.cameras.main.resetFX();
     this.cameras.main.setAlpha(1);
     this.cameras.main.fadeIn(220, 0, 0, 0);
+    this.runCountdown();
+  }
+
+  private drawShotsBar() {
+    this.shotsBar.clear();
+    const cx = this.scale.width / 2;
+    const y = this.scale.height - 14;
+    const pipW = 18;
+    const pipH = 8;
+    const gap = 6;
+    const total = this.maxShots;
+    const startX = cx - ((pipW + gap) * total - gap) / 2;
+    for (let i = 0; i < total; i++) {
+      const px = startX + i * (pipW + gap);
+      const taken = i < this.shotsTaken;
+      const isGoal = taken && i < this.goals;
+      if (taken) {
+        this.shotsBar.fillStyle(isGoal ? 0x39FF14 : 0xFF006E, 1);
+      } else {
+        this.shotsBar.fillStyle(0x333344, 1);
+      }
+      this.shotsBar.fillRoundedRect(px, y - pipH / 2, pipW, pipH, 3);
+      this.shotsBar.lineStyle(1, 0x666688, 0.7);
+      this.shotsBar.strokeRoundedRect(px, y - pipH / 2, pipW, pipH, 3);
+    }
+  }
+
+  private runCountdown() {
+    this.countdownActive = true;
+    const cx = this.scale.width / 2;
+    const cy = this.scale.height / 2;
+    const steps = ['3', '2', '1', 'GO!'];
+    const colors = ['#F5C842', '#F5C842', '#39FF14', '#46B3FF'];
+    let idx = 0;
+
+    const showNext = () => {
+      if (idx >= steps.length) {
+        this.countdownActive = false;
+        return;
+      }
+      const label = this.add.text(cx, cy, steps[idx], {
+        fontSize: idx === steps.length - 1 ? '28px' : '36px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: colors[idx],
+        stroke: '#000000',
+        strokeThickness: 5,
+      }).setOrigin(0.5).setAlpha(0).setDepth(14000).setScrollFactor(0);
+
+      this.tweens.add({
+        targets: label,
+        alpha: { from: 0, to: 1 },
+        scaleX: { from: 1.6, to: 1 },
+        scaleY: { from: 1.6, to: 1 },
+        duration: 180,
+        ease: 'Back.easeOut',
+        onComplete: () => {
+          this.time.delayedCall(idx === steps.length - 1 ? 320 : 600, () => {
+            this.tweens.add({
+              targets: label,
+              alpha: 0,
+              scaleX: 0.7,
+              scaleY: 0.7,
+              duration: 180,
+              ease: 'Sine.easeIn',
+              onComplete: () => {
+                label.destroy();
+                idx += 1;
+                showNext();
+              },
+            });
+          });
+        },
+      });
+    };
+
+    showNext();
   }
 
   update(_time: number, delta: number) {
     if (this.isFinished) return;
+    if (this.countdownActive) return;
 
     if (this.controls.isActionJustDown('back')) {
       this.finishAndExit(false);
@@ -301,10 +386,13 @@ export class PenaltyMinigame extends Phaser.Scene {
     this.shotsTaken += 1;
     if (isGoal) this.goals += 1;
     this.refreshHud();
+    this.drawShotsBar();
 
     if (isGoal) {
       this.resultText = 'GOL!';
       this.resultColor = '#39FF14';
+      this.spawnConfetti();
+      this.showFloatingLabel('GOLAZO!', '#39FF14');
     } else if (!inGoal) {
       this.resultText = 'AFUERA!';
       this.resultColor = '#FF6B6B';
@@ -331,6 +419,68 @@ export class PenaltyMinigame extends Phaser.Scene {
 
     this.phase = 'result';
     this.resultTimerMs = 700;
+  }
+
+  private spawnConfetti() {
+    const cx = this.scale.width / 2;
+    const cy = this.scale.height / 2;
+    const confettiColors = [0xF5C842, 0x39FF14, 0xFF006E, 0x46B3FF, 0xFFFFFF, 0xFF8B3D];
+    const count = Phaser.Math.Between(8, 12);
+
+    for (let i = 0; i < count; i++) {
+      const color = confettiColors[i % confettiColors.length];
+      const circle = this.add.circle(cx, cy, Phaser.Math.Between(4, 8), color, 1)
+        .setDepth(13500)
+        .setScrollFactor(0);
+
+      const angle = (i / count) * Math.PI * 2 + Phaser.Math.FloatBetween(-0.3, 0.3);
+      const dist = Phaser.Math.Between(80, 160);
+      const targetX = cx + Math.cos(angle) * dist;
+      const targetY = cy + Math.sin(angle) * dist;
+
+      this.tweens.add({
+        targets: circle,
+        x: targetX,
+        y: targetY,
+        alpha: { from: 1, to: 0 },
+        scaleX: { from: 1, to: 0.2 },
+        scaleY: { from: 1, to: 0.2 },
+        duration: Phaser.Math.Between(500, 800),
+        ease: 'Sine.easeOut',
+        onComplete: () => circle.destroy(),
+      });
+    }
+  }
+
+  private showFloatingLabel(text: string, color: string) {
+    const cx = this.scale.width / 2;
+    const label = this.add.text(cx, 310, text, {
+      fontSize: '18px',
+      fontFamily: '"Press Start 2P", monospace',
+      color,
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setAlpha(0).setDepth(13000).setScrollFactor(0);
+
+    this.tweens.add({
+      targets: label,
+      alpha: 1,
+      y: 290,
+      duration: 180,
+      ease: 'Sine.easeOut',
+      onComplete: () => {
+        this.time.delayedCall(240, () => {
+          this.tweens.add({
+            targets: label,
+            alpha: 0,
+            y: 270,
+            duration: 420,
+            ease: 'Sine.easeIn',
+            onComplete: () => label.destroy(),
+          });
+        });
+      },
+    });
   }
 
   private resetForNextShot() {
