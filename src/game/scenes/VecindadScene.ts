@@ -40,6 +40,19 @@ type MaterialNode = {
   label: Phaser.GameObjects.Text;
 };
 
+type ForestMob = {
+  id: string;
+  x: number;
+  y: number;
+  homeX: number;
+  homeY: number;
+  targetX: number;
+  targetY: number;
+  speed: number;
+  body: Phaser.GameObjects.Ellipse;
+  label: Phaser.GameObjects.Text;
+};
+
 type VecindadSceneData = {
   returnX?: number;
   returnY?: number;
@@ -79,12 +92,15 @@ const FARM_SEEDS: Array<{
 
 export class VecindadScene extends Phaser.Scene {
   private static readonly MOVE_SPEED = 145;
+  private static readonly SPRINT_MULTIPLIER = 1.55;
   private static readonly FOREST_BOUNDS = {
     x: 140,
     y: 128,
     w: 2520,
     h: 360,
   } as const;
+  private static readonly FOREST_MOB_AGGRO_RANGE = 220;
+  private static readonly FOREST_MOB_BLOCK_RADIUS = 92;
   private player!: AvatarRenderer;
   private room?: InteriorRoom;
   private keySpace!: Phaser.Input.Keyboard.Key;
@@ -98,6 +114,7 @@ export class VecindadScene extends Phaser.Scene {
   private keyJ!: Phaser.Input.Keyboard.Key;
   private keyK!: Phaser.Input.Keyboard.Key;
   private keyL!: Phaser.Input.Keyboard.Key;
+  private shiftKey?: Phaser.Input.Keyboard.Key;
   private inTransition = false;
   private px: number = VECINDAD_MAP.SPAWN_X;
   private py: number = VECINDAD_MAP.SPAWN_Y;
@@ -114,6 +131,8 @@ export class VecindadScene extends Phaser.Scene {
   private sharedParcels = new Map<string, SharedParcelState>();
   private parcelVisuals = new Map<string, ParcelVisual>();
   private materialNodes: MaterialNode[] = [];
+  private forestMobs: ForestMob[] = [];
+  private lastForestHitAt = 0;
   private promptText?: Phaser.GameObjects.Text;
   private hudText?: Phaser.GameObjects.Text;
   private farmHintText?: Phaser.GameObjects.Text;
@@ -151,6 +170,7 @@ export class VecindadScene extends Phaser.Scene {
 
     this.drawDistrict();
     this.setupMaterialNodes();
+    this.setupForestMobs();
     this.drawParcels();
     this.createPlayer();
     this.setupUi();
@@ -168,6 +188,7 @@ export class VecindadScene extends Phaser.Scene {
     this.keyJ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.J);
     this.keyK = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.K);
     this.keyL = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.L);
+    this.shiftKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyE = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
     this.bridgeCleanupFns.push(bindSafeResetToPlaza(this, () => {
@@ -196,6 +217,7 @@ export class VecindadScene extends Phaser.Scene {
     }
     this.handleMovement(delta);
     this.room?.update();
+    this.updateForestMobs(delta);
     this.updateMaterialNodes();
     this.updatePrompt();
 
@@ -718,6 +740,93 @@ export class VecindadScene extends Phaser.Scene {
     });
   }
 
+  private setupForestMobs() {
+    if (this.forestMobs.length) return;
+    const defs = [
+      { x: 460, y: 210, speed: 48 },
+      { x: 760, y: 338, speed: 52 },
+      { x: 1100, y: 220, speed: 50 },
+      { x: 1460, y: 332, speed: 54 },
+      { x: 1820, y: 214, speed: 49 },
+      { x: 2210, y: 336, speed: 53 },
+    ];
+
+    defs.forEach((def, index) => {
+      const body = this.add.ellipse(def.x, def.y, 26, 18, 0x8d1f2d, 0.95)
+        .setStrokeStyle(2, 0x2b0c12, 0.95)
+        .setDepth(3.1);
+      const label = this.add.text(def.x, def.y - 20, 'MOB', {
+        fontSize: '6px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#FF8D8D',
+        stroke: '#000000',
+        strokeThickness: 2,
+      }).setOrigin(0.5).setDepth(3.2);
+      this.forestMobs.push({
+        id: `forest_mob_${index + 1}`,
+        x: def.x,
+        y: def.y,
+        homeX: def.x,
+        homeY: def.y,
+        targetX: def.x,
+        targetY: def.y,
+        speed: def.speed,
+        body,
+        label,
+      });
+    });
+  }
+
+  private updateForestMobs(delta: number) {
+    const forest = VecindadScene.FOREST_BOUNDS;
+    const now = this.time.now;
+    const dt = Math.max(0.001, delta / 1000);
+
+    for (const mob of this.forestMobs) {
+      const distToPlayer = Phaser.Math.Distance.Between(mob.x, mob.y, this.px, this.py);
+      if (distToPlayer <= VecindadScene.FOREST_MOB_AGGRO_RANGE) {
+        mob.targetX = this.px;
+        mob.targetY = this.py;
+      } else if (Phaser.Math.Distance.Between(mob.x, mob.y, mob.targetX, mob.targetY) < 18) {
+        mob.targetX = Phaser.Math.Clamp(mob.homeX + Phaser.Math.Between(-120, 120), forest.x + 24, forest.x + forest.w - 24);
+        mob.targetY = Phaser.Math.Clamp(mob.homeY + Phaser.Math.Between(-92, 92), forest.y + 24, forest.y + forest.h - 24);
+      }
+
+      const angle = Phaser.Math.Angle.Between(mob.x, mob.y, mob.targetX, mob.targetY);
+      mob.x = Phaser.Math.Clamp(mob.x + Math.cos(angle) * mob.speed * dt, forest.x + 18, forest.x + forest.w - 18);
+      mob.y = Phaser.Math.Clamp(mob.y + Math.sin(angle) * mob.speed * dt, forest.y + 18, forest.y + forest.h - 18);
+
+      mob.body.setPosition(mob.x, mob.y);
+      mob.body.setDepth(3 + Math.floor(mob.y / 400));
+      mob.label.setPosition(mob.x, mob.y - 20);
+
+      if (distToPlayer < 26 && now - this.lastForestHitAt > 1200) {
+        this.lastForestHitAt = now;
+        const knockAngle = Phaser.Math.Angle.Between(mob.x, mob.y, this.px, this.py);
+        this.px = Phaser.Math.Clamp(this.px + Math.cos(knockAngle) * 40, 84, VECINDAD_MAP.WIDTH - 84);
+        this.py = Phaser.Math.Clamp(this.py + Math.sin(knockAngle) * 40, 84, VECINDAD_MAP.HEIGHT - 84);
+        this.player.setPosition(this.px, this.py);
+        this.player.setDepth(50 + Math.floor(this.py / 10));
+
+        const lost = Math.min(2, this.vecindadState.materials);
+        if (lost > 0) {
+          const nextState: VecindadState = {
+            ...this.vecindadState,
+            materials: this.vecindadState.materials - lost,
+          };
+          this.vecindadState = nextState;
+          this.refreshParcelVisuals();
+          eventBus.emit(EVENTS.VECINDAD_UPDATE_REQUEST, {
+            vecindad: nextState,
+            notice: `Un mob te golpeo: -${lost} materiales`,
+          });
+        } else {
+          eventBus.emit(EVENTS.UI_NOTICE, { msg: 'Un mob te golpeo en el bosque.', color: '#FF8D8D' });
+        }
+      }
+    }
+  }
+
   private renderHud() {
     if (!this.hudText) return;
     const stage = normalizeVecindadBuildStage(this.vecindadState.buildStage);
@@ -780,6 +889,12 @@ export class VecindadScene extends Phaser.Scene {
     );
   }
 
+  private isNodeContested(node: MaterialNode) {
+    return this.forestMobs.some((mob) =>
+      Phaser.Math.Distance.Between(mob.x, mob.y, node.x, node.y) < VecindadScene.FOREST_MOB_BLOCK_RADIUS
+    );
+  }
+
   private updatePrompt() {
     if (!this.promptText) return;
 
@@ -791,8 +906,13 @@ export class VecindadScene extends Phaser.Scene {
 
     const material = this.getNearbyMaterialNode();
     if (material) {
-      this.promptText.setText(`E RECOGER CACHE DEL BOSQUE +${material.value} MATS`);
-      this.promptText.setColor('#B9FF9E');
+      if (this.isNodeContested(material)) {
+        this.promptText.setText('MOBS CERCA: ALEJALOS PARA RECOGER');
+        this.promptText.setColor('#FF8D8D');
+      } else {
+        this.promptText.setText(`E RECOGER CACHE DEL BOSQUE +${material.value} MATS`);
+        this.promptText.setColor('#B9FF9E');
+      }
       return;
     }
 
@@ -867,6 +987,10 @@ export class VecindadScene extends Phaser.Scene {
 
     const material = this.getNearbyMaterialNode();
     if (material) {
+      if (this.isNodeContested(material)) {
+        eventBus.emit(EVENTS.UI_NOTICE, { msg: 'Hay mobs vigilando ese cache.', color: '#FF8D8D' });
+        return;
+      }
       this.collectMaterial(material);
       return;
     }
@@ -1313,7 +1437,9 @@ export class VecindadScene extends Phaser.Scene {
   }
 
   private handleMovement(delta: number) {
-    const speed = (VecindadScene.MOVE_SPEED * delta) / 1000;
+    const isSprinting = !!this.shiftKey?.isDown;
+    const effectiveSpeed = VecindadScene.MOVE_SPEED * (isSprinting ? VecindadScene.SPRINT_MULTIPLIER : 1);
+    const speed = (effectiveSpeed * delta) / 1000;
     let { dx, dy } = this.controls.readMovement(true);
     if (dx !== 0 && dy !== 0) {
       dx *= 0.707;

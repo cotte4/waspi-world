@@ -463,7 +463,7 @@ export default function PlayPage() {
       const result = payload as PenaltyResultPayload;
       if (!result?.won) return;
       if (!tokenRef.current) {
-        setUiNotice({ msg: 'Ganaste el minijuego. Inicia sesion para guardar el descuento.', color: '#46B3FF' });
+        setUiNotice({ msg: 'Ganaste el minijuego. Inicia sesion para acreditar TENKS.', color: '#46B3FF' });
         return;
       }
 
@@ -490,10 +490,8 @@ export default function PlayPage() {
         if (json.player) {
           applyPlayerState(json.player as PlayerState);
         }
-        if (json.reward?.code) {
-          setShopStatus(`Ganaste ${json.reward.percentOff}% OFF. Codigo: ${json.reward.code}`);
-          setUiNotice({ msg: `Premio guardado: ${json.reward.percentOff}% OFF · Codigo ${json.reward.code}` });
-        }
+        const earned = typeof json.tenksEarned === 'number' ? json.tenksEarned : 0;
+        setUiNotice({ msg: earned > 0 ? `Premio guardado: +${earned} TENKS` : 'Partida registrada.' });
       })();
     });
 

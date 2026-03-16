@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getAuthenticatedUser } from '@/src/lib/supabaseServer';
 import { DEFAULT_PLAYER_STATE, creditTenks, normalizePlayerState } from '@/src/lib/playerState';
-import { appendTenksTransaction, createDiscountCode, ensureCatalogSeeded, ensurePlayerRow, recordGameSession } from '@/src/lib/commercePersistence';
+import { appendTenksTransaction, ensureCatalogSeeded, ensurePlayerRow, recordGameSession } from '@/src/lib/commercePersistence';
+
+const PENALTY_TENKS_REWARD = 220;
 
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser(request.headers.get('authorization'));
@@ -22,21 +24,14 @@ export async function POST(request: NextRequest) {
   await ensureCatalogSeeded(admin);
   const current = normalizePlayerState(user.user_metadata?.waspiPlayer ?? DEFAULT_PLAYER_STATE);
   let next = current;
-  let discount: { code: string; percent_off: number; expires_at: string } | null = null;
 
   if (won) {
-    next = creditTenks(current, 220);
+    next = creditTenks(current, PENALTY_TENKS_REWARD);
     await appendTenksTransaction(admin, {
       playerId: user.id,
-      amount: 220,
+      amount: PENALTY_TENKS_REWARD,
       reason: 'penalty_win',
       balanceAfter: next.tenks,
-    });
-    discount = await createDiscountCode(admin, {
-      playerId: user.id,
-      percentOff: 10,
-      source: 'penalty_win',
-      expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
     });
   }
 
@@ -46,8 +41,8 @@ export async function POST(request: NextRequest) {
     minigame: 'penalty',
     score: goals,
     result: won ? 'win' : 'lose',
-    tenksEarned: won ? 220 : 0,
-    rewardCode: discount?.code ?? null,
+    tenksEarned: won ? PENALTY_TENKS_REWARD : 0,
+    rewardCode: null,
   });
 
   const { error } = await admin.auth.admin.updateUserById(user.id, {
@@ -65,13 +60,7 @@ export async function POST(request: NextRequest) {
     won,
     goals,
     shots,
-    reward: discount
-      ? {
-          code: discount.code,
-          percentOff: discount.percent_off,
-          expiresAt: discount.expires_at,
-        }
-      : null,
+    tenksEarned: won ? PENALTY_TENKS_REWARD : 0,
     player: next,
   });
 }

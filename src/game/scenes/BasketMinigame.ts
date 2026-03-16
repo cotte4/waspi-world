@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { addTenks, initTenks } from '../systems/TenksSystem';
+import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
+import { initTenks } from '../systems/TenksSystem';
 import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
@@ -55,11 +56,14 @@ export class BasketMinigame extends Phaser.Scene {
   private timerBarBg!: Phaser.GameObjects.Rectangle;
   private timerBar!: Phaser.GameObjects.Rectangle;
   private controls!: SceneControls;
+  private shooterAvatar?: AvatarRenderer;
 
   private hoopBaseX = 0;
   private readonly hoopY = 212;
   private ballStartX = 0;
   private ballStartY = 0;
+  private shooterX = 0;
+  private shooterY = 0;
 
   constructor() {
     super({ key: 'BasketMinigame' });
@@ -101,8 +105,10 @@ export class BasketMinigame extends Phaser.Scene {
 
     const hoopBaseX = width / 2 + 150;
     this.hoopBaseX = hoopBaseX;
-    this.ballStartX = width / 2 - 180;
-    this.ballStartY = height - 112;
+    this.shooterX = width / 2 - 206;
+    this.shooterY = height - 106;
+    this.ballStartX = this.shooterX + 14;
+    this.ballStartY = this.shooterY - 8;
 
     this.cameras.main.setBackgroundColor('#0d1020');
 
@@ -172,6 +178,9 @@ export class BasketMinigame extends Phaser.Scene {
     this.hoopNet = this.add.graphics();
     this.redrawNet(0);
     this.hoop.add([this.hoopBoard, this.hoopRim, this.hoopNet]);
+
+    this.shooterAvatar = new AvatarRenderer(this, this.shooterX, this.shooterY, loadStoredAvatarConfig());
+    this.shooterAvatar.setDepth(50);
 
     this.shadow = this.add.ellipse(this.ballStartX, this.ballStartY + 16, 26, 10, 0x000000, 0.28);
     this.ball = this.add.circle(this.ballStartX, this.ballStartY, 11, 0xf2872f, 1).setStrokeStyle(2, 0x5b2e0a, 1);
@@ -418,6 +427,7 @@ export class BasketMinigame extends Phaser.Scene {
   private takeShot() {
     this.phase = 'flying';
     this.cooldownMs = SHOT_COOLDOWN_MS;
+    this.shooterAvatar?.playShoot();
     this.shotsTaken += 1;
     this.refreshHud();
     this.resultLabel.setAlpha(0);
@@ -812,5 +822,7 @@ export class BasketMinigame extends Phaser.Scene {
 
   private handleShutdown() {
     this.input.off('pointerdown', this.handleShootInput, this);
+    this.shooterAvatar?.destroy();
+    this.shooterAvatar = undefined;
   }
 }

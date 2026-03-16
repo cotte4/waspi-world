@@ -344,6 +344,13 @@ const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
 const WEAPON_FALLBACK_TEXTURE = 'weapon_fallback_rect';
 
 export class WorldScene extends Phaser.Scene {
+  private static readonly GUN_SHOP_BOUNDS = {
+    x: 2100,
+    y: ZONES.PLAZA_Y + 190,
+    w: 280,
+    h: 210,
+  } as const;
+
   // Player
   private px: number = PLAYER.SPAWN_X;
   private py: number = PLAYER.SPAWN_Y;
@@ -2360,8 +2367,8 @@ export class WorldScene extends Phaser.Scene {
       color: '#C0C2CC',
     }).setOrigin(0.5).setDepth(2);
 
-    // Future plaza anchors
-    this.drawConstructionSite(2220, ZONES.PLAZA_Y + 190, 280, 210, 'GUN SHOP', '#46B3FF');
+    // Final plaza anchor: gun shop now active
+    this.drawGunShopBuilding();
 
     // Plaza text
     this.add.text(fx, ZONES.PLAZA_Y + 20, 'PLAZA', {
@@ -2673,10 +2680,19 @@ export class WorldScene extends Phaser.Scene {
         stroke: '#000000',
         strokeThickness: 3,
       }).setScrollFactor(0).setDepth(9999);
+      this.vecindadHud.setVisible(this.isInsideVecindadDistrict());
       return;
     }
 
     this.vecindadHud.setText(text);
+    this.vecindadHud.setVisible(this.isInsideVecindadDistrict());
+  }
+
+  private isInsideVecindadDistrict() {
+    return this.px >= ZONES.VECINDAD_X
+      && this.px <= ZONES.VECINDAD_X + ZONES.VECINDAD_W
+      && this.py >= ZONES.VECINDAD_Y
+      && this.py <= ZONES.VECINDAD_Y + ZONES.VECINDAD_H;
   }
 
   private drawVignette() {
@@ -2705,46 +2721,48 @@ export class WorldScene extends Phaser.Scene {
     g.fillRect(x + 14, y + 8, 8, 10);
   }
 
-  private drawConstructionSite(x: number, y: number, w: number, h: number, label: string, accentHex: string) {
+  private drawGunShopBuilding() {
+    const { x, y, w, h } = WorldScene.GUN_SHOP_BOUNDS;
     const g = this.add.graphics().setDepth(1.4);
+    const accentHex = '#46B3FF';
     const accent = Number(`0x${accentHex.replace('#', '')}`);
 
-    // Site slab
-    g.fillStyle(0x18161f, 0.95);
+    // Outer slab
+    g.fillStyle(0x101425, 0.95);
     g.fillRoundedRect(x, y, w, h, 16);
-    g.lineStyle(3, 0x3b3544, 0.9);
+    g.lineStyle(3, 0x2b3755, 0.95);
     g.strokeRoundedRect(x, y, w, h, 16);
 
-    // Excavation / unfinished footprint
-    g.fillStyle(0x23202b, 1);
-    g.fillRoundedRect(x + 22, y + 34, w - 44, h - 62, 10);
-    g.lineStyle(2, 0x4d4658, 0.8);
-    g.strokeRoundedRect(x + 22, y + 34, w - 44, h - 62, 10);
+    // Main facade
+    g.fillStyle(0x161d33, 1);
+    g.fillRoundedRect(x + 18, y + 30, w - 36, h - 50, 12);
+    g.lineStyle(2, 0x314674, 0.9);
+    g.strokeRoundedRect(x + 18, y + 30, w - 36, h - 50, 12);
 
-    // Metal frame
-    g.lineStyle(4, 0x8a8f9d, 0.85);
-    g.strokeRect(x + 58, y + 54, w - 116, h - 106);
-    g.lineBetween(x + 58, y + 54, x + 88, y + 26);
-    g.lineBetween(x + w - 58, y + 54, x + w - 88, y + 26);
-    g.lineBetween(x + 58, y + h - 52, x + 88, y + h - 24);
-    g.lineBetween(x + w - 58, y + h - 52, x + w - 88, y + h - 24);
+    // Neon strips
+    g.fillStyle(accent, 0.75);
+    g.fillRect(x + 30, y + 48, w - 60, 4);
+    g.fillRect(x + 30, y + 162, w - 60, 4);
 
-    // Safety stripes
-    g.fillStyle(0x000000, 0.28);
-    g.fillRoundedRect(x + 28, y + h - 42, w - 56, 18, 8);
-    for (let i = 0; i < 12; i++) {
-      const sx = x + 36 + i * 18;
-      g.fillStyle(i % 2 === 0 ? 0xF5C842 : 0x111111, 0.95);
-      g.fillRect(sx, y + h - 40, 12, 14);
-    }
+    // Window displays
+    g.fillStyle(0x0a0f1d, 1);
+    g.fillRoundedRect(x + 34, y + 72, 72, 76, 8);
+    g.fillRoundedRect(x + w - 106, y + 72, 72, 76, 8);
+    g.lineStyle(2, accent, 0.5);
+    g.strokeRoundedRect(x + 34, y + 72, 72, 76, 8);
+    g.strokeRoundedRect(x + w - 106, y + 72, 72, 76, 8);
 
-    // Crane-ish silhouette
-    g.fillStyle(0x5d6778, 1);
-    g.fillRect(x + w - 46, y - 26, 10, 124);
-    g.fillRect(x + w - 92, y - 20, 72, 8);
-    g.fillRect(x + w - 80, y - 8, 8, 46);
-    g.fillStyle(accent, 0.85);
-    g.fillRect(x + w - 112, y - 28, 96, 12);
+    // Door
+    const doorW = 58;
+    const doorH = 88;
+    const doorX = x + w / 2 - doorW / 2;
+    const doorY = y + h - doorH - 14;
+    g.fillStyle(0x090d18, 1);
+    g.fillRoundedRect(doorX, doorY, doorW, doorH, 10);
+    g.lineStyle(2, accent, 0.85);
+    g.strokeRoundedRect(doorX, doorY, doorW, doorH, 10);
+    g.fillStyle(accent, 0.9);
+    g.fillRect(doorX + doorW - 10, doorY + 42, 4, 12);
 
     // Signboard
     g.fillStyle(0x2b2016, 1);
@@ -2752,7 +2770,7 @@ export class WorldScene extends Phaser.Scene {
     g.lineStyle(2, accent, 0.85);
     g.strokeRoundedRect(x + 44, y - 34, 156, 36, 8);
 
-    this.add.text(x + 122, y - 16, label, {
+    this.add.text(x + 122, y - 16, 'GUN SHOP', {
       fontSize: '9px',
       fontFamily: '"Press Start 2P", monospace',
       color: accentHex,
@@ -2760,19 +2778,27 @@ export class WorldScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(2);
 
-    this.add.text(x + w / 2, y + h / 2 + 12, 'UNDER CONSTRUCTION', {
-      fontSize: '7px',
+    this.add.text(x + w / 2, y + h / 2 + 12, 'OPEN NOW', {
+      fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
-      color: '#C5CBD8',
+      color: '#B8D4FF',
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(2);
 
-    this.add.text(x + w / 2, y + h / 2 + 36, 'COMING SOON', {
+    this.add.text(x + w / 2, y + h / 2 + 36, 'SPACE ENTRAR', {
       fontSize: '6px',
       fontFamily: '"Press Start 2P", monospace',
-      color: '#888EA0',
+      color: '#7AA7E8',
     }).setOrigin(0.5).setDepth(2);
+  }
+
+  private getGunDealerPosition() {
+    const { x, y, w, h } = WorldScene.GUN_SHOP_BOUNDS;
+    return {
+      x: x + w / 2,
+      y: y + h - 10,
+    };
   }
 
   private drawBuildings() {
@@ -3714,8 +3740,7 @@ export class WorldScene extends Phaser.Scene {
   // ─── Gun Dealer NPC ──────────────────────────────────────────────────────────
 
   private spawnGunDealerNPC() {
-    const x = 1100;
-    const y = 870;
+    const { x, y } = this.getGunDealerPosition();
     const cfg: AvatarConfig = {
       bodyColor: 0xC17A4A,
       hairColor: 0x000000,
@@ -5162,6 +5187,9 @@ export class WorldScene extends Phaser.Scene {
     this.handleMovement(delta);
     this.syncPosition();
     this.chatSystem.update();
+    const showVecindadOverlay = this.isInsideVecindadDistrict();
+    this.vecindadHud?.setVisible(showVecindadOverlay);
+    this.parcelPrompt?.setVisible(showVecindadOverlay);
     this.runFrameStep('training combat', () => this.updateDummies());
     this.runFrameStep('interaction highlight', () => this.updateInteractionHighlight());
     this.handleInteraction();
@@ -5275,6 +5303,8 @@ export class WorldScene extends Phaser.Scene {
   // ─── Interaction ───────────────────────────────────────────────────────────────
 
   private getInteractionTarget(): InteractionTarget | null {
+    const gunShopBounds = WorldScene.GUN_SHOP_BOUNDS;
+    const { x: gunDealerX, y: gunDealerY } = this.getGunDealerPosition();
     const arcadeDoorX = BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2;
     const storeDoorX = BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2;
     const cafeDoorX = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
@@ -5290,6 +5320,9 @@ export class WorldScene extends Phaser.Scene {
     const nearArcade = Math.abs(this.px - arcadeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearStore = Math.abs(this.px - storeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearCafe = Math.abs(this.px - cafeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
+    const nearGunShop = Math.abs(this.px - gunDealerX) < 86
+      && this.py >= gunShopBounds.y + gunShopBounds.h - 120
+      && this.py <= gunShopBounds.y + gunShopBounds.h + 74;
 
     if (nearVecindad) {
       return { x: 120, y: ZONES.PLAZA_Y + 40, w: 140, h: 80, label: 'SPACE ENTRAR VECINDAD', color: 0xF5C842, sceneKey: 'VecindadScene' };
@@ -5312,12 +5345,8 @@ export class WorldScene extends Phaser.Scene {
     if (nearCasino) {
       return { x: casinoDoorX, y: BUILDINGS.CASINO.y + BUILDINGS.CASINO.h - 28, w: 120, h: 80, label: 'SPACE ENTRAR CASINO', color: 0xF5C842, sceneKey: 'CasinoInterior' };
     }
-
-    const GUN_DEALER_X = 1100;
-    const GUN_DEALER_Y = 870;
-    const nearGunDealer = Math.abs(this.px - GUN_DEALER_X) < 100 && Math.abs(this.py - GUN_DEALER_Y) < 100;
-    if (nearGunDealer && !this.gunShopOpen) {
-      return { x: GUN_DEALER_X, y: GUN_DEALER_Y - 30, w: 160, h: 70, label: 'SPACE HABLAR CON DEALER', color: 0xFF6B35, npcKey: 'gunDealer' };
+    if (nearGunShop && !this.gunShopOpen) {
+      return { x: gunDealerX, y: gunDealerY - 30, w: 160, h: 70, label: 'SPACE HABLAR CON DEALER', color: 0x46B3FF, npcKey: 'gunDealer' };
     }
 
     const COTTENKS_X = 1615;

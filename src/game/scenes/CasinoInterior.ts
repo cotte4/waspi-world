@@ -500,7 +500,7 @@ export class CasinoInterior extends Phaser.Scene {
     if (!this.overlayMode || !this.overlayBg || !this.overlayFrame || !this.overlayTitle || !this.overlayBody || !this.overlayFooter || !this.overlayAccent) return;
     this.clearCasinoVisuals();
     const cx = this.scale.width / 2; const cy = this.roomY + this.roomH / 2; const panelW = 500;
-    const panelH = this.overlayMode === 'poker' ? 290 : this.overlayMode === 'roulette' ? 270 : 230;
+    const panelH = this.overlayMode === 'poker' ? 360 : this.overlayMode === 'roulette' ? 270 : 230;
     const panelX = cx - panelW / 2; const panelY = cy - panelH / 2;
     const accentColor = this.overlayMode === 'slots' ? 0xF5C842 : this.overlayMode === 'roulette' ? 0xFF5A5A : this.overlayMode === 'poker' ? 0x8B5CF6 : 0x22CC88;
     this.overlayBg.clear(); this.overlayBg.fillStyle(0x000000, 0.78); this.overlayBg.fillRect(0, 0, this.scale.width, this.scale.height); this.overlayBg.fillStyle(0x0a0716, 0.96); this.overlayBg.fillRoundedRect(panelX, panelY, panelW, panelH, 12);
@@ -1215,18 +1215,18 @@ export class CasinoInterior extends Phaser.Scene {
     const { phase, anteIndex, playerHole, cpuHole, community, pot, resultText, actionIndex, cpuLastAction } = this.holdemState;
 
     // ── Header ──
-    this.overlayAccent.setPosition(cx + 180, cy - 128).setText(`SALDO: ${balance} T`).setVisible(true);
-    this.overlayTitle.setPosition(cx - 150, cy - 128).setText('POKER').setVisible(true);
+    this.overlayAccent.setPosition(cx + 180, cy - 162).setText(`SALDO: ${balance} T`).setVisible(true);
+    this.overlayTitle.setPosition(cx - 150, cy - 162).setText('POKER').setVisible(true);
     this.overlayBody.setVisible(false);
 
     // Pot display
-    this.addV(this.add.text(cx, cy - 128, `POT: ${pot} T`, { fontSize: '9px', fontFamily: '"Press Start 2P", monospace', color: 0xF5C842 < 1 ? '#F5C842' : '#F5C842', align: 'center' }).setOrigin(0.5).setDepth(34));
+    this.addV(this.add.text(cx, cy - 162, `POT: ${pot} T`, { fontSize: '9px', fontFamily: '"Press Start 2P", monospace', color: 0xF5C842 < 1 ? '#F5C842' : '#F5C842', align: 'center' }).setOrigin(0.5).setDepth(34));
 
     // Phase strip
     const phases: HoldemPhase[] = ['ante', 'preflop', 'flop', 'turn', 'river', 'showdown'];
     const phaseLabels = ['ANTE', 'PRE-FLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN'];
     const stripG = this.addV(this.add.graphics().setDepth(33));
-    const stripY = cy - 114; const stripW = 460; const stripX = cx - stripW / 2;
+    const stripY = cy - 146; const stripW = 460; const stripX = cx - stripW / 2;
     stripG.fillStyle(0x060410, 0.8); stripG.fillRoundedRect(stripX, stripY, stripW, 14, 3);
     phases.forEach((ph, idx) => {
       const pw = stripW / phases.length; const px = stripX + idx * pw;
@@ -1237,16 +1237,16 @@ export class CasinoInterior extends Phaser.Scene {
 
     // ── Felt table area ──
     const feltG = this.addV(this.add.graphics().setDepth(32));
-    feltG.fillStyle(0x0b3d1f, 0.9); feltG.fillRoundedRect(cx - 230, cy - 98, 460, 210, 8);
-    feltG.lineStyle(1, 0x1a6a35, 0.5); feltG.strokeRoundedRect(cx - 230, cy - 98, 460, 210, 8);
+    feltG.fillStyle(0x0b3d1f, 0.9); feltG.fillRoundedRect(cx - 230, cy - 130, 460, 250, 8);
+    feltG.lineStyle(1, 0x1a6a35, 0.5); feltG.strokeRoundedRect(cx - 230, cy - 130, 460, 250, 8);
 
     const CW = 40; const CH = 57; const CGAP = 8;
 
     // ── CPU section ──
-    const cpuLabelY = cy - 90;
+    const cpuLabelY = cy - 120;
     this.addV(this.add.text(cx, cpuLabelY, `CPU  ${cpuLastAction ? `— ${cpuLastAction}` : ''}`, { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: '#888888', align: 'center' }).setOrigin(0.5).setDepth(34));
     const cpuCardsX = cx - (CW + CGAP / 2);
-    const cpuCardsY = cy - 80;
+    const cpuCardsY = cy - 110;
     const atShowdown = phase === 'showdown';
     this.drawCard(cpuCardsX, cpuCardsY, cpuHole[0] ?? null, !atShowdown, atShowdown ? 'purple' : 'none', CW, CH);
     this.drawCard(cpuCardsX + CW + CGAP, cpuCardsY, cpuHole[1] ?? null, !atShowdown, atShowdown ? 'purple' : 'none', CW, CH);
@@ -1256,23 +1256,23 @@ export class CasinoInterior extends Phaser.Scene {
     }
 
     // ── Community cards ──
-    const commLabelY = cy - 14;
+    const commLabelY = cy - 50;
     this.addV(this.add.text(cx, commLabelY, 'COMUNIDAD', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#2a5a3a' }).setOrigin(0.5).setDepth(34));
     const commTotalW = 5 * CW + 4 * CGAP;
     const commX = cx - commTotalW / 2;
-    const commY = cy - 4;
+    const commY = cy - 38;
     for (let i = 0; i < 5; i++) {
       const cx5 = commX + i * (CW + CGAP);
       this.drawCard(cx5, commY, community[i] ?? null, false, 'none', CW, CH);
     }
 
     // ── Player section ──
-    const plLabelY = cy + 60;
+    const plLabelY = cy + 44;
     const playerBest = phase !== 'ante' && playerHole.length === 2 ? this.bestAvailableHand(playerHole, community) : null;
     this.addV(this.add.text(cx - (CW + CGAP / 2) - 10, plLabelY, 'TU MANO', { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: '#22CC88' }).setOrigin(0, 0.5).setDepth(34));
     if (playerBest) this.addV(this.add.text(cx + CW + 20, plLabelY, playerBest.label, { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#22CC88' }).setOrigin(0, 0.5).setDepth(34));
     const plCardsX = cx - (CW + CGAP / 2);
-    const plCardsY = cy + 70;
+    const plCardsY = cy + 54;
     const winnerBorder: 'gold' | 'green' | 'none' = phase === 'showdown'
       ? (playerBest && this.comparePokerResults(playerBest, this.bestAvailableHand(cpuHole, community)) > 0 ? 'gold' : 'none')
       : 'none';
@@ -1281,18 +1281,18 @@ export class CasinoInterior extends Phaser.Scene {
 
     // ── Result text ──
     const resultColor = phase === 'showdown' ? (resultText.includes('GANASTE') ? '#22CC88' : resultText.includes('EMPATE') ? '#F5C842' : '#FF5A5A') : '#F5C842';
-    this.addV(this.add.text(cx, cy + 100, resultText, { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: resultColor, align: 'center', wordWrap: { width: 450 } }).setOrigin(0.5).setDepth(34));
+    this.addV(this.add.text(cx, cy + 142, resultText, { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: resultColor, align: 'center', wordWrap: { width: 450 } }).setOrigin(0.5).setDepth(34));
 
     // ── Action selector (only during active phases) ──
     if (phase === 'ante') {
-      this.addV(this.add.text(cx, cy + 75, 'ANTE', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#555555' }).setOrigin(0.5).setDepth(34));
+      this.addV(this.add.text(cx, cy + 114, 'ANTE', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#555555' }).setOrigin(0.5).setDepth(34));
       HOLDEM_ANTES.forEach((av, idx) => {
         const bx = cx - 90 + idx * 50;
         const sel = idx === anteIndex;
         const bg = this.addV(this.add.graphics().setDepth(34));
-        bg.fillStyle(sel ? 0x8B5CF6 : 0x1a0e2e, sel ? 1 : 0.8); bg.fillRoundedRect(bx - 20, cy + 82, 40, 18, 3);
-        if (sel) { bg.lineStyle(1, 0xF5C842, 0.8); bg.strokeRoundedRect(bx - 20, cy + 82, 40, 18, 3); }
-        this.addV(this.add.text(bx, cy + 91, String(av), { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: sel ? '#ffffff' : '#666666' }).setOrigin(0.5).setDepth(35));
+        bg.fillStyle(sel ? 0x8B5CF6 : 0x1a0e2e, sel ? 1 : 0.8); bg.fillRoundedRect(bx - 20, cy + 122, 40, 18, 3);
+        if (sel) { bg.lineStyle(1, 0xF5C842, 0.8); bg.strokeRoundedRect(bx - 20, cy + 122, 40, 18, 3); }
+        this.addV(this.add.text(bx, cy + 131, String(av), { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: sel ? '#ffffff' : '#666666' }).setOrigin(0.5).setDepth(35));
       });
     } else if (phase === 'preflop' || phase === 'flop' || phase === 'turn' || phase === 'river') {
       const actions = ['FOLD', 'PASAR', `SUBIR +${HOLDEM_ANTES[anteIndex]}T`];
@@ -1303,9 +1303,9 @@ export class CasinoInterior extends Phaser.Scene {
         const aw = idx === 2 ? 130 : 90; const ax = aStartX + (idx === 0 ? 0 : idx === 1 ? 100 : 200);
         const sel = idx === actionIndex;
         const bg = this.addV(this.add.graphics().setDepth(34));
-        bg.fillStyle(sel ? actionBgColors[idx] : 0x0a0a0a, sel ? 1 : 0.8); bg.fillRoundedRect(ax, cy + 80, aw, 22, 4);
-        if (sel) { bg.lineStyle(2, parseInt(actionColors[idx].replace('#', ''), 16), 0.9); bg.strokeRoundedRect(ax, cy + 80, aw, 22, 4); }
-        this.addV(this.add.text(ax + aw / 2, cy + 91, label, { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: sel ? actionColors[idx] : '#444444' }).setOrigin(0.5).setDepth(35));
+        bg.fillStyle(sel ? actionBgColors[idx] : 0x0a0a0a, sel ? 1 : 0.8); bg.fillRoundedRect(ax, cy + 114, aw, 22, 4);
+        if (sel) { bg.lineStyle(2, parseInt(actionColors[idx].replace('#', ''), 16), 0.9); bg.strokeRoundedRect(ax, cy + 114, aw, 22, 4); }
+        this.addV(this.add.text(ax + aw / 2, cy + 125, label, { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: sel ? actionColors[idx] : '#444444' }).setOrigin(0.5).setDepth(35));
       });
     }
 
@@ -1313,7 +1313,7 @@ export class CasinoInterior extends Phaser.Scene {
     let footer = 'INTERACT  JUGAR OTRA   |   BACK  CIERRA';
     if (phase === 'ante') footer = '< >  ANTE   |   INTERACT  REPARTIR   |   BACK  CIERRA';
     else if (phase !== 'showdown') footer = '< >  ACCIÓN   |   INTERACT  CONFIRMA   |   BACK  CIERRA';
-    this.overlayFooter.setPosition(cx, cy + 126).setText(footer).setVisible(true);
+    this.overlayFooter.setPosition(cx, cy + 164).setText(footer).setVisible(true);
   }
 
   private randomSlotSymbol() { return Phaser.Utils.Array.GetRandom([...SLOT_SYMBOLS]); }
