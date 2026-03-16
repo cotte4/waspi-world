@@ -76,7 +76,6 @@ export async function ensurePlayerRow(admin: SupabaseClient, user: User, playerS
       equipped_top: state.inventory.equipped.top ?? null,
       equipped_bottom: state.inventory.equipped.bottom ?? null,
       tenks: state.tenks,
-      muted_players: state.mutedPlayers ?? [],
       updated_at: new Date().toISOString(),
     }, { onConflict: 'id' });
 
