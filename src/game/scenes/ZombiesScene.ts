@@ -14,6 +14,7 @@ import {
   safeWithLiveSprite,
 } from '../systems/AnimationSafety';
 import { SceneControls } from '../systems/SceneControls';
+import { startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { getInventory } from '../systems/InventorySystem';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
@@ -366,6 +367,7 @@ export class ZombiesScene extends Phaser.Scene {
   private packPad?: Phaser.GameObjects.Rectangle;
   private packLabel?: Phaser.GameObjects.Text;
   private audioContext?: AudioContext;
+  private sceneMusic: Phaser.Sound.BaseSound | null = null;
   private lastSpawnSfxAt = 0;
   private lastStompSfxAt = 0;
   private activePrompt?: Phaser.GameObjects.Text;
@@ -509,6 +511,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.cameras.main.setAlpha(1);
     this.cameras.main.fadeIn(240, 0, 0, 0);
 
+    this.sceneMusic = startSceneMusic(this, 'zombies_dark', 0.45);
     this.setupRealtime();
     this.setupChatBridge();
     this.beginRound();
@@ -3697,6 +3700,8 @@ export class ZombiesScene extends Phaser.Scene {
       void this.audioContext.close().catch(() => undefined);
       this.audioContext = undefined;
     }
+    stopSceneMusic(this, this.sceneMusic);
+    this.sceneMusic = null;
   }
 }
 

@@ -134,6 +134,7 @@ export default function PlayPage() {
   const [progression, setProgression] = useState<ProgressionState>(initialProgression);
   const [playerState, setPlayerState] = useState<PlayerState | null>(null);
   const [tenks, setTenks] = useState<number | null>(null);
+  const [tenksAnimating, setTenksAnimating] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [smoking, setSmoking] = useState(false);
   const [owned, setOwned] = useState<string[]>(initialInventory.owned);
@@ -165,6 +166,7 @@ export default function PlayPage() {
   const [bindingCaptureAction, setBindingCaptureAction] = useState<ActionBinding | null>(null);
   const [joystickUi, setJoystickUi] = useState({ active: false, dx: 0, dy: 0 });
   const [rescueArmed, setRescueArmed] = useState(false);
+  const audioCtxRef = useRef<AudioContext | null>(null);
   const tokenRef = useRef<string | null>(null);
   const playerStateRef = useRef<PlayerState | null>(null);
   const activeSceneRef = useRef('');
@@ -182,6 +184,26 @@ export default function PlayPage() {
     () => (shopItems.length ? shopItems : CATALOG).filter((item) => item.slot !== 'utility' && item.priceTenks > 0),
     [shopItems]
   );
+
+  const playUiSfx = useCallback((freq: number, duration: number, sweep?: number) => {
+    try {
+      if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
+        audioCtxRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      }
+      const ctx = audioCtxRef.current;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      if (sweep !== undefined) osc.frequency.linearRampToValueAtTime(sweep, ctx.currentTime + duration);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + duration);
+      osc.start();
+      osc.stop(ctx.currentTime + duration + 0.01);
+    } catch { /* silent fail */ }
+  }, []);
 
   const applyPlayerState = useCallback((player: PlayerState) => {
     suppressSyncRef.current = true;
@@ -356,19 +378,31 @@ export default function PlayPage() {
 
     const unsubProgression = eventBus.on(EVENTS.PLAYER_PROGRESSION, (payload: unknown) => {
       const next = payload as Partial<ProgressionState> | null;
-      setProgression({
-        kills: typeof next?.kills === 'number' ? next.kills : 0,
-        xp: typeof next?.xp === 'number' ? next.xp : 0,
-        level: typeof next?.level === 'number' ? next.level : 1,
-        nextLevelAt: typeof next?.nextLevelAt === 'number' || next?.nextLevelAt === null
-          ? next.nextLevelAt
-          : null,
+      setProgression((prev) => {
+        const nextLevel = typeof next?.level === 'number' ? next.level : 1;
+        if (nextLevel > prev.level) playUiSfx(392, 0.40, 784);
+        return {
+          kills: typeof next?.kills === 'number' ? next.kills : 0,
+          xp: typeof next?.xp === 'number' ? next.xp : 0,
+          level: nextLevel,
+          nextLevelAt: typeof next?.nextLevelAt === 'number' || next?.nextLevelAt === null
+            ? next.nextLevelAt
+            : null,
+        };
       });
     });
 
     const unsubTenks = eventBus.on(EVENTS.TENKS_CHANGED, (payload: unknown) => {
-      const p = payload as { balance: number };
+      const p = payload as { balance: number; delta?: number; reason?: string };
       setTenks(p.balance);
+      if (p.reason !== 'init') {
+        setTenksAnimating(true);
+        window.setTimeout(() => setTenksAnimating(false), 400);
+        if (typeof p.delta === 'number') {
+          if (p.delta > 0) playUiSfx(440, 0.12, 660);
+          else if (p.delta < 0) playUiSfx(330, 0.10, 220);
+        }
+      }
     });
 
     const unsubScene = eventBus.on(EVENTS.SCENE_CHANGED, (sceneName: unknown) => {
@@ -390,6 +424,7 @@ export default function PlayPage() {
       setEquipped(p.equipped ?? {});
       setGunOn(hasUtilityEquipped('UTIL-GUN-01'));
       setBallOn(hasUtilityEquipped('UTIL-BALL-01'));
+      playUiSfx(660, 0.18, 990);
     });
 
     const unsubShopOpen = eventBus.on(EVENTS.SHOP_OPEN, (payload: unknown) => {
@@ -574,7 +609,7 @@ export default function PlayPage() {
       unsubVecindadUpdate();
       unsubUiNotice();
     };
-  }, [applyPlayerState, playerState, syncPlayerState]);
+  }, [applyPlayerState, playUiSfx, playerState, syncPlayerState]);
 
   useEffect(() => {
     if (!uiNotice) return;
@@ -1162,10 +1197,11 @@ export default function PlayPage() {
     const trimmed = input.trim().slice(0, CHAT.MAX_CHARS);
     if (!chatVisible || !trimmed || now - lastSent < CHAT.RATE_LIMIT_MS) return;
 
+    playUiSfx(880, 0.08);
     eventBus.emit(EVENTS.CHAT_SEND, trimmed);
     setInput('');
     setLastSent(now);
-  }, [chatVisible, input, lastSent]);
+  }, [chatVisible, input, lastSent, playUiSfx]);
 
   const currentLevelFloorXp = getLevelFloorXp(progression.level);
   const nextLevelDelta = progression.nextLevelAt === null
@@ -1420,7 +1456,15 @@ export default function PlayPage() {
             </div>
           )}
           {tenks !== null && (
-            <div className="ww-chip px-2 py-1 text-xs" style={hudBadge('#F5C842', 'rgba(245,200,66,0.4)')}>
+            <div
+              className="ww-chip px-2 py-1 text-xs"
+              style={{
+                ...hudBadge('#F5C842', 'rgba(245,200,66,0.4)'),
+                transform: tenksAnimating ? 'scale(1.15)' : 'scale(1)',
+                transition: 'transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+                color: tenksAnimating ? '#FFFFFF' : '#F5C842',
+              }}
+            >
               TENKS {tenks}
             </div>
           )}
@@ -1564,6 +1608,7 @@ export default function PlayPage() {
                         width: `${progressPct * 100}%`,
                         height: '100%',
                         background: 'linear-gradient(90deg, #46B3FF 0%, #8CE0FF 100%)',
+                        transition: 'width 0.6s ease-out',
                       }}
                     />
                   </div>

@@ -10,6 +10,7 @@ import { DialogSystem } from '../systems/DialogSystem';
 import { BranchedDialog, type DialogNode } from '../systems/BranchedDialog';
 import { CATALOG } from '../config/catalog';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
+import { startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
 import { loadHudSettings, type HudSettings } from '../systems/HudSettings';
 import { addXpToProgression, getMaxProgressionLevel, loadProgressionState, saveProgressionState, type ProgressionState } from '../systems/ProgressionSystem';
 import { loadCombatStats, saveCombatStats, type CombatStats } from '../systems/CombatStats';
@@ -368,6 +369,7 @@ export class WorldScene extends Phaser.Scene {
   private audioCtx?: AudioContext;
   private audioUnlocked = false;
   private audioSettings: AudioSettings = loadAudioSettings();
+  private sceneMusic: Phaser.Sound.BaseSound | null = null;
   private hudSettings: HudSettings = loadHudSettings();
   private controls!: SceneControls;
   private audioSettingsCleanup?: () => void;
@@ -658,6 +660,9 @@ export class WorldScene extends Phaser.Scene {
 
     // Training arena
     this.runBootStep('training zone', () => this.setupTrainingZone());
+
+    // Scene music
+    this.sceneMusic = startSceneMusic(this, 'world_ambient', 0.35);
   }
 
   private setupTrainingZone() {
@@ -1387,6 +1392,8 @@ export class WorldScene extends Phaser.Scene {
     this.hp = Math.max(0, this.hp - dmg);
     this.renderHpHud();
     this.playCombatTone(90, 0.08, 'triangle', 0.045);
+
+    this.cameras.main.shake(50, 0.0018, false);
 
     const flash = this.add.rectangle(400, 300, 800, 600, 0xFF0000, 0.08)
       .setScrollFactor(0)
@@ -4874,6 +4881,8 @@ export class WorldScene extends Phaser.Scene {
     this.bridgeCleanupFns = [];
     this.audioSettingsCleanup?.();
     this.audioSettingsCleanup = undefined;
+    stopSceneMusic(this, this.sceneMusic);
+    this.sceneMusic = null;
     if (this.audioCtx && this.audioCtx.state !== 'closed') {
       void this.audioCtx.close();
     }

@@ -129,6 +129,10 @@ export class BootScene extends Phaser.Scene {
       }
     }
     this.load.audio('arcade_theme', '/assets/audio/arcade-theme.mp3');
+    // Música por escena (archivos pendientes — fallan silenciosamente si no existen)
+    this.load.audio('world_ambient',  '/assets/audio/world-ambient.ogg');
+    this.load.audio('zombies_dark',   '/assets/audio/zombies-dark.ogg');
+    this.load.audio('store_upbeat',   '/assets/audio/store-upbeat.ogg');
   }
 
   create() {

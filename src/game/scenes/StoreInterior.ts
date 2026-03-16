@@ -8,6 +8,7 @@ import { ChatSystem } from '../systems/ChatSystem';
 import { DialogSystem } from '../systems/DialogSystem';
 import { SceneControls } from '../systems/SceneControls';
 import { supabase, isConfigured } from '../../lib/supabase';
+import { startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
 
 type StoreRemotePlayer = {
   avatar: AvatarRenderer;
@@ -58,6 +59,7 @@ export class StoreInterior extends Phaser.Scene {
   private lastMoveDy = 0;
   private lastIsMoving = false;
   private controls!: SceneControls;
+  private sceneMusic: Phaser.Sound.BaseSound | null = null;
 
   constructor() {
     super({ key: 'StoreInterior' });
@@ -559,6 +561,7 @@ export class StoreInterior extends Phaser.Scene {
     this.keyJ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.J);
     this.keyK = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.K);
     this.keyL = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.L);
+    this.sceneMusic = startSceneMusic(this, 'store_upbeat', 0.38);
     this.setupRealtime();
   }
 
@@ -714,6 +717,11 @@ export class StoreInterior extends Phaser.Scene {
       this.cleanupFns.forEach((cleanup) => cleanup());
       this.cleanupFns = [];
     } catch (e) { console.error('[StoreInterior] cleanupFns failed', e); }
+
+    try {
+      stopSceneMusic(this, this.sceneMusic);
+      this.sceneMusic = null;
+    } catch (e) { console.error('[StoreInterior] sceneMusic cleanup failed', e); }
   }
 
   private setupRealtime() {
