@@ -200,9 +200,9 @@ const REMOTE_HIT_MIN_MS = 120;
 const MAX_REMOTE_CHAT_DISTANCE = 2600;
 const LOCAL_HIT_COOLDOWN_MS = 180;
 const DUMMY_RESPAWN_MS = 1800;
-const TRAINING_SURVIVAL_STEP_MS = 25000;
-const TRAINING_SURVIVAL_STEP_BONUS = 0.1;
-const TRAINING_SURVIVAL_MAX_MULTIPLIER = 2;
+const TRAINING_SURVIVAL_STEP_MS = 11000;
+const TRAINING_SURVIVAL_STEP_BONUS = 0.5;
+const TRAINING_SURVIVAL_MAX_MULTIPLIER = 11;
 const PLAZA_RESPAWN_X = 980;
 const PLAZA_RESPAWN_Y = ZONES.PLAZA_Y + 72;
 const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
@@ -250,7 +250,7 @@ const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
     pellets: 2,
     spread: 0.06,
     speed: 820,
-    damage: 14,
+    damage: 24,
     cooldownMs: 200,
     color: 0x39FF14,
     knockback: 18,
@@ -5961,7 +5961,7 @@ export class WorldScene extends Phaser.Scene {
   private renderTrainingHud() {
     if (!this.trainingHud) return;
     if (!this.inTraining) {
-      this.trainingHud.setText(`TRAINING KOs ${this.trainingScore} | BONO TENKS x1.0 | PROX +20% EN 20s`);
+      this.trainingHud.setText(`TRAINING KOs ${this.trainingScore} | BONO TENKS x1.0 | PROX +50% EN 11s`);
       return;
     }
 
@@ -5972,7 +5972,7 @@ export class WorldScene extends Phaser.Scene {
     const msIntoStep = elapsedMs % TRAINING_SURVIVAL_STEP_MS;
     const nextStepMs = maxed ? 0 : (TRAINING_SURVIVAL_STEP_MS - msIntoStep);
     const nextStepSec = maxed ? 0 : Math.max(1, Math.ceil(nextStepMs / 1000));
-    const nextLabel = maxed ? 'MAX' : `PROX +20% EN ${nextStepSec}s`;
+    const nextLabel = maxed ? 'MAX' : `PROX +50% EN ${nextStepSec}s`;
     this.trainingHud.setText(`TRAINING KOs ${this.trainingScore} | BONO TENKS x${multiplier.toFixed(1)} | ${nextLabel} | ${elapsedSec}s`);
   }
 
