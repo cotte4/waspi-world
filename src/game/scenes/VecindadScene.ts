@@ -234,6 +234,12 @@ export class VecindadScene extends Phaser.Scene {
     g.fillStyle(0x0b1a0b, 1);
     g.fillRect(0, 0, VECINDAD_MAP.WIDTH, VECINDAD_MAP.HEIGHT);
 
+    // Night gradient over the full district so lights pop.
+    g.fillStyle(0x05080f, 0.32);
+    g.fillRect(0, 0, VECINDAD_MAP.WIDTH, 520);
+    g.fillStyle(0x06100a, 0.18);
+    g.fillRect(0, 520, VECINDAD_MAP.WIDTH, 420);
+
     g.fillStyle(0x0a130a, 0.8);
     g.fillRect(0, 0, VECINDAD_MAP.WIDTH, 180);
 
@@ -278,6 +284,11 @@ export class VecindadScene extends Phaser.Scene {
     g.lineStyle(3, 0xf5c842, 0.8);
     g.strokeRoundedRect(70, 794, 170, 64, 10);
 
+    // Entrance strips and sign glow.
+    g.fillStyle(0xf5c842, 0.08);
+    g.fillRect(76, 860, 156, 12);
+    g.fillRect(76, 890, 156, 12);
+
     g.fillStyle(0x233424, 0.9);
     g.fillRoundedRect(1160, 860, 480, 200, 20);
     g.lineStyle(3, 0x4f7752, 0.75);
@@ -291,6 +302,8 @@ export class VecindadScene extends Phaser.Scene {
       g.strokeCircle(1400, 960, 62 + ring * 20);
     }
     this.drawDistrictLights(g);
+    this.drawDistrictProps(g);
+    this.drawAmbientOverlays();
 
     this.add.text(155, 822, 'LA VECINDAD', {
       fontSize: '10px',
@@ -396,6 +409,84 @@ export class VecindadScene extends Phaser.Scene {
       g.fillCircle(light.x, light.y - 34, 5);
       g.fillStyle(0xf5c842, 0.12);
       g.fillCircle(light.x, light.y - 34, 28);
+    });
+  }
+
+  private drawDistrictProps(g: Phaser.GameObjects.Graphics) {
+    // Benches around central plaza ring.
+    const benches = [
+      { x: 1240, y: 1030 },
+      { x: 1560, y: 1030 },
+      { x: 1240, y: 890 },
+      { x: 1560, y: 890 },
+    ];
+    benches.forEach((bench) => {
+      g.fillStyle(0x4f3a25, 1);
+      g.fillRoundedRect(bench.x - 34, bench.y - 8, 68, 16, 4);
+      g.fillStyle(0x2f2317, 1);
+      g.fillRect(bench.x - 28, bench.y + 8, 8, 10);
+      g.fillRect(bench.x + 20, bench.y + 8, 8, 10);
+      g.lineStyle(1, 0x7b5a3a, 0.65);
+      g.strokeRoundedRect(bench.x - 34, bench.y - 8, 68, 16, 4);
+    });
+
+    // Small kiosks / neighborhood stands.
+    const kiosks = [
+      { x: 650, y: 920, tint: 0x46B3FF },
+      { x: 2140, y: 920, tint: 0xF5C842 },
+    ];
+    kiosks.forEach((kiosk, i) => {
+      g.fillStyle(0x1b2420, 0.96);
+      g.fillRoundedRect(kiosk.x - 56, kiosk.y - 40, 112, 68, 8);
+      g.lineStyle(2, kiosk.tint, 0.75);
+      g.strokeRoundedRect(kiosk.x - 56, kiosk.y - 40, 112, 68, 8);
+      g.fillStyle(0x0e1713, 1);
+      g.fillRect(kiosk.x - 44, kiosk.y - 18, 88, 22);
+      g.fillStyle(kiosk.tint, 0.22);
+      g.fillRect(kiosk.x - 48, kiosk.y - 34, 96, 8);
+      this.add.text(kiosk.x, kiosk.y - 28, i === 0 ? 'MERCADITO' : 'REPAIRS', {
+        fontSize: '5px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: i === 0 ? '#6FC4FF' : '#F5C842',
+      }).setOrigin(0.5).setDepth(2.2);
+    });
+
+    // Decorative trash bins / posts to make the roads feel lived-in.
+    const posts = [
+      { x: 410, y: 960 }, { x: 930, y: 960 }, { x: 1880, y: 960 }, { x: 2360, y: 960 },
+      { x: 920, y: 420 }, { x: 1810, y: 420 }, { x: 920, y: 1460 }, { x: 1810, y: 1460 },
+    ];
+    posts.forEach((post) => {
+      g.fillStyle(0x2b2f36, 1);
+      g.fillRoundedRect(post.x - 8, post.y - 10, 16, 20, 4);
+      g.lineStyle(1, 0x5c6678, 0.7);
+      g.strokeRoundedRect(post.x - 8, post.y - 10, 16, 20, 4);
+      g.fillStyle(0x8ea4c4, 0.25);
+      g.fillRect(post.x - 6, post.y - 7, 12, 3);
+    });
+  }
+
+  private drawAmbientOverlays() {
+    // Soft vignette on edges to focus action toward center and forest path.
+    const v = this.add.graphics().setDepth(0.2);
+    const cx = VECINDAD_MAP.WIDTH / 2;
+    const cy = VECINDAD_MAP.HEIGHT / 2;
+    const baseR = Math.max(VECINDAD_MAP.WIDTH, VECINDAD_MAP.HEIGHT) * 0.85;
+    for (let i = 0; i < 5; i += 1) {
+      const t = i / 4;
+      v.fillStyle(0x000000, 0.03 + t * 0.08);
+      v.fillCircle(cx, cy, baseR * (1.05 - t * 0.4));
+    }
+
+    // Animated light haze around central plaza.
+    const haze = this.add.ellipse(1400, 960, 540, 240, 0x6CA86A, 0.08).setDepth(0.25);
+    this.tweens.add({
+      targets: haze,
+      alpha: { from: 0.05, to: 0.12 },
+      duration: 2600,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
     });
   }
 

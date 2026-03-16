@@ -93,10 +93,16 @@ export class GunShopInterior extends Phaser.Scene {
 
   private drawRoom() {
     const { width, height } = this.scale;
-    const g = this.add.graphics();
+    const g = this.add.graphics().setDepth(0);
 
     g.fillStyle(0x070b16);
     g.fillRect(0, 0, width, height);
+
+    // Subtle blue ambient blooms so the room feels alive.
+    g.fillStyle(0x16305a, 0.2);
+    g.fillCircle(this.roomX + 120, this.roomY + 40, 120);
+    g.fillStyle(0x0f1f3d, 0.16);
+    g.fillCircle(this.roomX + this.roomW - 120, this.roomY + 48, 130);
 
     g.fillStyle(0x0e1324);
     g.fillRoundedRect(this.roomX, this.roomY, this.roomW, this.roomH, 14);
@@ -115,6 +121,12 @@ export class GunShopInterior extends Phaser.Scene {
       g.lineBetween(this.roomX + 8, y, this.roomX + this.roomW - 8, y);
     }
 
+    // Thin wall grid for industrial vibe.
+    g.lineStyle(1, 0x1f2d4e, 0.28);
+    for (let x = this.roomX + 24; x < this.roomX + this.roomW - 20; x += 34) {
+      g.lineBetween(x, this.roomY + 70, x, this.roomY + this.roomH - 78);
+    }
+
     this.add.text(this.roomX + 18, this.roomY + 22, 'ARMS DEALER', {
       fontSize: '10px',
       fontFamily: '"Press Start 2P", monospace',
@@ -128,15 +140,118 @@ export class GunShopInterior extends Phaser.Scene {
       fontFamily: '"Silkscreen", monospace',
       color: '#9DBDFF',
     }).setOrigin(1, 0.5);
+
+    this.drawCeilingLights();
+    this.drawWeaponWall();
+    this.drawDealerCounter();
+
+    this.add.text(this.roomX + this.roomW / 2, this.roomY + this.roomH - 98, 'CUSTOM LOADOUTS • MODS • STREET-LEGAL? MAYBE.', {
+      fontSize: '5px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#4F6D9D',
+    }).setOrigin(0.5).setDepth(7);
+  }
+
+  private drawCeilingLights() {
+    const lx = this.roomX + this.roomW / 2;
+    const ly = this.roomY + 16;
+    const lightBar = this.add.graphics().setDepth(3);
+    lightBar.fillStyle(0x09152a, 1);
+    lightBar.fillRoundedRect(lx - 120, ly, 240, 14, 6);
+    lightBar.lineStyle(1, 0x46B3FF, 0.55);
+    lightBar.strokeRoundedRect(lx - 120, ly, 240, 14, 6);
+    lightBar.fillStyle(0x46B3FF, 0.28);
+    lightBar.fillRect(lx - 112, ly + 4, 224, 5);
+
+    const glow = this.add.rectangle(lx, ly + 30, 320, 90, 0x46B3FF, 0.08).setDepth(2);
+    this.tweens.add({
+      targets: glow,
+      alpha: { from: 0.04, to: 0.14 },
+      duration: 1800,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+  }
+
+  private drawWeaponWall() {
+    const wall = this.add.graphics().setDepth(4);
+
+    const leftRackX = this.roomX + 36;
+    const rightRackX = this.roomX + this.roomW - 236;
+    const rackY = this.roomY + 88;
+    const rackW = 200;
+    const rackH = 148;
+
+    [leftRackX, rightRackX].forEach((rx) => {
+      wall.fillStyle(0x0b1730, 1);
+      wall.fillRoundedRect(rx, rackY, rackW, rackH, 8);
+      wall.lineStyle(1, 0x2B4B7A, 0.9);
+      wall.strokeRoundedRect(rx, rackY, rackW, rackH, 8);
+      wall.lineStyle(1, 0x46B3FF, 0.3);
+      wall.lineBetween(rx + 12, rackY + 30, rx + rackW - 12, rackY + 30);
+      wall.lineBetween(rx + 12, rackY + 74, rx + rackW - 12, rackY + 74);
+      wall.lineBetween(rx + 12, rackY + 118, rx + rackW - 12, rackY + 118);
+    });
+
+    this.drawWeaponSilhouette(leftRackX + 26, rackY + 18, 0x6EA9FF);
+    this.drawWeaponSilhouette(leftRackX + 26, rackY + 62, 0x80C7FF);
+    this.drawWeaponSilhouette(leftRackX + 26, rackY + 106, 0x5F94E0);
+    this.drawWeaponSilhouette(rightRackX + 26, rackY + 18, 0x6EA9FF);
+    this.drawWeaponSilhouette(rightRackX + 26, rackY + 62, 0x80C7FF);
+    this.drawWeaponSilhouette(rightRackX + 26, rackY + 106, 0x5F94E0);
+  }
+
+  private drawWeaponSilhouette(x: number, y: number, tint: number) {
+    const gun = this.add.graphics().setDepth(5);
+    gun.fillStyle(tint, 0.65);
+    gun.fillRect(x, y + 7, 112, 6);
+    gun.fillRect(x + 86, y + 5, 30, 10);
+    gun.fillRect(x + 28, y + 13, 14, 12);
+    gun.fillRect(x + 12, y + 5, 18, 3);
+    gun.fillStyle(0x0A1222, 0.35);
+    gun.fillRect(x + 4, y + 8, 108, 2);
+    gun.lineStyle(1, 0x9DD2FF, 0.5);
+    gun.strokeRect(x, y + 7, 112, 6);
+  }
+
+  private drawDealerCounter() {
+    const ctr = this.add.graphics().setDepth(8);
+    const x = this.roomX + 80;
+    const y = this.roomY + this.roomH - 124;
+    const w = this.roomW - 160;
+    const h = 54;
+
+    // Counter face + top
+    ctr.fillStyle(0x0A1122, 1);
+    ctr.fillRoundedRect(x, y, w, h, 8);
+    ctr.fillStyle(0x132745, 1);
+    ctr.fillRoundedRect(x + 6, y - 10, w - 12, 14, 5);
+    ctr.lineStyle(1, 0x46B3FF, 0.8);
+    ctr.strokeRoundedRect(x, y, w, h, 8);
+    ctr.lineStyle(1, 0x8ED8FF, 0.5);
+    ctr.lineBetween(x + 6, y - 2, x + w - 6, y - 2);
+
+    // Sticker labels
+    this.add.text(x + 18, y + 8, 'NO REFUNDS', {
+      fontSize: '5px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FF6B6B',
+    }).setDepth(9);
+    this.add.text(x + w - 18, y + 8, 'WASPITO CERTIFIED', {
+      fontSize: '5px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+    }).setOrigin(1, 0).setDepth(9);
   }
 
   private spawnDealer() {
-    this.dealerX = this.roomX + 126;
-    this.dealerY = this.roomY + this.roomH - 132;
+    this.dealerX = this.roomX + this.roomW / 2;
+    this.dealerY = this.roomY + this.roomH - 156;
 
-    const d = this.add.graphics();
+    const d = this.add.graphics().setDepth(10);
     d.fillStyle(0x000000, 0.3);
-    d.fillEllipse(this.dealerX, this.dealerY + 56, 44, 14);
+    d.fillEllipse(this.dealerX, this.dealerY + 56, 54, 16);
     d.fillStyle(0xC17A4A);
     d.fillRect(this.dealerX - 11, this.dealerY - 2, 22, 20);
     d.fillStyle(0x12162a);
@@ -149,7 +264,6 @@ export class GunShopInterior extends Phaser.Scene {
     d.fillStyle(0x111111);
     d.fillRect(this.dealerX - 6, this.dealerY + 4, 4, 4);
     d.fillRect(this.dealerX + 2, this.dealerY + 4, 4, 4);
-    d.setDepth(10);
 
     this.add.text(this.dealerX, this.dealerY - 24, 'DEALER', {
       fontSize: '6px',
@@ -159,7 +273,7 @@ export class GunShopInterior extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(11);
 
-    this.dealerPrompt = this.add.text(this.dealerX, this.dealerY + 74, '[SPACE] HABLAR', {
+    this.dealerPrompt = this.add.text(this.dealerX, this.roomY + this.roomH - 34, '[SPACE] HABLAR', {
       fontSize: '5px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#9DBDFF',
@@ -218,6 +332,16 @@ export class GunShopInterior extends Phaser.Scene {
     }).setOrigin(0.5);
     container.add(title);
 
+    const closeBtn = this.add.text(px + pw - 16, py + 16, 'X', {
+      fontSize: '10px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FF5A5A',
+    }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
+    closeBtn.on('pointerdown', () => this.closeDealerPanel());
+    closeBtn.on('pointerover', () => closeBtn.setColor('#FFA0A0'));
+    closeBtn.on('pointerout', () => closeBtn.setColor('#FF5A5A'));
+    container.add(closeBtn);
+
     const balText = this.add.text(cx, py + 44, `TENKS: ${getTenksBalance().toLocaleString('es-AR')}`, {
       fontSize: '8px',
       fontFamily: '"Silkscreen", monospace',
@@ -229,6 +353,13 @@ export class GunShopInterior extends Phaser.Scene {
     divider.lineStyle(1, 0x46B3FF, 0.45);
     divider.lineBetween(px + 20, py + 58, px + pw - 20, py + 58);
     container.add(divider);
+
+    const footerHint = this.add.text(cx, py + ph - 10, 'BACK CIERRA', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#6E9BDB',
+    }).setOrigin(0.5);
+    container.add(footerHint);
 
     const gunItems = CATALOG.filter((item) => item.id.startsWith('UTIL-GUN'));
     const listY = py + 68;
