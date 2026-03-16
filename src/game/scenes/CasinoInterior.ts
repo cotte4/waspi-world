@@ -17,16 +17,19 @@ interface SlotsState { betIndex: number; reels: string[]; resultText: string; sp
 interface BlackjackState { phase: BlackjackPhase; betIndex: number; playerCards: number[]; dealerCards: number[]; dealerHidden: boolean; actionIndex: number; resultText: string; currentBet: number; deck: number[]; settled: boolean; handToken: number; }
 interface RouletteState { betIndex: number; optionIndex: number; resultText: string; spinning: boolean; spinToken: number; lastNumber: number | null; lastColor: 'red' | 'black' | 'green' | null; }
 interface RouletteBetOption { id: RouletteBetKind; label: string; payout: number; color: string; }
-interface PokerResult { label: string; payoutMultiplier: number; }
-type HoldemPhase = 'ante' | 'preflop' | 'flop' | 'river' | 'showdown';
+interface PokerResult {
+  label: string;
+  rank: number;
+  tiebreak: number[];
+}
+type HoldemPhase = 'ante' | 'preflop' | 'flop' | 'turn' | 'river' | 'showdown';
 interface HoldemState { phase: HoldemPhase; anteIndex: number; playerHole: number[]; cpuHole: number[]; community: number[]; pot: number; playerPaid: number; deck: number[]; resultText: string; actionIndex: number; cpuLastAction: string; handToken: number; }
 
-const SLOT_BETS = [100, 250, 500, 1000] as const;
+const SLOT_BETS = [50, 100, 250, 500] as const;
 const ROULETTE_BETS = [100, 250, 500, 1000] as const;
 const BLACKJACK_BETS = [100, 250, 500, 1000] as const;
 const HOLDEM_ANTES = [100, 250, 500, 1000] as const;
 const SLOT_SYMBOLS = ['7', 'BAR', 'WASP', 'STAR', 'BELL'] as const;
-const BLACKJACK_ACTIONS = ['HIT', 'STAND'] as const;
 const ROULETTE_OPTIONS: RouletteBetOption[] = [
   { id: 'red', label: 'ROJO', payout: 2, color: '#FF5A5A' },
   { id: 'black', label: 'NEGRO', payout: 2, color: '#DDDDDD' },
@@ -538,7 +541,8 @@ export class CasinoInterior extends Phaser.Scene {
       this.showToast('NO ALCANZA PARA GIRAR.');
       return;
     }
-    const finalReels = [this.randomSlotSymbol(), this.randomSlotSymbol(), this.randomSlotSymbol()];
+    const slotOutcome = this.rollSlotsOutcome();
+    const finalReels = slotOutcome.reels;
     this.slotsState.spinning = true;
     this.slotsState.resultText = 'GIRANDO...';
     const token = this.slotsState.spinToken + 1;
@@ -549,26 +553,58 @@ export class CasinoInterior extends Phaser.Scene {
       safeSceneDelayedCall(this, 80 * tick, () => {
         if (this.overlayMode !== 'slots' || this.slotsState.spinToken !== token) return;
         this.slotsState.reels = tick === totalTicks - 1 ? finalReels : [this.randomSlotSymbol(), this.randomSlotSymbol(), this.randomSlotSymbol()];
-        if (tick === totalTicks - 1) this.finishSlotsSpin(finalReels, bet);
+        if (tick === totalTicks - 1) this.finishSlotsSpin(slotOutcome, bet);
         else this.redrawOverlay();
       }, 'casino slots spin');
     }
   }
 
-  private finishSlotsSpin(reels: string[], bet: number) {
-    const counts = new Map<string, number>();
-    reels.forEach((symbol) => counts.set(symbol, (counts.get(symbol) ?? 0) + 1));
-    const maxCount = Math.max(...counts.values());
-    let payout = 0;
-    let resultText = 'MALA SUERTE. OTRA MAS.';
-    if (maxCount === 3 && reels[0] === '7') { payout = bet * 8; resultText = `TRIPLE 7! COBRAS ${payout} TENKS.`; }
-    else if (maxCount === 3) { payout = bet * 5; resultText = `TRIPLE MATCH! COBRAS ${payout} TENKS.`; }
-    else if (maxCount === 2) { payout = bet * 2; resultText = `PAREJA! COBRAS ${payout} TENKS.`; }
-    if (payout > 0) { addTenks(payout, 'casino_slots_payout'); this.showToast(`+${payout} TENKS`); }
-    else this.showToast('SIN PAGO');
+  private finishSlotsSpin(outcome: { reels: string[]; payoutMultiplier: number; label: string }, bet: number) {
+    const payout = Math.round(bet * outcome.payoutMultiplier);
+    const resultText = payout > 0
+      ? `${outcome.label} COBRAS ${payout} TENKS.`
+      : 'MALA SUERTE. OTRA MAS.';
+    if (payout > 0) {
+      addTenks(payout, 'casino_slots_payout');
+      this.showToast(`+${payout} TENKS`);
+      if (outcome.payoutMultiplier >= 5) {
+        console.log('SFX: slots_jackpot');
+        this.cameras.main.shake(180, 0.004);
+      }
+    } else {
+      this.showToast('SIN PAGO');
+    }
     this.slotsState.spinning = false;
     this.slotsState.resultText = resultText;
     this.redrawOverlay();
+  }
+
+  private rollSlotsOutcome() {
+    const roll = Phaser.Math.Between(1, 1000) / 10;
+    if (roll <= 2) {
+      const symbol = Phaser.Math.RND.pick(['7', 'WASP']);
+      return { reels: [symbol, symbol, symbol], payoutMultiplier: 10, label: 'JACKPOT!' };
+    }
+    if (roll <= 7) {
+      const symbol = this.randomSlotSymbol();
+      return { reels: [symbol, symbol, symbol], payoutMultiplier: 5, label: 'TRIPLE MATCH!' };
+    }
+    if (roll <= 17) {
+      const symbol = this.randomSlotSymbol();
+      const special = Phaser.Math.RND.pick(['7', 'STAR']);
+      return { reels: [symbol, symbol, special], payoutMultiplier: 3, label: 'CASI JACKPOT!' };
+    }
+    if (roll <= 42) {
+      const symbol = this.randomSlotSymbol();
+      const other = this.randomSlotSymbol();
+      return { reels: [symbol, symbol, other], payoutMultiplier: 1.5, label: 'PAREJA!' };
+    }
+    return { reels: this.buildLosingReels(), payoutMultiplier: 0, label: 'NADA' };
+  }
+
+  private buildLosingReels() {
+    const symbols = Phaser.Utils.Array.Shuffle([...SLOT_SYMBOLS]);
+    return [symbols[0], symbols[1], symbols[2]];
   }
 
   private startRouletteSpin() {
@@ -846,32 +882,156 @@ export class CasinoInterior extends Phaser.Scene {
 
   private renderBlackjackOverlay() {
     if (!this.overlayTitle || !this.overlayBody || !this.overlayFooter || !this.overlayAccent) return;
+    const cx = this.scale.width / 2;
+    const cy = this.roomY + this.roomH / 2;
     const balance = getTenksBalance();
     const bet = BLACKJACK_BETS[this.blackjackState.betIndex];
-    const betLine = BLACKJACK_BETS.map((value, index) => (index === this.blackjackState.betIndex ? `[${value}]` : `${value}`)).join('  ');
-    const dealerCards = this.blackjackState.dealerCards.map((card, index) => this.blackjackState.dealerHidden && index === 1 ? '??' : this.formatCard(card)).join('  ');
-    const playerCards = this.blackjackState.playerCards.map((card) => this.formatCard(card)).join('  ');
     const playerTotal = this.getHandTotal(this.blackjackState.playerCards);
     const dealerVisibleTotal = this.blackjackState.dealerHidden ? this.getHandTotal(this.blackjackState.dealerCards.slice(0, 1)) : this.getHandTotal(this.blackjackState.dealerCards);
-    const actionLine = BLACKJACK_ACTIONS.map((label, index) => (index === this.blackjackState.actionIndex ? `[${label}]` : label)).join('   ');
-    this.overlayAccent.setText(`SALDO ${balance} TENKS`);
-    this.overlayTitle.setText('BLACKJACK');
-    this.overlayBody.setText([
-      `DEALER: ${dealerCards || '--'}   (${dealerVisibleTotal || 0})`,
-      '',
-      `JUGADOR: ${playerCards || '--'}   (${playerTotal || 0})`,
-      '',
-      `APUESTA: ${bet} TENKS`,
-      this.blackjackState.phase === 'bet' ? betLine : actionLine,
-      '',
-      this.blackjackState.resultText,
-    ].join('\n'));
+    this.overlayAccent.setPosition(cx + 170, cy - 94).setText(`TENKS: ${balance}`).setVisible(true);
+    this.overlayTitle.setPosition(cx - 160, cy - 94).setText('BLACKJACK').setVisible(true);
+    this.overlayBody.setVisible(false);
+
+    const table = this.addV(this.add.graphics().setDepth(33));
+    table.fillStyle(0x1a5c2a, 1);
+    table.fillRoundedRect(cx - 210, cy - 80, 420, 180, 20);
+    table.lineStyle(3, 0x0e0e14, 0.9);
+    table.strokeRoundedRect(cx - 210, cy - 80, 420, 180, 20);
+    table.lineStyle(2, 0xF5C842, 0.35);
+    table.strokeRoundedRect(cx - 204, cy - 74, 408, 168, 18);
+    for (let y = cy - 72; y <= cy + 88; y += 8) {
+      table.lineStyle(1, 0x174f24, 0.22);
+      table.lineBetween(cx - 198, y, cx + 198, y);
+    }
+
+    this.addV(this.add.text(cx, cy - 64, `DEALER (${this.blackjackState.dealerHidden ? '??' : dealerVisibleTotal})`, {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#f0f0f0',
+    }).setOrigin(0.5).setDepth(35));
+
+    this.blackjackState.dealerCards.forEach((card, index) => {
+      const x = cx - 54 + index * 42;
+      const y = cy - 48;
+      const hidden = this.blackjackState.dealerHidden && index === 1;
+      this.drawBlackjackCardVisual(x, y, card, hidden, index);
+    });
+
+    this.addV(this.add.text(cx, cy + 32, `TU MANO (${playerTotal || 0})`, {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#ffffff',
+    }).setOrigin(0.5).setDepth(35));
+
+    this.blackjackState.playerCards.forEach((card, index) => {
+      const x = cx - 54 + index * 42;
+      const y = cy + 46;
+      this.drawBlackjackCardVisual(x, y, card, false, index);
+    });
+
+    this.addV(this.add.text(cx, cy + 8, `APUESTA: ${this.blackjackState.currentBet || bet} TENKS`, {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+    }).setOrigin(0.5).setDepth(35));
+
+    if (this.blackjackState.phase === 'bet') {
+      BLACKJACK_BETS.forEach((value, index) => {
+        const bx = cx - 126 + index * 84;
+        const active = index === this.blackjackState.betIndex;
+        const chip = this.addV(this.add.graphics().setDepth(35));
+        chip.fillStyle(active ? 0x46B3FF : 0x1a1a26, active ? 1 : 0.8);
+        chip.fillRoundedRect(bx, cy + 104, 72, 20, 5);
+        if (active) {
+          chip.lineStyle(2, 0xF5C842, 1);
+          chip.strokeRoundedRect(bx, cy + 104, 72, 20, 5);
+        }
+        this.addV(this.add.text(bx + 36, cy + 114, String(value), {
+          fontSize: '7px',
+          fontFamily: '"Press Start 2P", monospace',
+          color: active ? '#ffffff' : '#8888aa',
+        }).setOrigin(0.5).setDepth(36));
+      });
+    } else if (this.blackjackState.phase === 'player') {
+      const buttons = [
+        { label: 'HIT', color: 0x39FF14, text: '#000000' },
+        { label: 'STAND', color: 0xF5C842, text: '#000000' },
+      ];
+      buttons.forEach((button, index) => {
+        const bx = cx - 90 + index * 110;
+        const active = index === this.blackjackState.actionIndex;
+        const btn = this.addV(this.add.graphics().setDepth(35));
+        btn.fillStyle(active ? button.color : 0x1a1a26, active ? 1 : 0.82);
+        btn.fillRoundedRect(bx, cy + 104, 90, 22, 6);
+        if (active) {
+          btn.lineStyle(2, 0xffffff, 0.85);
+          btn.strokeRoundedRect(bx, cy + 104, 90, 22, 6);
+        }
+        this.addV(this.add.text(bx + 45, cy + 115, button.label, {
+          fontSize: '7px',
+          fontFamily: '"Press Start 2P", monospace',
+          color: active ? button.text : '#8888aa',
+        }).setOrigin(0.5).setDepth(36));
+      });
+    }
+
+    const resultColor = this.blackjackState.resultText.includes('BLACKJACK')
+      ? '#F5C842'
+      : this.blackjackState.resultText.includes('GANASTE') || this.blackjackState.resultText.includes('COBRAS')
+        ? '#39FF14'
+        : this.blackjackState.resultText.includes('EMPATE')
+          ? '#46B3FF'
+          : '#FF006E';
+    this.addV(this.add.text(cx, cy + 138, this.blackjackState.resultText, {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: resultColor,
+      align: 'center',
+      wordWrap: { width: 460 },
+    }).setOrigin(0.5).setDepth(35));
+
     let footer = 'BACK CIERRA';
     if (this.blackjackState.phase === 'bet') footer = '< > CAMBIA APUESTA   |   INTERACT REPARTE   |   BACK CIERRA';
     else if (this.blackjackState.phase === 'player') footer = '< > ELIGE ACCION   |   INTERACT CONFIRMA   |   BACK CIERRA';
     else if (this.blackjackState.phase === 'dealer') footer = 'LA CASA ESTA JUGANDO...';
     else if (this.blackjackState.phase === 'result') footer = 'INTERACT JUGAR OTRA   |   BACK CIERRA';
     this.overlayFooter.setText(footer);
+  }
+
+  private drawBlackjackCardVisual(x: number, y: number, card: number, hidden: boolean, visualIndex: number) {
+    const g = this.addV(this.add.graphics().setDepth(35));
+    g.fillStyle(0x000000, 0.25);
+    g.fillRoundedRect(x + 2, y + 2, 36, 50, 5);
+    if (hidden) {
+      g.fillStyle(0x0E0E14, 1);
+      g.fillRoundedRect(x, y, 36, 50, 5);
+      g.lineStyle(2, 0xF5C842, 0.8);
+      g.strokeRoundedRect(x, y, 36, 50, 5);
+      g.lineStyle(1, 0x2f2f40, 0.8);
+      for (let i = -6; i < 36; i += 6) {
+        g.lineBetween(x + i, y + 2, x + i + 16, y + 48);
+      }
+      return;
+    }
+    const rank = this.formatCard(card);
+    const suits = ['♠', '♥', '♦', '♣'];
+    const suit = suits[(card + visualIndex) % suits.length];
+    const isRed = suit === '♥' || suit === '♦';
+    const suitColor = isRed ? '#FF006E' : '#111111';
+    g.fillStyle(0xffffff, 1);
+    g.fillRoundedRect(x, y, 36, 50, 5);
+    g.lineStyle(1, 0xc7c7cf, 1);
+    g.strokeRoundedRect(x, y, 36, 50, 5);
+    this.addV(this.add.text(x + 4, y + 4, `${rank}${suit}`, {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: suitColor,
+    }).setDepth(36));
+    this.addV(this.add.text(x + 32, y + 46, `${rank}${suit}`, {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: suitColor,
+    }).setOrigin(1, 1).setDepth(36));
   }
 
   private handlePokerInput() {
@@ -882,7 +1042,7 @@ export class CasinoInterior extends Phaser.Scene {
       if (this.controls.isActionJustDown('interact')) this.startHoldemHand();
       return;
     }
-    if (phase === 'preflop' || phase === 'flop' || phase === 'river') {
+    if (phase === 'preflop' || phase === 'flop' || phase === 'turn' || phase === 'river') {
       if (this.controls.isMovementDirectionJustDown('left')) { this.holdemState.actionIndex = (this.holdemState.actionIndex + 2) % 3; this.redrawOverlay(); }
       if (this.controls.isMovementDirectionJustDown('right')) { this.holdemState.actionIndex = (this.holdemState.actionIndex + 1) % 3; this.redrawOverlay(); }
       if (this.controls.isActionJustDown('interact')) {
@@ -945,9 +1105,11 @@ export class CasinoInterior extends Phaser.Scene {
 
   private cpuDecideOnRaise(): boolean {
     const { cpuHole, community, phase } = this.holdemState;
-    const strength = this.bestAvailableHand(cpuHole, community).payoutMultiplier;
-    if (phase === 'river') return strength === 0 && Phaser.Math.Between(0, 2) > 0;
-    return Phaser.Math.Between(0, 5) === 0;
+    const strength = this.bestAvailableHand(cpuHole, community);
+    const weakHand = strength.rank <= 1;
+    const bluff = Phaser.Math.Between(1, 100) <= 12;
+    if (phase === 'river') return weakHand && !bluff;
+    return weakHand && Phaser.Math.Between(0, 100) < 45 && !bluff;
   }
 
   private advanceHoldemPhase() {
@@ -957,7 +1119,11 @@ export class CasinoInterior extends Phaser.Scene {
       this.holdemState.phase = 'flop';
       this.holdemState.resultText = 'FLOP — ELEGÍ UNA ACCIÓN.';
     } else if (phase === 'flop') {
-      this.holdemState.community.push(deck.pop()!, deck.pop()!);
+      this.holdemState.community.push(deck.pop()!);
+      this.holdemState.phase = 'turn';
+      this.holdemState.resultText = 'TURN — SEGUÍ JUGANDO.';
+    } else if (phase === 'turn') {
+      this.holdemState.community.push(deck.pop()!);
       this.holdemState.phase = 'river';
       this.holdemState.resultText = 'RIVER — ÚLTIMA RONDA.';
     } else if (phase === 'river') {
@@ -972,7 +1138,7 @@ export class CasinoInterior extends Phaser.Scene {
     const { playerHole, cpuHole, community, pot, playerPaid } = this.holdemState;
     const playerBest = this.bestAvailableHand(playerHole, community);
     const cpuBest = this.bestAvailableHand(cpuHole, community);
-    const cmp = playerBest.payoutMultiplier - cpuBest.payoutMultiplier;
+    const cmp = this.comparePokerResults(playerBest, cpuBest);
     this.holdemState.phase = 'showdown';
     if (cmp > 0) {
       addTenks(pot, 'casino_holdem_win');
@@ -991,27 +1157,22 @@ export class CasinoInterior extends Phaser.Scene {
 
   private bestAvailableHand(hole: number[], community: number[]): PokerResult {
     const all = [...hole, ...community];
-    if (all.length < 2) return { label: 'SIN CARTAS', payoutMultiplier: 0 };
-    if (all.length <= 4) {
-      const ranks = all.map((c) => ((c - 1) % 13) + 1);
-      const counts = new Map<number, number>();
-      ranks.forEach((r) => counts.set(r, (counts.get(r) ?? 0) + 1));
-      const groups = [...counts.values()].sort((a, b) => b - a);
-      const pairRank = [...counts.entries()].find(([, c]) => c === 2)?.[0] ?? 0;
-      if (groups[0] === 3) return { label: 'TRIO', payoutMultiplier: 4 };
-      if (groups[0] === 2 && groups[1] === 2) return { label: 'DOBLE PAREJA', payoutMultiplier: 3 };
-      if (groups[0] === 2 && (pairRank === 1 || pairRank >= 11)) return { label: 'JACKS O MEJOR', payoutMultiplier: 2 };
-      if (groups[0] === 2) return { label: 'PAR', payoutMultiplier: 0 };
-      return { label: 'CARTA ALTA', payoutMultiplier: 0 };
+    if (all.length < 2) return { label: 'SIN CARTAS', rank: 0, tiebreak: [0] };
+    if (all.length < 5) {
+      const ranks = all.map((card) => this.pokerRankValue(card));
+      const high = [...ranks].sort((a, b) => b - a);
+      return { label: 'CARTA ALTA', rank: 0, tiebreak: high };
     }
+
     if (all.length === 5) return this.evaluatePokerHand(all);
-    let best: PokerResult = { label: 'NADA', payoutMultiplier: 0 };
+
+    let best: PokerResult = { label: 'CARTA ALTA', rank: 0, tiebreak: [0] };
     for (let i = 0; i < all.length - 1; i += 1) {
       for (let j = i + 1; j < all.length; j += 1) {
         const hand5 = all.filter((_, k) => k !== i && k !== j);
         if (hand5.length !== 5) continue;
         const res = this.evaluatePokerHand(hand5);
-        if (res.payoutMultiplier > best.payoutMultiplier) best = res;
+        if (this.comparePokerResults(res, best) > 0) best = res;
       }
     }
     return best;
@@ -1062,8 +1223,8 @@ export class CasinoInterior extends Phaser.Scene {
     this.addV(this.add.text(cx, cy - 128, `POT: ${pot} T`, { fontSize: '9px', fontFamily: '"Press Start 2P", monospace', color: 0xF5C842 < 1 ? '#F5C842' : '#F5C842', align: 'center' }).setOrigin(0.5).setDepth(34));
 
     // Phase strip
-    const phases: HoldemPhase[] = ['ante', 'preflop', 'flop', 'river', 'showdown'];
-    const phaseLabels = ['ANTE', 'PRE-FLOP', 'FLOP', 'RIVER', 'SHOWDOWN'];
+    const phases: HoldemPhase[] = ['ante', 'preflop', 'flop', 'turn', 'river', 'showdown'];
+    const phaseLabels = ['ANTE', 'PRE-FLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN'];
     const stripG = this.addV(this.add.graphics().setDepth(33));
     const stripY = cy - 114; const stripW = 460; const stripX = cx - stripW / 2;
     stripG.fillStyle(0x060410, 0.8); stripG.fillRoundedRect(stripX, stripY, stripW, 14, 3);
@@ -1112,7 +1273,9 @@ export class CasinoInterior extends Phaser.Scene {
     if (playerBest) this.addV(this.add.text(cx + CW + 20, plLabelY, playerBest.label, { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#22CC88' }).setOrigin(0, 0.5).setDepth(34));
     const plCardsX = cx - (CW + CGAP / 2);
     const plCardsY = cy + 70;
-    const winnerBorder: 'gold' | 'green' | 'none' = phase === 'showdown' ? (playerBest && (playerBest.payoutMultiplier > (this.bestAvailableHand(cpuHole, community).payoutMultiplier)) ? 'gold' : 'none') : 'none';
+    const winnerBorder: 'gold' | 'green' | 'none' = phase === 'showdown'
+      ? (playerBest && this.comparePokerResults(playerBest, this.bestAvailableHand(cpuHole, community)) > 0 ? 'gold' : 'none')
+      : 'none';
     this.drawCard(plCardsX, plCardsY, playerHole[0] ?? null, false, winnerBorder, CW, CH);
     this.drawCard(plCardsX + CW + CGAP, plCardsY, playerHole[1] ?? null, false, winnerBorder, CW, CH);
 
@@ -1131,7 +1294,7 @@ export class CasinoInterior extends Phaser.Scene {
         if (sel) { bg.lineStyle(1, 0xF5C842, 0.8); bg.strokeRoundedRect(bx - 20, cy + 82, 40, 18, 3); }
         this.addV(this.add.text(bx, cy + 91, String(av), { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: sel ? '#ffffff' : '#666666' }).setOrigin(0.5).setDepth(35));
       });
-    } else if (phase === 'preflop' || phase === 'flop' || phase === 'river') {
+    } else if (phase === 'preflop' || phase === 'flop' || phase === 'turn' || phase === 'river') {
       const actions = ['FOLD', 'PASAR', `SUBIR +${HOLDEM_ANTES[anteIndex]}T`];
       const actionColors = ['#FF5A5A', '#22CC88', '#F5C842'];
       const actionBgColors = [0x4a0808, 0x083020, 0x4a3808];
@@ -1201,29 +1364,63 @@ export class CasinoInterior extends Phaser.Scene {
   }
 
   private evaluatePokerHand(cards: number[]): PokerResult {
-    const ranks = cards.map((card) => ((card - 1) % 13) + 1);
+    const ranks = cards.map((card) => this.pokerRankValue(card));
     const suits = cards.map((card) => Math.floor((card - 1) / 13));
     const counts = new Map<number, number>();
     ranks.forEach((rank) => counts.set(rank, (counts.get(rank) ?? 0) + 1));
-    const groups = [...counts.values()].sort((a, b) => b - a);
     const uniqueRanks = [...new Set(ranks)].sort((a, b) => a - b);
-    const normalized = uniqueRanks.map((rank) => (rank === 1 ? 14 : rank)).sort((a, b) => a - b);
+    const normalized = [...uniqueRanks].sort((a, b) => a - b);
     const isFlush = suits.every((suit) => suit === suits[0]);
-    const isWheel = uniqueRanks.length === 5 && uniqueRanks.join(',') === '1,2,3,4,5';
-    const isStraight = uniqueRanks.length === 5 && (normalized[4] - normalized[0] === 4 || isWheel);
-    const hasAceHighStraight = normalized.join(',') === '10,11,12,13,14';
-    const pairRank = [...counts.entries()].find(([, count]) => count === 2)?.[0] ?? 0;
+    const straightHigh = this.getStraightHighCard(normalized);
 
-    if (isStraight && isFlush && hasAceHighStraight) return { label: 'ESCALERA REAL', payoutMultiplier: 40 };
-    if (isStraight && isFlush) return { label: 'ESCALERA COLOR', payoutMultiplier: 20 };
-    if (groups[0] === 4) return { label: 'POKER', payoutMultiplier: 12 };
-    if (groups[0] === 3 && groups[1] === 2) return { label: 'FULL HOUSE', payoutMultiplier: 8 };
-    if (isFlush) return { label: 'COLOR', payoutMultiplier: 6 };
-    if (isStraight) return { label: 'ESCALERA', payoutMultiplier: 5 };
-    if (groups[0] === 3) return { label: 'TRIO', payoutMultiplier: 4 };
-    if (groups[0] === 2 && groups[1] === 2) return { label: 'DOBLE PAREJA', payoutMultiplier: 3 };
-    if (groups[0] === 2 && (pairRank === 1 || pairRank >= 11)) return { label: 'JACKS O MEJOR', payoutMultiplier: 2 };
-    return { label: 'NADA', payoutMultiplier: 0 };
+    const grouped = [...counts.entries()]
+      .map(([rank, count]) => ({ rank, count }))
+      .sort((a, b) => (b.count - a.count) || (b.rank - a.rank));
+
+    if (isFlush && straightHigh === 14) return { label: 'ESCALERA REAL', rank: 9, tiebreak: [14] };
+    if (isFlush && straightHigh > 0) return { label: 'ESCALERA COLOR', rank: 8, tiebreak: [straightHigh] };
+    if (grouped[0].count === 4) return { label: 'POKER', rank: 7, tiebreak: [grouped[0].rank, grouped[1].rank] };
+    if (grouped[0].count === 3 && grouped[1].count === 2) return { label: 'FULL HOUSE', rank: 6, tiebreak: [grouped[0].rank, grouped[1].rank] };
+    if (isFlush) return { label: 'COLOR', rank: 5, tiebreak: [...ranks].sort((a, b) => b - a) };
+    if (straightHigh > 0) return { label: 'ESCALERA', rank: 4, tiebreak: [straightHigh] };
+    if (grouped[0].count === 3) {
+      const kickers = grouped.filter((g) => g.count === 1).map((g) => g.rank).sort((a, b) => b - a);
+      return { label: 'TRIO', rank: 3, tiebreak: [grouped[0].rank, ...kickers] };
+    }
+    if (grouped[0].count === 2 && grouped[1].count === 2) {
+      const pairRanks = grouped.filter((g) => g.count === 2).map((g) => g.rank).sort((a, b) => b - a);
+      const kicker = grouped.find((g) => g.count === 1)?.rank ?? 0;
+      return { label: 'DOBLE PAREJA', rank: 2, tiebreak: [pairRanks[0], pairRanks[1], kicker] };
+    }
+    if (grouped[0].count === 2) {
+      const kickers = grouped.filter((g) => g.count === 1).map((g) => g.rank).sort((a, b) => b - a);
+      return { label: 'PAR', rank: 1, tiebreak: [grouped[0].rank, ...kickers] };
+    }
+    return { label: 'CARTA ALTA', rank: 0, tiebreak: [...ranks].sort((a, b) => b - a) };
+  }
+
+  private pokerRankValue(card: number) {
+    const rank = ((card - 1) % 13) + 1;
+    return rank === 1 ? 14 : rank;
+  }
+
+  private getStraightHighCard(sortedUniqueRanks: number[]) {
+    if (sortedUniqueRanks.length !== 5) return 0;
+    const isRegular = sortedUniqueRanks[4] - sortedUniqueRanks[0] === 4;
+    if (isRegular) return sortedUniqueRanks[4];
+    const wheel = sortedUniqueRanks.join(',') === '2,3,4,5,14';
+    return wheel ? 5 : 0;
+  }
+
+  private comparePokerResults(a: PokerResult, b: PokerResult) {
+    if (a.rank !== b.rank) return a.rank - b.rank;
+    const maxLen = Math.max(a.tiebreak.length, b.tiebreak.length);
+    for (let i = 0; i < maxLen; i += 1) {
+      const av = a.tiebreak[i] ?? 0;
+      const bv = b.tiebreak[i] ?? 0;
+      if (av !== bv) return av - bv;
+    }
+    return 0;
   }
 
   private updateStationProximity() {

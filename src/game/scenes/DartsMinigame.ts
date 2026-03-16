@@ -1,0 +1,244 @@
+import Phaser from 'phaser';
+import { addTenks } from '../systems/TenksSystem';
+import { eventBus, EVENTS } from '../config/eventBus';
+import { transitionToScene } from '../systems/SceneUi';
+import { SceneControls } from '../systems/SceneControls';
+
+type DartsPhase = 'aiming' | 'result' | 'done' | 'exiting';
+
+const TOTAL_DARTS = 9;
+const BOARD_RADIUS = 160;
+
+export class DartsMinigame extends Phaser.Scene {
+  private phase: DartsPhase = 'aiming';
+  private score = 0;
+  private thrown = 0;
+  private bullseyes = 0;
+  private cursorAngle = 0;
+  private cursorRadius = 40;
+  private cursorDir = 1;
+  private resultTimerMs = 0;
+  private isFinished = false;
+
+  private boardX = 0;
+  private boardY = 0;
+
+  private boardG!: Phaser.GameObjects.Graphics;
+  private cursor!: Phaser.GameObjects.Arc;
+  private hud!: Phaser.GameObjects.Text;
+  private footer!: Phaser.GameObjects.Text;
+  private resultLabel!: Phaser.GameObjects.Text;
+  private controls!: SceneControls;
+
+  constructor() {
+    super({ key: 'DartsMinigame' });
+  }
+
+  create() {
+    const { width, height } = this.scale;
+    this.boardX = width / 2;
+    this.boardY = height / 2 + 24;
+    this.controls = new SceneControls(this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
+
+    this.add.rectangle(0, 0, width, height, 0x0E0E14, 1).setOrigin(0);
+    this.add.text(width / 2, 48, 'DARDOS', {
+      fontSize: '18px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+    }).setOrigin(0.5);
+
+    this.boardG = this.add.graphics();
+    this.drawBoard();
+    this.cursor = this.add.circle(this.boardX, this.boardY, 6, 0xF5C842, 1).setStrokeStyle(2, 0x000000, 0.45);
+    this.hud = this.add.text(16, 16, '', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#ffffff',
+      lineSpacing: 6,
+    });
+    this.footer = this.add.text(width / 2, height - 24, 'SPACE/CLICK TIRAR - ESC SALIR', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#9a9ab0',
+    }).setOrigin(0.5);
+    this.resultLabel = this.add.text(width / 2, height - 74, '', {
+      fontSize: '12px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 4,
+      align: 'center',
+    }).setOrigin(0.5).setAlpha(0);
+
+    this.input.on('pointerdown', this.throwDart, this);
+    this.refreshHud();
+  }
+
+  update(_time: number, delta: number) {
+    if (this.isFinished) return;
+    if (this.controls.isActionJustDown('back')) {
+      this.finishAndExit(0);
+      return;
+    }
+    if (this.controls.isActionJustDown('interact')) {
+      this.throwDart();
+    }
+
+    if (this.phase === 'aiming') {
+      this.cursorAngle += delta * 0.0024 * this.cursorDir;
+      this.cursorRadius += delta * 0.03 * this.cursorDir;
+      if (this.cursorRadius > 146 || this.cursorRadius < 18) this.cursorDir *= -1;
+      const wobble = Math.sin(this.time.now * 0.004) * 14;
+      const x = this.boardX + Math.cos(this.cursorAngle) * (this.cursorRadius + wobble);
+      const y = this.boardY + Math.sin(this.cursorAngle) * (this.cursorRadius - wobble * 0.6);
+      this.cursor.setPosition(x, y);
+      return;
+    }
+
+    this.resultTimerMs -= delta;
+    if (this.resultTimerMs <= 0) {
+      if (this.phase === 'done') {
+        this.finishAndExit(this.computeReward());
+      } else {
+        this.phase = 'aiming';
+        this.resultLabel.setAlpha(0);
+      }
+    }
+  }
+
+  private drawBoard() {
+    this.boardG.clear();
+    this.boardG.fillStyle(0x0f0f16, 1);
+    this.boardG.fillCircle(this.boardX, this.boardY, BOARD_RADIUS);
+    this.boardG.lineStyle(3, 0xF5C842, 0.9);
+    this.boardG.strokeCircle(this.boardX, this.boardY, BOARD_RADIUS);
+
+    for (let i = 0; i < 20; i += 1) {
+      const a0 = -Math.PI / 2 + (i * Math.PI * 2) / 20;
+      const a1 = -Math.PI / 2 + ((i + 1) * Math.PI * 2) / 20;
+      const sectionColor = i % 2 === 0 ? 0x2a2a34 : 0x202028;
+      this.boardG.fillStyle(sectionColor, 1);
+      this.boardG.slice(this.boardX, this.boardY, 140, a0, a1, false);
+      this.boardG.fillPath();
+      this.boardG.lineStyle(1, 0x111111, 0.65);
+      this.boardG.lineBetween(this.boardX, this.boardY, this.boardX + Math.cos(a0) * 140, this.boardY + Math.sin(a0) * 140);
+
+      const labelNum = ((i + 1) * 7) % 20 + 1;
+      const tx = this.boardX + Math.cos((a0 + a1) / 2) * 154;
+      const ty = this.boardY + Math.sin((a0 + a1) / 2) * 154;
+      this.add.text(tx, ty, String(labelNum), {
+        fontSize: '7px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#f0f0f0',
+      }).setOrigin(0.5);
+    }
+
+    this.boardG.lineStyle(10, 0xF5C842, 0.85);
+    this.boardG.strokeCircle(this.boardX, this.boardY, 150); // double
+    this.boardG.lineStyle(8, 0xF5C842, 0.85);
+    this.boardG.strokeCircle(this.boardX, this.boardY, 104); // triple
+    this.boardG.fillStyle(0x39FF14, 0.95);
+    this.boardG.fillCircle(this.boardX, this.boardY, 26); // bull
+    this.boardG.fillStyle(0xF5C842, 1);
+    this.boardG.fillCircle(this.boardX, this.boardY, 14); // bullseye
+  }
+
+  private throwDart() {
+    if (this.phase !== 'aiming' || this.isFinished) return;
+    this.phase = 'result';
+    this.thrown += 1;
+    const x = this.cursor.x;
+    const y = this.cursor.y;
+    const score = this.scoreDart(x, y);
+    this.score += score;
+    if (score === 50) {
+      this.bullseyes += 1;
+      eventBus.emit(EVENTS.DARTS_BULLSEYE, { score: this.score, thrown: this.thrown });
+    }
+    eventBus.emit(EVENTS.DARTS_SCORE, { score: this.score, thrown: this.thrown, dartScore: score });
+
+    const dart = this.add.rectangle(this.boardX, this.scale.height - 64, 28, 4, 0xd0d0d0, 1);
+    dart.setRotation(Phaser.Math.Angle.Between(this.boardX, this.scale.height - 64, x, y));
+    this.tweens.add({
+      targets: dart,
+      x,
+      y,
+      duration: 200,
+      ease: 'Sine.easeIn',
+      onComplete: () => {
+        dart.setScale(0.72);
+      },
+    });
+
+    this.resultLabel.setAlpha(1);
+    this.resultLabel.setText(score > 0 ? `+${score}` : 'MISS');
+    this.resultLabel.setColor(score > 0 ? '#F5C842' : '#FF006E');
+    this.resultTimerMs = 460;
+    this.refreshHud();
+    if (this.thrown >= TOTAL_DARTS) {
+      this.phase = 'done';
+      const reward = this.computeReward();
+      this.resultLabel.setText(`FINAL ${this.score} / +${reward} TENKS`);
+      this.resultLabel.setColor('#39FF14');
+      this.resultTimerMs = 1600;
+    }
+  }
+
+  private scoreDart(x: number, y: number) {
+    const dx = x - this.boardX;
+    const dy = y - this.boardY;
+    const r = Math.sqrt(dx * dx + dy * dy);
+    if (r > BOARD_RADIUS) return 0;
+    if (r <= 14) return 50;
+    if (r <= 26) return 25;
+
+    const angle = Phaser.Math.Angle.Normalize(Math.atan2(dy, dx) + Math.PI / 2);
+    const sectionIndex = Math.floor((angle / (Math.PI * 2)) * 20);
+    const base = ((sectionIndex + 1) * 7) % 20 + 1;
+    const multiplier = r >= 145 ? 2 : r >= 98 && r <= 110 ? 3 : 1;
+    return base * multiplier;
+  }
+
+  private computeReward() {
+    let reward = 50;
+    if (this.score > 200) reward = 500;
+    else if (this.score >= 151) reward = 350;
+    else if (this.score >= 101) reward = 200;
+    else if (this.score >= 51) reward = 100;
+    reward += this.bullseyes * 75;
+    return reward;
+  }
+
+  private refreshHud() {
+    const round = Math.min(3, Math.floor(this.thrown / 3) + 1);
+    const dartsInRound = this.thrown % 3;
+    this.hud.setText([
+      `SCORE ${this.score}`,
+      `RONDA ${round}/3`,
+      `DARDOS ${dartsInRound}/3`,
+      `BULL ${this.bullseyes}`,
+    ]);
+  }
+
+  private finishAndExit(reward: number) {
+    if (this.isFinished) return;
+    this.isFinished = true;
+    this.phase = 'exiting';
+    if (reward > 0) {
+      addTenks(reward, 'darts_reward');
+    }
+    transitionToScene(this, 'ArcadeInterior', {
+      dartsCooldownMs: 1200,
+      dartsReward: {
+        score: this.score,
+        bullseyes: this.bullseyes,
+        tenksEarned: reward,
+      },
+    });
+  }
+
+  private handleShutdown() {
+    this.input.off('pointerdown', this.throwDart, this);
+  }
+}

@@ -3,6 +3,7 @@ import { addTenks } from '../systems/TenksSystem';
 import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { SceneControls } from '../systems/SceneControls';
+import { safeSceneDelayedCall } from '../systems/AnimationSafety';
 
 type PenaltyPhase = 'aiming' | 'shooting' | 'result' | 'done' | 'exiting';
 
@@ -348,41 +349,125 @@ export class PenaltyMinigame extends Phaser.Scene {
     this.phase = 'shooting';
     this.resultLabel.setAlpha(0);
     this.summaryLabel.setAlpha(0);
+    this.cameras.main.shake(80, 0.0025);
 
-    const shotTargetX = this.aimX + Phaser.Math.Between(-18, 18);
-    const shotTargetY = Phaser.Math.Between(this.goalY - this.goalH / 2 + 22, this.goalY + this.goalH / 2 - 22);
-    const diveX = this.goalX + Phaser.Math.Between(-100, 100);
+    const shot = this.buildShotTarget();
+    const goaliePlan = this.buildGoaliePlan(shot.targetX, shot.targetY, shot.zone);
 
     this.tweens.add({
       targets: this.goalie,
-      x: diveX,
-      y: shotTargetY + 4,
-      angle: Phaser.Math.Between(-18, 18),
-      duration: 260,
+      x: this.goalie.x + goaliePlan.tellTilt,
+      angle: goaliePlan.tellTilt * 0.35,
+      duration: 110,
       ease: 'Sine.easeOut',
     });
+    safeSceneDelayedCall(this, goaliePlan.reactionDelayMs, () => {
+      if (this.phase !== 'shooting') return;
+      this.tweens.add({
+        targets: this.goalie,
+        x: goaliePlan.shouldStay ? this.goalX : goaliePlan.diveX,
+        y: goaliePlan.shouldStay ? this.goalY - 10 : shot.targetY + 4,
+        angle: goaliePlan.shouldStay ? 0 : goaliePlan.diveAngle,
+        duration: 280,
+        ease: 'Cubic.easeOut',
+      });
+    }, 'penalty goalie reaction');
 
     this.tweens.add({
       targets: this.ball,
-      x: shotTargetX,
-      y: shotTargetY,
+      x: shot.targetX,
+      y: shot.targetY,
       scaleX: 0.72,
       scaleY: 0.72,
       duration: 280,
       ease: 'Sine.easeOut',
+      onUpdate: () => {
+        const trail = this.add.circle(this.ball.x, this.ball.y, 2, 0xffffff, 0.35);
+        this.tweens.add({
+          targets: trail,
+          alpha: 0,
+          scaleX: 0.2,
+          scaleY: 0.2,
+          duration: 140,
+          ease: 'Sine.easeOut',
+          onComplete: () => trail.destroy(),
+        });
+      },
       onComplete: () => {
         const inGoal =
-          shotTargetX > this.goalX - this.goalW / 2 + 8 &&
-          shotTargetX < this.goalX + this.goalW / 2 - 8 &&
-          shotTargetY > this.goalY - this.goalH / 2 + 6 &&
-          shotTargetY < this.goalY + this.goalH / 2 - 6;
-        const saved = Phaser.Math.Distance.Between(shotTargetX, shotTargetY, this.goalie.x, this.goalie.y) < 42;
-        this.resolveShot(inGoal && !saved, inGoal, saved);
+          shot.targetX > this.goalX - this.goalW / 2 + 8 &&
+          shot.targetX < this.goalX + this.goalW / 2 - 8 &&
+          shot.targetY > this.goalY - this.goalH / 2 + 6 &&
+          shot.targetY < this.goalY + this.goalH / 2 - 6;
+        const hitPost = shot.kind === 'post';
+        const saved = !goaliePlan.shouldStay
+          && inGoal
+          && !hitPost
+          && Phaser.Math.Distance.Between(shot.targetX, shot.targetY, this.goalie.x, this.goalie.y) < goaliePlan.reach;
+        this.resolveShot(inGoal && !saved && !hitPost, inGoal, saved, shot.kind);
       },
     });
   }
 
-  private resolveShot(isGoal: boolean, inGoal: boolean, saved: boolean) {
+  private buildShotTarget() {
+    const marginX = this.goalW / 2;
+    const leftPost = this.goalX - marginX;
+    const rightPost = this.goalX + marginX;
+    const topBar = this.goalY - this.goalH / 2;
+    const insideX = this.aimX + Phaser.Math.Between(-22, 22);
+    const insideY = Phaser.Math.Between(topBar + 20, this.goalY + this.goalH / 2 - 16);
+    const distanceToCenter = Math.abs(this.aimX - this.goalX) / (this.goalW / 2);
+    const roll = Phaser.Math.Between(1, 100);
+
+    if (roll <= 15 || distanceToCenter > 0.93) {
+      const farSide = this.aimX < this.goalX ? -1 : 1;
+      const extreme = distanceToCenter > 0.96 || Phaser.Math.Between(0, 1) === 1;
+      const missType = extreme && Phaser.Math.Between(0, 100) < 55 ? 'high' : 'outside';
+      return {
+        kind: missType as 'outside' | 'high',
+        zone: 'edge' as const,
+        targetX: farSide < 0 ? leftPost - Phaser.Math.Between(18, 36) : rightPost + Phaser.Math.Between(18, 36),
+        targetY: missType === 'high'
+          ? topBar - Phaser.Math.Between(26, 56)
+          : Phaser.Math.Between(topBar + 16, this.goalY + this.goalH / 2 + 20),
+      };
+    }
+
+    if (roll <= 30 || (distanceToCenter > 0.82 && Phaser.Math.Between(0, 100) < 60)) {
+      const toLeft = this.aimX < this.goalX;
+      return {
+        kind: 'post' as const,
+        zone: 'edge' as const,
+        targetX: (toLeft ? leftPost : rightPost) + (toLeft ? 3 : -3),
+        targetY: Phaser.Math.Between(topBar + 12, this.goalY + this.goalH / 2 - 12),
+      };
+    }
+
+    return {
+      kind: 'goal' as const,
+      zone: distanceToCenter < 0.32 ? 'center' as const : distanceToCenter < 0.72 ? 'mid' as const : 'edge' as const,
+      targetX: Phaser.Math.Clamp(insideX, leftPost + 8, rightPost - 8),
+      targetY: insideY,
+    };
+  }
+
+  private buildGoaliePlan(targetX: number, targetY: number, zone: 'center' | 'mid' | 'edge') {
+    const reactionDelayMs = Phaser.Math.Between(100, 300);
+    const shouldStay = Phaser.Math.Between(1, 100) <= 8;
+    const reach = zone === 'center' ? 58 : zone === 'mid' ? 46 : 36;
+    const saveChance = zone === 'center' ? 0.9 : zone === 'mid' ? 0.55 : 0.2;
+    const commitTowardShot = Phaser.Math.FloatBetween(0, 1) < saveChance;
+    return {
+      reactionDelayMs,
+      shouldStay,
+      reach,
+      tellTilt: Phaser.Math.Between(-8, 8),
+      diveX: commitTowardShot ? targetX : this.goalX + Phaser.Math.Between(-100, 100),
+      diveAngle: commitTowardShot ? Phaser.Math.Between(-16, 16) : Phaser.Math.Between(-22, 22),
+    };
+  }
+
+  private resolveShot(isGoal: boolean, inGoal: boolean, saved: boolean, shotKind: 'goal' | 'post' | 'outside' | 'high') {
     this.shotsTaken += 1;
     if (isGoal) this.goals += 1;
     this.refreshHud();
@@ -393,12 +478,28 @@ export class PenaltyMinigame extends Phaser.Scene {
       this.resultColor = '#39FF14';
       this.spawnConfetti();
       this.showFloatingLabel('GOLAZO!', '#39FF14');
-    } else if (!inGoal) {
+    } else if (shotKind === 'post') {
+      this.resultText = 'AL PALO!';
+      this.resultColor = '#F5C842';
+      this.cameras.main.shake(120, 0.0045);
+      console.log('SFX: penalty_post_hit');
+    } else if (shotKind === 'high') {
+      this.resultText = 'ARRIBA!';
+      this.resultColor = '#FF6B6B';
+    } else if (!inGoal || shotKind === 'outside') {
       this.resultText = 'AFUERA!';
       this.resultColor = '#FF6B6B';
     } else if (saved) {
       this.resultText = 'ATAJADA!';
       this.resultColor = '#FF6B6B';
+      this.tweens.add({
+        targets: this.goalie,
+        y: this.goalie.y - 8,
+        duration: 120,
+        yoyo: true,
+        repeat: 1,
+        ease: 'Sine.easeOut',
+      });
     } else {
       this.resultText = 'CASI!';
       this.resultColor = '#F5C842';

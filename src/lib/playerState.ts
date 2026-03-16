@@ -4,6 +4,8 @@ import { normalizeVecindadBuildStage } from './vecindad';
 
 const DEFAULT_UTILITY_ID = 'UTIL-GUN-01';
 export const VECINDAD_DEED_ITEM_ID = 'UTIL-DEED-01';
+const FARM_SEED_TYPES = ['basica', 'indica', 'sativa', 'purple_haze', 'og_kush'] as const;
+type FarmSeedType = (typeof FARM_SEED_TYPES)[number];
 
 export type InventoryState = {
   owned: string[];
@@ -18,7 +20,19 @@ export type VecindadState = {
   ownedParcelId?: string;
   buildStage: number;
   materials: number;
+  cannabisFarmUnlocked?: boolean;
+  farmPlants?: Array<{
+    slotIndex: number;
+    seedType: 'basica' | 'indica' | 'sativa' | 'purple_haze' | 'og_kush';
+    plantedAt: number;
+    wateredAt?: number;
+    waterCount: number;
+  }>;
 };
+
+function isFarmSeedType(value: unknown): value is NonNullable<VecindadState['farmPlants']>[number]['seedType'] {
+  return typeof value === 'string' && FARM_SEED_TYPES.includes(value as FarmSeedType);
+}
 
 export type PlayerState = {
   tenks: number;
@@ -54,6 +68,8 @@ export const DEFAULT_PLAYER_STATE: PlayerState = {
     ownedParcelId: undefined,
     buildStage: 0,
     materials: 0,
+    cannabisFarmUnlocked: false,
+    farmPlants: [],
   },
 };
 
@@ -112,6 +128,29 @@ export function normalizePlayerState(input: unknown): PlayerState {
         state.vecindad && typeof state.vecindad === 'object' && typeof state.vecindad.materials === 'number'
           ? Math.max(0, Math.floor(state.vecindad.materials))
           : DEFAULT_PLAYER_STATE.vecindad.materials,
+      cannabisFarmUnlocked:
+        state.vecindad && typeof state.vecindad === 'object' && typeof state.vecindad.cannabisFarmUnlocked === 'boolean'
+          ? state.vecindad.cannabisFarmUnlocked
+          : false,
+      farmPlants:
+        state.vecindad && typeof state.vecindad === 'object' && Array.isArray(state.vecindad.farmPlants)
+          ? state.vecindad.farmPlants
+              .filter((entry): entry is NonNullable<VecindadState['farmPlants']>[number] =>
+                Boolean(entry)
+                && typeof entry === 'object'
+                && typeof entry.slotIndex === 'number'
+                && isFarmSeedType(entry.seedType)
+                && typeof entry.plantedAt === 'number'
+                && typeof entry.waterCount === 'number'
+              )
+              .map((entry) => ({
+                slotIndex: Math.max(0, Math.min(11, Math.floor(entry.slotIndex))),
+                seedType: entry.seedType,
+                plantedAt: Math.max(0, Math.floor(entry.plantedAt)),
+                wateredAt: typeof entry.wateredAt === 'number' ? Math.max(0, Math.floor(entry.wateredAt)) : undefined,
+                waterCount: Math.max(0, Math.floor(entry.waterCount)),
+              }))
+          : [],
     },
     progression,
   };

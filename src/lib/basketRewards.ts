@@ -1,12 +1,16 @@
-export const BASKET_REWARD_TIERS = [
-  { minScore: 9, tenks: 8 },
-  { minScore: 7, tenks: 6 },
-  { minScore: 5, tenks: 4 },
-  { minScore: 3, tenks: 2 },
-  { minScore: 0, tenks: 0 },
+export const BASKET_STREAK_REWARDS = [
+  { minStreak: 4, tenks: 300 },
+  { minStreak: 3, tenks: 200 },
+  { minStreak: 2, tenks: 150 },
+  { minStreak: 1, tenks: 100 },
 ] as const;
+
+export function calculateBasketShotReward(streak: number) {
+  const safeStreak = Math.max(1, Math.floor(streak));
+  return BASKET_STREAK_REWARDS.find((tier) => safeStreak >= tier.minStreak)?.tenks ?? 100;
+}
 
 export function calculateBasketReward(score: number) {
   const safeScore = Math.max(0, Math.floor(score));
-  return BASKET_REWARD_TIERS.find((tier) => safeScore >= tier.minScore)?.tenks ?? 0;
+  return safeScore * 100;
 }

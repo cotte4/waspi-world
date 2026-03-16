@@ -20,11 +20,19 @@ interface ArcadeBasketReward {
   status?: 'granted' | 'pending' | 'local';
 }
 
+interface ArcadeDartsReward {
+  score?: number;
+  bullseyes?: number;
+  tenksEarned?: number;
+}
+
 interface ArcadeInteriorData {
   basketReward?: ArcadeBasketReward;
   penaltyReward?: ArcadePenaltyReward;
+  dartsReward?: ArcadeDartsReward;
   basketCooldownMs?: number;
   penaltyCooldownMs?: number;
+  dartsCooldownMs?: number;
 }
 
 export class ArcadeInterior extends Phaser.Scene {
@@ -46,10 +54,13 @@ export class ArcadeInterior extends Phaser.Scene {
   private py = 0;
   private basketMachineZone = new Phaser.Geom.Rectangle();
   private penaltyMachineZone = new Phaser.Geom.Rectangle();
+  private dartsMachineZone = new Phaser.Geom.Rectangle();
   private wasInsideBasketZone = false;
   private wasInsidePenaltyZone = false;
+  private wasInsideDartsZone = false;
   private basketCooldownMs = 0;
   private penaltyCooldownMs = 0;
+  private dartsCooldownMs = 0;
   private rewardMessage = '';
   private rewardColor = '#39FF14';
   private rewardDetail = '';
@@ -75,13 +86,16 @@ export class ArcadeInterior extends Phaser.Scene {
     this.inTransition = false;
     this.wasInsideBasketZone = false;
     this.wasInsidePenaltyZone = false;
+    this.wasInsideDartsZone = false;
     this.lastMoveDx = 0;
     this.lastMoveDy = 0;
     this.lastIsMoving = false;
     this.basketCooldownMs = data.basketCooldownMs ?? 0;
     this.penaltyCooldownMs = data.penaltyCooldownMs ?? 0;
+    this.dartsCooldownMs = data.dartsCooldownMs ?? 0;
     const basketReward = data.basketReward;
     const reward = data.penaltyReward;
+    const dartsReward = data.dartsReward;
 
     if (basketReward) {
       if (basketReward.status === 'pending') {
@@ -108,6 +122,13 @@ export class ArcadeInterior extends Phaser.Scene {
       this.rewardMessage = 'PENALES TERMINADOS';
       this.rewardDetail = `${reward.goals ?? 0} GOLES / ${reward.shots ?? 5} TIROS`;
       this.rewardColor = '#F5C842';
+      return;
+    }
+
+    if (dartsReward) {
+      this.rewardMessage = 'DARDOS COBRADO';
+      this.rewardDetail = `${dartsReward.score ?? 0} PTS / BULL ${dartsReward.bullseyes ?? 0}${dartsReward.tenksEarned ? ` / +${dartsReward.tenksEarned} TENKS` : ''}`;
+      this.rewardColor = dartsReward.tenksEarned && dartsReward.tenksEarned > 0 ? '#39FF14' : '#46B3FF';
       return;
     }
 
@@ -207,7 +228,7 @@ export class ArcadeInterior extends Phaser.Scene {
     g.strokeRoundedRect(roomX + 22, roomY + roomH - 110, roomW - 44, 70, 18);
 
     const machinePositions = [roomX + 92, roomX + 226, roomX + 350, roomX + 474, roomX + 608];
-    const machineLabels = ['RACER', 'BASKET', 'PENALES', 'DJ', 'ZOMBIS'];
+    const machineLabels = ['RACER', 'BASKET', 'PENALES', 'DARDOS', 'ZOMBIS'];
 
     machinePositions.forEach((mx, index) => {
       const isPenaltyMachine = index === 2;
@@ -244,6 +265,11 @@ export class ArcadeInterior extends Phaser.Scene {
         this.penaltyMachineZone = new Phaser.Geom.Rectangle(mx - 36, roomY + 56, 72, 122);
         this.glowPad = this.add.ellipse(mx, roomY + 192, 94, 24, 0xF5C842, 0.12)
           .setStrokeStyle(1, 0xF5C842, 0.35)
+          .setDepth(1);
+      } else if (index === 3) {
+        this.dartsMachineZone = new Phaser.Geom.Rectangle(mx - 36, roomY + 56, 72, 122);
+        this.add.ellipse(mx, roomY + 192, 94, 24, 0xFF006E, 0.12)
+          .setStrokeStyle(1, 0xFF006E, 0.35)
           .setDepth(1);
       } else {
         this.add.text(mx, roomY + 190, 'SOON', {
@@ -374,6 +400,7 @@ export class ArcadeInterior extends Phaser.Scene {
       const signData = [
         { label: 'BASKET', color: 0x46B3FF },
         { label: 'PENALES', color: 0xF5C842 },
+        { label: 'DARDOS', color: 0xFF006E },
       ];
       signData.forEach(({ label, color }, si) => {
         const sx = roomX + 80 + si * 160;
@@ -409,7 +436,7 @@ export class ArcadeInterior extends Phaser.Scene {
       color: '#FF006E',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, roomY + 54, 'PISA BASKET O PENALES PARA JUGAR', {
+    this.add.text(width / 2, roomY + 54, 'PISA BASKET, PENALES O DARDOS PARA JUGAR', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#A0A0B4',
@@ -469,6 +496,10 @@ export class ArcadeInterior extends Phaser.Scene {
       this.penaltyCooldownMs = Math.max(0, this.penaltyCooldownMs - delta);
     }
 
+    if (this.dartsCooldownMs > 0) {
+      this.dartsCooldownMs = Math.max(0, this.dartsCooldownMs - delta);
+    }
+
     this.handleMovement(delta);
     this.updateMachineState();
     this.room?.update();
@@ -481,6 +512,7 @@ export class ArcadeInterior extends Phaser.Scene {
   private updateMachineState() {
     const inBasketZone = this.basketMachineZone.contains(this.px, this.py);
     const inPenaltyZone = this.penaltyMachineZone.contains(this.px, this.py);
+    const inDartsZone = this.dartsMachineZone.contains(this.px, this.py);
 
     if (this.basketGlowPad) {
       const pulse = 0.1 + Math.abs(Math.sin(this.time.now / 320)) * 0.08;
@@ -505,6 +537,12 @@ export class ArcadeInterior extends Phaser.Scene {
       } else if (inPenaltyZone) {
         this.machineHint.setText('PENALES LISTOS');
         this.machineHint.setColor('#F5C842');
+      } else if (this.dartsCooldownMs > 0 && inDartsZone) {
+        this.machineHint.setText('DARDOS RECARGANDO...');
+        this.machineHint.setColor('#888888');
+      } else if (inDartsZone) {
+        this.machineHint.setText('DARDOS LISTO');
+        this.machineHint.setColor('#FF006E');
       } else {
         this.machineHint.setText('ESC SALIR DEL ARCADE');
         this.machineHint.setColor('#666666');
@@ -519,8 +557,13 @@ export class ArcadeInterior extends Phaser.Scene {
       this.startPenalty();
     }
 
+    if (inDartsZone && !this.wasInsideDartsZone && this.dartsCooldownMs <= 0) {
+      this.startDarts();
+    }
+
     this.wasInsideBasketZone = inBasketZone;
     this.wasInsidePenaltyZone = inPenaltyZone;
+    this.wasInsideDartsZone = inDartsZone;
   }
 
   private startBasket() {
@@ -540,6 +583,16 @@ export class ArcadeInterior extends Phaser.Scene {
     this.cameras.main.fadeOut(250, 0, 0, 0);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
       this.scene.start('PenaltyMinigame');
+    });
+  }
+
+  private startDarts() {
+    if (this.inTransition) return;
+    this.inTransition = true;
+    this.flashMessage(this.scale.width / 2, this.scale.height / 2 + 52, 'ENTRANDO A DARDOS', '#FF006E');
+    this.cameras.main.fadeOut(250, 0, 0, 0);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      this.scene.start('DartsMinigame');
     });
   }
 

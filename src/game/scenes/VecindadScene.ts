@@ -18,6 +18,7 @@ import {
 } from '../../lib/vecindad';
 import type { VecindadState } from '../../lib/playerState';
 import { supabase } from '../../lib/supabase';
+import { getTenksBalance } from '../systems/TenksSystem';
 
 type ParcelVisual = {
   title: Phaser.GameObjects.Text;
@@ -44,6 +45,38 @@ type VecindadSceneData = {
   returnY?: number;
 };
 
+type SeedType = 'basica' | 'indica' | 'sativa' | 'purple_haze' | 'og_kush';
+
+type FarmPlant = {
+  slotIndex: number;
+  seedType: SeedType;
+  plantedAt: number;
+  wateredAt?: number;
+  waterCount: number;
+};
+
+type FarmActionRequest =
+  | { action: 'farm_unlock' }
+  | { action: 'farm_plant'; slotIndex: number; seedType: SeedType }
+  | { action: 'farm_water'; slotIndex: number }
+  | { action: 'farm_harvest'; slotIndex: number };
+
+const FARM_UNLOCK_COST = 11000;
+const FARM_SLOTS = 6;
+const FARM_SEEDS: Array<{
+  type: SeedType;
+  label: string;
+  cost: number;
+  growthMs: number;
+  rewardBase: number;
+}> = [
+  { type: 'basica', label: 'BASICA', cost: 200, growthMs: 30 * 60 * 1000, rewardBase: 350 },
+  { type: 'indica', label: 'INDICA', cost: 350, growthMs: 60 * 60 * 1000, rewardBase: 600 },
+  { type: 'sativa', label: 'SATIVA', cost: 500, growthMs: 2 * 60 * 60 * 1000, rewardBase: 1000 },
+  { type: 'purple_haze', label: 'PURPLE HAZE', cost: 800, growthMs: 3 * 60 * 60 * 1000, rewardBase: 1800 },
+  { type: 'og_kush', label: 'OG KUSH', cost: 1200, growthMs: 5 * 60 * 60 * 1000, rewardBase: 3000 },
+];
+
 export class VecindadScene extends Phaser.Scene {
   private static readonly MOVE_SPEED = 145;
   private player!: AvatarRenderer;
@@ -69,12 +102,25 @@ export class VecindadScene extends Phaser.Scene {
     ownedParcelId: undefined,
     buildStage: 0,
     materials: 0,
+    cannabisFarmUnlocked: false,
+    farmPlants: [],
   };
   private sharedParcels = new Map<string, SharedParcelState>();
   private parcelVisuals = new Map<string, ParcelVisual>();
   private materialNodes: MaterialNode[] = [];
   private promptText?: Phaser.GameObjects.Text;
   private hudText?: Phaser.GameObjects.Text;
+  private farmHintText?: Phaser.GameObjects.Text;
+  private farmOpen = false;
+  private selectedFarmSlot = 0;
+  private selectedSeedIndex = 0;
+  private farmOverlay?: Phaser.GameObjects.Container;
+  private farmSlots: Phaser.GameObjects.Rectangle[] = [];
+  private farmSlotLabels: Phaser.GameObjects.Text[] = [];
+  private farmSlotHitboxes: Phaser.Geom.Rectangle[] = [];
+  private farmButtonHitboxes: Array<{ id: 'seed' | 'plant' | 'water' | 'harvest' | 'exit'; rect: Phaser.Geom.Rectangle }> = [];
+  private farmInfoText?: Phaser.GameObjects.Text;
+  private farmActionText?: Phaser.GameObjects.Text;
   private bridgeCleanupFns: Array<() => void> = [];
   private controls!: SceneControls;
   private realtimeChannel: RealtimeChannel | null = null;
@@ -102,6 +148,7 @@ export class VecindadScene extends Phaser.Scene {
     this.drawParcels();
     this.createPlayer();
     this.setupUi();
+    this.createFarmOverlay();
     this.setupBridge();
     void this.loadSharedParcels();
     this.subscribeToParcelChanges();
@@ -135,6 +182,12 @@ export class VecindadScene extends Phaser.Scene {
 
   update(_time: number, delta: number) {
     if (this.inTransition) return;
+    if (this.farmOpen) {
+      this.updateFarmOverlay();
+      if (Phaser.Input.Keyboard.JustDown(this.keySpace)) this.closeFarmOverlay();
+      if (Phaser.Input.Keyboard.JustDown(this.keyE)) this.handleFarmPrimaryAction();
+      return;
+    }
     this.handleMovement(delta);
     this.room?.update();
     this.updateMaterialNodes();
@@ -274,6 +327,12 @@ export class VecindadScene extends Phaser.Scene {
         materials: typeof (payload as Record<string, unknown>).materials === 'number'
           ? (payload as Record<string, number>).materials
           : 0,
+        cannabisFarmUnlocked: typeof (payload as Record<string, unknown>).cannabisFarmUnlocked === 'boolean'
+          ? (payload as Record<string, boolean>).cannabisFarmUnlocked
+          : false,
+        farmPlants: Array.isArray((payload as Record<string, unknown>).farmPlants)
+          ? ((payload as Record<string, unknown>).farmPlants as FarmPlant[])
+          : [],
       };
       this.refreshParcelVisuals();
     }));
@@ -441,6 +500,7 @@ export class VecindadScene extends Phaser.Scene {
     }
 
     this.renderHud();
+    if (this.farmOpen) this.refreshFarmOverlay();
   }
 
   private drawParcelStructure(
@@ -502,6 +562,17 @@ export class VecindadScene extends Phaser.Scene {
 
     graphics.fillStyle(0x111111, 0.65);
     graphics.fillRoundedRect(houseX + 12, houseY + houseH - 34, houseW - 24, 18, 8);
+
+    if (mine && buildStage > 0) {
+      const farmX = parcel.x + parcel.w - 74;
+      const farmY = parcel.y + parcel.h - 62;
+      graphics.fillStyle(this.vecindadState.cannabisFarmUnlocked ? 0x1d3c1d : 0x2a2a2a, 0.95);
+      graphics.fillRoundedRect(farmX - 50, farmY - 26, 100, 44, 8);
+      graphics.lineStyle(2, this.vecindadState.cannabisFarmUnlocked ? 0x39FF14 : 0x888888, 0.85);
+      graphics.strokeRoundedRect(farmX - 50, farmY - 26, 100, 44, 8);
+      graphics.fillStyle(this.vecindadState.cannabisFarmUnlocked ? 0x39FF14 : 0xF5C842, 0.8);
+      graphics.fillCircle(farmX - 34, farmY - 6, 5);
+    }
   }
 
   private setupMaterialNodes() {
@@ -567,6 +638,9 @@ export class VecindadScene extends Phaser.Scene {
         : stage >= MAX_VECINDAD_STAGE
           ? 'OBJETIVO CASA COMPLETA'
           : `OBJETIVO STAGE ${stage + 1} ${nextCost} MATS`;
+    const farmLine = this.vecindadState.cannabisFarmUnlocked
+      ? `FARM ON | PLANTAS ${(this.vecindadState.farmPlants ?? []).length}/${FARM_SLOTS}`
+      : 'FARM LOCKED';
 
     this.hudText.setText([
       'LA VECINDAD',
@@ -574,6 +648,7 @@ export class VecindadScene extends Phaser.Scene {
       matsLine,
       progressBar,
       `STAGE ${stage}/${MAX_VECINDAD_STAGE}${stage >= MAX_VECINDAD_STAGE ? ' MAX' : ''}`,
+      farmLine,
       objective,
     ]);
   }
@@ -612,6 +687,17 @@ export class VecindadScene extends Phaser.Scene {
     if (material) {
       this.promptText.setText(`E RECOGER TU CACHE +${material.value} MATS`);
       this.promptText.setColor('#B9FF9E');
+      return;
+    }
+
+    if (this.isNearOwnedFarmSpot()) {
+      if (!this.vecindadState.cannabisFarmUnlocked) {
+        this.promptText.setText(`E DESBLOQUEAR CANNABIS FARM ${FARM_UNLOCK_COST} TENKS`);
+        this.promptText.setColor('#F5C842');
+      } else {
+        this.promptText.setText('E ABRIR CANNABIS FARM | SPACE CERRAR');
+        this.promptText.setColor('#39FF14');
+      }
       return;
     }
 
@@ -668,6 +754,11 @@ export class VecindadScene extends Phaser.Scene {
   }
 
   private handlePrimaryAction() {
+    if (this.isNearOwnedFarmSpot()) {
+      this.handleFarmPrimaryAction();
+      return;
+    }
+
     const material = this.getNearbyMaterialNode();
     if (material) {
       this.collectMaterial(material);
@@ -688,6 +779,11 @@ export class VecindadScene extends Phaser.Scene {
   }
 
   private handleSecondaryAction() {
+    if (this.farmOpen) {
+      this.closeFarmOverlay();
+      return;
+    }
+
     if (this.isNearExitGate()) {
       this.leaveToWorld();
       return;
@@ -715,6 +811,318 @@ export class VecindadScene extends Phaser.Scene {
         returnX: parcel.x + parcel.w / 2,
         returnY: parcel.y + parcel.h - 28,
       });
+    });
+  }
+
+  private getOwnedParcel() {
+    if (!this.vecindadState.ownedParcelId) return null;
+    return VECINDAD_PARCELS.find((parcel) => parcel.id === this.vecindadState.ownedParcelId) ?? null;
+  }
+
+  private getOwnedFarmSpot() {
+    const ownedParcel = this.getOwnedParcel();
+    if (!ownedParcel) return null;
+    if (normalizeVecindadBuildStage(this.vecindadState.buildStage) <= 0) return null;
+    return {
+      x: ownedParcel.x + ownedParcel.w - 74,
+      y: ownedParcel.y + ownedParcel.h - 44,
+    };
+  }
+
+  private isNearOwnedFarmSpot() {
+    const spot = this.getOwnedFarmSpot();
+    if (!spot) return false;
+    return Phaser.Math.Distance.Between(this.px, this.py, spot.x, spot.y) < 76;
+  }
+
+  private createFarmOverlay() {
+    const { width, height } = this.scale;
+    const cx = width / 2;
+    const cy = height / 2;
+    const container = this.add.container(0, 0).setDepth(3000).setScrollFactor(0).setVisible(false);
+    const bg = this.add.rectangle(cx, cy, width, height, 0x000000, 0.72).setScrollFactor(0);
+    const panel = this.add.rectangle(cx, cy, 560, 340, 0x111318, 0.98).setStrokeStyle(2, 0x39FF14, 0.7).setScrollFactor(0);
+    const title = this.add.text(cx, cy - 144, 'CANNABIS FARM', {
+      fontSize: '12px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#39FF14',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setScrollFactor(0);
+
+    this.farmInfoText = this.add.text(cx, cy - 114, '', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      align: 'center',
+      lineSpacing: 6,
+    }).setOrigin(0.5).setScrollFactor(0);
+
+    this.farmActionText = this.add.text(cx, cy + 122, '', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#B9FF9E',
+      align: 'center',
+      lineSpacing: 6,
+    }).setOrigin(0.5).setScrollFactor(0);
+
+    const slotStartX = cx - 150;
+    const slotStartY = cy - 72;
+    const slotW = 96;
+    const slotH = 56;
+    for (let i = 0; i < FARM_SLOTS; i += 1) {
+      const col = i % 3;
+      const row = Math.floor(i / 3);
+      const x = slotStartX + col * 150;
+      const y = slotStartY + row * 92;
+      const rect = this.add.rectangle(x, y, slotW, slotH, 0x2b2018, 0.98)
+        .setStrokeStyle(2, 0x5b4632, 0.9)
+        .setScrollFactor(0);
+      const label = this.add.text(x, y, 'VACIO', {
+        fontSize: '6px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#A2B59C',
+        align: 'center',
+      }).setOrigin(0.5).setScrollFactor(0);
+      this.farmSlots.push(rect);
+      this.farmSlotLabels.push(label);
+      this.farmSlotHitboxes.push(new Phaser.Geom.Rectangle(x - slotW / 2, y - slotH / 2, slotW, slotH));
+      container.add([rect, label]);
+    }
+
+    const buttons = [
+      { id: 'seed' as const, label: 'SEMILLA', x: cx - 208, y: cy + 66, color: 0x46B3FF },
+      { id: 'plant' as const, label: 'PLANTAR', x: cx - 88, y: cy + 66, color: 0x39FF14 },
+      { id: 'water' as const, label: 'REGAR', x: cx + 32, y: cy + 66, color: 0x46B3FF },
+      { id: 'harvest' as const, label: 'COSECHAR', x: cx + 152, y: cy + 66, color: 0xF5C842 },
+      { id: 'exit' as const, label: 'SALIR', x: cx + 242, y: cy - 144, color: 0xFF006E },
+    ];
+    buttons.forEach((btn) => {
+      const w = btn.id === 'exit' ? 72 : 104;
+      const h = 24;
+      const shape = this.add.rectangle(btn.x, btn.y, w, h, 0x1a1f2a, 0.95)
+        .setStrokeStyle(2, btn.color, 0.8)
+        .setScrollFactor(0);
+      const txt = this.add.text(btn.x, btn.y, btn.label, {
+        fontSize: '6px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#FFFFFF',
+      }).setOrigin(0.5).setScrollFactor(0);
+      this.farmButtonHitboxes.push({ id: btn.id, rect: new Phaser.Geom.Rectangle(btn.x - w / 2, btn.y - h / 2, w, h) });
+      container.add([shape, txt]);
+    });
+
+    container.add([bg, panel, title, this.farmInfoText, this.farmActionText]);
+    this.farmOverlay = container;
+
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (!this.farmOpen) return;
+      const sx = pointer.x;
+      const sy = pointer.y;
+      for (let i = 0; i < this.farmSlotHitboxes.length; i += 1) {
+        if (this.farmSlotHitboxes[i].contains(sx, sy)) {
+          this.selectedFarmSlot = i;
+          this.refreshFarmOverlay();
+          return;
+        }
+      }
+      const hit = this.farmButtonHitboxes.find((button) => button.rect.contains(sx, sy));
+      if (!hit) return;
+      if (hit.id === 'seed') {
+        this.selectedSeedIndex = (this.selectedSeedIndex + 1) % FARM_SEEDS.length;
+        this.refreshFarmOverlay();
+      } else if (hit.id === 'plant') {
+        this.plantInSelectedSlot();
+      } else if (hit.id === 'water') {
+        this.waterSelectedSlot();
+      } else if (hit.id === 'harvest') {
+        this.harvestSelectedSlot();
+      } else if (hit.id === 'exit') {
+        this.closeFarmOverlay();
+      }
+    });
+  }
+
+  private openFarmOverlay() {
+    if (!this.farmOverlay) return;
+    this.farmOpen = true;
+    this.farmOverlay.setVisible(true);
+    this.refreshFarmOverlay();
+  }
+
+  private closeFarmOverlay() {
+    this.farmOpen = false;
+    this.farmOverlay?.setVisible(false);
+  }
+
+  private updateFarmOverlay() {
+    if (this.controls.isMovementDirectionJustDown('left')) {
+      this.selectedFarmSlot = (this.selectedFarmSlot + FARM_SLOTS - 1) % FARM_SLOTS;
+      this.refreshFarmOverlay();
+    } else if (this.controls.isMovementDirectionJustDown('right')) {
+      this.selectedFarmSlot = (this.selectedFarmSlot + 1) % FARM_SLOTS;
+      this.refreshFarmOverlay();
+    } else if (this.controls.isMovementDirectionJustDown('up')) {
+      this.selectedSeedIndex = (this.selectedSeedIndex + FARM_SEEDS.length - 1) % FARM_SEEDS.length;
+      this.refreshFarmOverlay();
+    } else if (this.controls.isMovementDirectionJustDown('down')) {
+      this.selectedSeedIndex = (this.selectedSeedIndex + 1) % FARM_SEEDS.length;
+      this.refreshFarmOverlay();
+    }
+  }
+
+  private handleFarmPrimaryAction() {
+    if (!this.vecindadState.ownedParcelId) {
+      eventBus.emit(EVENTS.UI_NOTICE, 'Primero necesitas comprar una parcela.');
+      return;
+    }
+    if (!this.vecindadState.cannabisFarmUnlocked) {
+      this.requestFarmAction({ action: 'farm_unlock' });
+      return;
+    }
+    if (!this.farmOpen) this.openFarmOverlay();
+    else this.plantInSelectedSlot();
+  }
+
+  private requestFarmAction(payload: FarmActionRequest) {
+    eventBus.emit(EVENTS.FARM_ACTION_REQUEST, payload);
+  }
+
+  private getFarmPlants(): FarmPlant[] {
+    return (this.vecindadState.farmPlants ?? []) as FarmPlant[];
+  }
+
+  private setFarmPlants(plants: FarmPlant[], notice?: string) {
+    this.vecindadState = {
+      ...this.vecindadState,
+      farmPlants: plants,
+    };
+    eventBus.emit(EVENTS.VECINDAD_UPDATE_REQUEST, {
+      vecindad: this.vecindadState,
+      notice,
+    });
+    this.refreshFarmOverlay();
+  }
+
+  private getPlantBySlot(slotIndex: number) {
+    return this.getFarmPlants().find((plant) => plant.slotIndex === slotIndex);
+  }
+
+  private getSeedConfig(seedType: SeedType) {
+    return FARM_SEEDS.find((seed) => seed.type === seedType) ?? FARM_SEEDS[0];
+  }
+
+  private getPlantStage(plant: FarmPlant) {
+    const config = this.getSeedConfig(plant.seedType);
+    const elapsed = Date.now() - plant.plantedAt;
+    const ratio = elapsed / config.growthMs;
+    const effectiveRatio = plant.waterCount >= 1 ? ratio : ratio * 0.5;
+    if (effectiveRatio < 0.25) return 'sprout';
+    if (effectiveRatio < 0.5) return 'seedling';
+    if (effectiveRatio < 1) return 'growing';
+    return 'flowering';
+  }
+
+  private getPlantRemainingMs(plant: FarmPlant) {
+    const config = this.getSeedConfig(plant.seedType);
+    const elapsed = Date.now() - plant.plantedAt;
+    const ratio = elapsed / config.growthMs;
+    const effectiveRatio = plant.waterCount >= 1 ? ratio : ratio * 0.5;
+    if (effectiveRatio >= 1) return 0;
+    const ratioNeeded = 1 - effectiveRatio;
+    return Math.max(0, Math.floor(ratioNeeded * config.growthMs));
+  }
+
+  private formatMs(ms: number) {
+    if (ms <= 0) return 'LISTA';
+    const minutes = Math.ceil(ms / 60000);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    const rem = minutes % 60;
+    return `${hours}h ${rem}m`;
+  }
+
+  private refreshFarmOverlay() {
+    if (!this.farmOverlay || !this.farmInfoText || !this.farmActionText) return;
+    const plants = this.getFarmPlants();
+    const selectedSeed = FARM_SEEDS[this.selectedSeedIndex];
+    for (let i = 0; i < this.farmSlots.length; i += 1) {
+      const slotRect = this.farmSlots[i];
+      const label = this.farmSlotLabels[i];
+      const plant = plants.find((entry) => entry.slotIndex === i);
+      const selected = this.selectedFarmSlot === i;
+      slotRect.setStrokeStyle(2, selected ? 0xF5C842 : 0x5b4632, 0.95);
+      if (!plant) {
+        slotRect.setFillStyle(0x2b2018, 0.98);
+        label.setText(`SLOT ${i + 1}\nVACIO`).setColor('#A2B59C');
+      } else {
+        const stage = this.getPlantStage(plant);
+        const timeLeft = this.formatMs(this.getPlantRemainingMs(plant));
+        const stageColor = stage === 'flowering' ? '#39FF14' : stage === 'growing' ? '#B9FF9E' : '#46B3FF';
+        slotRect.setFillStyle(stage === 'flowering' ? 0x1d3f20 : 0x23331f, 0.98);
+        label.setText(`${this.getSeedConfig(plant.seedType).label}\n${stage.toUpperCase()} ${timeLeft}`).setColor(stageColor);
+      }
+    }
+
+    const selectedPlant = this.getPlantBySlot(this.selectedFarmSlot);
+    const selectedStage = selectedPlant ? this.getPlantStage(selectedPlant) : 'empty';
+    this.farmInfoText.setText([
+      `TENKS ${getTenksBalance()} | SLOT ${this.selectedFarmSlot + 1}/${FARM_SLOTS}`,
+      `SEMILLA ${selectedSeed.label} COSTO ${selectedSeed.cost}T`,
+    ]);
+    this.farmActionText.setText([
+      `ESTADO ${selectedStage.toUpperCase()} | PLANTAS ${plants.length}/${FARM_SLOTS}`,
+      '< > SLOT   ^ v SEMILLA   E ACCION PRIMARIA   SPACE SALIR',
+    ]);
+  }
+
+  private plantInSelectedSlot() {
+    const plants = this.getFarmPlants();
+    if (plants.some((plant) => plant.slotIndex === this.selectedFarmSlot)) {
+      eventBus.emit(EVENTS.UI_NOTICE, 'Ese slot ya tiene una planta.');
+      return;
+    }
+    const seed = FARM_SEEDS[this.selectedSeedIndex];
+    this.requestFarmAction({
+      action: 'farm_plant',
+      slotIndex: this.selectedFarmSlot,
+      seedType: seed.type,
+    });
+  }
+
+  private waterSelectedSlot() {
+    const plants = this.getFarmPlants();
+    const plant = plants.find((entry) => entry.slotIndex === this.selectedFarmSlot);
+    if (!plant) {
+      eventBus.emit(EVENTS.UI_NOTICE, 'No hay planta en ese slot.');
+      return;
+    }
+    const stage = this.getPlantStage(plant);
+    if (stage === 'flowering') {
+      eventBus.emit(EVENTS.UI_NOTICE, 'Ya esta lista para cosechar.');
+      return;
+    }
+    this.requestFarmAction({
+      action: 'farm_water',
+      slotIndex: this.selectedFarmSlot,
+    });
+  }
+
+  private harvestSelectedSlot() {
+    const plants = this.getFarmPlants();
+    const plant = plants.find((entry) => entry.slotIndex === this.selectedFarmSlot);
+    if (!plant) {
+      eventBus.emit(EVENTS.UI_NOTICE, 'No hay planta para cosechar.');
+      return;
+    }
+    const stage = this.getPlantStage(plant);
+    if (stage !== 'flowering') {
+      eventBus.emit(EVENTS.UI_NOTICE, 'Aun no esta lista para cosecha.');
+      return;
+    }
+    this.requestFarmAction({
+      action: 'farm_harvest',
+      slotIndex: this.selectedFarmSlot,
     });
   }
 
@@ -826,12 +1234,25 @@ export class VecindadScene extends Phaser.Scene {
         ownedParcelId: typeof parsed.vecindad?.ownedParcelId === 'string' ? parsed.vecindad.ownedParcelId : undefined,
         buildStage: typeof parsed.vecindad?.buildStage === 'number' ? parsed.vecindad.buildStage : 0,
         materials: typeof parsed.vecindad?.materials === 'number' ? parsed.vecindad.materials : 0,
+        cannabisFarmUnlocked: Boolean(parsed.vecindad?.cannabisFarmUnlocked),
+        farmPlants: Array.isArray(parsed.vecindad?.farmPlants)
+          ? parsed.vecindad.farmPlants.filter((entry): entry is FarmPlant =>
+              Boolean(entry)
+              && typeof entry === 'object'
+              && typeof (entry as FarmPlant).slotIndex === 'number'
+              && typeof (entry as FarmPlant).seedType === 'string'
+              && typeof (entry as FarmPlant).plantedAt === 'number'
+              && typeof (entry as FarmPlant).waterCount === 'number'
+            )
+          : [],
       };
     } catch {
       this.vecindadState = {
         ownedParcelId: undefined,
         buildStage: 0,
         materials: 0,
+        cannabisFarmUnlocked: false,
+        farmPlants: [],
       };
     }
   }

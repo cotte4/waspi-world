@@ -95,6 +95,12 @@ interface VecindadSharedPayload {
   broadcast?: boolean;
 }
 
+type FarmActionRequestPayload =
+  | { action: 'farm_unlock' }
+  | { action: 'farm_plant'; slotIndex: number; seedType: 'basica' | 'indica' | 'sativa' | 'purple_haze' | 'og_kush' }
+  | { action: 'farm_water'; slotIndex: number }
+  | { action: 'farm_harvest'; slotIndex: number };
+
 const CHAT_SCENES = new Set([
   'WorldScene',
   'VecindadScene',
@@ -590,6 +596,56 @@ export default function PlayPage() {
       if (next.notice) setUiNotice({ msg: next.notice });
     });
 
+    const unsubFarmAction = eventBus.on(EVENTS.FARM_ACTION_REQUEST, (payload: unknown) => {
+      const next = payload as FarmActionRequestPayload | null;
+      if (!next?.action) return;
+      void (async () => {
+        if (!tokenRef.current) {
+          setUiNotice({ msg: 'Inicia sesion para usar Cannabis Farm.', color: '#46B3FF' });
+          return;
+        }
+        const res = await fetch('/api/vecindad', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${tokenRef.current}`,
+          },
+          body: JSON.stringify(next),
+        }).catch(() => null);
+
+        const json = await res?.json().catch(() => null) as {
+          error?: string;
+          notice?: string;
+          player?: PlayerState;
+          parcels?: SharedParcelState[];
+          reward?: number;
+        } | null;
+
+        if (!res?.ok || !json?.player) {
+          setUiNotice({ msg: json?.error ?? 'No pude procesar la accion del farm.', color: '#FF4444' });
+          return;
+        }
+
+        applyPlayerState(normalizePlayerState(json.player));
+        if (json.parcels) {
+          eventBus.emit(EVENTS.VECINDAD_SHARED_STATE_CHANGED, {
+            parcels: json.parcels,
+            broadcast: true,
+          } satisfies VecindadSharedPayload);
+        }
+        if (next.action === 'farm_unlock') {
+          eventBus.emit(EVENTS.FARM_UNLOCKED, {});
+        } else if (next.action === 'farm_plant') {
+          eventBus.emit(EVENTS.FARM_PLANTED, { slotIndex: next.slotIndex, seedType: next.seedType });
+        } else if (next.action === 'farm_water') {
+          eventBus.emit(EVENTS.FARM_WATERED, { slotIndex: next.slotIndex });
+        } else if (next.action === 'farm_harvest') {
+          eventBus.emit(EVENTS.FARM_HARVESTED, { slotIndex: next.slotIndex, reward: json.reward });
+        }
+        setUiNotice({ msg: json.notice ?? 'Accion de farm completada.' });
+      })();
+    });
+
     const unsubUiNotice = eventBus.on(EVENTS.UI_NOTICE, (payload: unknown) => {
       if (typeof payload === 'string' && payload.trim()) {
         setUiNotice({ msg: payload });
@@ -616,6 +672,7 @@ export default function PlayPage() {
       unsubParcelBuy();
       unsubParcelBuild();
       unsubVecindadUpdate();
+      unsubFarmAction();
       unsubUiNotice();
     };
   }, [applyPlayerState, playUiSfx, playerState, syncPlayerState]);

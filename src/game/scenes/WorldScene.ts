@@ -4865,6 +4865,12 @@ export class WorldScene extends Phaser.Scene {
         materials: typeof (payload as Record<string, unknown>).materials === 'number'
           ? (payload as Record<string, number>).materials
           : 0,
+        cannabisFarmUnlocked: typeof (payload as Record<string, unknown>).cannabisFarmUnlocked === 'boolean'
+          ? (payload as Record<string, boolean>).cannabisFarmUnlocked
+          : false,
+        farmPlants: Array.isArray((payload as Record<string, unknown>).farmPlants)
+          ? ((payload as Record<string, unknown>).farmPlants as VecindadState['farmPlants'])
+          : [],
       };
       this.refreshParcelVisuals();
     }));
@@ -4955,12 +4961,16 @@ export class WorldScene extends Phaser.Scene {
         ownedParcelId: typeof parsed.vecindad?.ownedParcelId === 'string' ? parsed.vecindad.ownedParcelId : undefined,
         buildStage: typeof parsed.vecindad?.buildStage === 'number' ? parsed.vecindad.buildStage : 0,
         materials: typeof parsed.vecindad?.materials === 'number' ? parsed.vecindad.materials : 0,
+        cannabisFarmUnlocked: typeof parsed.vecindad?.cannabisFarmUnlocked === 'boolean' ? parsed.vecindad.cannabisFarmUnlocked : false,
+        farmPlants: Array.isArray(parsed.vecindad?.farmPlants) ? parsed.vecindad.farmPlants : [],
       };
     } catch {
       this.vecindadState = {
         ownedParcelId: undefined,
         buildStage: 0,
         materials: 0,
+        cannabisFarmUnlocked: false,
+        farmPlants: [],
       };
     }
   }
