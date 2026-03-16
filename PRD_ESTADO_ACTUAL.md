@@ -1,7 +1,71 @@
 # WASPI WORLD — PRD Estado Actual
-**Fecha:** 2026-03-15
-**Nota:** Actualizado post Fase 0 de auditoría — refleja el estado real del código vs lo declarado en los PRDs anteriores.
-**Archivos fuente:** `PRD_WASPI_WORLD.md` (v1.2), `PRD_WASPI_WORLD.md` (estado actualizado 2026-03-14), `PRD_SPRITE_OVERHAUL.md`, código real en `src/` y `app/`.
+**Fecha:** 2026-03-16
+**Nota:** Actualizado post sesión de visual polish y bug fixes.
+**Archivos fuente:** `PRD_WASPI_WORLD.md` (v1.2), código real en `src/` y `app/`.
+
+---
+
+## Sesión 2026-03-16 — Lo que se hizo
+
+### Bug fixes
+- **Parcel buy sin TENKS**: `handleInteraction()` en WorldScene no tenía rama para compra de parcelas. Agregado. Ahora se deducen correctamente los TENKS.
+- **Basement zombie exit freeze**: `BasementScene.update()` llamaba `enterZombieDepths()` sin chequear proximidad. Guardado con `isNearZombieAccess()`.
+
+### Sentry
+- Configurado `@sentry/nextjs` con `sentry.client.config.ts`, `sentry.server.config.ts`, `sentry.edge.config.ts`.
+- CSP actualizado con `*.ingest.us.sentry.io`. Source maps solo en Vercel.
+- **Pendiente**: agregar env vars en el dashboard de Vercel.
+
+### Visual polish megapass (commits `89cf735`, `160b0d4`)
+
+**HUD global:**
+- HP bar: borde neon dorado, flash rojo al recibir daño, ancho 140px
+- XP bar: barra delgada azul neon debajo del HP, muestra progreso al próximo nivel
+- Level badge: pill top-left con `LVL X/Y`
+- Weapon cooldown bar: thin bar animada que se llena según cooldown del arma equipada
+
+**WorldScene ambiente:**
+- Drop shadows detrás de cada edificio (depth 1.5)
+- Entrance floor markers: zona coloreada + chevron permanente frente a cada puerta
+- Interaction hint bobbing: el texto de acción sube/baja ±4px en ciclo
+- Ambient particles: ~20 puntos neon flotantes en la plaza/zonas bajas
+
+**Interiores:**
+- `StoreInterior`: dot pattern dorado, focal glow animado sobre NPC, mostrador procedural, estanterías
+- `ArcadeInterior`: red de circuitos neon rosa, 4 máquinas arcade con pantalla CRT, luces intermitentes, carteles de juegos
+- `CafeInterior`: paleta cálida `#1a1209`, 7 fuentes de vapor con loop float+fade
+- `CasinoInterior`: marquesina parpadeante en bordes, poker glow pulsante, 8 fichas decorativas
+
+**Combat feedback:**
+- Muzzle flash: círculo blanco/amarillo ~80ms al disparar
+- Hit tint: tint rojo 100ms en AvatarRenderer al recibir daño
+- Damage numbers: color por arma (dorado/naranja/azul/verde), tamaño por magnitud, `CRIT!` si daño ≥ 30
+
+**Minimap:**
+- Top-right, 160×100px, fondo negro, borde neon azul
+- Edificios en colores temáticos, punto dorado = jugador, puntos azules = remotos
+- Toggle con `showArenaHud`
+
+**Transiciones:**
+- `showSceneTitle()` en `SceneUi.ts`: backdrop + título 18px, fade in/hold/fade out
+- Llamado en Store, Arcade, Café, Casino, Basement
+
+**Minijuegos:**
+- Countdown 3→2→1→GO! al inicio de ambos minijuegos
+- BasketMinigame: score 14px neon, timer bar, scale punch, "NICE SHOT!"
+- PenaltyMinigame: pips de progreso, confetti en gol, "GOLAZO!"
+
+**Enemigos:**
+- Formas procedurales: rusher=triángulo, shooter=cuadrado+barril, tank=hexágono, boss=estrella 8 puntas
+- Idle bobbing desfasado por `phase`
+- Proximity agro glow cuando jugador a <220px
+- Hurt flash blanco 180ms al recibir daño
+- HP bar on-demand: solo visible 2.5s después de recibir golpe
+
+### Tiled migration
+- Revisado concepto. Decisión: **diferido**. Requiere diseñar el mapa en Tiled primero. El mundo programático queda como decisión final hasta que existan los assets.
+
+---
 
 ---
 
