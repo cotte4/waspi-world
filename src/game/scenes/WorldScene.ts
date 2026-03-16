@@ -29,7 +29,6 @@ import {
 import { announceScene, bindSafeResetToPlaza } from '../systems/SceneUi';
 import { SceneControls } from '../systems/SceneControls';
 import { getVoiceChat, destroyVoiceChat } from '../systems/voiceChatInstance';
-import { VoiceChatManager } from '../systems/VoiceChatManager';
 import type { VecindadState } from '../../lib/playerState';
 import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
 import { EnemySprite, registerZombieAnims, type ZombieType } from '../systems/EnemySprite';
@@ -398,11 +397,8 @@ export class WorldScene extends Phaser.Scene {
 
   // Voice Chat
   private voiceMuteBtn?: Phaser.GameObjects.Text;
-  private voiceDeviceBtn?: Phaser.GameObjects.Text;
-  private voiceOffBtn?: Phaser.GameObjects.Text;
   private voiceStatusText?: Phaser.GameObjects.Text;
-  private voiceDevicePanel?: Phaser.GameObjects.Container;
-  private voicePromptPanel?: Phaser.GameObjects.Container;
+  private voicePromptObjects: Phaser.GameObjects.GameObject[] = [];
   private isActivatingVoice = false;
   private voiceFrameCount = 0;
   // Speaking indicators (world-space circles above avatars)
@@ -888,35 +884,19 @@ export class WorldScene extends Phaser.Scene {
   private setupVoiceHud() {
     const camH = this.cameras.main.height;
     // Y offset: 118px above bottom keeps buttons above the React chat overlay
-    // which covers the bottom ~100px of the canvas.
     const BY = camH - 118;
-    const btnStyle = {
+
+    // Single mic toggle button
+    this.voiceMuteBtn = this.add.text(10, BY, '[MIC]', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       backgroundColor: '#0A0A14',
       padding: { x: 5, y: 3 },
-    };
-
-    // [MIC OFF] — main toggle button
-    this.voiceMuteBtn = this.add.text(10, BY, '[MIC OFF]', {
-      ...btnStyle,
       color: '#9999BB',
     }).setScrollFactor(0).setDepth(9999).setInteractive({ useHandCursor: true });
 
-    // [DEV] — device picker
-    this.voiceDeviceBtn = this.add.text(10, BY + 18, '[DEV]', {
-      ...btnStyle,
-      color: '#7777AA',
-    }).setScrollFactor(0).setDepth(9999).setInteractive({ useHandCursor: true });
-
-    // [OFF] — fully disable voice
-    this.voiceOffBtn = this.add.text(58, BY + 18, '[OFF]', {
-      ...btnStyle,
-      color: '#7777AA',
-    }).setScrollFactor(0).setDepth(9999).setInteractive({ useHandCursor: true });
-
-    // Peer count indicator
-    this.voiceStatusText = this.add.text(10, BY + 36, '', {
+    // Small status text for errors/peer count
+    this.voiceStatusText = this.add.text(10, BY + 18, '', {
       fontSize: '6px',
       fontFamily: 'Silkscreen, monospace',
       color: '#7777AA',
@@ -927,12 +907,11 @@ export class WorldScene extends Phaser.Scene {
       this.px, this.py - 54, 5, 0, 360, false, 0x39FF14, 0,
     ).setDepth(200);
 
-    // ── Button handlers ──────────────────────────────────────────────────────
+    // ── Button handler ────────────────────────────────────────────────────────
 
     this.voiceMuteBtn.on('pointerdown', async () => {
       const vc = getVoiceChat();
       if (!vc.connected) {
-        // If pref is already 'on' and mic is granted, skip the prompt
         const pref = this.getVoicePref();
         const granted = await this.isMicGranted();
         if (pref === 'on' && granted) {
@@ -947,16 +926,21 @@ export class WorldScene extends Phaser.Scene {
       }
     });
 
-    this.voiceDeviceBtn.on('pointerdown', () => {
-      if (this.voiceDevicePanel) {
-        this.closeMicDevicePanel();
-      } else {
-        void this.openMicDevicePanel();
-      }
+    // ── React settings bridge ─────────────────────────────────────────────────
+
+    const unsubMic = eventBus.on(EVENTS.VOICE_MIC_CHANGED, (deviceId: unknown) => {
+      const vc = getVoiceChat();
+      if (!vc.connected || typeof deviceId !== 'string') return;
+      vc.switchMic(deviceId).catch((e) => console.warn('[VoiceChat] Mic switch failed:', e));
     });
 
-    this.voiceOffBtn.on('pointerdown', () => {
+    const unsubDisable = eventBus.on(EVENTS.VOICE_DISABLE, () => {
       void this.disableVoice();
+    });
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      unsubMic();
+      unsubDisable();
     });
   }
 
@@ -1002,52 +986,52 @@ export class WorldScene extends Phaser.Scene {
    * Only calls getUserMedia AFTER the user explicitly accepts.
    */
   private showVoicePrompt() {
-    if (this.voicePromptPanel) return;
-    this.closeMicDevicePanel();
+    if (this.voicePromptObjects.length > 0) return;
 
     const camW = this.cameras.main.width;
     const camH = this.cameras.main.height;
     const panelW = 290;
     const panelH = 116;
-    const panelX = (camW - panelW) / 2;
-    const panelY = (camH - panelH) / 2;
+    const px = (camW - panelW) / 2;
+    const py = (camH - panelH) / 2;
+    const D = 10001;
 
-    const bg = this.add.rectangle(0, 0, panelW, panelH, 0x0A0A14, 0.96)
+    const bg = this.add.rectangle(px, py, panelW, panelH, 0x0A0A14, 0.96)
       .setStrokeStyle(1, 0x46B3FF, 0.7)
-      .setOrigin(0, 0);
+      .setOrigin(0, 0)
+      .setScrollFactor(0).setDepth(D);
 
-    const title = this.add.text(12, 10, 'VOICE CHAT', {
+    const title = this.add.text(px + 12, py + 10, 'VOICE CHAT', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#46B3FF',
-    });
+    }).setScrollFactor(0).setDepth(D);
 
-    const desc = this.add.text(12, 30, [
+    const desc = this.add.text(px + 12, py + 30, [
       'Vas a escuchar a otros jugadores',
-      'cuando esten cerca. El audio va',
-      'directo entre browsers (P2P).',
+      'cuando esten cerca. Audio P2P directo.',
     ], {
       fontSize: '6px',
       fontFamily: 'Silkscreen, monospace',
       color: '#AAAACC',
       lineSpacing: 4,
-    });
+    }).setScrollFactor(0).setDepth(D);
 
-    const btnActivar = this.add.text(12, 84, '[ACTIVAR]', {
+    const btnActivar = this.add.text(px + 12, py + 78, '[ACTIVAR]', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#39FF14',
       backgroundColor: '#0E1A0E',
       padding: { x: 5, y: 3 },
-    }).setInteractive({ useHandCursor: true });
+    }).setScrollFactor(0).setDepth(D).setInteractive({ useHandCursor: true });
 
-    const btnSinVoz = this.add.text(130, 84, '[JUGAR SIN VOZ]', {
+    const btnSinVoz = this.add.text(px + 130, py + 78, '[SIN VOZ]', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#888888',
       backgroundColor: '#0E0E14',
       padding: { x: 5, y: 3 },
-    }).setInteractive({ useHandCursor: true });
+    }).setScrollFactor(0).setDepth(D).setInteractive({ useHandCursor: true });
 
     btnActivar.on('pointerover', () => btnActivar.setStyle({ color: '#FFFFFF' }));
     btnActivar.on('pointerout', () => btnActivar.setStyle({ color: '#39FF14' }));
@@ -1062,17 +1046,14 @@ export class WorldScene extends Phaser.Scene {
     btnSinVoz.on('pointerdown', () => {
       this.closeVoicePrompt();
       this.setVoicePref('off');
-      this.voiceStatusText?.setText('sin voz').setStyle({ color: '#7777AA' });
     });
 
-    this.voicePromptPanel = this.add.container(panelX, panelY, [bg, title, desc, btnActivar, btnSinVoz])
-      .setScrollFactor(0)
-      .setDepth(10001);
+    this.voicePromptObjects = [bg, title, desc, btnActivar, btnSinVoz];
   }
 
   private closeVoicePrompt() {
-    this.voicePromptPanel?.destroy();
-    this.voicePromptPanel = undefined;
+    this.voicePromptObjects.forEach((o) => o.destroy());
+    this.voicePromptObjects = [];
   }
 
   /**
@@ -1098,9 +1079,7 @@ export class WorldScene extends Phaser.Scene {
       this.connectToVoicePeersInRoom();
 
       this.voiceMuteBtn?.setText('[MIC ON]').setStyle({ color: '#39FF14' });
-      this.voiceDeviceBtn?.setStyle({ color: '#39FF14' });
-      this.voiceOffBtn?.setStyle({ color: '#FF6666' });
-      this.voiceStatusText?.setStyle({ color: '#39FF14' });
+      this.voiceStatusText?.setText('').setStyle({ color: '#39FF14' });
     } catch (err) {
       const name = (err as DOMException)?.name;
       let label = '[NO MIC]';
@@ -1145,76 +1124,7 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  private async openMicDevicePanel() {
-    this.closeMicDevicePanel();
-
-    let devices: MediaDeviceInfo[];
-    try {
-      devices = await VoiceChatManager.getAudioInputDevices();
-    } catch {
-      return;
-    }
-    if (devices.length === 0) return;
-
-    const camH = this.cameras.main.height;
-    const panelX = 10;
-    const rowH = 16;
-    const panelW = 220;
-    const panelH = 20 + devices.length * rowH;
-    const panelY = camH - 28 - panelH;
-
-    const bg = this.add.rectangle(0, 0, panelW, panelH, 0x0E0E14, 0.97)
-      .setStrokeStyle(1, 0x46B3FF, 0.6)
-      .setOrigin(0, 0);
-
-    const title = this.add.text(8, 4, 'SELECT MIC', {
-      fontSize: '6px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#46B3FF',
-    });
-
-    const items: Phaser.GameObjects.GameObject[] = [bg, title];
-
-    devices.forEach((device, i) => {
-      const label = device.label || `Mic ${i + 1}`;
-      const short = label.length > 28 ? label.slice(0, 27) + '…' : label;
-      const row = this.add.text(8, 18 + i * rowH, short, {
-        fontSize: '6px',
-        fontFamily: 'Silkscreen, monospace',
-        color: '#CCCCCC',
-        backgroundColor: '#0E0E14',
-        padding: { x: 2, y: 2 },
-      }).setInteractive({ useHandCursor: true });
-
-      row.on('pointerover', () => row.setStyle({ color: '#39FF14' }));
-      row.on('pointerout', () => row.setStyle({ color: '#CCCCCC' }));
-      row.on('pointerdown', async () => {
-        this.closeMicDevicePanel();
-        const vc = getVoiceChat();
-        if (vc.connected) {
-          try {
-            await vc.switchMic(device.deviceId);
-            this.voiceMuteBtn?.setText('[MIC ON]').setStyle({ color: '#39FF14' });
-          } catch (e) {
-            console.warn('[VoiceChat] Mic switch failed:', e);
-          }
-        }
-      });
-      items.push(row);
-    });
-
-    this.voiceDevicePanel = this.add.container(panelX, panelY, items)
-      .setScrollFactor(0)
-      .setDepth(10000);
-  }
-
-  private closeMicDevicePanel() {
-    this.voiceDevicePanel?.destroy();
-    this.voiceDevicePanel = undefined;
-  }
-
   private async disableVoice() {
-    this.closeMicDevicePanel();
     this.closeVoicePrompt();
     const vc = getVoiceChat();
     if (!vc.connected) return;
@@ -1223,9 +1133,7 @@ export class WorldScene extends Phaser.Scene {
     await this.channel?.track({ player_id: this.playerId });
     // destroyVoiceChat() nulls the singleton so next activation starts fresh
     destroyVoiceChat();
-    this.voiceMuteBtn?.setText('[MIC OFF]').setStyle({ color: '#9999BB' });
-    this.voiceDeviceBtn?.setStyle({ color: '#7777AA' });
-    this.voiceOffBtn?.setStyle({ color: '#7777AA' });
+    this.voiceMuteBtn?.setText('[MIC]').setStyle({ color: '#9999BB' });
     this.voiceStatusText?.setText('').setStyle({ color: '#7777AA' });
     this.localSpeakingIndicator?.setAlpha(0);
     for (const [, arc] of this.speakingIndicators) arc.setAlpha(0);
@@ -5931,7 +5839,6 @@ export class WorldScene extends Phaser.Scene {
       this.localSpeakingIndicator = undefined;
       this.speakingIndicators.forEach((arc) => arc.destroy());
       this.speakingIndicators.clear();
-      this.closeMicDevicePanel();
       this.closeVoicePrompt();
     } catch { /* noop */ }
 

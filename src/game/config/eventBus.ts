@@ -65,4 +65,6 @@ export const EVENTS = {
   DARTS_SCORE: 'darts:score',
   DARTS_BULLSEYE: 'darts:bullseye',
   OPEN_STATS: 'stats:open',
+  VOICE_MIC_CHANGED: 'voice:mic:changed',
+  VOICE_DISABLE: 'voice:disable',
 } as const;

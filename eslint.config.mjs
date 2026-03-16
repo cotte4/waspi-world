@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Tiled editor files (XML with .tsx extension — not TypeScript)
+    "tiled/**",
   ]),
 ]);
 
