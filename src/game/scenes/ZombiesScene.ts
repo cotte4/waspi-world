@@ -1483,7 +1483,9 @@ export class ZombiesScene extends Phaser.Scene {
       return;
     }
 
-    if (this.bossRoundActive && !this.bossSpawnedThisRound && !this.bossAlive && this.zombies.size === 0) {
+    const aliveZombies = this.countAliveZombies();
+
+    if (this.bossRoundActive && !this.bossSpawnedThisRound && !this.bossAlive && aliveZombies === 0) {
       const spawnedBoss = this.spawnBossZombie();
       if (spawnedBoss) {
         this.bossSpawnedThisRound = true;
@@ -1498,7 +1500,7 @@ export class ZombiesScene extends Phaser.Scene {
       && this.bossRoundActive
       && this.bossSpawnedThisRound
       && !this.bossAlive
-      && this.zombies.size === 0
+      && aliveZombies === 0
       && this.zombieProjectiles.size === 0
     ) {
       this.depthsUnlocked = true;
@@ -1506,7 +1508,7 @@ export class ZombiesScene extends Phaser.Scene {
       this.showNotice('DEPTHS UNLOCKED', '#FF9DC8');
     }
 
-    if (this.zombies.size === 0 && !this.bossAlive && this.zombieProjectiles.size === 0 && this.roundBreakUntil === 0) {
+    if (aliveZombies === 0 && !this.bossAlive && this.zombieProjectiles.size === 0 && this.roundBreakUntil === 0) {
       this.roundBreakUntil = this.time.now + ZOMBIES_POINTS.roundBreakMs;
       this.showNotice(`LIMPIASTE LA RONDA ${this.round}`, '#9EFFB7');
     }

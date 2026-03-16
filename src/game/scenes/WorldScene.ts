@@ -8,7 +8,7 @@ import { addTenks, initTenks, getTenksBalance } from '../systems/TenksSystem';
 import { getEquippedColors, hasUtilityEquipped, ownItem, equipItem, getInventory, replaceInventory } from '../systems/InventorySystem';
 import { DialogSystem } from '../systems/DialogSystem';
 import { BranchedDialog, type DialogNode } from '../systems/BranchedDialog';
-import { CATALOG } from '../config/catalog';
+import { CATALOG, getItem } from '../config/catalog';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
 import { startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
 import { loadHudSettings, type HudSettings } from '../systems/HudSettings';
@@ -4016,12 +4016,13 @@ export class WorldScene extends Phaser.Scene {
     balText: Phaser.GameObjects.Text,
   ) {
     const owned = getInventory().owned.includes(item.id);
+    const comingSoon = !!item.comingSoon;
 
     // Row bg
     const rowBg = this.add.graphics().setScrollFactor(0);
-    rowBg.fillStyle(0x1a1a2e, owned ? 0.4 : 0.7);
+    rowBg.fillStyle(0x1a1a2e, owned ? 0.4 : comingSoon ? 0.25 : 0.7);
     rowBg.fillRoundedRect(panelX + 16, rowY, panelW - 32, 60, 6);
-    rowBg.lineStyle(1, owned ? 0x39FF14 : 0xFF6B35, 0.5);
+    rowBg.lineStyle(1, owned ? 0x39FF14 : comingSoon ? 0x666688 : 0xFF6B35, 0.5);
     rowBg.strokeRoundedRect(panelX + 16, rowY, panelW - 32, 60, 6);
     container.add(rowBg);
 
@@ -4029,7 +4030,7 @@ export class WorldScene extends Phaser.Scene {
     const nameText = this.add.text(panelX + 32, rowY + 14, item.name + (item.isLimited ? ' ★' : ''), {
       fontSize: '9px',
       fontFamily: '"Press Start 2P", monospace',
-      color: item.isLimited ? '#F5C842' : '#FFFFFF',
+      color: comingSoon ? '#777799' : item.isLimited ? '#F5C842' : '#FFFFFF',
     }).setScrollFactor(0);
     container.add(nameText);
 
@@ -4037,7 +4038,7 @@ export class WorldScene extends Phaser.Scene {
     const descText = this.add.text(panelX + 32, rowY + 30, item.description ?? '', {
       fontSize: '7px',
       fontFamily: '"Silkscreen", monospace',
-      color: '#9999BB',
+      color: comingSoon ? '#666688' : '#9999BB',
     }).setScrollFactor(0);
     container.add(descText);
 
@@ -4045,9 +4046,19 @@ export class WorldScene extends Phaser.Scene {
     const priceText = this.add.text(panelX + panelW - 160, rowY + 20, `${item.priceTenks.toLocaleString('es-AR')} T`, {
       fontSize: '9px',
       fontFamily: '"Silkscreen", monospace',
-      color: '#F5C842',
+      color: comingSoon ? '#666688' : '#F5C842',
     }).setOrigin(0, 0.5).setScrollFactor(0);
     container.add(priceText);
+
+    if (comingSoon) {
+      const soonLabel = this.add.text(panelX + panelW - 50, rowY + 30, 'SOON', {
+        fontSize: '7px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#666688',
+      }).setOrigin(0.5, 0.5).setScrollFactor(0);
+      container.add(soonLabel);
+      return;
+    }
 
     if (owned) {
       const ownedLabel = this.add.text(panelX + panelW - 50, rowY + 30, 'OWNED', {
@@ -4103,6 +4114,11 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private async buyGunItem(itemId: string, priceTenks: number): Promise<{ success: boolean; message: string }> {
+    const item = getItem(itemId);
+    if (item?.comingSoon) {
+      return { success: false, message: 'Ese arma todavía no está implementada.' };
+    }
+
     const balance = getTenksBalance();
     if (balance < priceTenks) {
       return { success: false, message: `Necesitás ${priceTenks.toLocaleString('es-AR')} TENKS.` };
