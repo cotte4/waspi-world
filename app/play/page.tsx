@@ -105,6 +105,7 @@ const CHAT_SCENES = new Set([
   'WorldScene',
   'VecindadScene',
   'StoreInterior',
+  'GunShopInterior',
   'CafeInterior',
   'ArcadeInterior',
   'CasinoInterior',
@@ -116,6 +117,7 @@ const CHAT_SCENES = new Set([
 const INTERIOR_SOCIAL_SCENES = new Set([
   'VecindadScene',
   'StoreInterior',
+  'GunShopInterior',
   'CafeInterior',
   'ArcadeInterior',
   'CasinoInterior',
@@ -123,7 +125,7 @@ const INTERIOR_SOCIAL_SCENES = new Set([
   'ZombiesScene',
   'BasementZombiesScene',
 ]);
-const JOYSTICK_SCENES = new Set(['WorldScene', 'VecindadScene', 'StoreInterior', 'PvpArenaScene', 'ZombiesScene', 'BasementZombiesScene']);
+const JOYSTICK_SCENES = new Set(['WorldScene', 'VecindadScene', 'StoreInterior', 'GunShopInterior', 'PvpArenaScene', 'ZombiesScene', 'BasementZombiesScene']);
 
 export default function PlayPage() {
   const initialInventory = useMemo(() => getInventory(), []);

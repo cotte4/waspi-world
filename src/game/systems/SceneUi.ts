@@ -8,6 +8,14 @@ let lastTransitionTime = 0;
 const TRANSITION_THROTTLE_MS = 300;
 
 export function announceScene(scene: Phaser.Scene) {
+  // transitionToScene() disables input during fade-out; ensure each new scene
+  // starts with keyboard/input re-enabled to avoid re-entry freezes.
+  scene.input.enabled = true;
+  if (scene.input.keyboard) {
+    scene.input.keyboard.enabled = true;
+    const keyboardWithReset = scene.input.keyboard as Phaser.Input.Keyboard.KeyboardPlugin & { resetKeys?: () => void };
+    keyboardWithReset.resetKeys?.();
+  }
   eventBus.emit(EVENTS.SCENE_CHANGED, scene.scene.key);
 }
 

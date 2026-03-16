@@ -134,7 +134,6 @@ type DummyState = {
   archetype: EnemyArchetype;
   nameplate: Phaser.GameObjects.Text;
   hpBar: Phaser.GameObjects.Graphics;
-  shapeGfx: Phaser.GameObjects.Graphics; // procedural shape visual
   sprite?: EnemySprite;
   hp: number;
   maxHp: number;
@@ -718,7 +717,7 @@ export class WorldScene extends Phaser.Scene {
 
     // Ambient NPC
     this.runBootStep('ambient npcs', () => this.spawnAmbientNPCs());
-    this.runBootStep('gun dealer npc', () => this.spawnGunDealerNPC());
+    // Dealer now lives inside GunShopInterior.
     this.runBootStep('cottenks npc', () => this.spawnCottenksNPC());
 
     // HP/Combat/Utilities
@@ -1297,14 +1296,11 @@ export class WorldScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(32);
 
     const hpBar = this.add.graphics().setDepth(31);
-    // Procedural shape graphics — drawn each frame with shape per archetype
-    const shapeGfx = this.add.graphics().setDepth(30.5);
     const state: DummyState = {
       label,
       archetype,
       nameplate,
       hpBar,
-      shapeGfx,
       sprite: zombieSprite,
       hp: profile.maxHp,
       maxHp: profile.maxHp,
@@ -1343,7 +1339,6 @@ export class WorldScene extends Phaser.Scene {
 
     // Clear graphics
     try { state.hpBar.clear(); } catch { return; }
-    try { state.shapeGfx.clear(); } catch { /* ignore */ }
 
     if (!state.alive) {
       state.nameplate.setPosition(dummy.x, dummy.y - 42);
@@ -1362,108 +1357,6 @@ export class WorldScene extends Phaser.Scene {
     state.sprite?.setPosition(cx, cy);
 
     const now = this.time.now;
-    const isHurt = (now - state.lastHurtAt) < 180;
-
-    // ── Proximity agro glow ──────────────────────────────────────────────────
-    const distToPlayer = Phaser.Math.Distance.Between(cx, cy, this.px, this.py);
-    if (distToPlayer < 220) {
-      const agroAlpha = Phaser.Math.Clamp((1 - distToPlayer / 220) * 0.35, 0, 0.35);
-      const agroScale = 1 + Math.sin(now / 160) * 0.08;
-      state.shapeGfx.lineStyle(2, state.tint, agroAlpha);
-      state.shapeGfx.strokeCircle(cx, cy, r * agroScale + 8);
-    }
-
-    // ── Procedural shape per archetype ───────────────────────────────────────
-    const fillColor = isHurt ? 0xFFFFFF : state.tint;
-    const fillAlpha = isHurt ? 0.95 : 0.92;
-    state.shapeGfx.fillStyle(fillColor, fillAlpha);
-
-    if (state.archetype === 'rusher') {
-      // Upward-pointing triangle — fast and aggressive
-      state.shapeGfx.fillTriangle(
-        cx, cy - r,                    // apex
-        cx - r * 0.82, cy + r * 0.6,  // bottom-left
-        cx + r * 0.82, cy + r * 0.6,  // bottom-right
-      );
-      // Dark inner detail
-      if (!isHurt) {
-        state.shapeGfx.fillStyle(0x000000, 0.3);
-        state.shapeGfx.fillTriangle(cx, cy - r * 0.3, cx - r * 0.3, cy + r * 0.35, cx + r * 0.3, cy + r * 0.35);
-      }
-      // Border
-      state.shapeGfx.lineStyle(isHurt ? 2 : 1.5, isHurt ? 0xFFFFFF : 0xFF8B8B, isHurt ? 0.9 : 0.6);
-      state.shapeGfx.strokeTriangle(cx, cy - r, cx - r * 0.82, cy + r * 0.6, cx + r * 0.82, cy + r * 0.6);
-
-    } else if (state.archetype === 'shooter') {
-      // Rounded square body + barrel stub pointing toward player
-      state.shapeGfx.fillRoundedRect(cx - r, cy - r, r * 2, r * 2, 4);
-      // Eye / sensor circle
-      if (!isHurt) {
-        state.shapeGfx.fillStyle(0x000000, 0.55);
-        state.shapeGfx.fillCircle(cx, cy, r * 0.38);
-        state.shapeGfx.fillStyle(0xFF8B3D, 0.9);
-        state.shapeGfx.fillCircle(cx, cy, r * 0.18);
-      }
-      // Barrel stub toward player
-      const barrelAngle = Phaser.Math.Angle.Between(cx, cy, this.px, this.py);
-      const bx = cx + Math.cos(barrelAngle) * (r + 2);
-      const by = cy + Math.sin(barrelAngle) * (r + 2);
-      state.shapeGfx.fillStyle(isHurt ? 0xFFFFFF : 0xFF8B3D, 0.85);
-      state.shapeGfx.fillRect(bx - 3, by - 3, 6 + r * 0.5, 6);
-      // Border
-      state.shapeGfx.lineStyle(1.5, isHurt ? 0xFFFFFF : 0xFFC38D, isHurt ? 0.9 : 0.5);
-      state.shapeGfx.strokeRoundedRect(cx - r, cy - r, r * 2, r * 2, 4);
-
-    } else if (state.archetype === 'tank') {
-      // Hexagon — solid and heavy
-      const hexPoints: Phaser.Types.Math.Vector2Like[] = [];
-      for (let i = 0; i < 6; i++) {
-        const angle = (Math.PI / 3) * i - Math.PI / 6;
-        hexPoints.push({ x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r });
-      }
-      state.shapeGfx.fillPoints(hexPoints, true);
-      // Inner hex detail
-      if (!isHurt) {
-        state.shapeGfx.fillStyle(0x000000, 0.25);
-        const innerHex: Phaser.Types.Math.Vector2Like[] = [];
-        for (let i = 0; i < 6; i++) {
-          const angle = (Math.PI / 3) * i - Math.PI / 6;
-          innerHex.push({ x: cx + Math.cos(angle) * r * 0.55, y: cy + Math.sin(angle) * r * 0.55 });
-        }
-        state.shapeGfx.fillPoints(innerHex, true);
-      }
-      // Border
-      state.shapeGfx.lineStyle(2, isHurt ? 0xFFFFFF : 0xD8A8FF, isHurt ? 0.9 : 0.6);
-      state.shapeGfx.strokePoints(hexPoints, true);
-
-    } else if (state.archetype === 'boss') {
-      // 8-pointed star — intimidating
-      const outerR = r;
-      const innerR = r * 0.44;
-      const starPoints: Phaser.Types.Math.Vector2Like[] = [];
-      for (let i = 0; i < 16; i++) {
-        const angle = (Math.PI * 2 * i) / 16 - Math.PI / 2;
-        const rad = i % 2 === 0 ? outerR : innerR;
-        starPoints.push({ x: cx + Math.cos(angle) * rad, y: cy + Math.sin(angle) * rad });
-      }
-      // Pulsing outer glow for boss
-      const bossGlowR = outerR + 6 + Math.sin(now / 180) * 4;
-      state.shapeGfx.fillStyle(state.tint, 0.08 + Math.sin(now / 180) * 0.04);
-      state.shapeGfx.fillCircle(cx, cy, bossGlowR);
-      // Star body
-      state.shapeGfx.fillStyle(fillColor, fillAlpha);
-      state.shapeGfx.fillPoints(starPoints, true);
-      // Center eye
-      if (!isHurt) {
-        state.shapeGfx.fillStyle(0x000000, 0.6);
-        state.shapeGfx.fillCircle(cx, cy, r * 0.28);
-        state.shapeGfx.fillStyle(0x3DD6FF, 0.9);
-        state.shapeGfx.fillCircle(cx, cy, r * 0.14);
-      }
-      // Border
-      state.shapeGfx.lineStyle(2, isHurt ? 0xFFFFFF : 0x7FE8FF, isHurt ? 0.9 : 0.65);
-      state.shapeGfx.strokePoints(starPoints, true);
-    }
 
     // ── HP bar — only visible after being hit ────────────────────────────────
     if (now < state.hpBarShowUntil) {
@@ -2797,7 +2690,7 @@ export class WorldScene extends Phaser.Scene {
     const { x, y, w, h } = WorldScene.GUN_SHOP_BOUNDS;
     return {
       x: x + w / 2,
-      y: y + h - 10,
+      y: y + h - 24,
     };
   }
 
@@ -3967,9 +3860,12 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private openGunShopPanel() {
-    if (this.gunShopOpen) return;
-    this.gunShopOpen = true;
-    this.inputBlocked = true;
+    // Legacy fallback: gun shop now lives in its own interior scene.
+    // If any old path still calls this method, redirect to the new scene.
+    if (!this.inTransition) {
+      this.transitionToScene('GunShopInterior');
+    }
+    return;
 
     const cam = this.cameras.main;
     const cx = cam.width / 2;
@@ -5320,9 +5216,9 @@ export class WorldScene extends Phaser.Scene {
     const nearArcade = Math.abs(this.px - arcadeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearStore = Math.abs(this.px - storeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearCafe = Math.abs(this.px - cafeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
-    const nearGunShop = Math.abs(this.px - gunDealerX) < 86
-      && this.py >= gunShopBounds.y + gunShopBounds.h - 120
-      && this.py <= gunShopBounds.y + gunShopBounds.h + 74;
+    const nearGunShop = Math.abs(this.px - gunDealerX) < 92
+      && this.py >= gunShopBounds.y + gunShopBounds.h - 108
+      && this.py <= gunShopBounds.y + gunShopBounds.h + 52;
 
     if (nearVecindad) {
       return { x: 120, y: ZONES.PLAZA_Y + 40, w: 140, h: 80, label: 'SPACE ENTRAR VECINDAD', color: 0xF5C842, sceneKey: 'VecindadScene' };
@@ -5345,8 +5241,8 @@ export class WorldScene extends Phaser.Scene {
     if (nearCasino) {
       return { x: casinoDoorX, y: BUILDINGS.CASINO.y + BUILDINGS.CASINO.h - 28, w: 120, h: 80, label: 'SPACE ENTRAR CASINO', color: 0xF5C842, sceneKey: 'CasinoInterior' };
     }
-    if (nearGunShop && !this.gunShopOpen) {
-      return { x: gunDealerX, y: gunDealerY - 30, w: 160, h: 70, label: 'SPACE HABLAR CON DEALER', color: 0x46B3FF, npcKey: 'gunDealer' };
+    if (nearGunShop) {
+      return { x: gunDealerX, y: gunDealerY, w: 164, h: 76, label: 'SPACE ENTRAR GUN SHOP', color: 0x46B3FF, sceneKey: 'GunShopInterior' };
     }
 
     const COTTENKS_X = 1615;
@@ -5408,10 +5304,6 @@ export class WorldScene extends Phaser.Scene {
     const target = this.getInteractionTarget();
     if (target?.sceneKey) {
       this.transitionToScene(target.sceneKey);
-      return;
-    }
-    if (target?.npcKey === 'gunDealer') {
-      this.openGunDealerDialog();
       return;
     }
     if (target?.npcKey === 'cottenks') {
