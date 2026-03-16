@@ -3,8 +3,8 @@ import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRendere
 import { SAFE_PLAZA_RETURN, ZONES } from '../config/constants';
 import { CATALOG, getItem } from '../config/catalog';
 import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene } from '../systems/SceneUi';
-import { addTenks, getTenksBalance } from '../systems/TenksSystem';
-import { equipItem, getInventory, ownItem } from '../systems/InventorySystem';
+import { addTenks, getTenksBalance, initTenks } from '../systems/TenksSystem';
+import { equipItem, getInventory, ownItem, replaceInventory } from '../systems/InventorySystem';
 import { SceneControls } from '../systems/SceneControls';
 import { createScrollArea } from '../systems/ScrollArea';
 import { supabase, isConfigured } from '../../lib/supabase';
@@ -349,6 +349,12 @@ export class GunShopInterior extends Phaser.Scene {
     }).setOrigin(0.5);
     container.add(balText);
 
+    // On open, refresh local TENKS from server-authoritative balance.
+    void this.syncAuthoritativeTenks().then((balance) => {
+      if (balance === null || !this.dealerPanel || !balText.active) return;
+      balText.setText(`TENKS: ${balance.toLocaleString('es-AR')}`);
+    });
+
     const divider = this.add.graphics();
     divider.lineStyle(1, 0x46B3FF, 0.45);
     divider.lineBetween(px + 20, py + 58, px + pw - 20, py + 58);
@@ -485,19 +491,17 @@ export class GunShopInterior extends Phaser.Scene {
       return { success: false, message: 'Ese arma todavia no esta implementada.' };
     }
 
-    if (getTenksBalance() < priceTenks) {
-      return { success: false, message: `Necesitas ${priceTenks.toLocaleString('es-AR')} TENKS.` };
-    }
-
     if (!supabase || !isConfigured) {
+      if (getTenksBalance() < priceTenks) {
+        return { success: false, message: `Necesitas ${priceTenks.toLocaleString('es-AR')} TENKS.` };
+      }
       ownItem(itemId);
       equipItem(itemId);
       addTenks(-priceTenks, `gun_shop_${itemId.toLowerCase()}`);
       return { success: true, message: `${itemId} equipado (modo offline).` };
     }
 
-    const { data } = await supabase.auth.getSession();
-    const token = data.session?.access_token;
+    const token = await this.getSessionToken();
     if (!token) {
       return { success: false, message: 'Tenes que estar logueado para comprar.' };
     }
@@ -513,10 +517,50 @@ export class GunShopInterior extends Phaser.Scene {
 
     if (!res?.ok) {
       const err = await res?.json().catch(() => null) as { error?: string } | null;
+      // Keep local HUD in sync when server rejects purchase by balance.
+      await this.syncAuthoritativeTenks(token);
       return { success: false, message: err?.error ?? 'Error al comprar. Intenta de nuevo.' };
     }
 
-    return { success: true, message: 'Compra completada.' };
+    const result = await res.json() as {
+      player?: { tenks?: number; inventory?: { owned: string[]; equipped: Record<string, unknown> } };
+      notice?: string;
+    };
+
+    // Sync full inventory from server if available, otherwise grant+equip locally.
+    if (result.player?.inventory) {
+      replaceInventory(result.player.inventory as Parameters<typeof replaceInventory>[0]);
+    } else {
+      ownItem(itemId);
+    }
+    equipItem(itemId);
+
+    if (typeof result.player?.tenks === 'number') {
+      initTenks(result.player.tenks, { preferStored: false });
+    } else {
+      await this.syncAuthoritativeTenks(token);
+    }
+
+    return { success: true, message: result.notice ?? 'Compra completada.' };
+  }
+
+  private async getSessionToken() {
+    if (!supabase) return null;
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.access_token ?? null;
+  }
+
+  private async syncAuthoritativeTenks(token?: string) {
+    const authToken = token ?? await this.getSessionToken();
+    if (!authToken) return null;
+    const res = await fetch('/api/player/tenks', {
+      headers: { Authorization: `Bearer ${authToken}` },
+    }).catch(() => null);
+    if (!res?.ok) return null;
+    const json = await res.json().catch(() => null) as { balance?: number } | null;
+    if (typeof json?.balance !== 'number') return null;
+    initTenks(json.balance, { preferStored: false });
+    return json.balance;
   }
 
   private exitToWorld() {
