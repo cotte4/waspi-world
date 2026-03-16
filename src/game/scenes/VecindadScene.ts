@@ -534,6 +534,21 @@ export class VecindadScene extends Phaser.Scene {
     if (!this.hudText) return;
     const stage = normalizeVecindadBuildStage(this.vecindadState.buildStage);
     const nextCost = getNextVecindadBuildCost(stage);
+    const mats = this.vecindadState.materials;
+
+    // Progress bar (text-based, 10 chars wide)
+    let progressBar = '';
+    if (stage < MAX_VECINDAD_STAGE) {
+      const filled = Math.min(Math.floor((mats / nextCost) * 10), 10);
+      progressBar = '[' + '█'.repeat(filled) + '░'.repeat(10 - filled) + ']';
+    } else {
+      progressBar = '[██████████]';
+    }
+
+    const matsLine = stage >= MAX_VECINDAD_STAGE
+      ? `MATS ${mats} (MAX)`
+      : `MATS ${mats} / ${nextCost} → STAGE ${stage + 1}`;
+
     const objective = !this.vecindadState.ownedParcelId
       ? 'OBJETIVO COMPRA UNA PARCELA'
       : stage <= 0
@@ -545,8 +560,9 @@ export class VecindadScene extends Phaser.Scene {
     this.hudText.setText([
       'LA VECINDAD',
       this.vecindadState.ownedParcelId ? `PARCELA ${this.vecindadState.ownedParcelId}` : 'SIN PARCELA',
-      `MATS ${this.vecindadState.materials}`,
-      `STAGE ${stage}/${MAX_VECINDAD_STAGE}${stage >= MAX_VECINDAD_STAGE ? ' MAX' : ` NEXT ${nextCost}`}`,
+      matsLine,
+      progressBar,
+      `STAGE ${stage}/${MAX_VECINDAD_STAGE}${stage >= MAX_VECINDAD_STAGE ? ' MAX' : ''}`,
       objective,
     ]);
   }

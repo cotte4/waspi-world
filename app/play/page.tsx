@@ -141,6 +141,8 @@ export default function PlayPage() {
   const [gunOn, setGunOn] = useState((initialInventory.equipped.utility ?? []).includes('UTIL-GUN-01'));
   const [ballOn, setBallOn] = useState((initialInventory.equipped.utility ?? []).includes('UTIL-BALL-01'));
   const [activeScene, setActiveScene] = useState('');
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingSlide, setOnboardingSlide] = useState(0);
   const [authEmail, setAuthEmail] = useState<string | null>(null);
   const [emailInput, setEmailInput] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
@@ -153,6 +155,7 @@ export default function PlayPage() {
   const [checkoutBusyId, setCheckoutBusyId] = useState<string | null>(null);
   const [shopStatus, setShopStatus] = useState(initialCheckout.status);
   const [isMobile, setIsMobile] = useState(false);
+  const [showMobileHint, setShowMobileHint] = useState(false);
   const [playerActions, setPlayerActions] = useState<PlayerActionsPayload | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(initialAudioSettings);
@@ -369,7 +372,12 @@ export default function PlayPage() {
     });
 
     const unsubScene = eventBus.on(EVENTS.SCENE_CHANGED, (sceneName: unknown) => {
-      if (typeof sceneName === 'string') setActiveScene(sceneName);
+      if (typeof sceneName === 'string') {
+        setActiveScene(sceneName);
+        if (sceneName === 'WorldScene' && !localStorage.getItem('waspi_onboarding_v1')) {
+          setShowOnboarding(true);
+        }
+      }
     });
 
     const unsubInv = eventBus.on(EVENTS.INVENTORY_TOGGLE, () => {
@@ -595,6 +603,17 @@ export default function PlayPage() {
   useEffect(() => {
     activeSceneRef.current = activeScene;
   }, [activeScene]);
+
+  useEffect(() => {
+    if (isMobile && activeScene === 'WorldScene' && !localStorage.getItem('waspi_mobile_hint_v1')) {
+      setShowMobileHint(true);
+      const t = window.setTimeout(() => {
+        setShowMobileHint(false);
+        localStorage.setItem('waspi_mobile_hint_v1', 'done');
+      }, 5000);
+      return () => window.clearTimeout(t);
+    }
+  }, [isMobile, activeScene]);
 
   useEffect(() => () => {
     clearVirtualJoystickState();
@@ -1238,6 +1257,24 @@ export default function PlayPage() {
       .filter((item) => item.slot === 'utility' && item.id !== 'UTIL-GUN-01' && item.id !== 'UTIL-BALL-01'),
     [owned],
   );
+
+  const ONBOARDING_SLIDES = [
+    {
+      title: 'BIENVENIDO A WASPI WORLD',
+      body: 'Un mundo abierto donde la ropa que usás es real.\nExplorá, jugá y vestí a tu waspi.',
+      icon: '👋',
+    },
+    {
+      title: 'TENKS',
+      body: 'Ganás TENKS jugando minijuegos y en combate.\nUsalos para comprar ropa y parcelas.',
+      icon: '🪙',
+    },
+    {
+      title: 'EMPEZÁ POR COTTENKS',
+      body: 'Hablá con COTTENKS en la plaza.\nTe explica todo lo que necesitás saber.',
+      icon: '🗣️',
+    },
+  ];
 
   return (
     <>
@@ -2402,6 +2439,108 @@ export default function PlayPage() {
             >
               MOVE
             </div>
+          </div>
+        )}
+
+        {showOnboarding && (
+          <div
+            className="ww-overlay absolute inset-0 flex flex-col items-center justify-center"
+            style={{
+              background: 'rgba(14,14,20,0.92)',
+              zIndex: 9999,
+              fontFamily: '"Press Start 2P", monospace',
+            }}
+          >
+            <div style={{ textAlign: 'center', padding: '0 24px', maxWidth: 480 }}>
+              <div style={{ fontSize: 48, marginBottom: 24 }}>
+                {ONBOARDING_SLIDES[onboardingSlide].icon}
+              </div>
+              <div style={{ color: '#F5C842', fontSize: 10, marginBottom: 20, lineHeight: '20px' }}>
+                {ONBOARDING_SLIDES[onboardingSlide].title}
+              </div>
+              <div style={{ color: '#ffffff', fontSize: 7, lineHeight: '16px', whiteSpace: 'pre-line' }}>
+                {ONBOARDING_SLIDES[onboardingSlide].body}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, margin: '32px 0 24px' }}>
+              {ONBOARDING_SLIDES.map((_, i) => (
+                <div key={i} style={{
+                  width: 8, height: 8,
+                  borderRadius: '50%',
+                  background: i === onboardingSlide ? '#F5C842' : '#444',
+                }} />
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              {onboardingSlide < ONBOARDING_SLIDES.length - 1 ? (
+                <button
+                  onClick={() => setOnboardingSlide(s => s + 1)}
+                  style={{
+                    background: '#F5C842', color: '#0E0E14',
+                    border: 'none', padding: '10px 24px',
+                    fontFamily: '"Press Start 2P", monospace', fontSize: 8,
+                    cursor: 'pointer',
+                  }}
+                >
+                  SIGUIENTE →
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    localStorage.setItem('waspi_onboarding_v1', 'done');
+                    setShowOnboarding(false);
+                  }}
+                  style={{
+                    background: '#F5C842', color: '#0E0E14',
+                    border: 'none', padding: '10px 24px',
+                    fontFamily: '"Press Start 2P", monospace', fontSize: 8,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ¡ENTRAR AL MUNDO!
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  localStorage.setItem('waspi_onboarding_v1', 'done');
+                  setShowOnboarding(false);
+                }}
+                style={{
+                  background: 'transparent', color: '#666',
+                  border: '1px solid #333', padding: '10px 16px',
+                  fontFamily: '"Press Start 2P", monospace', fontSize: 7,
+                  cursor: 'pointer',
+                }}
+              >
+                SKIP
+              </button>
+            </div>
+          </div>
+        )}
+
+        {showMobileHint && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 12,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: 'rgba(14,14,20,0.88)',
+              border: '1px solid #46B3FF44',
+              color: '#46B3FF',
+              fontFamily: '"Press Start 2P", monospace',
+              fontSize: 6,
+              padding: '8px 16px',
+              textAlign: 'center',
+              zIndex: 8000,
+              pointerEvents: 'none',
+              lineHeight: '14px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            JOYSTICK = MOVER · A = INTERACTUAR
           </div>
         )}
 

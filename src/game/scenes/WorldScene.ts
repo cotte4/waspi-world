@@ -413,6 +413,7 @@ export class WorldScene extends Phaser.Scene {
 
   // COTTENKS NPC
   private cottenksDialog: BranchedDialog | null = null;
+  private cottenksQuestMarker?: Phaser.GameObjects.Text;
 
   // Sprint
   private shiftKey?: Phaser.Input.Keyboard.Key;
@@ -3217,6 +3218,28 @@ export class WorldScene extends Phaser.Scene {
       strokeThickness: 2,
     }).setOrigin(0.5, 1).setDepth(9000);
 
+    // Quest marker — only shown until the player talks to COTTENKS for the first time
+    if (typeof localStorage !== 'undefined' && !localStorage.getItem('waspi_cottenks_met')) {
+      const questMarker = this.add.text(x, y - 60, '!', {
+        fontSize: '18px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#F5C842',
+        stroke: '#0E0E14',
+        strokeThickness: 4,
+      }).setOrigin(0.5).setDepth(10);
+
+      this.tweens.add({
+        targets: questMarker,
+        y: y - 68,
+        duration: 600,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+
+      this.cottenksQuestMarker = questMarker;
+    }
+
     const buildSprite = () => {
       const sprite = this.add.image(x, y, 'cottenks');
       const targetH = 90;
@@ -3251,14 +3274,25 @@ export class WorldScene extends Phaser.Scene {
 
     // ── Terminal leaves ──────────────────────────────────────────────────────
 
+    const dismissCottenksMarker = () => {
+      if (this.cottenksQuestMarker) {
+        this.cottenksQuestMarker.destroy();
+        this.cottenksQuestMarker = undefined;
+      }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('waspi_cottenks_met', 'true');
+      }
+    };
+
     const endBye: DialogNode = {
       lines: ['COTTENKS: Dale, seguí tu camino. Los TENKS no se ganan parado.'],
-      onComplete: () => { this.cottenksDialog = null; this.inputBlocked = false; },
+      onComplete: () => { dismissCottenksMarker(); this.cottenksDialog = null; this.inputBlocked = false; },
     };
 
     const endStoreGo: DialogNode = {
       lines: ['COTTENKS: Entrá. No te arrepentís.'],
       onComplete: () => {
+        dismissCottenksMarker();
         this.cottenksDialog = null;
         this.inputBlocked = false;
         // Teleport player to store door and trigger entry
@@ -3272,7 +3306,7 @@ export class WorldScene extends Phaser.Scene {
         'COTTENKS: Comprá en la Store, chateá, habitá el mundo.',
         'COTTENKS: El que está presente, cobra.',
       ],
-      onComplete: () => { this.cottenksDialog = null; this.inputBlocked = false; },
+      onComplete: () => { dismissCottenksMarker(); this.cottenksDialog = null; this.inputBlocked = false; },
     };
 
     // ── Branch: ¿Cómo gano TENKS? ────────────────────────────────────────────
@@ -4652,14 +4686,14 @@ export class WorldScene extends Phaser.Scene {
 
     const GUN_DEALER_X = 1100;
     const GUN_DEALER_Y = 870;
-    const nearGunDealer = Math.abs(this.px - GUN_DEALER_X) < 80 && Math.abs(this.py - GUN_DEALER_Y) < 80;
+    const nearGunDealer = Math.abs(this.px - GUN_DEALER_X) < 100 && Math.abs(this.py - GUN_DEALER_Y) < 100;
     if (nearGunDealer && !this.gunShopOpen) {
       return { x: GUN_DEALER_X, y: GUN_DEALER_Y - 30, w: 160, h: 70, label: 'SPACE HABLAR CON DEALER', color: 0xFF6B35, npcKey: 'gunDealer' };
     }
 
     const COTTENKS_X = 1615;
     const COTTENKS_Y = 558;
-    const nearCottenks = Math.abs(this.px - COTTENKS_X) < 90 && Math.abs(this.py - COTTENKS_Y) < 90;
+    const nearCottenks = Math.abs(this.px - COTTENKS_X) < 100 && Math.abs(this.py - COTTENKS_Y) < 100;
     if (nearCottenks && !this.cottenksDialog?.isActive()) {
       return { x: COTTENKS_X, y: COTTENKS_Y - 36, w: 180, h: 70, label: 'SPACE HABLAR CON COTTENKS', color: 0xF5C842, npcKey: 'cottenks' };
     }
