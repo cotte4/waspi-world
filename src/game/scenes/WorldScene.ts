@@ -187,7 +187,7 @@ type InteractionTarget = {
 };
 
 const REMOTE_CHAT_MIN_MS = 1000;
-const REMOTE_MOVE_MIN_MS = 50;
+const REMOTE_MOVE_MIN_MS = 100;
 const REMOTE_HIT_MIN_MS = 120;
 const MAX_REMOTE_CHAT_DISTANCE = 2600;
 const LOCAL_HIT_COOLDOWN_MS = 180;
@@ -329,6 +329,8 @@ export class WorldScene extends Phaser.Scene {
   // Multiplayer
   private remotePlayers = new Map<string, RemotePlayer>();
   private lastPosSent = 0;
+  private lastBroadcastX = 0;
+  private lastBroadcastY = 0;
   private channel: ReturnType<NonNullable<typeof supabase>['channel']> | null = null;
   private bridgeCleanupFns: Array<() => void> = [];
   private lastMoveDx = 0;
@@ -1446,12 +1448,12 @@ export class WorldScene extends Phaser.Scene {
     this.bullets = this.physics.add.group({
       allowGravity: false,
       collideWorldBounds: true,
-      maxSize: 32,
+      maxSize: 64,
     });
     this.enemyBullets = this.physics.add.group({
       allowGravity: false,
       collideWorldBounds: true,
-      maxSize: 48,
+      maxSize: 80,
     });
 
     this.worldPointerShootHandler = (p: Phaser.Input.Pointer) => {
@@ -4194,10 +4196,18 @@ export class WorldScene extends Phaser.Scene {
     avatar.playDeath();
   }
 
-  private syncPosition() {
+  private syncPosition(forceUpdate = false) {
     const now = Date.now();
     if (now - this.lastPosSent < 66) return; // ~15Hz
+
+    // Delta encoding: skip broadcast if player hasn't moved more than 2px
+    const dx = Math.abs(this.px - this.lastBroadcastX);
+    const dy = Math.abs(this.py - this.lastBroadcastY);
+    if (dx < 2 && dy < 2 && !forceUpdate) return;
+
     this.lastPosSent = now;
+    this.lastBroadcastX = this.px;
+    this.lastBroadcastY = this.py;
 
     this.channel?.send({
       type: 'broadcast',
@@ -4613,6 +4623,17 @@ export class WorldScene extends Phaser.Scene {
         }
         this.pvpEnabled = true;
         this.showArenaNotice('TRAINING HOT ZONE', '#39FF14');
+        // Resume dummies when entering training zone
+        this.dummyStates.forEach((_state, dummy) => {
+          dummy.setActive(true);
+          dummy.setVisible(true);
+        });
+      } else {
+        // Pause dummies when leaving training zone to save CPU
+        this.dummyStates.forEach((_state, dummy) => {
+          dummy.setActive(false);
+          dummy.setVisible(false);
+        });
       }
     }
 

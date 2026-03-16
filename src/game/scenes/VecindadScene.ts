@@ -78,6 +78,7 @@ export class VecindadScene extends Phaser.Scene {
   private bridgeCleanupFns: Array<() => void> = [];
   private controls!: SceneControls;
   private realtimeChannel: RealtimeChannel | null = null;
+  private parcelRefreshTimeout?: ReturnType<typeof setTimeout>;
 
   constructor() {
     super({ key: 'VecindadScene' });
@@ -322,7 +323,7 @@ export class VecindadScene extends Phaser.Scene {
       const parcelId = String((payload.old as Record<string, unknown>).parcel_id ?? '');
       if (parcelId) {
         this.sharedParcels.delete(parcelId);
-        this.refreshParcelVisuals();
+        this.scheduleParcelRefresh();
       }
       return;
     }
@@ -338,7 +339,17 @@ export class VecindadScene extends Phaser.Scene {
       ownerUsername: String(row.owner_username ?? 'player'),
       buildStage: normalizeVecindadBuildStage(typeof row.build_stage === 'number' ? row.build_stage : 0),
     });
-    this.refreshParcelVisuals();
+    this.scheduleParcelRefresh();
+  }
+
+  private scheduleParcelRefresh() {
+    if (this.parcelRefreshTimeout) {
+      clearTimeout(this.parcelRefreshTimeout);
+    }
+    this.parcelRefreshTimeout = setTimeout(() => {
+      this.parcelRefreshTimeout = undefined;
+      this.refreshParcelVisuals();
+    }, 200);
   }
 
   private drawParcels() {
@@ -826,6 +837,11 @@ export class VecindadScene extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
+    if (this.parcelRefreshTimeout) {
+      clearTimeout(this.parcelRefreshTimeout);
+      this.parcelRefreshTimeout = undefined;
+    }
+
     try {
       void this.realtimeChannel?.unsubscribe();
       this.realtimeChannel = null;

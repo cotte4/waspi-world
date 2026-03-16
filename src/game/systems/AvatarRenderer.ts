@@ -466,6 +466,11 @@ export class AvatarRenderer {
     } catch {
       // If the scene is already tearing down, we still want destroy to finish.
     }
+    // NOTE: seed textures (seed_gengar_avatar, seed_buho_avatar, etc.) are intentionally
+    // NOT removed here. They are global keys shared by all players with the same avatarKind —
+    // removing them on one player's destroy() would break every other avatar of that kind
+    // still rendered in the scene. These textures live for the duration of the scene and are
+    // reclaimed when the scene is destroyed.
     safeDestroyGameObject(this.specialSprite);
     if (this.isContainerUsable()) safeDestroyGameObject(this.container);
   }
