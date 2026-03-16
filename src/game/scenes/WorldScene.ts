@@ -1286,9 +1286,39 @@ export class WorldScene extends Phaser.Scene {
     } else {
       this.showArenaNotice(`+${state.xpReward} XP +${state.tenksReward} TENKS ${state.label}`, '#F5C842');
     }
+
+    // Pulse progressionHud on TENKS gain
+    if (this.progressionHud) {
+      this.tweens.killTweensOf(this.progressionHud);
+      this.tweens.add({
+        targets: this.progressionHud,
+        scaleX: { from: 1.18, to: 1 },
+        scaleY: { from: 1.18, to: 1 },
+        duration: 220,
+        ease: 'Back.easeOut',
+      });
+    }
+
     if (this.progression.level > previousLevel) {
       this.showArenaNotice(`LEVEL UP ${this.progression.level}/${getMaxProgressionLevel()}`, '#46B3FF');
       this.playCombatTone(260, 0.2, 'square', 0.06);
+      // Level-up celebration: blue camera flash + particle burst at player
+      this.cameras.main.flash(300, 70, 179, 255, false);
+      for (let i = 0; i < 16; i++) {
+        const star = this.add.circle(this.px, this.py, Phaser.Math.Between(2, 5), 0x46B3FF, 1).setDepth(5001);
+        const angle = (Math.PI * 2 * i) / 16;
+        const dist = Phaser.Math.Between(28, 64);
+        this.tweens.add({
+          targets: star,
+          x: this.px + Math.cos(angle) * dist,
+          y: this.py + Math.sin(angle) * dist,
+          alpha: { from: 1, to: 0 },
+          scale: { from: 1, to: 0.2 },
+          duration: 500,
+          ease: 'Quad.easeOut',
+          onComplete: () => safeDestroyGameObject(star),
+        });
+      }
     }
 
     const burst = this.add.text(dummy.x, dummy.y - 18, 'KO', {
@@ -1308,17 +1338,31 @@ export class WorldScene extends Phaser.Scene {
       onComplete: () => safeDestroyGameObject(burst),
     });
 
-    for (let i = 0; i < 6; i++) {
+    // Shockwave ring
+    const ring = this.add.circle(dummy.x, dummy.y, 8, 0xFFFFFF, 0).setDepth(4999);
+    ring.setStrokeStyle(2, state.tint, 0.8);
+    this.tweens.add({
+      targets: ring,
+      scaleX: 5,
+      scaleY: 5,
+      alpha: { from: 0.8, to: 0 },
+      duration: 340,
+      ease: 'Sine.easeOut',
+      onComplete: () => safeDestroyGameObject(ring),
+    });
+
+    // 12 shards burst
+    for (let i = 0; i < 12; i++) {
       const shard = this.add.circle(dummy.x, dummy.y, Phaser.Math.Between(2, 4), state.tint, 0.9).setDepth(5000);
-      const angle = (Math.PI * 2 * i) / 6 + Phaser.Math.FloatBetween(-0.25, 0.25);
-      const dist = Phaser.Math.Between(20, 44);
+      const angle = (Math.PI * 2 * i) / 12 + Phaser.Math.FloatBetween(-0.15, 0.15);
+      const dist = Phaser.Math.Between(18, 52);
       this.tweens.add({
         targets: shard,
         x: dummy.x + Math.cos(angle) * dist,
         y: dummy.y + Math.sin(angle) * dist,
         alpha: { from: 0.9, to: 0 },
-        scale: { from: 1, to: 0.4 },
-        duration: 380,
+        scale: { from: 1, to: 0.3 },
+        duration: Phaser.Math.Between(320, 480),
         ease: 'Quad.easeOut',
         onComplete: () => safeDestroyGameObject(shard),
       });
@@ -1488,12 +1532,25 @@ export class WorldScene extends Phaser.Scene {
     this.renderHpHud();
     this.playCombatTone(90, 0.08, 'triangle', 0.045);
 
-    this.cameras.main.shake(50, 0.0018, false);
+    this.cameras.main.shake(90, 0.006, false);
 
-    const flash = this.add.rectangle(400, 300, 800, 600, 0xFF0000, 0.08)
+    // Red vignette overlay
+    const flash = this.add.rectangle(400, 300, 800, 600, 0xFF0000, 0.22)
       .setScrollFactor(0)
       .setDepth(20000);
-    this.tweens.add({ targets: flash, alpha: 0, duration: 140, onComplete: () => flash.destroy() });
+    this.tweens.add({ targets: flash, alpha: 0, duration: 200, onComplete: () => flash.destroy() });
+
+    // Avatar flash ring — white burst at player position
+    const avatarFlash = this.add.circle(this.px, this.py, 18, 0xFFFFFF, 0.6).setDepth(2099);
+    this.tweens.add({
+      targets: avatarFlash,
+      alpha: 0,
+      scaleX: 2.2,
+      scaleY: 2.2,
+      duration: 180,
+      ease: 'Sine.easeOut',
+      onComplete: () => avatarFlash.destroy(),
+    });
 
     const pushAngle = Phaser.Math.Angle.Between(sourceX, sourceY, this.px, this.py);
     this.px += Math.cos(pushAngle) * 20;
