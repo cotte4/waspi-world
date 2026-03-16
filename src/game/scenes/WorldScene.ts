@@ -5,7 +5,7 @@ import { WORLD, PLAYER, COLORS, ZONES, BUILDINGS, CHAT, SAFE_PLAZA_RETURN } from
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
 import { addTenks, initTenks, getTenksBalance } from '../systems/TenksSystem';
-import { getEquippedColors, hasUtilityEquipped, ownItem, equipItem, getInventory, replaceInventory } from '../systems/InventorySystem';
+import { ensureItemEquipped, getEquippedColors, hasUtilityEquipped, ownItem, getInventory, replaceInventory } from '../systems/InventorySystem';
 import { DialogSystem } from '../systems/DialogSystem';
 import { BranchedDialog, type DialogNode } from '../systems/BranchedDialog';
 import { CATALOG, getItem } from '../config/catalog';
@@ -4480,7 +4480,7 @@ export class WorldScene extends Phaser.Scene {
     if (!supabase || !isConfigured) {
       // Dev/offline mode: grant + equip locally
       ownItem(itemId);
-      equipItem(itemId); // emits AVATAR_SET → refreshUtilitiesFromInventory
+      ensureItemEquipped(itemId); // idempotent equip for utilities
       addTenks(-priceTenks, `gun_shop_${itemId.toLowerCase()}`);
       return { success: true, message: `${itemId} equipado (modo offline).` };
     }
@@ -4514,7 +4514,7 @@ export class WorldScene extends Phaser.Scene {
       ownItem(itemId);
     }
     // Always equip utility items so they take effect immediately
-    equipItem(itemId); // emits AVATAR_SET → triggers refreshUtilitiesFromInventory in WorldScene
+    ensureItemEquipped(itemId); // idempotent equip for utilities
     if (typeof result.player?.tenks === 'number') {
       initTenks(result.player.tenks, { preferStored: false });
     }

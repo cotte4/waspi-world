@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { BUILDINGS, SAFE_PLAZA_RETURN } from '../config/constants';
 import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene } from '../systems/SceneUi';
 import { SceneControls } from '../systems/SceneControls';
+import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -72,6 +73,11 @@ const ROOMS: RoomBounds[] = [
 export class BasementScene extends Phaser.Scene {
   /** Invisible rectangles used for collision — populated in setupCollisions(). */
   public wallBodies: Phaser.GameObjects.Rectangle[] = [];
+  private player!: AvatarRenderer;
+  private playerAnchor!: Phaser.GameObjects.Rectangle;
+  private px = BASEMENT_PLAYER_SPAWN.x;
+  private py = BASEMENT_PLAYER_SPAWN.y;
+  private inTransition = false;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private keyW!: Phaser.Input.Keyboard.Key;
   private keyA!: Phaser.Input.Keyboard.Key;
@@ -108,7 +114,8 @@ export class BasementScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor('#0E0E14');
     this.cameras.main.setBounds(0, 0, SCENE_W, SCENE_H);
     this.cameras.main.setZoom(0.94);
-    this.cameras.main.centerOn(BASEMENT_PLAYER_SPAWN.x + 220, BASEMENT_PLAYER_SPAWN.y - 120);
+    this.px = BASEMENT_PLAYER_SPAWN.x;
+    this.py = BASEMENT_PLAYER_SPAWN.y;
 
     this.drawFloors();
     this.drawStaircase();
@@ -118,6 +125,12 @@ export class BasementScene extends Phaser.Scene {
     this.drawRoomLabels();
     this.setupCollisions();
     this.drawSceneChrome();
+
+    this.playerAnchor = this.add.rectangle(this.px, this.py, 2, 2, 0x000000, 0);
+    this.player = new AvatarRenderer(this, this.px, this.py, loadStoredAvatarConfig());
+    this.player.setDepth(DEPTH_FURNITURE + 20);
+    this.cameras.main.startFollow(this.playerAnchor, true, 0.14, 0.14);
+    this.cameras.main.centerOn(this.px, this.py);
 
     createBackButton(this, () => this.exitToWorld());
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -135,13 +148,22 @@ export class BasementScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number) {
+    if (this.inTransition) return;
     const { dx, dy, stepX, stepY } = this.controls.readMovementStep(delta, 220);
+    const nextX = Phaser.Math.Clamp(this.px + stepX, 40, SCENE_W - 40);
+    const nextY = Phaser.Math.Clamp(this.py + stepY, 40, SCENE_H - 40);
 
-    if (dx !== 0 || dy !== 0) {
-      const cam = this.cameras.main;
-      cam.scrollX = Phaser.Math.Clamp(cam.scrollX + stepX, 0, SCENE_W - cam.width / cam.zoom);
-      cam.scrollY = Phaser.Math.Clamp(cam.scrollY + stepY, 0, SCENE_H - cam.height / cam.zoom);
+    if (!this.isPositionBlocked(nextX, this.py)) {
+      this.px = nextX;
     }
+    if (!this.isPositionBlocked(this.px, nextY)) {
+      this.py = nextY;
+    }
+
+    this.player.update(dx !== 0 || dy !== 0, dx, dy);
+    this.player.setPosition(this.px, this.py);
+    this.player.setDepth(DEPTH_FURNITURE + 20 + Math.floor(this.py / 12));
+    this.playerAnchor.setPosition(this.px, this.py);
 
     this.updateInteractionUi();
 
@@ -156,6 +178,8 @@ export class BasementScene extends Phaser.Scene {
   }
 
   private exitToWorld() {
+    if (this.inTransition) return;
+    this.inTransition = true;
     transitionToScene(this, 'WorldScene', {
       returnX: BASEMENT_RETURN.x,
       returnY: BASEMENT_RETURN.y,
@@ -163,6 +187,8 @@ export class BasementScene extends Phaser.Scene {
   }
 
   private enterZombieDepths() {
+    if (this.inTransition) return;
+    this.inTransition = true;
     transitionToScene(this, 'ZombiesScene', {
       returnScene: 'BasementScene',
       returnX: BASEMENT_ZOMBIES_ENTRY.x,
@@ -816,8 +842,25 @@ export class BasementScene extends Phaser.Scene {
   }
 
   private isNearZombieAccess() {
-    const cam = this.cameras.main;
-    return Phaser.Math.Distance.Between(cam.midPoint.x, cam.midPoint.y, BASEMENT_ZOMBIES_ENTRY.x, BASEMENT_ZOMBIES_ENTRY.y) <= 170;
+    return Phaser.Math.Distance.Between(this.px, this.py, BASEMENT_ZOMBIES_ENTRY.x, BASEMENT_ZOMBIES_ENTRY.y) <= 170;
+  }
+
+  private isPositionBlocked(x: number, y: number) {
+    const bodyHalfW = 14;
+    const bodyHalfH = 14;
+    for (const wall of this.wallBodies) {
+      const left = wall.x - wall.width / 2;
+      const right = wall.x + wall.width / 2;
+      const top = wall.y - wall.height / 2;
+      const bottom = wall.y + wall.height / 2;
+      const overlaps =
+        x + bodyHalfW > left &&
+        x - bodyHalfW < right &&
+        y + bodyHalfH > top &&
+        y - bodyHalfH < bottom;
+      if (overlaps) return true;
+    }
+    return false;
   }
 
   private updateInteractionUi() {

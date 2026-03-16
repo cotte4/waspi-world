@@ -3,8 +3,9 @@ import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRendere
 import { SAFE_PLAZA_RETURN, ZONES } from '../config/constants';
 import { CATALOG, getItem } from '../config/catalog';
 import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene } from '../systems/SceneUi';
+import { InteriorRoom } from '../systems/InteriorRoom';
 import { addTenks, getTenksBalance, initTenks } from '../systems/TenksSystem';
-import { equipItem, getInventory, ownItem, replaceInventory } from '../systems/InventorySystem';
+import { ensureItemEquipped, getInventory, ownItem, replaceInventory } from '../systems/InventorySystem';
 import { SceneControls } from '../systems/SceneControls';
 import { createScrollArea } from '../systems/ScrollArea';
 import { supabase, isConfigured } from '../../lib/supabase';
@@ -29,6 +30,10 @@ export class GunShopInterior extends Phaser.Scene {
   private dealerY = 0;
   private dealerPrompt?: Phaser.GameObjects.Text;
   private dealerPanel?: Phaser.GameObjects.Container;
+  private room?: InteriorRoom;
+  private lastMoveDx = 0;
+  private lastMoveDy = 0;
+  private lastIsMoving = false;
 
   constructor() {
     super({ key: 'GunShopInterior' });
@@ -39,6 +44,7 @@ export class GunShopInterior extends Phaser.Scene {
     announceScene(this);
     showSceneTitle(this, 'GUN SHOP', 0x46B3FF);
     this.controls = new SceneControls(this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', { returnX: SAFE_PLAZA_RETURN.X, returnY: SAFE_PLAZA_RETURN.Y });
     });
@@ -51,6 +57,18 @@ export class GunShopInterior extends Phaser.Scene {
     this.drawRoom();
     this.spawnDealer();
     this.spawnPlayer();
+    this.room = new InteriorRoom(this, {
+      roomKey: 'waspi-room-gunshop',
+      getPosition: () => ({ x: this.px, y: this.py }),
+      getMovement: () => ({ dx: this.lastMoveDx, dy: this.lastMoveDy, isMoving: this.lastIsMoving }),
+      getAvatarConfig: () => loadStoredAvatarConfig(),
+      onRemoteClick: (playerId, username) => {
+        eventBus.emit(EVENTS.PLAYER_ACTIONS_OPEN, { playerId, username });
+      },
+      localColor: '#7CC7FF',
+      remoteColor: '#A5BCFF',
+    });
+    this.room.start();
 
     this.add.text(width / 2, this.roomY + this.roomH + 18, 'SPACE HABLAR  •  BACK SALIR', {
       fontSize: '6px',
@@ -70,8 +88,12 @@ export class GunShopInterior extends Phaser.Scene {
 
   update(_time: number, delta: number) {
     if (this.inTransition) return;
+    this.room?.update();
 
     if (this.dealerPanel) {
+      this.lastMoveDx = 0;
+      this.lastMoveDy = 0;
+      this.lastIsMoving = false;
       if (this.controls.isActionJustDown('back')) {
         this.closeDealerPanel();
       }
@@ -296,6 +318,9 @@ export class GunShopInterior extends Phaser.Scene {
     this.player.update(dx !== 0 || dy !== 0, dx, dy);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(20 + Math.floor(this.py / 10));
+    this.lastMoveDx = dx;
+    this.lastMoveDy = dy;
+    this.lastIsMoving = dx !== 0 || dy !== 0;
   }
 
   private isNearDealer() {
@@ -496,7 +521,7 @@ export class GunShopInterior extends Phaser.Scene {
         return { success: false, message: `Necesitas ${priceTenks.toLocaleString('es-AR')} TENKS.` };
       }
       ownItem(itemId);
-      equipItem(itemId);
+      ensureItemEquipped(itemId);
       addTenks(-priceTenks, `gun_shop_${itemId.toLowerCase()}`);
       return { success: true, message: `${itemId} equipado (modo offline).` };
     }
@@ -533,7 +558,7 @@ export class GunShopInterior extends Phaser.Scene {
     } else {
       ownItem(itemId);
     }
-    equipItem(itemId);
+    ensureItemEquipped(itemId);
 
     if (typeof result.player?.tenks === 'number') {
       initTenks(result.player.tenks, { preferStored: false });
@@ -571,5 +596,10 @@ export class GunShopInterior extends Phaser.Scene {
       returnX: GunShopInterior.RETURN_X,
       returnY: GunShopInterior.RETURN_Y,
     });
+  }
+
+  private handleSceneShutdown() {
+    this.room?.shutdown();
+    this.room = undefined;
   }
 }

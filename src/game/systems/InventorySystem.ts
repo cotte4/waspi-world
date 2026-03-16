@@ -80,6 +80,32 @@ export function equipItem(id: string) {
   return true;
 }
 
+/**
+ * Idempotent equip helper.
+ * Unlike equipItem() it never toggles utility items OFF.
+ */
+export function ensureItemEquipped(id: string) {
+  const item = getItem(id);
+  if (!item) return false;
+  const s = loadState();
+  if (!s.owned.includes(id)) return false;
+
+  if (item.slot === 'utility') {
+    const list = s.equipped.utility ?? [];
+    if (list.includes(id)) return true;
+    s.equipped.utility = [...list, id];
+  } else if (s.equipped[item.slot] === id) {
+    return true;
+  } else {
+    s.equipped[item.slot] = id;
+  }
+
+  saveState(s);
+  eventBus.emit(EVENTS.INVENTORY_CHANGED, s);
+  eventBus.emit(EVENTS.AVATAR_SET, { equipTop: s.equipped.top, equipBottom: s.equipped.bottom });
+  return true;
+}
+
 export function getEquippedColors(): { topColor?: number; bottomColor?: number } {
   const s = loadState();
   const top = s.equipped.top ? getItem(s.equipped.top) : null;
