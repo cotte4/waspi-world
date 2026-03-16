@@ -28,6 +28,8 @@ import {
 } from '../systems/AnimationSafety';
 import { announceScene, bindSafeResetToPlaza } from '../systems/SceneUi';
 import { SceneControls } from '../systems/SceneControls';
+import { getVoiceChat, destroyVoiceChat } from '../systems/voiceChatInstance';
+import { VoiceChatManager } from '../systems/VoiceChatManager';
 import type { VecindadState } from '../../lib/playerState';
 import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
 import { EnemySprite, registerZombieAnims, type ZombieType } from '../systems/EnemySprite';
@@ -98,6 +100,8 @@ type RemoteHitEvent = {
 
 type WeaponMode = 'pistol' | 'shotgun' | 'uzi' | 'blaster' | 'deagle' | 'cannon';
 type EnemyArchetype = 'rusher' | 'shooter' | 'tank' | 'boss';
+/** Shape of each entry in the Supabase Presence state for voice chat. */
+type PresenceVoice = { voice_peer_id?: string; [key: string]: unknown };
 
 type WeaponStats = {
   label: string;
@@ -391,6 +395,19 @@ export class WorldScene extends Phaser.Scene {
   private keySpace!: Phaser.Input.Keyboard.Key;
   private keyE!: Phaser.Input.Keyboard.Key;
   private inTransition = false;
+
+  // Voice Chat
+  private voiceMuteBtn?: Phaser.GameObjects.Text;
+  private voiceDeviceBtn?: Phaser.GameObjects.Text;
+  private voiceOffBtn?: Phaser.GameObjects.Text;
+  private voiceStatusText?: Phaser.GameObjects.Text;
+  private voiceDevicePanel?: Phaser.GameObjects.Container;
+  private voicePromptPanel?: Phaser.GameObjects.Container;
+  private isActivatingVoice = false;
+  private voiceFrameCount = 0;
+  // Speaking indicators (world-space circles above avatars)
+  private speakingIndicators = new Map<string, Phaser.GameObjects.Arc>();
+  private localSpeakingIndicator?: Phaser.GameObjects.Arc;
 
   // Multiplayer
   private remotePlayers = new Map<string, RemotePlayer>();
@@ -722,6 +739,7 @@ export class WorldScene extends Phaser.Scene {
 
     // HP/Combat/Utilities
     this.runBootStep('hp hud', () => this.setupHpHud());
+    this.runBootStep('voice hud', () => this.setupVoiceHud());
     this.runBootStep('combat', () => this.setupCombat());
     this.runBootStep('weapon system', () => this.setupWeaponSystem());
     this.runBootStep('utility refresh', () => this.refreshUtilitiesFromInventory());
@@ -863,6 +881,395 @@ export class WorldScene extends Phaser.Scene {
     this.xpBar = this.add.graphics().setScrollFactor(0).setDepth(9998);
 
     this.renderHpHud();
+  }
+
+  // ─── Voice Chat HUD ─────────────────────────────────────────────────────────
+
+  private setupVoiceHud() {
+    const camH = this.cameras.main.height;
+    const btnStyle = {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      backgroundColor: '#0E0E14',
+      padding: { x: 4, y: 2 },
+    };
+
+    // [MIC OFF] — main toggle button
+    this.voiceMuteBtn = this.add.text(10, camH - 22, '[MIC OFF]', {
+      ...btnStyle,
+      color: '#555577',
+    }).setScrollFactor(0).setDepth(9999).setInteractive({ useHandCursor: true });
+
+    // [DEV] — device picker
+    this.voiceDeviceBtn = this.add.text(90, camH - 22, '[DEV]', {
+      ...btnStyle,
+      color: '#444466',
+    }).setScrollFactor(0).setDepth(9999).setInteractive({ useHandCursor: true });
+
+    // [OFF] — fully disable voice
+    this.voiceOffBtn = this.add.text(122, camH - 22, '[OFF]', {
+      ...btnStyle,
+      color: '#444466',
+    }).setScrollFactor(0).setDepth(9999).setInteractive({ useHandCursor: true });
+
+    // Peer count indicator
+    this.voiceStatusText = this.add.text(10, camH - 9, '', {
+      fontSize: '6px',
+      fontFamily: 'Silkscreen, monospace',
+      color: '#444466',
+    }).setScrollFactor(0).setDepth(9999);
+
+    // Local speaking indicator (world space, follows player avatar)
+    this.localSpeakingIndicator = this.add.arc(
+      this.px, this.py - 54, 5, 0, 360, false, 0x39FF14, 0,
+    ).setDepth(200);
+
+    // ── Button handlers ──────────────────────────────────────────────────────
+
+    this.voiceMuteBtn.on('pointerdown', async () => {
+      const vc = getVoiceChat();
+      if (!vc.connected) {
+        // If pref is already 'on' and mic is granted, skip the prompt
+        const pref = this.getVoicePref();
+        const granted = await this.isMicGranted();
+        if (pref === 'on' && granted) {
+          await this.activateVoice();
+        } else {
+          this.showVoicePrompt();
+        }
+      } else {
+        const muted = vc.toggleMute();
+        this.voiceMuteBtn?.setText(muted ? '[MUTED]' : '[MIC ON]')
+          .setStyle({ color: muted ? '#FF006E' : '#39FF14' });
+      }
+    });
+
+    this.voiceDeviceBtn.on('pointerdown', () => {
+      if (this.voiceDevicePanel) {
+        this.closeMicDevicePanel();
+      } else {
+        void this.openMicDevicePanel();
+      }
+    });
+
+    this.voiceOffBtn.on('pointerdown', () => {
+      void this.disableVoice();
+    });
+  }
+
+  // ─── Voice onboarding ─────────────────────────────────────────────────────
+
+  private getVoicePref(): 'on' | 'off' | null {
+    try {
+      const v = localStorage.getItem('waspi_voice_pref');
+      if (v === 'on' || v === 'off') return v;
+    } catch { /* noop */ }
+    return null;
+  }
+
+  private setVoicePref(pref: 'on' | 'off') {
+    try { localStorage.setItem('waspi_voice_pref', pref); } catch { /* noop */ }
+  }
+
+  private async isMicGranted(): Promise<boolean> {
+    try {
+      const result = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+      return result.state === 'granted';
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Auto-init voice on startup if the user previously chose "on"
+   * AND the browser already has mic permission (no prompt needed).
+   */
+  private async tryAutoInitVoice() {
+    if (this.getVoicePref() !== 'on') return;
+    try {
+      if (!await this.isMicGranted()) return;
+      await this.activateVoice();
+    } catch {
+      // Silent failure — user can manually activate via button
+    }
+  }
+
+  /**
+   * Shows the pre-prompt dialog asking the user if they want voice chat.
+   * Only calls getUserMedia AFTER the user explicitly accepts.
+   */
+  private showVoicePrompt() {
+    if (this.voicePromptPanel) return;
+    this.closeMicDevicePanel();
+
+    const camW = this.cameras.main.width;
+    const camH = this.cameras.main.height;
+    const panelW = 290;
+    const panelH = 116;
+    const panelX = (camW - panelW) / 2;
+    const panelY = (camH - panelH) / 2;
+
+    const bg = this.add.rectangle(0, 0, panelW, panelH, 0x0A0A14, 0.96)
+      .setStrokeStyle(1, 0x46B3FF, 0.7)
+      .setOrigin(0, 0);
+
+    const title = this.add.text(12, 10, 'VOICE CHAT', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#46B3FF',
+    });
+
+    const desc = this.add.text(12, 30, [
+      'Vas a escuchar a otros jugadores',
+      'cuando esten cerca. El audio va',
+      'directo entre browsers (P2P).',
+    ], {
+      fontSize: '6px',
+      fontFamily: 'Silkscreen, monospace',
+      color: '#AAAACC',
+      lineSpacing: 4,
+    });
+
+    const btnActivar = this.add.text(12, 84, '[ACTIVAR]', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#39FF14',
+      backgroundColor: '#0E1A0E',
+      padding: { x: 5, y: 3 },
+    }).setInteractive({ useHandCursor: true });
+
+    const btnSinVoz = this.add.text(130, 84, '[JUGAR SIN VOZ]', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#888888',
+      backgroundColor: '#0E0E14',
+      padding: { x: 5, y: 3 },
+    }).setInteractive({ useHandCursor: true });
+
+    btnActivar.on('pointerover', () => btnActivar.setStyle({ color: '#FFFFFF' }));
+    btnActivar.on('pointerout', () => btnActivar.setStyle({ color: '#39FF14' }));
+    btnActivar.on('pointerdown', async () => {
+      this.closeVoicePrompt();
+      this.setVoicePref('on');
+      await this.activateVoice();
+    });
+
+    btnSinVoz.on('pointerover', () => btnSinVoz.setStyle({ color: '#FF006E' }));
+    btnSinVoz.on('pointerout', () => btnSinVoz.setStyle({ color: '#888888' }));
+    btnSinVoz.on('pointerdown', () => {
+      this.closeVoicePrompt();
+      this.setVoicePref('off');
+      this.voiceStatusText?.setText('sin voz').setStyle({ color: '#444466' });
+    });
+
+    this.voicePromptPanel = this.add.container(panelX, panelY, [bg, title, desc, btnActivar, btnSinVoz])
+      .setScrollFactor(0)
+      .setDepth(10001);
+  }
+
+  private closeVoicePrompt() {
+    this.voicePromptPanel?.destroy();
+    this.voicePromptPanel = undefined;
+  }
+
+  /**
+   * Core voice activation: init PeerJS + mic, publish to Presence,
+   * then immediately call all peers already in the room.
+   * Separated so it can be called from prompt, auto-init, and button.
+   */
+  private async activateVoice() {
+    // Guard: prevent concurrent init calls (double-click, race with auto-init)
+    if (this.isActivatingVoice) return;
+    const vc = getVoiceChat();
+    if (vc.connected) return;
+    this.isActivatingVoice = true;
+    try {
+      this.voiceMuteBtn?.setText('[MIC ...]').setStyle({ color: '#F5C842' });
+      await vc.init(this.playerId);
+
+      // Publish peer ID via Presence — auto-cleans on disconnect
+      await this.channel?.track({ player_id: this.playerId, voice_peer_id: vc.peerId });
+
+      // Timing fix: explicitly call all voice-enabled peers already in the room
+      // (presence.sync might have fired before vc was ready)
+      this.connectToVoicePeersInRoom();
+
+      this.voiceMuteBtn?.setText('[MIC ON]').setStyle({ color: '#39FF14' });
+      this.voiceDeviceBtn?.setStyle({ color: '#39FF14' });
+      this.voiceOffBtn?.setStyle({ color: '#FF6666' });
+      this.voiceStatusText?.setStyle({ color: '#39FF14' });
+    } catch (err) {
+      const name = (err as DOMException)?.name;
+      let label = '[NO MIC]';
+      let hint = 'Revisá la configuracion del browser';
+      if (name === 'NotAllowedError') {
+        label = '[DENEGADO]';
+        hint = 'Habilitá el mic en el candado de la URL';
+      } else if (name === 'NotFoundError') {
+        label = '[SIN MIC]';
+        hint = 'No se encontro microfono conectado';
+      } else if (name === 'NotReadableError') {
+        label = '[MIC EN USO]';
+        hint = 'Otra app esta usando el microfono';
+      }
+      console.warn('[VoiceChat] Mic init failed:', err);
+      this.voiceMuteBtn?.setText(label).setStyle({ color: '#FF006E' });
+      this.voiceStatusText?.setText(hint).setStyle({ color: '#FF6666' });
+      // Clear the hint after 4 seconds
+      this.time.delayedCall(4000, () => {
+        this.voiceStatusText?.setText('').setStyle({ color: '#444466' });
+      });
+    } finally {
+      this.isActivatingVoice = false;
+    }
+  }
+
+  /**
+   * Timing fix: called right after voice init + channel.track().
+   * Iterates current presence state and calls anyone with voice_peer_id.
+   * Guards against the case where presence.sync fired before vc was ready.
+   */
+  private connectToVoicePeersInRoom() {
+    const vc = getVoiceChat();
+    if (!vc.connected) return;
+    const state = this.channel?.presenceState<PresenceVoice>() ?? {};
+    for (const presences of Object.values(state)) {
+      for (const p of presences) {
+        if (p.voice_peer_id && p.voice_peer_id !== vc.peerId) {
+          vc.callPeer(p.voice_peer_id);
+        }
+      }
+    }
+  }
+
+  private async openMicDevicePanel() {
+    this.closeMicDevicePanel();
+
+    let devices: MediaDeviceInfo[];
+    try {
+      devices = await VoiceChatManager.getAudioInputDevices();
+    } catch {
+      return;
+    }
+    if (devices.length === 0) return;
+
+    const camH = this.cameras.main.height;
+    const panelX = 10;
+    const rowH = 16;
+    const panelW = 220;
+    const panelH = 20 + devices.length * rowH;
+    const panelY = camH - 28 - panelH;
+
+    const bg = this.add.rectangle(0, 0, panelW, panelH, 0x0E0E14, 0.97)
+      .setStrokeStyle(1, 0x46B3FF, 0.6)
+      .setOrigin(0, 0);
+
+    const title = this.add.text(8, 4, 'SELECT MIC', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#46B3FF',
+    });
+
+    const items: Phaser.GameObjects.GameObject[] = [bg, title];
+
+    devices.forEach((device, i) => {
+      const label = device.label || `Mic ${i + 1}`;
+      const short = label.length > 28 ? label.slice(0, 27) + '…' : label;
+      const row = this.add.text(8, 18 + i * rowH, short, {
+        fontSize: '6px',
+        fontFamily: 'Silkscreen, monospace',
+        color: '#CCCCCC',
+        backgroundColor: '#0E0E14',
+        padding: { x: 2, y: 2 },
+      }).setInteractive({ useHandCursor: true });
+
+      row.on('pointerover', () => row.setStyle({ color: '#39FF14' }));
+      row.on('pointerout', () => row.setStyle({ color: '#CCCCCC' }));
+      row.on('pointerdown', async () => {
+        this.closeMicDevicePanel();
+        const vc = getVoiceChat();
+        if (vc.connected) {
+          try {
+            await vc.switchMic(device.deviceId);
+            this.voiceMuteBtn?.setText('[MIC ON]').setStyle({ color: '#39FF14' });
+          } catch (e) {
+            console.warn('[VoiceChat] Mic switch failed:', e);
+          }
+        }
+      });
+      items.push(row);
+    });
+
+    this.voiceDevicePanel = this.add.container(panelX, panelY, items)
+      .setScrollFactor(0)
+      .setDepth(10000);
+  }
+
+  private closeMicDevicePanel() {
+    this.voiceDevicePanel?.destroy();
+    this.voiceDevicePanel = undefined;
+  }
+
+  private async disableVoice() {
+    this.closeMicDevicePanel();
+    this.closeVoicePrompt();
+    const vc = getVoiceChat();
+    if (!vc.connected) return;
+    this.setVoicePref('off');
+    // Remove voice_peer_id from presence (keep player presence alive)
+    await this.channel?.track({ player_id: this.playerId });
+    // destroyVoiceChat() nulls the singleton so next activation starts fresh
+    destroyVoiceChat();
+    this.voiceMuteBtn?.setText('[MIC OFF]').setStyle({ color: '#555577' });
+    this.voiceDeviceBtn?.setStyle({ color: '#444466' });
+    this.voiceOffBtn?.setStyle({ color: '#444466' });
+    this.voiceStatusText?.setText('').setStyle({ color: '#444466' });
+    this.localSpeakingIndicator?.setAlpha(0);
+    for (const [, arc] of this.speakingIndicators) arc.setAlpha(0);
+  }
+
+  // ─── Voice Presence handlers ─────────────────────────────────────────────────
+
+  /**
+   * Fires on subscribe and any time the presence state changes in full.
+   * Connect to every peer that already has voice enabled.
+   */
+  private handleVoicePresenceSync() {
+    const vc = getVoiceChat();
+    if (!vc.connected) return;
+    const state = this.channel?.presenceState<PresenceVoice>() ?? {};
+    for (const presences of Object.values(state)) {
+      for (const p of presences) {
+        if (p.voice_peer_id && p.voice_peer_id !== vc.peerId) {
+          vc.callPeer(p.voice_peer_id);
+        }
+      }
+    }
+  }
+
+  /**
+   * Fires when a peer enters the channel and has a voice_peer_id tracked.
+   */
+  private handleVoicePresenceJoin(newPresences: PresenceVoice[]) {
+    const vc = getVoiceChat();
+    if (!vc.connected) return;
+    for (const p of newPresences) {
+      if (p.voice_peer_id && p.voice_peer_id !== vc.peerId) {
+        vc.callPeer(p.voice_peer_id);
+      }
+    }
+  }
+
+  /**
+   * Fires when a peer leaves the channel (tab closed, disconnect, etc.).
+   * Supabase handles this automatically — no manual cleanup needed from the leaving peer.
+   */
+  private handleVoicePresenceLeave(leftPresences: PresenceVoice[]) {
+    const vc = getVoiceChat();
+    if (!vc.connected) return;
+    for (const p of leftPresences) {
+      if (p.voice_peer_id) vc.disconnectPeer(p.voice_peer_id);
+    }
   }
 
   private renderHpHud() {
@@ -4371,7 +4778,10 @@ export class WorldScene extends Phaser.Scene {
     }
 
     this.channel = supabase.channel('waspi-world', {
-      config: { broadcast: { self: false } },
+      config: {
+        broadcast: { self: false },
+        presence: { key: this.playerId },
+      },
     });
 
     this.channel
@@ -4396,8 +4806,20 @@ export class WorldScene extends Phaser.Scene {
       .on('broadcast', { event: 'player:hit' }, ({ payload }) => {
         this.handleHit(payload);
       })
+      // Voice chat — Presence: auto-cleans on disconnect, late-joiner safe
+      .on('presence', { event: 'sync' }, () => {
+        this.handleVoicePresenceSync();
+      })
+      .on('presence', { event: 'join' }, ({ newPresences }) => {
+        this.handleVoicePresenceJoin(newPresences as PresenceVoice[]);
+      })
+      .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+        this.handleVoicePresenceLeave(leftPresences as PresenceVoice[]);
+      })
       .subscribe(() => {
         this.broadcastSelfState('player:join');
+        // Auto-init voice here, after the channel is confirmed subscribed
+        void this.tryAutoInitVoice();
       });
     return 'multiplayer';
   }
@@ -4486,6 +4908,11 @@ export class WorldScene extends Phaser.Scene {
       this.chatSystem.clearBubble(playerId);
       this.emitPresence();
     }
+    // Voice chat: disconnect this peer
+    getVoiceChat().disconnectPeer(`waspi-${playerId}`);
+    // Destroy speaking indicator
+    this.speakingIndicators.get(playerId)?.destroy();
+    this.speakingIndicators.delete(playerId);
   }
 
   private handleRemoteMove(payload: unknown) {
@@ -4608,6 +5035,12 @@ export class WorldScene extends Phaser.Scene {
     this.ensureRemoteWeaponSprite(remotePlayer);
     this.updateRemoteWeaponSprite(remotePlayer);
     this.emitPresence();
+
+    // Voice chat: handled via Supabase Presence (handleVoicePresenceJoin/Sync)
+
+    // Speaking indicator — small circle above nameplate, hidden until VAD fires
+    const indicator = this.add.arc(x, y - 56, 5, 0, 360, false, 0x46B3FF, 0).setDepth(200);
+    this.speakingIndicators.set(id, indicator);
 
     nameplate.setInteractive({ useHandCursor: true });
     nameplate.on('pointerdown', () => {
@@ -5192,6 +5625,44 @@ export class WorldScene extends Phaser.Scene {
       }
     });
 
+    // Proximity voice chat — update every 5 frames (~12Hz)
+    this.voiceFrameCount++;
+    if (this.voiceFrameCount % 5 === 0) {
+      const vc = getVoiceChat();
+      if (vc.connected) {
+        const peerPositions = new Map<string, { x: number; y: number }>();
+        for (const [remoteId, rp] of this.remotePlayers) {
+          peerPositions.set(`waspi-${remoteId}`, { x: rp.x, y: rp.y });
+        }
+        vc.updateProximityVolumes({ x: this.px, y: this.py }, peerPositions);
+
+        // Peer count
+        const count = vc.peerCount;
+        this.voiceStatusText?.setText(count > 0 ? `${count}p` : '');
+
+        // Local speaking indicator (world space, above own avatar)
+        if (this.localSpeakingIndicator) {
+          const level = vc.getLocalSpeakingLevel();
+          const speaking = level > 0.04 && !vc.muted;
+          this.localSpeakingIndicator.setPosition(this.px, this.py - 56);
+          this.localSpeakingIndicator.setAlpha(speaking ? 0.85 : 0);
+        }
+
+        // Remote speaking indicators
+        for (const [remoteId, rp] of this.remotePlayers) {
+          const arc = this.speakingIndicators.get(remoteId);
+          if (!arc) continue;
+          arc.setPosition(rp.x, rp.y - 56);
+          const level = vc.getSpeakingLevel(`waspi-${remoteId}`);
+          arc.setAlpha(level > 0.04 ? 0.85 : 0);
+        }
+      } else {
+        // Voice not active — hide all indicators
+        this.localSpeakingIndicator?.setAlpha(0);
+        for (const [, arc] of this.speakingIndicators) arc.setAlpha(0);
+      }
+    }
+
     this.runFrameStep('minimap', () => this.renderMinimap());
   }
 
@@ -5443,6 +5914,20 @@ export class WorldScene extends Phaser.Scene {
       });
       this.remotePlayers.clear();
     } catch (e) { console.error('[WorldScene] remotePlayers cleanup failed', e); }
+
+    // Voice chat: disconnect all peers, destroy speaking indicators
+    try {
+      const vc = getVoiceChat();
+      for (const peerId of vc.connectedPeerIds) vc.disconnectPeer(peerId);
+    } catch { /* noop */ }
+    try {
+      this.localSpeakingIndicator?.destroy();
+      this.localSpeakingIndicator = undefined;
+      this.speakingIndicators.forEach((arc) => arc.destroy());
+      this.speakingIndicators.clear();
+      this.closeMicDevicePanel();
+      this.closeVoicePrompt();
+    } catch { /* noop */ }
 
     try { this.dummyStates.clear(); } catch { /* noop */ }
     try { this.sharedParcelState.clear(); } catch { /* noop */ }
