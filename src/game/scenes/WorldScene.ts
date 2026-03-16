@@ -3982,11 +3982,76 @@ export class WorldScene extends Phaser.Scene {
     div.lineBetween(px + 20, py + 60, px + pw - 20, py + 60);
     container.add(div);
 
-    // Gun items from catalog
+    // Gun items from catalog (scrollable)
     const gunItems = CATALOG.filter(i => i.id.startsWith('UTIL-GUN'));
+    const listTop = py + 70;
+    const listPad = 10;
+    const listX = px;
+    const listY = listTop;
+    const listW = pw;
+    const listH = ph - (listTop - py) - 18; // leave a bit of bottom breathing room
+
+    const listMaskG = this.add.graphics().setScrollFactor(0);
+    listMaskG.fillStyle(0xffffff, 1);
+    listMaskG.fillRect(listX, listY, listW, listH);
+    const listMask = listMaskG.createGeometryMask();
+    listMaskG.setVisible(false);
+
+    const listContainer = this.add.container(0, 0).setScrollFactor(0);
+    listContainer.setMask(listMask);
+    container.add(listContainer);
+
     gunItems.forEach((item, idx) => {
-      const rowY = py + 80 + idx * 72;
-      this.buildGunShopRow(container, px, rowY, pw, item, balText);
+      const rowY = listY + listPad + idx * 72;
+      this.buildGunShopRow(listContainer, px, rowY, pw, item, balText);
+    });
+
+    // Basic wheel scroll (trackpad / mouse)
+    const contentHeight = listPad * 2 + gunItems.length * 72;
+    const maxScroll = Math.max(0, contentHeight - listH);
+    const applyScroll = (targetY: number) => {
+      listContainer.y = Phaser.Math.Clamp(targetY, -maxScroll, 0);
+      if (maxScroll <= 0) {
+        scrollThumb.setVisible(false);
+        scrollTrack.setVisible(false);
+        return;
+      }
+      const t = -listContainer.y / maxScroll;
+      const thumbTravel = trackH - thumbH;
+      scrollThumb.setY(trackY + t * thumbTravel);
+      scrollThumb.setVisible(true);
+      scrollTrack.setVisible(true);
+    };
+
+    const trackW = 6;
+    const trackH = listH - 18;
+    const trackX = px + pw - 16;
+    const trackY = listY + 10;
+    const scrollTrack = this.add.rectangle(trackX, trackY + trackH / 2, trackW, trackH, 0xffffff, 0.08)
+      .setScrollFactor(0)
+      .setDepth(11001)
+      .setVisible(false);
+    const thumbH = Math.max(18, Math.round(trackH * (listH / Math.max(listH, contentHeight))));
+    const scrollThumb = this.add.rectangle(trackX, trackY + thumbH / 2, trackW, thumbH, 0xF5C842, 0.45)
+      .setScrollFactor(0)
+      .setDepth(11002)
+      .setVisible(false);
+    container.add(scrollTrack);
+    container.add(scrollThumb);
+
+    applyScroll(0);
+
+    const wheelHandler = (_pointer: Phaser.Input.Pointer, _go: unknown, _dx: number, dy: number) => {
+      // Only scroll when pointer is over the panel list area
+      const p = this.input.activePointer;
+      if (p.x < listX || p.x > listX + listW || p.y < listY || p.y > listY + listH) return;
+      const next = listContainer.y - Math.sign(dy) * 34;
+      applyScroll(next);
+    };
+    this.input.on('wheel', wheelHandler);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      try { this.input.off('wheel', wheelHandler); } catch { /* noop */ }
+      try { listMaskG.destroy(); } catch { /* noop */ }
     });
 
     // Close button
