@@ -225,7 +225,7 @@ const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
 };
 const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
   rusher: {
-    label: 'RUSH',
+    label: '▲ RUSH',
     tint: 0xFF5E5E,
     maxHp: 34,
     radius: 16,
@@ -239,7 +239,7 @@ const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
     shotCooldownMs: 999999,
   },
   shooter: {
-    label: 'SHOT',
+    label: '◆ SHOT',
     tint: 0xFF8B3D,
     maxHp: 40,
     radius: 18,
@@ -253,7 +253,7 @@ const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
     shotCooldownMs: 850,
   },
   tank: {
-    label: 'TANK',
+    label: '■ TANK',
     tint: 0xB74DFF,
     maxHp: 72,
     radius: 22,
@@ -267,7 +267,7 @@ const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
     shotCooldownMs: 999999,
   },
   boss: {
-    label: 'BOSS',
+    label: '★ BOSS',
     tint: 0x3DD6FF,
     maxHp: 220,
     radius: 28,
@@ -2430,7 +2430,7 @@ export class WorldScene extends Phaser.Scene {
 
     // Sub-label "EST. WASPI"
     this.add.text(cx, y + 72, '— EST. WASPI —', {
-      fontSize: '5px',
+      fontSize: '6px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#46b3ff',
     }).setOrigin(0.5).setDepth(4).setAlpha(0.7);
@@ -2638,9 +2638,9 @@ export class WorldScene extends Phaser.Scene {
     g.lineStyle(1, 0x552200, 0.7);
     g.lineBetween(mbX + 5, mbY + 42, mbX + 1, mbY + 54);
     g.lineBetween(mbX + 29, mbY + 42, mbX + 33, mbY + 54);
-    this.add.text(mbX + 17, mbY + 10, 'MENÚ', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#44aa44' }).setOrigin(0.5).setDepth(3);
-    this.add.text(mbX + 17, mbY + 24, 'DEL', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#44aa44' }).setOrigin(0.5).setDepth(3);
-    this.add.text(mbX + 17, mbY + 36, 'DÍA', { fontSize: '5px', fontFamily: '"Press Start 2P", monospace', color: '#44aa44' }).setOrigin(0.5).setDepth(3);
+    this.add.text(mbX + 17, mbY + 10, 'MENÚ', { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: '#44aa44' }).setOrigin(0.5).setDepth(3);
+    this.add.text(mbX + 17, mbY + 24, 'DEL', { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: '#44aa44' }).setOrigin(0.5).setDepth(3);
+    this.add.text(mbX + 17, mbY + 36, 'DÍA', { fontSize: '6px', fontFamily: '"Press Start 2P", monospace', color: '#44aa44' }).setOrigin(0.5).setDepth(3);
 
     // ── Warm ambient ─────────────────────────────────────────
     g.fillStyle(ORANGE, 0.022);
@@ -3307,15 +3307,6 @@ export class WorldScene extends Phaser.Scene {
         // Teleport player to store door and trigger entry
         this.transitionToScene('StoreInterior');
       },
-    };
-
-    const endEarningTenks: DialogNode = {
-      lines: [
-        'COTTENKS: Jugá en el Arcade. Ganá matches.',
-        'COTTENKS: Comprá en la Store, chateá, habitá el mundo.',
-        'COTTENKS: El que está presente, cobra.',
-      ],
-      onComplete: () => { dismissCottenksMarker(); this.cottenksDialog = null; this.inputBlocked = false; },
     };
 
     // ── Branch: ¿Cómo gano TENKS? ────────────────────────────────────────────
@@ -4903,13 +4894,13 @@ export class WorldScene extends Phaser.Scene {
       this.remotePlayers.clear();
     } catch (e) { console.error('[WorldScene] remotePlayers cleanup failed', e); }
 
-    try { this.dummyStates.clear(); } catch (e) { /* noop */ }
-    try { this.sharedParcelState.clear(); } catch (e) { /* noop */ }
-    try { this.parcelVisuals.clear(); } catch (e) { /* noop */ }
-    try { this.remoteMoveTimes.clear(); } catch (e) { /* noop */ }
-    try { this.remoteChatTimes.clear(); } catch (e) { /* noop */ }
-    try { this.remoteHitTimes.clear(); } catch (e) { /* noop */ }
-    try { this.mutedPlayerIds.clear(); } catch (e) { /* noop */ }
+    try { this.dummyStates.clear(); } catch { /* noop */ }
+    try { this.sharedParcelState.clear(); } catch { /* noop */ }
+    try { this.parcelVisuals.clear(); } catch { /* noop */ }
+    try { this.remoteMoveTimes.clear(); } catch { /* noop */ }
+    try { this.remoteChatTimes.clear(); } catch { /* noop */ }
+    try { this.remoteHitTimes.clear(); } catch { /* noop */ }
+    try { this.mutedPlayerIds.clear(); } catch { /* noop */ }
   }
 
   private emitPresence() {

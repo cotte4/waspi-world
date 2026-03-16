@@ -30,6 +30,7 @@ import { getTenksBalance, initTenks } from '@/src/game/systems/TenksSystem';
 import { mutePlayer, normalizePlayerState, grantInventoryItem, type PlayerState } from '@/src/lib/playerState';
 import type { SharedParcelState } from '@/src/lib/vecindad';
 import { reconcileInventoryFromDB } from '@/src/lib/commercePersistence';
+import { track } from '@/src/lib/analytics';
 
 const PhaserGame = dynamic(() => import('@/app/components/PhaserGame'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
@@ -156,6 +157,7 @@ export default function PlayPage() {
   const [checkoutBusyId, setCheckoutBusyId] = useState<string | null>(null);
   const [shopStatus, setShopStatus] = useState(initialCheckout.status);
   const [isMobile, setIsMobile] = useState(false);
+  const [isPortrait, setIsPortrait] = useState(false);
   const [showMobileHint, setShowMobileHint] = useState(false);
   const [playerActions, setPlayerActions] = useState<PlayerActionsPayload | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -334,7 +336,10 @@ export default function PlayPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const update = () => {
-      setIsMobile(window.innerWidth <= 768);
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      setIsMobile(w <= 768);
+      setIsPortrait(w < h);
     };
     update();
     window.addEventListener('resize', update);
@@ -408,6 +413,7 @@ export default function PlayPage() {
     const unsubScene = eventBus.on(EVENTS.SCENE_CHANGED, (sceneName: unknown) => {
       if (typeof sceneName === 'string') {
         setActiveScene(sceneName);
+        track('scene_enter', { scene: sceneName });
         if (sceneName === 'WorldScene' && !localStorage.getItem('waspi_onboarding_v1')) {
           setShowOnboarding(true);
         }
@@ -432,6 +438,7 @@ export default function PlayPage() {
       setShopSource(next.source ?? 'scene');
       setShopOpen(true);
       setShopStatus(next.source === 'store_interior' ? 'Compra ropa con TENKS y equipala al instante.' : '');
+      track('shop_open', { source: next.source ?? 'scene' });
     });
 
     const unsubShopClose = eventBus.on(EVENTS.SHOP_CLOSE, () => {
@@ -641,6 +648,7 @@ export default function PlayPage() {
 
   useEffect(() => {
     if (isMobile && activeScene === 'WorldScene' && !localStorage.getItem('waspi_mobile_hint_v1')) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowMobileHint(true);
       const t = window.setTimeout(() => {
         setShowMobileHint(false);
@@ -957,6 +965,7 @@ export default function PlayPage() {
     if (json.player) {
       applyPlayerState(normalizePlayerState(json.player as PlayerState));
     }
+    track('shop_purchase', { item_id: item.id, price_tenks: item.priceTenks });
     setCheckoutBusyId(null);
     setShopStatus(
       (json.notice as string | undefined)
@@ -1424,6 +1433,34 @@ export default function PlayPage() {
           }
         }
       `}</style>
+      {isMobile && isPortrait && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: '#0E0E14',
+            zIndex: 99999,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 24,
+            padding: 32,
+          }}
+        >
+          <div style={{ fontSize: 56 }}>↻</div>
+          <div style={{
+            fontFamily: '"Press Start 2P", monospace',
+            fontSize: '9px',
+            color: '#F5C842',
+            textAlign: 'center',
+            lineHeight: 2,
+          }}>
+            GIRA TU CELULAR<br />
+            <span style={{ color: '#46B3FF', fontSize: '7px' }}>el juego funciona en landscape</span>
+          </div>
+        </div>
+      )}
       <div
       className="ww-shell w-screen h-screen overflow-hidden flex items-center justify-center"
       style={{
@@ -1618,7 +1655,7 @@ export default function PlayPage() {
           )}
         </div>
 
-        {hudSettings.showControlsPanel && (
+        {hudSettings.showControlsPanel && !isMobile && (
           <div
             className="ww-panel absolute top-2 right-2 pointer-events-none"
             style={{
@@ -1627,7 +1664,7 @@ export default function PlayPage() {
               padding: '4px 8px',
               fontFamily: '"Press Start 2P", monospace',
               color: 'rgba(255,255,255,0.3)',
-              fontSize: isMobile ? '5px' : '6px',
+              fontSize: '7px',
               lineHeight: '1.8',
             }}
           >

@@ -533,8 +533,6 @@ export class CasinoInterior extends Phaser.Scene {
     const cy = this.roomY + this.roomH / 2;
     const balance = getTenksBalance();
     const { spinning, lastNumber, lastColor, betIndex, optionIndex, resultText } = this.rouletteState;
-    const selectedOption = ROULETTE_OPTIONS[optionIndex];
-
     this.overlayAccent.setPosition(cx, cy - 112).setText(`SALDO: ${balance} T`).setVisible(true);
     this.overlayTitle.setPosition(cx, cy - 95).setText('RULETA').setVisible(true);
     this.overlayBody.setVisible(false);
