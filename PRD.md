@@ -696,55 +696,56 @@ waspi-world/
 
 ## 19. Estado del Desarrollo
 
-> Última actualización: **2026-03-16**
+> Última actualización: **2026-03-16** (sesión 2)
 
 ### ✅ Completado (Semanas 1–2)
 
 - **Scaffold:** Next.js 16 + Phaser 3 + Supabase + Stripe instalados
 - **WorldScene:** Mundo 2D completo dibujado programáticamente
-  - Calle principal con sidewalks, líneas de calle, faroles con glow
-  - ARCADE (neón rosa), WASPI STORE (dorado pulsante), CAFÉ (neón naranja)
-  - TU CASA (spawn point), PLAZA con fuente y bancas
-  - Cielo con estrellas
 - **AvatarRenderer:** Chibi waspi layerado con animación de caminata
-- **ChatSystem:** Burbujas BoomBang-style (dorado=propio, azul=otros), fade out
-- **MultiplayerSync:** Supabase Realtime broadcast (degradación elegante a solo mode)
-- **Play page:** Overlay de chat con log + input + HUD de usuario
-- **Landing page:** Pantalla de entrada al mundo
-- **Build:** Pasa TypeScript + Turbopack sin errores
+- **ChatSystem:** Burbujas BoomBang-style, fade out
+- **MultiplayerSync:** Supabase Realtime broadcast
+- **Play page + Landing page:** funcionales
+- **Build:** Pasa TypeScript + ESLint sin errores
 
-### ✅ Completado (2026-03-16) — Proximity Voice Chat
+### ✅ Completado (2026-03-16 sesión 1) — Proximity Voice Chat
 
-- **VoiceChatManager** (`src/game/systems/VoiceChatManager.ts`): sistema P2P completo
-  - PeerJS (WebRTC) — full mesh, hasta 6 jugadores (15 conexiones)
-  - VAD (Voice Activity Detection) via Web Audio API — indicadores visuales de quién habla
-  - Volumen por proximidad — falloff logarítmico, minDist 150px / maxDist 600px
-  - Selector de micrófono — `RTCRtpSender.replaceTrack()` sin renegociación
-  - Mute/unmute, master volume, cleanup completo
-- **voiceChatInstance** (`src/game/systems/voiceChatInstance.ts`): singleton persistente entre escenas
-- **WorldScene integración:**
-  - Señalización de peer IDs via Supabase Presence (late-joiner safe, auto-cleanup)
-  - HUD en-game: `[MIC OFF]`, `[DEV]` (selector mic), `[OFF]` (desactivar voz)
-  - Indicadores circulares sobre avatares cuando están hablando (VAD threshold 0.04)
-  - Onboarding con dialog in-game, mensajes de error específicos por tipo
-  - Auto-init si el jugador ya había dado permiso de mic (localStorage pref)
-  - Botones posicionados sobre el overlay de chat React (`camH - 118`) — fix Vercel
-- **tsconfig.json:** excluye `tiled/` para evitar que archivos XML de Tiled se interpreten como TypeScript
-- **package.json:** dependencia `peerjs` agregada
+- **VoiceChatManager:** PeerJS P2P, VAD, volumen por proximidad, selector de mic
+- **Señalización via Supabase Presence** (late-joiner safe)
+- **HUD limpio:** botón `[MIC]` único; selector de mic y desactivar en Settings
+- **Fix:** dialog `[ACTIVAR]` roto — reemplazado Container de Phaser con objetos flat
+- **Fix:** "sesión activa" oculto cuando autenticado; K/D removido del top-left
+
+### ✅ Completado (2026-03-16 sesión 2) — Stats System
+
+- **StatsSystem** (`src/game/systems/StatsSystem.ts`): ya existía pero nunca conectado, ahora funcional
+  - Eventos conectados: `STATS_ZOMBIE_KILL` en cada kill de dummy, `STATS_PVP_RESULT` en cada muerte
+  - Distancia caminada: `recordDistanceDelta()` cada frame en el loop de movimiento
+  - NPCs: `recordNpcTalk()` al abrir diálogo con COTTENKS
+  - TENKS: auto-tracking via listener en `TENKS_CHANGED` (earned/spent)
+  - Init con Supabase user ID al autenticarse; teardown al cerrar sesión
+  - Flush a DB al salir de escena + cada 30 segundos automático
+- **API:** `GET /api/player/stats` — lee tabla `player_stats` en Supabase
+- **Panel de stats** (botón 📊 en el HUD):
+  - Combate: zombies eliminados, muertes, mejor racha, K/D ratio
+  - Economía: TENKS ganados, gastados, balance neto
+  - Exploración: horas jugadas, km caminados, NPCs hablados, zonas visitadas
+  - Minijuegos: basket (mejor score, % enceste) y penalty (goles, W/L)
+  - Invitados: muestra stats de la sesión actual en memoria
+  - Autenticados: carga historial completo desde DB
 
 ### 🔄 En progreso
 
 - Supabase Realtime configurado y conectado (env vars listas)
-- Voice chat deployado en Vercel — pendiente QA con múltiples jugadores reales
+- Voice chat + Stats panel deployados en Vercel
 
 ### ⏳ Próximos pasos
 
-- QA de voice chat con 2+ usuarios reales en Vercel
-- Interiores de edificios (Store, Arcade, Café, Casa)
-- Sistema de diálogo NPC typewriter
-- Panel de shop + Stripe Checkout
-- Sistema de TENKS completo
-- Minijuego de penales
-- Auth (Supabase Auth: magic link + Google + Discord)
-- Character creator completo
-- Mobile controls (joystick virtual)
+1. **QA de voice chat** con 2+ usuarios reales en Vercel
+2. **Interiores de edificios** — Store, Arcade, Café, Casa (con fade in/out)
+3. **Sistema de diálogo NPC typewriter** — vendedor principal
+4. **Panel de shop + Stripe Checkout** — flujo completo de compra
+5. **Auth completo** — magic link + Google + Discord (base ya existe)
+6. **Character creator** — customización de avatar completa
+7. **Mobile controls** — joystick virtual responsive
+8. **Minijuego de penales** — TENKS reward integrado
