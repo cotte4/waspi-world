@@ -43,23 +43,28 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Server-validated TENKS balance ---
-  // Read the authoritative balance from player_tenks_balance.
-  // If no row exists yet, seed it from players.tenks (back-compat).
+  // Read from player_tenks_balance and reconcile with players.tenks.
+  // Some legacy reward flows still update players.tenks but not the balance table.
   const { data: balanceRow, error: balanceError } = await admin
     .from('player_tenks_balance')
     .select('balance')
     .eq('player_id', user.id)
     .single<{ balance: number }>();
 
+  const { data: playerRow, error: playerError } = await admin
+    .from('players')
+    .select('tenks')
+    .eq('id', user.id)
+    .maybeSingle<{ tenks: number }>();
+
+  if (playerError) {
+    return NextResponse.json({ error: playerError.message }, { status: 500 });
+  }
+
   let serverBalance: number;
 
   if (balanceError && balanceError.code === 'PGRST116') {
-    // Row missing — seed from players.tenks or fall back to client state.
-    const { data: playerRow } = await admin
-      .from('players')
-      .select('tenks')
-      .eq('id', user.id)
-      .single<{ tenks: number }>();
+    // Row missing — seed from players.tenks or fall back to metadata state.
     serverBalance = playerRow?.tenks ?? currentPlayer.tenks;
 
     await admin
@@ -68,12 +73,20 @@ export async function POST(request: NextRequest) {
   } else if (balanceError) {
     return NextResponse.json({ error: balanceError.message }, { status: 500 });
   } else {
-    serverBalance = balanceRow.balance;
+    // Reconcile stale balance table rows against players.tenks.
+    serverBalance = Math.max(balanceRow.balance, playerRow?.tenks ?? balanceRow.balance);
+    if (serverBalance !== balanceRow.balance) {
+      await admin
+        .from('player_tenks_balance')
+        .upsert({ player_id: user.id, balance: serverBalance });
+    }
   }
 
   if (serverBalance < item.priceTenks) {
     return NextResponse.json({
       error: `Necesitas ${item.priceTenks.toLocaleString('es-AR')} TENKS para comprar ${item.name}.`,
+      balance: serverBalance,
+      required: item.priceTenks,
     }, { status: 400 });
   }
 
