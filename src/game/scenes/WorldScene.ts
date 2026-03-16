@@ -1511,13 +1511,16 @@ export class WorldScene extends Phaser.Scene {
   private static readonly WEAPON_CYCLE: WeaponMode[] = ['pistol', 'uzi', 'shotgun', 'blaster', 'deagle', 'cannon'];
 
   private hasWeaponUnlocked(weapon: WeaponMode): boolean {
+    const owned = getInventory().owned;
     switch (weapon) {
       case 'pistol':  return true;
-      case 'uzi':     return hasUtilityEquipped('UTIL-GUN-SMG-01');
-      case 'shotgun': return hasUtilityEquipped('UTIL-GUN-SHOT-01');
-      case 'blaster': return hasUtilityEquipped('UTIL-GUN-GOLD-01');
-      case 'deagle':  return hasUtilityEquipped('UTIL-GUN-DEAGLE-01');
-      case 'cannon':  return hasUtilityEquipped('UTIL-GUN-CANNON-01');
+      // Weapon unlocks must depend on ownership, not current utility equip state.
+      // Otherwise a purchased gun can appear "blocked" if utility toggles drift.
+      case 'uzi':     return owned.includes('UTIL-GUN-SMG-01');
+      case 'shotgun': return owned.includes('UTIL-GUN-SHOT-01');
+      case 'blaster': return owned.includes('UTIL-GUN-GOLD-01');
+      case 'deagle':  return owned.includes('UTIL-GUN-DEAGLE-01');
+      case 'cannon':  return owned.includes('UTIL-GUN-CANNON-01');
     }
   }
 
