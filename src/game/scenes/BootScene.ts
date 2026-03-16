@@ -80,10 +80,18 @@ export class BootScene extends Phaser.Scene {
     this.load.image('seed_buho', '/assets/seeds/buho.png');
     this.load.image('seed_piplup', '/assets/seeds/piplup.png');
     this.load.image('seed_chacha', '/assets/seeds/chacha.png');
-    this.load.spritesheet('weapon_glock_idle', '/assets/sprites/guns/01_glock/idle_strip.png', { frameWidth: 64, frameHeight: 64 });
-    this.load.spritesheet('weapon_glock_shoot', '/assets/sprites/guns/01_glock/shoot_strip.png', { frameWidth: 64, frameHeight: 64 });
-    this.load.spritesheet('weapon_shotgun_idle', '/assets/sprites/guns/03_shotgun/idle_strip.png', { frameWidth: 64, frameHeight: 64 });
-    this.load.spritesheet('weapon_shotgun_shoot', '/assets/sprites/guns/03_shotgun/shoot_strip.png', { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_glock_idle',   '/assets/sprites/guns/01_glock/idle_strip.png',    { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_glock_shoot',  '/assets/sprites/guns/01_glock/shoot_strip.png',   { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_uzi_idle',     '/assets/sprites/guns/02_uzi/idle_strip.png',      { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_uzi_shoot',    '/assets/sprites/guns/02_uzi/shoot_strip.png',     { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_shotgun_idle', '/assets/sprites/guns/03_shotgun/idle_strip.png',  { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_shotgun_shoot','/assets/sprites/guns/03_shotgun/shoot_strip.png', { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_blaster_idle', '/assets/sprites/guns/04_blaster/idle_strip.png',  { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_blaster_shoot','/assets/sprites/guns/04_blaster/shoot_strip.png', { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_deagle_idle',  '/assets/sprites/guns/05_deagle/idle_strip.png',   { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_deagle_shoot', '/assets/sprites/guns/05_deagle/shoot_strip.png',  { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_cannon_idle',  '/assets/sprites/guns/06_cannon/idle_strip.png',   { frameWidth: 64, frameHeight: 64 });
+    this.load.spritesheet('weapon_cannon_shoot', '/assets/sprites/guns/06_cannon/shoot_strip.png',  { frameWidth: 64, frameHeight: 64 });
 
     const CHARACTER_FOLDERS: Record<string, string> = {
       trap_a: 'trap_A',
