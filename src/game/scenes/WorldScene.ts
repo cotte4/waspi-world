@@ -4918,6 +4918,24 @@ export class WorldScene extends Phaser.Scene {
     }
     if (target?.npcKey === 'cottenks') {
       this.openCottenksDialog();
+      return;
+    }
+
+    // Vecindad: material node collection
+    const nearMaterial = this.getNearbyMaterialNode();
+    if (nearMaterial) {
+      this.collectMaterial(nearMaterial);
+      return;
+    }
+
+    // Vecindad: parcel buy or build
+    const nearParcel = this.getNearbyParcel();
+    if (nearParcel) {
+      if (this.vecindadState.ownedParcelId === nearParcel.id) {
+        this.buildOwnedParcel();
+      } else if (!this.vecindadState.ownedParcelId && !this.sharedParcelState.has(nearParcel.id)) {
+        eventBus.emit(EVENTS.PARCEL_BUY_REQUEST, { parcelId: nearParcel.id, cost: nearParcel.cost });
+      }
     }
   }
 

@@ -144,7 +144,7 @@ export class BasementScene extends Phaser.Scene {
 
     this.updateInteractionUi();
 
-    if (this.controls.isActionJustDown('interact')) {
+    if (this.controls.isActionJustDown('interact') && this.isNearZombieAccess()) {
       this.enterZombieDepths();
       return;
     }
