@@ -29,6 +29,7 @@ import {
 import { announceScene, bindSafeResetToPlaza } from '../systems/SceneUi';
 import { SceneControls } from '../systems/SceneControls';
 import { getVoiceChat, destroyVoiceChat } from '../systems/voiceChatInstance';
+import { recordDistanceDelta, recordNpcTalk } from '../systems/StatsSystem';
 import type { VecindadState } from '../../lib/playerState';
 import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
 import { EnemySprite, registerZombieAnims, type ZombieType } from '../systems/EnemySprite';
@@ -1787,6 +1788,7 @@ export class WorldScene extends Phaser.Scene {
     this.combatStats = { ...this.combatStats, kills: this.combatStats.kills + 1 };
     saveCombatStats(this.combatStats);
     eventBus.emit(EVENTS.PLAYER_COMBAT_STATS, this.combatStats);
+    eventBus.emit(EVENTS.STATS_ZOMBIE_KILL);
     if (this.trainingHud) {
       this.trainingHud.setText(`TRAINING KOs ${this.trainingScore}`);
     }
@@ -2117,6 +2119,7 @@ export class WorldScene extends Phaser.Scene {
     this.combatStats = { ...this.combatStats, deaths: this.combatStats.deaths + 1 };
     saveCombatStats(this.combatStats);
     eventBus.emit(EVENTS.PLAYER_COMBAT_STATS, this.combatStats);
+    eventBus.emit(EVENTS.STATS_PVP_RESULT, { won: false });
     this.playerAvatar.playDeath();
     this.broadcastSelfState('player:update', 'death');
     this.hp = 100;
@@ -4076,6 +4079,7 @@ export class WorldScene extends Phaser.Scene {
   private openCottenksDialog() {
     if (this.cottenksDialog?.isActive()) return;
     this.inputBlocked = true;
+    recordNpcTalk();
 
     // ── Terminal leaves ──────────────────────────────────────────────────────
 
@@ -4540,6 +4544,9 @@ export class WorldScene extends Phaser.Scene {
         else finalX = b.x + b.w + 8;
       }
     }
+
+    const movedDist = Math.sqrt((finalX - this.px) ** 2 + (finalY - this.py) ** 2);
+    if (movedDist > 0.5) recordDistanceDelta(movedDist);
 
     this.px = finalX;
     this.py = finalY;
@@ -5776,6 +5783,11 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
+    // Flush any pending stat changes before leaving the scene
+    import('../systems/StatsSystem').then(({ flushStatsSystem }) => {
+      void flushStatsSystem();
+    }).catch(() => {});
+
     if (this.worldPointerShootHandler) {
       this.input.off('pointerdown', this.worldPointerShootHandler);
       this.worldPointerShootHandler = undefined;

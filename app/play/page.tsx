@@ -25,6 +25,7 @@ import {
   type MovementScheme,
 } from '@/src/game/systems/ControlSettings';
 import { getLevelFloorXp, getMaxProgressionLevel, loadProgressionState, type ProgressionState } from '@/src/game/systems/ProgressionSystem';
+import { initStatsSystem, teardownStatsSystem, getStats, type PlayerStats } from '@/src/game/systems/StatsSystem';
 import { supabase } from '@/src/lib/supabase';
 import { getTenksBalance, initTenks } from '@/src/game/systems/TenksSystem';
 import { mutePlayer, normalizePlayerState, grantInventoryItem, type PlayerState } from '@/src/lib/playerState';
@@ -170,6 +171,9 @@ export default function PlayPage() {
   const [showMobileHint, setShowMobileHint] = useState(false);
   const [playerActions, setPlayerActions] = useState<PlayerActionsPayload | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [statsData, setStatsData] = useState<PlayerStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(initialAudioSettings);
   const [hudSettings, setHudSettings] = useState<HudSettings>(initialHudSettings);
@@ -804,6 +808,7 @@ export default function PlayPage() {
 
     tokenRef.current = session.access_token;
     setAuthEmail(session.user.email ?? null);
+    void initStatsSystem(session.user.id);
 
     const res = await fetch('/api/player', {
       method: 'GET',
@@ -1024,6 +1029,7 @@ export default function PlayPage() {
     }
     tokenRef.current = null;
     setAuthEmail(null);
+    teardownStatsSystem();
     setAuthStatus('Sesion cerrada.');
   }, []);
 
@@ -1331,6 +1337,30 @@ export default function PlayPage() {
       setRescueArmed(false);
     }, 4000);
   }, []);
+  const openStats = useCallback(async () => {
+    setStatsOpen(true);
+    setStatsLoading(true);
+    const token = tokenRef.current;
+    if (token) {
+      const res = await fetch('/api/player/stats', {
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => null);
+      if (res?.ok) {
+        const json = await res.json() as { stats?: PlayerStats };
+        if (json.stats) setStatsData(json.stats);
+      }
+    } else {
+      // Guest: show in-memory session stats
+      setStatsData(getStats() as PlayerStats);
+    }
+    setStatsLoading(false);
+  }, []);
+
+  const closeStats = useCallback(() => {
+    setStatsOpen(false);
+    setStatsData(null);
+  }, []);
+
   const openSettings = useCallback(() => {
     setSettingsOpen(true);
   }, []);
@@ -1782,8 +1812,25 @@ export default function PlayPage() {
         </button>
 
         <button
-          onClick={handleSafeReset}
+          onClick={() => void openStats()}
           className="absolute right-2 top-40"
+          style={{
+            fontFamily: '"Press Start 2P", monospace',
+            fontSize: '11px',
+            padding: '6px 9px',
+            background: 'rgba(70,179,255,0.1)',
+            color: '#46B3FF',
+            border: '1px solid rgba(70,179,255,0.25)',
+            cursor: 'pointer',
+            lineHeight: 1,
+          }}
+        >
+          📊
+        </button>
+
+        <button
+          onClick={handleSafeReset}
+          className="absolute right-2 top-52"
           style={{
             fontFamily: '"Press Start 2P", monospace',
             fontSize: '8px',
@@ -2552,6 +2599,141 @@ export default function PlayPage() {
                 </div>
               </div>
             </div>
+        )}
+
+        {statsOpen && (
+          <div
+            className="ww-overlay absolute inset-0 flex items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.6)', zIndex: 20 }}
+            onClick={(e) => { if (e.target === e.currentTarget) closeStats(); }}
+          >
+            <div
+              className="ww-modal flex flex-col"
+              style={{
+                width: isMobile ? '94%' : 560,
+                maxHeight: isMobile ? '88%' : 520,
+                background: 'rgba(10,10,18,0.97)',
+                border: '1px solid rgba(70,179,255,0.35)',
+                boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                className="flex items-center justify-between"
+                style={{
+                  padding: '14px 16px 10px',
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                  fontFamily: '"Press Start 2P", monospace',
+                  color: '#46B3FF',
+                  fontSize: '10px',
+                  flexShrink: 0,
+                }}
+              >
+                <span>ESTADÍSTICAS</span>
+                <button onClick={closeStats} style={modalCloseButtonStyle()}>CERRAR</button>
+              </div>
+
+              <div style={{ overflowY: 'auto', padding: '14px 16px 18px', fontFamily: '"Silkscreen", monospace' }}>
+                {statsLoading ? (
+                  <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '13px', textAlign: 'center', paddingTop: 24 }}>
+                    cargando...
+                  </div>
+                ) : !statsData ? (
+                  <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', textAlign: 'center', paddingTop: 24 }}>
+                    Inicia sesión para guardar y ver tus stats históricas.
+                  </div>
+                ) : (() => {
+                  const s = statsData;
+                  const kd = s.deaths > 0 ? (s.zombie_kills / s.deaths).toFixed(2) : s.zombie_kills.toString();
+                  const basketPct = s.basket_shots > 0 ? Math.round((s.basket_makes / s.basket_shots) * 100) : 0;
+                  const hrsPlayed = (s.time_played_seconds / 3600).toFixed(1);
+                  const kmWalked = (s.distance_walked / 50000).toFixed(2);
+                  return (
+                    <div style={{ display: 'grid', gap: 18 }}>
+                      {/* Combat */}
+                      <div>
+                        <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '7px', color: '#FF6B6B', marginBottom: 10 }}>
+                          ⚔ COMBATE
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                          {[
+                            ['Zombies eliminados', s.zombie_kills],
+                            ['Muertes', s.deaths],
+                            ['Mejor racha', s.kill_streak_best],
+                            ['K/D ratio', kd],
+                          ].map(([label, val]) => (
+                            <div key={String(label)} style={{ background: 'rgba(255,107,107,0.08)', border: '1px solid rgba(255,107,107,0.18)', padding: '8px 10px', borderRadius: 4 }}>
+                              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.45)', marginBottom: 4 }}>{label}</div>
+                              <div style={{ fontSize: '18px', color: '#FF6B6B' }}>{val}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Economy */}
+                      <div>
+                        <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '7px', color: '#F5C842', marginBottom: 10 }}>
+                          ◆ ECONOMÍA
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                          {[
+                            ['TENKS ganados', s.tenks_earned],
+                            ['TENKS gastados', s.tenks_spent],
+                            ['Balance', s.tenks_earned - s.tenks_spent],
+                          ].map(([label, val]) => (
+                            <div key={String(label)} style={{ background: 'rgba(245,200,66,0.08)', border: '1px solid rgba(245,200,66,0.18)', padding: '8px 10px', borderRadius: 4 }}>
+                              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.45)', marginBottom: 4 }}>{label}</div>
+                              <div style={{ fontSize: '16px', color: '#F5C842' }}>{val}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Exploration */}
+                      <div>
+                        <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '7px', color: '#39FF14', marginBottom: 10 }}>
+                          ◉ EXPLORACIÓN
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                          {[
+                            ['Horas jugadas', hrsPlayed],
+                            ['KM caminados', kmWalked],
+                            ['NPCs hablados', s.npcs_talked_to],
+                            ['Zonas visitadas', s.zones_visited.length],
+                          ].map(([label, val]) => (
+                            <div key={String(label)} style={{ background: 'rgba(57,255,20,0.07)', border: '1px solid rgba(57,255,20,0.15)', padding: '8px 10px', borderRadius: 4 }}>
+                              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.45)', marginBottom: 4 }}>{label}</div>
+                              <div style={{ fontSize: '16px', color: '#39FF14' }}>{val}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Minigames */}
+                      <div>
+                        <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '7px', color: '#9B59F5', marginBottom: 10 }}>
+                          🎮 MINIJUEGOS
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                          {[
+                            ['Basket — mejor score', s.basket_best_score],
+                            [`Basket — encestes ${basketPct}%`, `${s.basket_makes}/${s.basket_shots}`],
+                            ['Penalty — goles', s.penalty_goals],
+                            [`Penales W/L`, `${s.penalty_wins}/${s.penalty_losses}`],
+                          ].map(([label, val]) => (
+                            <div key={String(label)} style={{ background: 'rgba(155,89,245,0.08)', border: '1px solid rgba(155,89,245,0.18)', padding: '8px 10px', borderRadius: 4 }}>
+                              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.45)', marginBottom: 4 }}>{label}</div>
+                              <div style={{ fontSize: '16px', color: '#9B59F5' }}>{val}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
         )}
 
         {joystickVisible && (

@@ -128,12 +128,17 @@ export async function initStatsSystem(uid: string): Promise<void> {
     eventBus.on(EVENTS.PENALTY_RESULT, (payload: unknown) => {
       const p = payload as { won: boolean; goals: number; shots: number } | null;
       if (!p) return;
-      // saves = shots that didn't result in goals (opponent perspective)
       recordPenaltyGame(p.won, p.goals, p.shots - p.goals);
     }),
-    // SCENE_CHANGED is already emitted by announceScene() in every scene create().
     eventBus.on(EVENTS.SCENE_CHANGED, (payload: unknown) => {
       if (typeof payload === 'string') recordZoneVisited(payload);
+    }),
+    // Track TENKS economy automatically via existing TENKS_CHANGED event
+    eventBus.on(EVENTS.TENKS_CHANGED, (payload: unknown) => {
+      const p = payload as { delta: number; reason: string } | null;
+      if (!p || p.delta === 0 || p.reason === 'init') return;
+      if (p.delta > 0) recordTenksEarned(p.delta);
+      else recordTenksSpent(-p.delta);
     }),
   ];
 
