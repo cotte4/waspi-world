@@ -1308,17 +1308,6 @@ export default function PlayPage() {
     clearVirtualJoystickState();
   }, []);
 
-  const leftHudVisible = hudSettings.showSocialPanel || hudSettings.showProgressPanel;
-  const toggleLeftHud = () => {
-    setHudSettings((current) => {
-      const shouldShow = !(current.showSocialPanel || current.showProgressPanel);
-      return {
-        ...current,
-        showSocialPanel: shouldShow,
-        showProgressPanel: shouldShow,
-      };
-    });
-  };
   const passiveUtilityItems = useMemo(
     () => owned
       .map((id) => CATALOG.find((i) => i.id === id))
@@ -1538,23 +1527,6 @@ export default function PlayPage() {
         </div>
 
         <div className="absolute top-12 left-2 flex flex-col gap-2">
-          <button
-            onClick={toggleLeftHud}
-            style={{
-              width: 182,
-              fontFamily: '"Press Start 2P", monospace',
-              fontSize: '8px',
-              padding: '8px 10px',
-              background: leftHudVisible ? 'rgba(255,255,255,0.08)' : '#46B3FF',
-              color: leftHudVisible ? '#BFDFFF' : '#071018',
-              border: leftHudVisible ? '1px solid rgba(70,179,255,0.24)' : 'none',
-              cursor: 'pointer',
-              textAlign: 'left',
-              boxShadow: '0 10px 24px rgba(0,0,0,0.28)',
-            }}
-          >
-            {leftHudVisible ? 'HUD IZQ OCULTAR' : 'HUD IZQ MOSTRAR'}
-          </button>
           {hudSettings.showSocialPanel && (
             <div
               className="ww-panel ww-panel-delayed"

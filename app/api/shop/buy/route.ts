@@ -106,7 +106,26 @@ export async function POST(request: NextRequest) {
   });
 
   if (metadataError) {
-    return NextResponse.json({ error: metadataError.message }, { status: 500 });
+    // Compensating action: refund TENKS if persistence to user_metadata fails.
+    // Without this, the player can lose TENKS but not receive the item.
+    try {
+      const { data: afterDeduct } = await admin
+        .from('player_tenks_balance')
+        .select('balance')
+        .eq('player_id', user.id)
+        .single<{ balance: number }>();
+      const currentBalance = typeof afterDeduct?.balance === 'number' ? afterDeduct.balance : newBalance;
+      const refundBalance = currentBalance + item.priceTenks;
+      await admin
+        .from('player_tenks_balance')
+        .upsert({ player_id: user.id, balance: refundBalance });
+    } catch (refundErr) {
+      console.error('POST /api/shop/buy refund failed after metadata error:', refundErr);
+    }
+
+    return NextResponse.json({
+      error: `No se pudo guardar la compra en tu cuenta (${metadataError.message}). Reembolsamos los TENKS.`,
+    }, { status: 500 });
   }
 
   let syncWarning: string | null = null;

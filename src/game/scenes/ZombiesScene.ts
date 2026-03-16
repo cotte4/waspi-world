@@ -438,6 +438,11 @@ export class ZombiesScene extends Phaser.Scene {
 
   create() {
     this.input.enabled = true;
+    // transitionToScene() disables keyboard input during fades; ensure it is re-enabled
+    // when entering ZombiesScene so movement/interactions work reliably.
+    if (this.input.keyboard) {
+      this.input.keyboard.enabled = true;
+    }
     this.controls = new SceneControls(this);
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
