@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 const securityHeaders = [
   {
@@ -27,7 +28,7 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com data:",
       "img-src 'self' data: blob: https:",
-      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com",
+      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://*.ingest.us.sentry.io https://*.ingest.sentry.io",
       "worker-src 'self' blob:",
       "frame-src https://js.stripe.com https://hooks.stripe.com",
       "media-src 'self' blob:",
@@ -49,4 +50,22 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  org: 'francisco-uria',
+  project: 'waspi-world',
+
+  // Suppress noisy build output
+  silent: !process.env.CI,
+
+  // Upload source maps only in CI/Vercel (avoids bloating local builds)
+  sourcemaps: {
+    disable: !process.env.VERCEL,
+  },
+
+  // Disable Sentry's automatic instrumentation of API routes
+  // (we call Sentry.captureException manually where needed)
+  autoInstrumentServerFunctions: false,
+
+  // Avoid wrapping the entire app in a Sentry boundary we don't control
+  disableLogger: true,
+});
