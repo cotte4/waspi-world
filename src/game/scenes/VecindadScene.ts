@@ -24,6 +24,7 @@ import { SkillShopPanel } from '../systems/SkillShopPanel';
 import { getSkillSystem } from '../systems/SkillSystem';
 import { getContractSystem } from '../systems/ContractSystem';
 import { ContractPanel } from '../systems/ContractPanel';
+import { FishingMinigame } from '../systems/FishingMinigame';
 
 type ParcelVisual = {
   title: Phaser.GameObjects.Text;
@@ -108,6 +109,7 @@ export class VecindadScene extends Phaser.Scene {
   } as const;
   private static readonly FOREST_MOB_AGGRO_RANGE = 220;
   private static readonly FOREST_MOB_BLOCK_RADIUS = 92;
+  private static readonly FISHING_SPOT = { x: 2440, y: 1540, range: 80 };
   private player!: AvatarRenderer;
   private room?: InteriorRoom;
   private keySpace!: Phaser.Input.Keyboard.Key;
@@ -123,6 +125,7 @@ export class VecindadScene extends Phaser.Scene {
   private keyL!: Phaser.Input.Keyboard.Key;
   private shiftKey?: Phaser.Input.Keyboard.Key;
   private inTransition = false;
+  private fishingActive = false;
   private px: number = VECINDAD_MAP.SPAWN_X;
   private py: number = VECINDAD_MAP.SPAWN_Y;
   private lastMoveDx = 0;
@@ -333,6 +336,7 @@ export class VecindadScene extends Phaser.Scene {
     this.drawDistrictLights(g);
     this.drawDistrictProps(g);
     this.drawAmbientOverlays();
+    this.drawFishingPond(g);
 
     this.add.text(155, 822, 'LA VECINDAD', {
       fontSize: '10px',
@@ -532,6 +536,31 @@ export class VecindadScene extends Phaser.Scene {
       repeat: -1,
       ease: 'Sine.easeInOut',
     });
+  }
+
+  private drawFishingPond(g: Phaser.GameObjects.Graphics) {
+    const { x, y } = VecindadScene.FISHING_SPOT;
+    // Pond water
+    g.fillStyle(0x0a2233, 1);
+    g.fillEllipse(x, y, 180, 100);
+    g.lineStyle(2, 0x1A4A6A, 0.9);
+    g.strokeEllipse(x, y, 180, 100);
+    // Water shimmer lines
+    g.lineStyle(1, 0x2A6A8A, 0.45);
+    g.lineBetween(x - 55, y - 8, x + 30, y - 8);
+    g.lineBetween(x - 40, y + 6, x + 55, y + 6);
+    // Glow
+    g.fillStyle(0x1A6A9A, 0.08);
+    g.fillEllipse(x, y, 220, 130);
+    // Pier
+    g.fillStyle(0x5a3a1a, 1);
+    g.fillRoundedRect(x - 8, y - 62, 16, 56, 4);
+    g.fillRoundedRect(x - 30, y - 68, 60, 10, 4);
+    // Label
+    this.add.text(x, y + 68, '🎣 PESCAR [E]', {
+      fontSize: '7px', fontFamily: '"Press Start 2P", monospace',
+      color: '#4A9ECC', stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
   }
 
   private createPlayer() {
@@ -1115,6 +1144,15 @@ export class VecindadScene extends Phaser.Scene {
   }
 
   private handlePrimaryAction() {
+    if (this.fishingActive) return;
+
+    // Fishing spot
+    const fs = VecindadScene.FISHING_SPOT;
+    if (Phaser.Math.Distance.Between(this.px, this.py, fs.x, fs.y) < fs.range) {
+      void this.handleFishing();
+      return;
+    }
+
     if (this.isNearOwnedFarmSpot()) {
       this.handleFarmPrimaryAction();
       return;
@@ -1334,6 +1372,45 @@ export class VecindadScene extends Phaser.Scene {
       this.selectedSeedIndex = (this.selectedSeedIndex + 1) % FARM_SEEDS.length;
       this.refreshFarmOverlay();
     }
+  }
+
+  private async handleFishing(): Promise<void> {
+    this.fishingActive = true;
+
+    const sys = getSkillSystem();
+    const fishingLevel = sys.getLevel('fishing');
+    const isAutoMode = fishingLevel >= 4;
+
+    const minigame = new FishingMinigame(this);
+    const result = await minigame.play(isAutoMode);
+    minigame.destroy();
+
+    if (result === 'miss') {
+      this.fishingActive = false;
+      eventBus.emit(EVENTS.UI_NOTICE, { message: '🎣 Se escapó...', color: '#888899' });
+      return;
+    }
+
+    const isAuto = isAutoMode;
+    const minigameBonus = result === 'perfect' ? 5 : result === 'good' ? 3 : 0;
+
+    const qr = await sys.rollQuality('fishing', 'fish_catch', isAuto);
+    void getContractSystem().trackAction('fish_catch', 'fishing', qr.quality);
+
+    eventBus.emit(EVENTS.UI_NOTICE, { message: `🐟 PESCADO [${qr.label}]`, color: qr.color });
+
+    const xpTotal = 12 + qr.xp_bonus + minigameBonus;
+    const xpResult = await sys.addXp('fishing', xpTotal, 'fish_catch');
+    if (xpResult.leveled_up) {
+      eventBus.emit(EVENTS.UI_NOTICE, { message: `🎣 PESCA LVL ${xpResult.new_level}!`, color: '#4A9ECC' });
+    }
+
+    if (qr.quality === 'legendary') {
+      this.cameras.main.flash(400, 74, 159, 204, false);
+      eventBus.emit(EVENTS.UI_NOTICE, { message: '✨ PESCA LEGENDARIA!', color: '#4A9ECC' });
+    }
+
+    this.fishingActive = false;
   }
 
   private handleFarmPrimaryAction() {
@@ -1633,6 +1710,7 @@ export class VecindadScene extends Phaser.Scene {
   }
 
   private handleMovement(delta: number) {
+    if (this.fishingActive) return;
     const isSprinting = !!this.shiftKey?.isDown;
     const sys = getSkillSystem();
     const speedPct = sys.getPassiveBuffTotal('speed') + sys.getSynergyBuff('speed');
