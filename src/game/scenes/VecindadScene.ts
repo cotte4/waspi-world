@@ -19,6 +19,9 @@ import {
 import type { VecindadState } from '../../lib/playerState';
 import { supabase } from '../../lib/supabase';
 import { getTenksBalance } from '../systems/TenksSystem';
+import { SkillTreePanel } from '../systems/SkillTreePanel';
+import { SkillShopPanel } from '../systems/SkillShopPanel';
+import { getSkillSystem } from '../systems/SkillSystem';
 
 type ParcelVisual = {
   title: Phaser.GameObjects.Text;
@@ -76,6 +79,8 @@ type FarmActionRequest =
 
 const FARM_UNLOCK_COST = 11000;
 const FARM_SLOTS = 6;
+const WEED_SEED_TYPES = new Set<SeedType>(['basica', 'indica', 'sativa', 'purple_haze', 'og_kush']);
+
 const FARM_SEEDS: Array<{
   type: SeedType;
   label: string;
@@ -150,6 +155,10 @@ export class VecindadScene extends Phaser.Scene {
   private controls!: SceneControls;
   private realtimeChannel: RealtimeChannel | null = null;
   private parcelRefreshTimeout?: ReturnType<typeof setTimeout>;
+  private skillTreePanel?: SkillTreePanel;
+  private skillShopPanel?: SkillShopPanel;
+  private keyT?: Phaser.Input.Keyboard.Key;
+  private keyY?: Phaser.Input.Keyboard.Key;
 
   constructor() {
     super({ key: 'VecindadScene' });
@@ -191,6 +200,10 @@ export class VecindadScene extends Phaser.Scene {
     this.shiftKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyE = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
+    this.skillTreePanel = new SkillTreePanel(this);
+    this.skillShopPanel = new SkillShopPanel(this);
+    this.keyT = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.T);
+    this.keyY = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Y);
     this.bridgeCleanupFns.push(bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', {
         returnX: SAFE_PLAZA_RETURN.X,
@@ -220,12 +233,19 @@ export class VecindadScene extends Phaser.Scene {
     this.updateForestMobs(delta);
     this.updateMaterialNodes();
     this.updatePrompt();
+    this.checkForestEntry();
 
     if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
       this.handlePrimaryAction();
     }
     if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
       this.handleSecondaryAction();
+    }
+    if (this.keyT && Phaser.Input.Keyboard.JustDown(this.keyT)) {
+      this.skillTreePanel?.toggle();
+    }
+    if (this.keyY && Phaser.Input.Keyboard.JustDown(this.keyY)) {
+      this.skillShopPanel?.toggle();
     }
   }
 
@@ -333,6 +353,21 @@ export class VecindadScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5);
+
+    // Forest entry portal gate (north-centre of forest strip)
+    g.fillStyle(0x0f2a11, 1);
+    g.fillRoundedRect(1350, 128, 100, 28, 6);
+    g.lineStyle(2, 0xf5c842, 0.7);
+    g.strokeRoundedRect(1350, 128, 100, 28, 6);
+    g.fillStyle(0xf5c842, 0.15);
+    g.fillRect(1352, 130, 96, 24);
+    this.add.text(1400, 142, '▲ BOSQUE', {
+      fontSize: '5px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000',
+      strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(2);
     this.add.text(VECINDAD_MAP.WIDTH / 2, 194, 'SUBI POR EL CAMINO CENTRAL Y LEVANTA CACHES', {
       fontSize: '6px',
       fontFamily: '"Press Start 2P", monospace',
@@ -1409,6 +1444,20 @@ export class VecindadScene extends Phaser.Scene {
       slotIndex: this.selectedFarmSlot,
       seedType: seed.type,
     });
+
+    // Gardening XP always; Weed XP only for cannabis seeds
+    const grantPlantSkillXp = (skill: 'gardening' | 'weed') =>
+      getSkillSystem()
+        .addXp(skill, 5, 'farm_plant')
+        .then((r) => {
+          if (r.leveled_up) {
+            const label = skill === 'gardening' ? '🌿 JARDINERÍA' : '🌿 WEED';
+            eventBus.emit(EVENTS.UI_NOTICE, { message: `${label} LVL ${r.new_level}!`, color: '#39FF14' });
+          }
+        })
+        .catch(() => undefined);
+    void grantPlantSkillXp('gardening');
+    if (WEED_SEED_TYPES.has(seed.type)) void grantPlantSkillXp('weed');
   }
 
   private waterSelectedSlot() {
@@ -1445,6 +1494,38 @@ export class VecindadScene extends Phaser.Scene {
       action: 'farm_harvest',
       slotIndex: this.selectedFarmSlot,
     });
+
+    // Quality roll + XP — fire and forget
+    const isWeed = WEED_SEED_TYPES.has(plant.seedType);
+    void (async () => {
+      const sys = getSkillSystem();
+      const skillId = isWeed ? 'weed' : 'gardening';
+
+      // Roll quality server-side using the dominant skill for this plant
+      const qr = await sys.rollQuality(skillId, 'farm_harvest');
+
+      // Quality feedback
+      const qualityMsg = `COSECHA [${qr.label}]`;
+      eventBus.emit(EVENTS.UI_NOTICE, { message: qualityMsg, color: qr.color });
+
+      if (qr.quality === 'legendary') {
+        eventBus.emit(EVENTS.UI_NOTICE, { message: '✨ COSECHA LEGENDARIA!', color: '#F5C842' });
+      }
+
+      // XP: base 15 + quality bonus; gardening always, weed only if cannabis
+      const xpTotal = 15 + qr.xp_bonus;
+      const gardenResult = await sys.addXp('gardening', xpTotal, 'farm_harvest');
+      if (gardenResult.leveled_up) {
+        eventBus.emit(EVENTS.UI_NOTICE, { message: `🌿 JARDINERÍA LVL ${gardenResult.new_level}!`, color: '#39FF14' });
+      }
+
+      if (isWeed) {
+        const weedResult = await sys.addXp('weed', xpTotal, 'farm_harvest');
+        if (weedResult.leveled_up) {
+          eventBus.emit(EVENTS.UI_NOTICE, { message: `🌿 WEED LVL ${weedResult.new_level}!`, color: '#39FF14' });
+        }
+      }
+    })();
   }
 
   private collectMaterial(node: MaterialNode) {
@@ -1518,6 +1599,17 @@ export class VecindadScene extends Phaser.Scene {
     return this.px < 240 && this.py > 790 && this.py < 1110;
   }
 
+  private checkForestEntry() {
+    if (this.py < 155 && this.px > 1300 && this.px < 1500) {
+      if (this.inTransition) return;
+      this.inTransition = true;
+      transitionToScene(this, 'BosqueMaterialesScene', {
+        returnX: undefined,
+        returnY: undefined,
+      });
+    }
+  }
+
   private leaveToWorld() {
     if (this.inTransition) return;
     this.inTransition = true;
@@ -1529,7 +1621,8 @@ export class VecindadScene extends Phaser.Scene {
 
   private handleMovement(delta: number) {
     const isSprinting = !!this.shiftKey?.isDown;
-    const effectiveSpeed = VecindadScene.MOVE_SPEED * (isSprinting ? VecindadScene.SPRINT_MULTIPLIER : 1);
+    const speedPct = getSkillSystem().getPassiveBuffTotal('speed');
+    const effectiveSpeed = VecindadScene.MOVE_SPEED * (1 + speedPct / 100) * (isSprinting ? VecindadScene.SPRINT_MULTIPLIER : 1);
     const speed = (effectiveSpeed * delta) / 1000;
     let { dx, dy } = this.controls.readMovement(true);
     if (dx !== 0 && dy !== 0) {
@@ -1601,5 +1694,8 @@ export class VecindadScene extends Phaser.Scene {
       this.bridgeCleanupFns.forEach((cleanup) => cleanup());
       this.bridgeCleanupFns = [];
     } catch (e) { console.error('[VecindadScene] bridgeCleanupFns failed', e); }
+
+    this.skillTreePanel?.destroy();
+    this.skillTreePanel = undefined;
   }
 }
