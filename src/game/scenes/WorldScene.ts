@@ -968,6 +968,31 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
+  private async getMicPermissionState(): Promise<PermissionState | 'unknown'> {
+    try {
+      const result = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+      return result.state;
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  private hasDoneMicGrantReload(): boolean {
+    try {
+      return localStorage.getItem('waspi_voice_mic_grant_reload_done') === '1';
+    } catch {
+      return true;
+    }
+  }
+
+  private markMicGrantReloadDone() {
+    try {
+      localStorage.setItem('waspi_voice_mic_grant_reload_done', '1');
+    } catch {
+      // noop
+    }
+  }
+
   /**
    * Auto-init voice on startup if the user previously chose "on"
    * AND the browser already has mic permission (no prompt needed).
@@ -1069,6 +1094,7 @@ export class WorldScene extends Phaser.Scene {
     if (vc.connected) return;
     this.isActivatingVoice = true;
     try {
+      const micStateBefore = await this.getMicPermissionState();
       this.voiceMuteBtn?.setText('[MIC ...]').setStyle({ color: '#F5C842' });
       await vc.init(this.playerId);
 
@@ -1081,6 +1107,14 @@ export class WorldScene extends Phaser.Scene {
 
       this.voiceMuteBtn?.setText('[MIC ON]').setStyle({ color: '#39FF14' });
       this.voiceStatusText?.setText('').setStyle({ color: '#39FF14' });
+
+      // UX: first successful permission grant gets a one-time reload so voice
+      // starts from a clean state on fresh page load.
+      if (micStateBefore === 'prompt' && !this.hasDoneMicGrantReload()) {
+        this.markMicGrantReloadDone();
+        window.location.reload();
+        return;
+      }
     } catch (err) {
       const name = (err as DOMException)?.name;
       let label = '[NO MIC]';

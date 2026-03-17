@@ -16,7 +16,8 @@ const securityHeaders = [
   },
   {
     key: 'Permissions-Policy',
-    value: 'camera=(), microphone=(), geolocation=()',
+    // Voice chat requires getUserMedia in /play; allow same-origin microphone access.
+    value: 'camera=(), microphone=(self), geolocation=()',
   },
   // NOTE: CSP is intentionally permissive for Phaser 3 (WebGL, blob textures,
   // Google Fonts). XSS in chat is prevented by React's default text escaping.
