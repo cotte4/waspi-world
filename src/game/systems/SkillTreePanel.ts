@@ -7,6 +7,7 @@ import type { SkillId } from './SkillSystem';
 import { getSkillDef, getXpForNextLevel, ALL_SKILL_IDS, SKILL_XP_THRESHOLDS } from '../config/skillTrees';
 import { getSpecsForSkill, type SpecDef } from '../config/specializations';
 import { eventBus, EVENTS } from '../config/eventBus';
+import type { SynergyDef } from '../config/synergies';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -67,6 +68,10 @@ export class SkillTreePanel {
   private specModal?: Phaser.GameObjects.Container;
   private specModalVisible = false;
   private specBadges: (Phaser.GameObjects.Text | null)[] = [];
+
+  // Synergy display
+  private synergyRows: Phaser.GameObjects.Text[] = [];
+  private synergyContainer?: Phaser.GameObjects.Container;
 
   // ---------------------------------------------------------------------------
   // Constructor — builds the full panel DOM once
@@ -196,6 +201,8 @@ export class SkillTreePanel {
         badge.setVisible(isLv3 && !hasSpec);
       }
     });
+
+    this.refreshSynergies();
   }
 
   destroy(): void {
@@ -274,6 +281,9 @@ export class SkillTreePanel {
     ALL_SKILL_IDS.forEach((skillId, index) => {
       this.buildCard(skillId, index);
     });
+
+    // Synergy strip at the bottom of the panel
+    this.buildSynergyStrip();
   }
 
   private buildCard(skillId: SkillId, index: number): void {
@@ -549,5 +559,67 @@ export class SkillTreePanel {
     this.specModal?.destroy();
     this.specModal = undefined;
     this.specModalVisible = false;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Synergy strip — shown at the bottom of the panel
+  // ---------------------------------------------------------------------------
+
+  private buildSynergyStrip(): void {
+    const { width, height } = this.scene.scale;
+    const panelLeft = width  / 2 - PANEL_W / 2;
+    const panelTop  = height / 2 - PANEL_H / 2;
+
+    // Strip background
+    const stripY = panelTop + PANEL_H - 52;
+    const stripGfx = this.scene.add.graphics().setScrollFactor(0);
+    stripGfx.fillStyle(0x0a0a10, 0.9);
+    stripGfx.fillRect(panelLeft + 2, stripY, PANEL_W - 4, 48);
+    stripGfx.lineStyle(1, 0xf5c842, 0.2);
+    stripGfx.lineBetween(panelLeft + 16, stripY, panelLeft + PANEL_W - 16, stripY);
+
+    const labelX = panelLeft + 16;
+    const labelY = stripY + 10;
+    const synergyLabel = this.scene.add.text(labelX, labelY, 'SINERGIAS:', {
+      fontSize: '5px', fontFamily: FONT, color: '#F5C842',
+    }).setOrigin(0, 0.5).setScrollFactor(0);
+
+    // Placeholder rows (refreshed in refreshSynergies)
+    const row1 = this.scene.add.text(labelX + 76, labelY, '—', {
+      fontSize: '5px', fontFamily: FONT, color: '#444455',
+    }).setOrigin(0, 0.5).setScrollFactor(0);
+
+    const row2 = this.scene.add.text(labelX + 76, labelY + 16, '', {
+      fontSize: '5px', fontFamily: FONT, color: '#444455',
+    }).setOrigin(0, 0.5).setScrollFactor(0);
+
+    const row3 = this.scene.add.text(labelX + 76 + 220, labelY, '', {
+      fontSize: '5px', fontFamily: FONT, color: '#444455',
+    }).setOrigin(0, 0.5).setScrollFactor(0);
+
+    const row4 = this.scene.add.text(labelX + 76 + 220, labelY + 16, '', {
+      fontSize: '5px', fontFamily: FONT, color: '#444455',
+    }).setOrigin(0, 0.5).setScrollFactor(0);
+
+    this.synergyRows = [row1, row2, row3, row4];
+    this.container.add([stripGfx, synergyLabel, row1, row2, row3, row4]);
+  }
+
+  private refreshSynergies(): void {
+    const active = getSkillSystem().getActiveSynergies();
+
+    // Show up to 4 synergies in a 2×2 grid
+    for (let i = 0; i < 4; i++) {
+      const row = this.synergyRows[i];
+      if (!row) continue;
+      const syn: SynergyDef | undefined = active[i];
+      if (syn) {
+        row.setText(`${syn.emoji} ${syn.name}`).setColor(syn.color);
+      } else if (i === 0 && active.length === 0) {
+        row.setText('Sube 2 skills a Lv2+ para activar sinergias').setColor('#444455');
+      } else {
+        row.setText('').setColor('#444455');
+      }
+    }
   }
 }

@@ -5,6 +5,7 @@
 
 import type { QualityTier } from '../config/qualityTiers';
 import type { SpecId } from '../config/specializations';
+import { SYNERGY_DEFS, type SynergyDef } from '../config/synergies';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -289,6 +290,29 @@ export class SkillSystem {
     } catch {
       return fallback;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // getActiveSynergies — returns all synergies the player currently meets
+  // Computed from loaded skill levels — no extra API call needed.
+  // -------------------------------------------------------------------------
+
+  getActiveSynergies(): SynergyDef[] {
+    return SYNERGY_DEFS.filter((syn) =>
+      syn.requires.every((req) => this.getLevel(req.skillId) >= req.minLevel),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // getSynergyBuff — sums speed_bonus (or other stat bonuses) from all active
+  // synergies. Returns percent value (e.g. 15 means +15%).
+  // -------------------------------------------------------------------------
+
+  getSynergyBuff(stat: string): number {
+    return this.getActiveSynergies()
+      .flatMap((syn) => syn.effects)
+      .filter((fx) => fx.type === 'speed_bonus' && fx.stat === stat)
+      .reduce((sum, fx) => sum + fx.value, 0);
   }
 
   // -------------------------------------------------------------------------

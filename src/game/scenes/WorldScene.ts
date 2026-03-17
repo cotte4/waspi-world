@@ -34,6 +34,8 @@ import type { VecindadState } from '../../lib/playerState';
 import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
 import { EnemySprite, registerZombieAnims, type ZombieType } from '../systems/EnemySprite';
 import { SkillTreePanel } from '../systems/SkillTreePanel';
+import { SkillShopPanel } from '../systems/SkillShopPanel';
+import { getSkillSystem } from '../systems/SkillSystem';
 
 interface RemotePlayer {
   avatar: AvatarRenderer;
@@ -433,6 +435,7 @@ export class WorldScene extends Phaser.Scene {
 
   // Combat / HP
   private hp = 100;
+  private maxHp = 100;
   private hpBar!: Phaser.GameObjects.Graphics;
   private hpText!: Phaser.GameObjects.Text;
   private lastHealAt = 0;
@@ -446,7 +449,9 @@ export class WorldScene extends Phaser.Scene {
   private keyFive!: Phaser.Input.Keyboard.Key;
   private keySix!: Phaser.Input.Keyboard.Key;
   private skillTreePanel?: SkillTreePanel;
+  private skillShopPanel?: SkillShopPanel;
   private keyT?: Phaser.Input.Keyboard.Key;
+  private keyY?: Phaser.Input.Keyboard.Key;
   private bullets!: Phaser.Physics.Arcade.Group;
   private enemyBullets!: Phaser.Physics.Arcade.Group;
   private playerHitbox!: HitboxArc;
@@ -785,9 +790,11 @@ export class WorldScene extends Phaser.Scene {
     // Minimap
     this.runBootStep('minimap', () => this.setupMinimap());
 
-    // Skill tree panel + T key
+    // Skill tree panel (T) + Skill shop panel (Y)
     this.skillTreePanel = new SkillTreePanel(this);
+    this.skillShopPanel = new SkillShopPanel(this);
     this.keyT = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.T);
+    this.keyY = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Y);
 
     // Scene music
     this.sceneMusic = startSceneMusic(this, 'world_ambient', 0.35);
@@ -897,6 +904,11 @@ export class WorldScene extends Phaser.Scene {
 
     // XP bar — thin, below the HP bar
     this.xpBar = this.add.graphics().setScrollFactor(0).setDepth(9998);
+
+    // Apply passive HP buff from SkillSystem
+    const hpBuff = getSkillSystem().getPassiveBuffTotal('maxHp');
+    this.maxHp = Math.round(100 * (1 + hpBuff / 100));
+    this.hp = this.maxHp;
 
     this.renderHpHud();
   }
@@ -1273,7 +1285,7 @@ export class WorldScene extends Phaser.Scene {
     const h = 9;
     const x = 8;
     const y = 40;
-    const pct = Phaser.Math.Clamp(this.hp / 100, 0, 1);
+    const pct = Phaser.Math.Clamp(this.hp / this.maxHp, 0, 1);
 
     // HP bar background + fill
     this.hpBar.clear();
@@ -2215,7 +2227,7 @@ export class WorldScene extends Phaser.Scene {
     eventBus.emit(EVENTS.STATS_PVP_RESULT, { won: false });
     this.playerAvatar.playDeath();
     this.broadcastSelfState('player:update', 'death');
-    this.hp = 100;
+    this.hp = this.maxHp;
     this.renderHpHud();
     this.px = PLAZA_RESPAWN_X;
     this.py = PLAZA_RESPAWN_Y;
@@ -4618,7 +4630,9 @@ export class WorldScene extends Phaser.Scene {
     }
 
     const isSprinting = !!(this.shiftKey?.isDown) && !this.inputBlocked;
-    const speed = PLAYER.SPEED * (isSprinting ? 2 : 1) * (delta / 1000);
+    const sys = getSkillSystem();
+    const speedPct = sys.getPassiveBuffTotal('speed') + sys.getSynergyBuff('speed');
+    const speed = PLAYER.SPEED * (1 + speedPct / 100) * (isSprinting ? 2 : 1) * (delta / 1000);
     let { dx, dy } = this.controls.readMovement(true);
 
     // Touch fallback if no keyboard input
@@ -4733,7 +4747,7 @@ export class WorldScene extends Phaser.Scene {
   private safeResetToPlaza() {
     this.inTransition = false;
     this.inputBlocked = false;
-    this.hp = 100;
+    this.hp = this.maxHp;
     this.px = SAFE_PLAZA_RETURN.X;
     this.py = SAFE_PLAZA_RETURN.Y;
     this.lastIsMoving = false;
@@ -5619,13 +5633,14 @@ export class WorldScene extends Phaser.Scene {
     // Healing platform regen (800ms tick, +3 HP, only when not in training zone and hp < 100)
     const HEAL_X = 900; const HEAL_Y = ZONES.PLAZA_Y + 170; const HEAL_W = 180; const HEAL_H = 130;
     const inHealZone = this.px >= HEAL_X && this.px <= HEAL_X + HEAL_W && this.py >= HEAL_Y && this.py <= HEAL_Y + HEAL_H;
-    if (inHealZone && !this.inTraining && this.hp < 100 && this.time.now - this.lastHealAt >= 800) {
+    if (inHealZone && !this.inTraining && this.hp < this.maxHp && this.time.now - this.lastHealAt >= 800) {
       this.lastHealAt = this.time.now;
-      this.hp = Math.min(100, this.hp + 3);
+      this.hp = Math.min(this.maxHp, this.hp + 3);
       this.renderHpHud();
     }
 
     if (this.keyT && Phaser.Input.Keyboard.JustDown(this.keyT)) { this.skillTreePanel?.toggle(); }
+    if (this.keyY && Phaser.Input.Keyboard.JustDown(this.keyY)) { this.skillShopPanel?.toggle(); }
 
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyQ))     { this.switchWeapon(); }
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyOne))   { this.switchWeapon('pistol'); }

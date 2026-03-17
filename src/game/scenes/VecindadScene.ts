@@ -1621,7 +1621,8 @@ export class VecindadScene extends Phaser.Scene {
 
   private handleMovement(delta: number) {
     const isSprinting = !!this.shiftKey?.isDown;
-    const speedPct = getSkillSystem().getPassiveBuffTotal('speed');
+    const sys = getSkillSystem();
+    const speedPct = sys.getPassiveBuffTotal('speed') + sys.getSynergyBuff('speed');
     const effectiveSpeed = VecindadScene.MOVE_SPEED * (1 + speedPct / 100) * (isSprinting ? VecindadScene.SPRINT_MULTIPLIER : 1);
     const speed = (effectiveSpeed * delta) / 1000;
     let { dx, dy } = this.controls.readMovement(true);

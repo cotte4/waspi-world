@@ -541,7 +541,8 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   private handleMovement(delta: number) {
     const dt = delta / 1000;
     const sprint = this.shiftKey?.isDown ? SPRINT_MULT : 1;
-    const speedPct = getSkillSystem().getPassiveBuffTotal('speed');
+    const sys = getSkillSystem();
+    const speedPct = sys.getPassiveBuffTotal('speed') + sys.getSynergyBuff('speed');
     const speed = MOVE_SPEED * (1 + speedPct / 100) * sprint;
 
     let dx = 0; let dy = 0;
