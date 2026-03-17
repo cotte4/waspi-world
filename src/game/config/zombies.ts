@@ -1,4 +1,4 @@
-export type ZombiesWeaponId = 'pistol' | 'shotgun' | 'smg' | 'rifle' | 'raygun';
+export type ZombiesWeaponId = 'pistol' | 'shotgun' | 'smg' | 'rifle' | 'deagle' | 'cannon' | 'raygun';
 export type ZombieType = 'walker' | 'runner' | 'brute';
 export type ZombiesSectionId = 'start' | 'yard' | 'workshop' | 'street';
 
@@ -144,6 +144,36 @@ export const ZOMBIES_WEAPONS: Record<ZombiesWeaponId, ZombiesWeaponConfig> = {
     reloadMs: 1450,
     mysteryWeight: 22,
     folder: 'rifle',
+  },
+  deagle: {
+    id: 'deagle',
+    label: 'DEAGLE',
+    color: 0xFF006E,
+    damage: 52,
+    pellets: 1,
+    spread: 0.02,
+    fireDelayMs: 280,
+    range: 460,
+    magazineSize: 8,
+    reserveAmmo: 40,
+    reloadMs: 1300,
+    mysteryWeight: 18,
+    folder: 'deagle',
+  },
+  cannon: {
+    id: 'cannon',
+    label: 'CANNON',
+    color: 0xF5C842,
+    damage: 65,
+    pellets: 5,
+    spread: 0.18,
+    fireDelayMs: 600,
+    range: 380,
+    magazineSize: 4,
+    reserveAmmo: 20,
+    reloadMs: 1800,
+    mysteryWeight: 10,
+    folder: 'cannon',
   },
   raygun: {
     id: 'raygun',

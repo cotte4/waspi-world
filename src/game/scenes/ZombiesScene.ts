@@ -454,7 +454,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.chatSystem = new ChatSystem(this);
     this.weaponInventory = this.createWeaponInventory();
     this.applyArmsDelaerLoadout();
-    this.weaponOrder = ['pistol', ...(['shotgun', 'smg', 'rifle', 'raygun'] as ZombiesWeaponId[]).filter(id => this.weaponInventory[id].owned)];
+    this.weaponOrder = ['pistol', ...(['shotgun', 'smg', 'rifle', 'deagle', 'cannon', 'raygun'] as ZombiesWeaponId[]).filter(id => this.weaponInventory[id].owned)];
     this.currentWeapon = this.weaponOrder[this.weaponOrder.length - 1];
     this.points = ZOMBIES_POINTS.start;
     this.hp = ZOMBIES_PLAYER.maxHp;
@@ -528,6 +528,8 @@ export class ZombiesScene extends Phaser.Scene {
       shotgun: { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
       smg:     { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
       rifle:   { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
+      deagle:  { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
+      cannon:  { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
       raygun:  { owned: false, ammoInMag: 0, reserveAmmo: 0, upgraded: false },
     };
   }
@@ -536,10 +538,12 @@ export class ZombiesScene extends Phaser.Scene {
   private applyArmsDelaerLoadout() {
     const owned = getInventory().owned;
     const grants: Array<[string, ZombiesWeaponId]> = [
-      ['UTIL-GUN-SHOT-01', 'shotgun'],
-      ['UTIL-GUN-SMG-01',  'smg'],
-      ['UTIL-GUN-RIFL-01', 'rifle'],
-      ['UTIL-GUN-GOLD-01', 'raygun'],
+      ['UTIL-GUN-SHOT-01',   'shotgun'],
+      ['UTIL-GUN-SMG-01',    'smg'],
+      ['UTIL-GUN-RIFL-01',   'rifle'],
+      ['UTIL-GUN-DEAGLE-01', 'deagle'],
+      ['UTIL-GUN-CANNON-01', 'cannon'],
+      ['UTIL-GUN-GOLD-01',   'raygun'],
     ];
     for (const [itemId, weaponId] of grants) {
       if (owned.includes(itemId)) {

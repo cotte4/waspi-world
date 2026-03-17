@@ -98,7 +98,7 @@ type RemoteHitEvent = {
   ky?: number;
 };
 
-type WeaponMode = 'pistol' | 'shotgun' | 'uzi' | 'blaster' | 'deagle' | 'cannon';
+type WeaponMode = 'pistol' | 'shotgun' | 'smg' | 'rifle' | 'deagle' | 'cannon' | 'raygun';
 type EnemyArchetype = 'rusher' | 'shooter' | 'tank' | 'boss';
 /** Shape of each entry in the Supabase Presence state for voice chat. */
 type PresenceVoice = { voice_peer_id?: string; [key: string]: unknown };
@@ -215,22 +215,22 @@ const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
     cooldownMs: 120,
     color: 0xF5C842,
     knockback: 18,
-    idleTexture: 'weapon_glock_idle',
-    idleAnim: 'weapon-glock-idle',
-    shootAnim: 'weapon-glock-shoot',
+    idleTexture: 'weapon_pistol_idle',
+    idleAnim: 'weapon-pistol-idle',
+    shootAnim: 'weapon-pistol-shoot',
   },
-  uzi: {
-    label: 'UZI',
+  smg: {
+    label: 'BUZZ SMG',
     pellets: 1,
     spread: 0.14,
     speed: 680,
     damage: 7,
     cooldownMs: 55,
-    color: 0x46B3FF,
+    color: 0x00E5FF,
     knockback: 8,
-    idleTexture: 'weapon_uzi_idle',
-    idleAnim: 'weapon-uzi-idle',
-    shootAnim: 'weapon-uzi-shoot',
+    idleTexture: 'weapon_smg_idle',
+    idleAnim: 'weapon-smg-idle',
+    shootAnim: 'weapon-smg-shoot',
   },
   shotgun: {
     label: 'SHOTGUN',
@@ -239,24 +239,24 @@ const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
     speed: 610,
     damage: 16,
     cooldownMs: 320,
-    color: 0xFF8B3D,
+    color: 0xFF6E00,
     knockback: 34,
     idleTexture: 'weapon_shotgun_idle',
     idleAnim: 'weapon-shotgun-idle',
     shootAnim: 'weapon-shotgun-shoot',
   },
-  blaster: {
-    label: 'RAY-X',
-    pellets: 2,
-    spread: 0.06,
+  rifle: {
+    label: 'RANGER',
+    pellets: 1,
+    spread: 0.03,
     speed: 820,
     damage: 24,
     cooldownMs: 200,
-    color: 0x39FF14,
+    color: 0x4685FF,
     knockback: 18,
-    idleTexture: 'weapon_blaster_idle',
-    idleAnim: 'weapon-blaster-idle',
-    shootAnim: 'weapon-blaster-shoot',
+    idleTexture: 'weapon_rifle_idle',
+    idleAnim: 'weapon-rifle-idle',
+    shootAnim: 'weapon-rifle-shoot',
   },
   deagle: {
     label: 'DEAGLE',
@@ -265,7 +265,7 @@ const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
     speed: 920,
     damage: 36,
     cooldownMs: 400,
-    color: 0xFF8B3D,
+    color: 0xFF006E,
     knockback: 48,
     idleTexture: 'weapon_deagle_idle',
     idleAnim: 'weapon-deagle-idle',
@@ -278,11 +278,24 @@ const WEAPON_STATS: Record<WeaponMode, WeaponStats> = {
     speed: 480,
     damage: 22,
     cooldownMs: 650,
-    color: 0xFF006E,
+    color: 0xF5C842,
     knockback: 70,
     idleTexture: 'weapon_cannon_idle',
     idleAnim: 'weapon-cannon-idle',
     shootAnim: 'weapon-cannon-shoot',
+  },
+  raygun: {
+    label: 'RAY-X',
+    pellets: 1,
+    spread: 0.01,
+    speed: 980,
+    damage: 72,
+    cooldownMs: 300,
+    color: 0xB026FF,
+    knockback: 24,
+    idleTexture: 'weapon_raygun_idle',
+    idleAnim: 'weapon-raygun-idle',
+    shootAnim: 'weapon-raygun-shoot',
   },
 };
 const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
@@ -1308,18 +1321,20 @@ export class WorldScene extends Phaser.Scene {
   private ensureWeaponAnimations() {
     ensureFallbackRectTexture(this, WEAPON_FALLBACK_TEXTURE, 24, 8, 0xF5C842, 0x1A1A1A);
     const animations = [
-      { key: 'weapon-glock-idle',    texture: 'weapon_glock_idle',    frameRate: 8,  repeat: -1 },
-      { key: 'weapon-glock-shoot',   texture: 'weapon_glock_shoot',   frameRate: 18, repeat: 0 },
-      { key: 'weapon-uzi-idle',      texture: 'weapon_uzi_idle',      frameRate: 8,  repeat: -1 },
-      { key: 'weapon-uzi-shoot',     texture: 'weapon_uzi_shoot',     frameRate: 24, repeat: 0 },
+      { key: 'weapon-pistol-idle',   texture: 'weapon_pistol_idle',   frameRate: 8,  repeat: -1 },
+      { key: 'weapon-pistol-shoot',  texture: 'weapon_pistol_shoot',  frameRate: 18, repeat: 0 },
+      { key: 'weapon-smg-idle',      texture: 'weapon_smg_idle',      frameRate: 8,  repeat: -1 },
+      { key: 'weapon-smg-shoot',     texture: 'weapon_smg_shoot',     frameRate: 24, repeat: 0 },
       { key: 'weapon-shotgun-idle',  texture: 'weapon_shotgun_idle',  frameRate: 8,  repeat: -1 },
       { key: 'weapon-shotgun-shoot', texture: 'weapon_shotgun_shoot', frameRate: 18, repeat: 0 },
-      { key: 'weapon-blaster-idle',  texture: 'weapon_blaster_idle',  frameRate: 8,  repeat: -1 },
-      { key: 'weapon-blaster-shoot', texture: 'weapon_blaster_shoot', frameRate: 18, repeat: 0 },
+      { key: 'weapon-rifle-idle',    texture: 'weapon_rifle_idle',    frameRate: 8,  repeat: -1 },
+      { key: 'weapon-rifle-shoot',   texture: 'weapon_rifle_shoot',   frameRate: 18, repeat: 0 },
       { key: 'weapon-deagle-idle',   texture: 'weapon_deagle_idle',   frameRate: 8,  repeat: -1 },
       { key: 'weapon-deagle-shoot',  texture: 'weapon_deagle_shoot',  frameRate: 14, repeat: 0 },
       { key: 'weapon-cannon-idle',   texture: 'weapon_cannon_idle',   frameRate: 8,  repeat: -1 },
       { key: 'weapon-cannon-shoot',  texture: 'weapon_cannon_shoot',  frameRate: 12, repeat: 0 },
+      { key: 'weapon-raygun-idle',   texture: 'weapon_raygun_idle',   frameRate: 8,  repeat: -1 },
+      { key: 'weapon-raygun-shoot',  texture: 'weapon_raygun_shoot',  frameRate: 14, repeat: 0 },
     ] as const;
 
     for (const animation of animations) {
@@ -1483,7 +1498,7 @@ export class WorldScene extends Phaser.Scene {
     this.positionWeaponSprite(rp.gunSprite, rp.x, rp.y, rp.aimAngle, 2100 + Math.floor(rp.y / 10));
   }
 
-  private static readonly WEAPON_CYCLE: WeaponMode[] = ['pistol', 'uzi', 'shotgun', 'blaster', 'deagle', 'cannon'];
+  private static readonly WEAPON_CYCLE: WeaponMode[] = ['pistol', 'smg', 'shotgun', 'rifle', 'deagle', 'cannon', 'raygun'];
 
   private hasWeaponUnlocked(weapon: WeaponMode): boolean {
     const owned = getInventory().owned;
@@ -1491,9 +1506,10 @@ export class WorldScene extends Phaser.Scene {
       case 'pistol':  return true;
       // Weapon unlocks must depend on ownership, not current utility equip state.
       // Otherwise a purchased gun can appear "blocked" if utility toggles drift.
-      case 'uzi':     return owned.includes('UTIL-GUN-SMG-01');
+      case 'smg':     return owned.includes('UTIL-GUN-SMG-01');
       case 'shotgun': return owned.includes('UTIL-GUN-SHOT-01');
-      case 'blaster': return owned.includes('UTIL-GUN-GOLD-01');
+      case 'rifle':   return owned.includes('UTIL-GUN-RIFL-01');
+      case 'raygun':  return owned.includes('UTIL-GUN-GOLD-01');
       case 'deagle':  return owned.includes('UTIL-GUN-DEAGLE-01');
       case 'cannon':  return owned.includes('UTIL-GUN-CANNON-01');
     }
@@ -1787,11 +1803,17 @@ export class WorldScene extends Phaser.Scene {
     // Floating damage number — color by weapon, size by damage magnitude
     const dmgColor = this.currentWeapon === 'shotgun'
       ? '#FF8B3D'
-      : this.currentWeapon === 'blaster'
-        ? '#46B3FF'
-        : (this.currentWeapon === 'uzi' || this.currentWeapon === 'cannon')
-          ? '#39FF14'
-          : '#F5C842'; // pistol / deagle / fallback → dorado
+      : this.currentWeapon === 'rifle'
+        ? '#4685FF'
+        : this.currentWeapon === 'smg'
+          ? '#00E5FF'
+          : this.currentWeapon === 'cannon'
+            ? '#F5C842'
+            : this.currentWeapon === 'deagle'
+              ? '#FF006E'
+              : this.currentWeapon === 'raygun'
+                ? '#B026FF'
+                : '#39FF14'; // pistol / fallback → green
     const dmgFontSize = damage >= 30 ? '10px' : damage >= 15 ? '9px' : '8px';
     const hitNumber = this.add.text(dummy.x, dummy.y - 8, `-${damage}`, {
       fontSize: dmgFontSize,
@@ -5514,8 +5536,8 @@ export class WorldScene extends Phaser.Scene {
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyQ))     { this.switchWeapon(); }
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyOne))   { this.switchWeapon('pistol'); }
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyTwo))   { this.switchWeapon('shotgun'); }
-    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyThree)) { this.switchWeapon('uzi'); }
-    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyFour))  { this.switchWeapon('blaster'); }
+    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyThree)) { this.switchWeapon('smg'); }
+    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyFour))  { this.switchWeapon('rifle'); }
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyFive))  { this.switchWeapon('deagle'); }
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keySix))   { this.switchWeapon('cannon'); }
 
