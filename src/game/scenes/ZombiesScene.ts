@@ -366,6 +366,7 @@ export class ZombiesScene extends Phaser.Scene {
   private boxPreviewText?: Phaser.GameObjects.Text;
   private packPad?: Phaser.GameObjects.Rectangle;
   private packLabel?: Phaser.GameObjects.Text;
+  private powerupBanner?: Phaser.GameObjects.Text;
   private audioContext?: AudioContext;
   private sceneMusic: Phaser.Sound.BaseSound | null = null;
   private lastSpawnSfxAt = 0;
@@ -1062,6 +1063,15 @@ export class ZombiesScene extends Phaser.Scene {
       align: 'center',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(1200).setAlpha(0);
 
+    this.powerupBanner = this.add.text(ZOMBIES_VIEWPORT.WIDTH / 2, 132, '', {
+      fontSize: '11px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FFFFFF',
+      stroke: '#000000',
+      strokeThickness: 5,
+      align: 'center',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(1200).setAlpha(0);
+
     this.bossIntroText = this.add.text(ZOMBIES_VIEWPORT.WIDTH / 2, ZOMBIES_VIEWPORT.HEIGHT / 2, '', {
       fontSize: '18px',
       fontFamily: '"Press Start 2P", monospace',
@@ -1160,9 +1170,15 @@ export class ZombiesScene extends Phaser.Scene {
   private renderHud() {
     const weapon = this.getWeaponStats(this.currentWeapon);
     const ammo = this.weaponInventory[this.currentWeapon];
+    const doubleSeconds = this.doublePointsUntil > this.time.now
+      ? Math.ceil((this.doublePointsUntil - this.time.now) / 1000)
+      : 0;
+    const instaSeconds = this.instaKillUntil > this.time.now
+      ? Math.ceil((this.instaKillUntil - this.time.now) / 1000)
+      : 0;
     const timedBuffs = [
-      this.doublePointsUntil > this.time.now ? `2X ${Math.ceil((this.doublePointsUntil - this.time.now) / 1000)}s` : '',
-      this.instaKillUntil > this.time.now ? `INSTA ${Math.ceil((this.instaKillUntil - this.time.now) / 1000)}s` : '',
+      doubleSeconds > 0 ? `2X PTS ${doubleSeconds}s` : '',
+      instaSeconds > 0 ? `INSTA KILL ${instaSeconds}s` : '',
     ].filter(Boolean).join('  ');
     const roundState = this.roundBreakUntil > this.time.now
       ? `INTER ${Math.ceil((this.roundBreakUntil - this.time.now) / 1000)}s`
@@ -1212,6 +1228,23 @@ export class ZombiesScene extends Phaser.Scene {
       scaleY: 1,
       alpha: { from: 1, to: 0 },
       duration: 1600,
+      ease: 'Sine.easeOut',
+    });
+  }
+
+  private showPowerupBanner(text: string, color = '#FFFFFF') {
+    if (!this.powerupBanner) return;
+    this.powerupBanner.setText(text);
+    this.powerupBanner.setColor(color);
+    this.powerupBanner.setAlpha(1);
+    this.powerupBanner.setScale(1.15);
+    this.tweens.killTweensOf(this.powerupBanner);
+    this.tweens.add({
+      targets: this.powerupBanner,
+      alpha: { from: 1, to: 0 },
+      scaleX: 1,
+      scaleY: 1,
+      duration: 1800,
       ease: 'Sine.easeOut',
     });
   }
@@ -1572,17 +1605,20 @@ export class ZombiesScene extends Phaser.Scene {
 
     return {
       ...base,
-      damage: Math.round(base.damage * (weaponId === 'raygun' ? 1.3 : 1.5)),
-      fireDelayMs: Math.max(weaponId === 'smg' ? 70 : 90, Math.round(base.fireDelayMs * 0.82)),
-      magazineSize: Math.round(base.magazineSize * (weaponId === 'shotgun' ? 1.5 : 1.4)),
-      reserveAmmo: Math.round(base.reserveAmmo * 1.25),
-      reloadMs: Math.max(850, Math.round(base.reloadMs * 0.84)),
-      displayLabel: `${base.label}+`,
+      damage: Math.round(base.damage * (weaponId === 'raygun' ? 1.45 : 1.7)),
+      fireDelayMs: Math.max(
+        weaponId === 'smg' ? 70 : 90,
+        Math.round(base.fireDelayMs * 0.78),
+      ),
+      magazineSize: Math.round(base.magazineSize * (weaponId === 'shotgun' ? 1.6 : 1.5)),
+      reserveAmmo: Math.round(base.reserveAmmo * 1.35),
+      reloadMs: Math.max(800, Math.round(base.reloadMs * 0.8)),
+      displayLabel: `${base.label}*`,
     };
   }
 
   private getPackCost(weaponId: ZombiesWeaponId) {
-    return weaponId === 'raygun' ? 4200 : 2500;
+    return 5000;
   }
 
   private pickZombieType(): ZombieType {
@@ -2776,9 +2812,11 @@ export class ZombiesScene extends Phaser.Scene {
     } else if (pickup.kind === 'insta_kill') {
       this.instaKillUntil = this.time.now + 12000;
       this.showNotice('INSTA-KILL', '#FF6A6A');
+      this.showPowerupBanner('INSTA KILL', '#FF6A6A');
     } else if (pickup.kind === 'double_points') {
       this.doublePointsUntil = this.time.now + 15000;
       this.showNotice('DOUBLE POINTS', '#F5C842');
+      this.showPowerupBanner('DOUBLE POINTS', '#F5C842');
     } else if (pickup.kind === 'nuke') {
       this.triggerNuke();
       this.showNotice('NUKE', '#9BFF4F');
@@ -2876,6 +2914,16 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private requestExit() {
+    // UX: exiting the main ZombiesScene should always take the player
+    // back to the plaza in WorldScene, not bounce through BasementScene.
+    if (this.scene.key === 'ZombiesScene') {
+      transitionToScene(this, 'WorldScene', {
+        returnX: SAFE_PLAZA_RETURN.X,
+        returnY: SAFE_PLAZA_RETURN.Y,
+      });
+      return;
+    }
+
     transitionToScene(this, this.returnScene, {
       returnX: this.returnX,
       returnY: this.returnY,
