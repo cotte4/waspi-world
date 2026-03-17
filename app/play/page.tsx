@@ -37,6 +37,7 @@ const PhaserGame = dynamic(() => import('@/app/components/PhaserGame'), { ssr: f
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
 const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
+const VOICE_MIC_DEVICE_KEY = 'waspi_voice_mic_device_id';
 const MAGIC_LINK_COOLDOWN_MS = 60_000;
 
 interface ChatMsg {
@@ -175,6 +176,7 @@ export default function PlayPage() {
   const [statsData, setStatsData] = useState<PlayerStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedMicDeviceId, setSelectedMicDeviceId] = useState<string>(getInitialSelectedMicDeviceId);
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(initialAudioSettings);
   const [hudSettings, setHudSettings] = useState<HudSettings>(initialHudSettings);
   const [controlSettings, setControlSettings] = useState<ControlSettings>(initialControlSettings);
@@ -709,9 +711,27 @@ export default function PlayPage() {
   useEffect(() => {
     if (!settingsOpen) return;
     navigator.mediaDevices?.enumerateDevices().then((devices) => {
-      setMicDevices(devices.filter((d) => d.kind === 'audioinput'));
+      const inputs = devices.filter((d) => d.kind === 'audioinput');
+      setMicDevices(inputs);
+      if (inputs.length === 0) return;
+      if (!selectedMicDeviceId || !inputs.some((d) => d.deviceId === selectedMicDeviceId)) {
+        setSelectedMicDeviceId(inputs[0].deviceId);
+      }
     }).catch(() => {});
-  }, [settingsOpen]);
+  }, [selectedMicDeviceId, settingsOpen]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (selectedMicDeviceId) {
+        window.localStorage.setItem(VOICE_MIC_DEVICE_KEY, selectedMicDeviceId);
+      } else {
+        window.localStorage.removeItem(VOICE_MIC_DEVICE_KEY);
+      }
+    } catch {
+      // noop
+    }
+  }, [selectedMicDeviceId]);
 
   useEffect(() => {
     activeSceneRef.current = activeScene;
@@ -2570,9 +2590,12 @@ export default function PlayPage() {
                         {micDevices.map((d, i) => (
                           <button
                             key={d.deviceId}
-                            onClick={() => eventBus.emit(EVENTS.VOICE_MIC_CHANGED, d.deviceId)}
+                            onClick={() => {
+                              setSelectedMicDeviceId(d.deviceId);
+                              eventBus.emit(EVENTS.VOICE_MIC_CHANGED, d.deviceId);
+                            }}
                             style={{
-                              ...optionButtonStyle(false),
+                              ...optionButtonStyle(selectedMicDeviceId === d.deviceId),
                               textAlign: 'left',
                               fontSize: '11px',
                             }}
@@ -3173,6 +3196,11 @@ function getInitialCheckoutState(): { open: boolean; tab: ShopTab; status: strin
     };
   }
   return { open: false, tab: 'products', status: '' };
+}
+
+function getInitialSelectedMicDeviceId(): string {
+  if (typeof window === 'undefined') return '';
+  return window.localStorage.getItem(VOICE_MIC_DEVICE_KEY) ?? '';
 }
 
 const textInputStyle = {

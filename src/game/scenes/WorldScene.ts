@@ -959,6 +959,23 @@ export class WorldScene extends Phaser.Scene {
     try { localStorage.setItem('waspi_voice_pref', pref); } catch { /* noop */ }
   }
 
+  private getPreferredMicDeviceId(): string | null {
+    try {
+      const value = localStorage.getItem('waspi_voice_mic_device_id');
+      return value || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private clearPreferredMicDeviceId() {
+    try {
+      localStorage.removeItem('waspi_voice_mic_device_id');
+    } catch {
+      // noop
+    }
+  }
+
   private async isMicGranted(): Promise<boolean> {
     try {
       const result = await navigator.permissions.query({ name: 'microphone' as PermissionName });
@@ -1095,8 +1112,20 @@ export class WorldScene extends Phaser.Scene {
     this.isActivatingVoice = true;
     try {
       const micStateBefore = await this.getMicPermissionState();
+      const preferredMicId = this.getPreferredMicDeviceId();
       this.voiceMuteBtn?.setText('[MIC ...]').setStyle({ color: '#F5C842' });
-      await vc.init(this.playerId);
+      try {
+        await vc.init(this.playerId, preferredMicId ?? undefined);
+      } catch (err) {
+        const name = (err as DOMException)?.name;
+        // Selected mic can become stale (unplugged/renamed). Retry with default.
+        if (preferredMicId && (name === 'NotFoundError' || name === 'OverconstrainedError')) {
+          this.clearPreferredMicDeviceId();
+          await vc.init(this.playerId);
+        } else {
+          throw err;
+        }
+      }
 
       // Publish peer ID via Presence — auto-cleans on disconnect
       await this.channel?.track({ player_id: this.playerId, voice_peer_id: vc.peerId });
