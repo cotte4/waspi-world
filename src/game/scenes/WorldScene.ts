@@ -33,6 +33,7 @@ import { recordDistanceDelta, recordNpcTalk } from '../systems/StatsSystem';
 import type { VecindadState } from '../../lib/playerState';
 import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
 import { EnemySprite, registerZombieAnims, type ZombieType } from '../systems/EnemySprite';
+import { SkillTreePanel } from '../systems/SkillTreePanel';
 
 interface RemotePlayer {
   avatar: AvatarRenderer;
@@ -434,6 +435,7 @@ export class WorldScene extends Phaser.Scene {
   private hp = 100;
   private hpBar!: Phaser.GameObjects.Graphics;
   private hpText!: Phaser.GameObjects.Text;
+  private lastHealAt = 0;
   private gunEnabled = true;
   private keyF!: Phaser.Input.Keyboard.Key;
   private keyQ!: Phaser.Input.Keyboard.Key;
@@ -443,6 +445,8 @@ export class WorldScene extends Phaser.Scene {
   private keyFour!: Phaser.Input.Keyboard.Key;
   private keyFive!: Phaser.Input.Keyboard.Key;
   private keySix!: Phaser.Input.Keyboard.Key;
+  private skillTreePanel?: SkillTreePanel;
+  private keyT?: Phaser.Input.Keyboard.Key;
   private bullets!: Phaser.Physics.Arcade.Group;
   private enemyBullets!: Phaser.Physics.Arcade.Group;
   private playerHitbox!: HitboxArc;
@@ -780,6 +784,10 @@ export class WorldScene extends Phaser.Scene {
 
     // Minimap
     this.runBootStep('minimap', () => this.setupMinimap());
+
+    // Skill tree panel + T key
+    this.skillTreePanel = new SkillTreePanel(this);
+    this.keyT = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.T);
 
     // Scene music
     this.sceneMusic = startSceneMusic(this, 'world_ambient', 0.35);
@@ -2685,6 +2693,64 @@ export class WorldScene extends Phaser.Scene {
       fontFamily: '"Press Start 2P", monospace',
       color: '#C0C2CC',
     }).setOrigin(0.5).setDepth(2);
+
+    // ── Healing Platform ─────────────────────────────────────────────────────
+    // Position: above PvP booth (y = PLAZA_Y+180) and left of training zone (x < 1150)
+    const hx = 900; const hy = ZONES.PLAZA_Y + 170;
+    const hw = 180;  const hh = 130;
+
+    // Outer glow
+    g.fillStyle(0x00ff88, 0.04);
+    g.fillRoundedRect(hx - 14, hy - 14, hw + 28, hh + 28, 22);
+
+    // Platform base
+    g.fillStyle(0x0d1f16, 1);
+    g.fillRoundedRect(hx, hy, hw, hh, 14);
+    g.lineStyle(2, 0x1aff7a, 0.55);
+    g.strokeRoundedRect(hx, hy, hw, hh, 14);
+
+    // Inner floor grid
+    g.lineStyle(1, 0x152e1e, 0.6);
+    for (let ix = hx + 16; ix < hx + hw - 8; ix += 20) {
+      g.lineBetween(ix, hy + 8, ix, hy + hh - 8);
+    }
+    for (let iy = hy + 12; iy < hy + hh - 8; iy += 20) {
+      g.lineBetween(hx + 8, iy, hx + hw - 8, iy);
+    }
+
+    // Cross symbol (medical +)
+    const cx = hx + hw / 2; const cy = hy + hh / 2 + 8;
+    g.fillStyle(0x1aff7a, 0.7);
+    g.fillRoundedRect(cx - 18, cy - 6, 36, 12, 3);  // horizontal bar
+    g.fillRoundedRect(cx - 6, cy - 18, 12, 36, 3);  // vertical bar
+
+    // Corner accent dots
+    const dots = [
+      [hx + 14, hy + 14], [hx + hw - 14, hy + 14],
+      [hx + 14, hy + hh - 14], [hx + hw - 14, hy + hh - 14],
+    ] as const;
+    dots.forEach(([dx, dy]) => {
+      g.fillStyle(0x1aff7a, 0.5);
+      g.fillCircle(dx, dy, 4);
+    });
+
+    // Label
+    this.add.text(hx + hw / 2, hy + 14, 'HEALING ZONE', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#1aff7a',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+
+    this.add.text(hx + hw / 2, hy + hh - 14, '+3 HP / seg', {
+      fontSize: '5px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#66ffaa',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(2);
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Final plaza anchor: gun shop now active
     this.drawGunShopBuilding();
@@ -5550,6 +5616,17 @@ export class WorldScene extends Phaser.Scene {
       this.renderTrainingHud();
     }
 
+    // Healing platform regen (800ms tick, +3 HP, only when not in training zone and hp < 100)
+    const HEAL_X = 900; const HEAL_Y = ZONES.PLAZA_Y + 170; const HEAL_W = 180; const HEAL_H = 130;
+    const inHealZone = this.px >= HEAL_X && this.px <= HEAL_X + HEAL_W && this.py >= HEAL_Y && this.py <= HEAL_Y + HEAL_H;
+    if (inHealZone && !this.inTraining && this.hp < 100 && this.time.now - this.lastHealAt >= 800) {
+      this.lastHealAt = this.time.now;
+      this.hp = Math.min(100, this.hp + 3);
+      this.renderHpHud();
+    }
+
+    if (this.keyT && Phaser.Input.Keyboard.JustDown(this.keyT)) { this.skillTreePanel?.toggle(); }
+
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyQ))     { this.switchWeapon(); }
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyOne))   { this.switchWeapon('pistol'); }
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyTwo))   { this.switchWeapon('shotgun'); }
@@ -5701,6 +5778,9 @@ export class WorldScene extends Phaser.Scene {
     const nearCasino = Math.abs(this.px - casinoDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
     const nearVecindad = this.px < 220 && this.py > ZONES.SOUTH_SIDEWALK_Y - 30 && this.py < ZONES.PLAZA_Y + 120;
     const nearPvpBooth = this.px >= 900 && this.px <= 1080 && this.py >= ZONES.PLAZA_Y + 420 && this.py <= ZONES.PLAZA_Y + 550;
+    const zombiesPadX = 640;
+    const zombiesPadY = ZONES.PLAZA_Y + 430;
+    const nearZombiesPad = Math.abs(this.px - zombiesPadX) < 90 && Math.abs(this.py - zombiesPadY) < 80;
     const basementDoorX = BUILDINGS.HOUSE.x + BUILDINGS.HOUSE.w / 2;
     const basementDoorY = BUILDINGS.HOUSE.y + BUILDINGS.HOUSE.h - 32;
     const nearBasement = Math.abs(this.px - basementDoorX) < 90
@@ -5718,6 +5798,9 @@ export class WorldScene extends Phaser.Scene {
     }
     if (nearBasement) {
       return { x: basementDoorX, y: basementDoorY, w: BUILDINGS.HOUSE.w + 20, h: BUILDINGS.HOUSE.h + 10, label: 'SPACE ENTRAR BASEMENT', color: 0xB48BFF, sceneKey: 'BasementScene' };
+    }
+    if (nearZombiesPad) {
+      return { x: zombiesPadX, y: zombiesPadY, w: 200, h: 90, label: 'SPACE ENTRAR MODO ZOMBIES', color: 0xFF6EA8, sceneKey: 'ZombiesScene' };
     }
     if (nearPvpBooth) {
       return { x: 990, y: ZONES.PLAZA_Y + 485, w: 180, h: 90, label: 'SPACE ENTRAR PVP PIT', color: 0xFF4DA6, sceneKey: 'PvpArenaScene' };
@@ -5917,6 +6000,8 @@ export class WorldScene extends Phaser.Scene {
       this.channel = null;
     }
     this.chatSystem?.destroy();
+    this.skillTreePanel?.destroy();
+    this.skillTreePanel = undefined;
     this.bridgeCleanupFns.forEach((cleanup) => cleanup());
     this.bridgeCleanupFns = [];
     this.audioSettingsCleanup?.();

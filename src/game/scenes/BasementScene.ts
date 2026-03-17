@@ -34,7 +34,6 @@ const C_FLOOR_OWL     = 0x0D0D18;
 // ─── Player spawn & zombie spawns (exported for game logic) ───────────────────
 
 export const BASEMENT_PLAYER_SPAWN = { x: 160, y: 660 };
-export const BASEMENT_ZOMBIES_ENTRY = { x: 1540, y: 1410 };
 const BASEMENT_RETURN = {
   x: BUILDINGS.HOUSE.x + BUILDINGS.HOUSE.w / 2,
   y: BUILDINGS.HOUSE.y + BUILDINGS.HOUSE.h + 26,
@@ -167,11 +166,6 @@ export class BasementScene extends Phaser.Scene {
 
     this.updateInteractionUi();
 
-    if (this.controls.isActionJustDown('interact') && this.isNearZombieAccess()) {
-      this.enterZombieDepths();
-      return;
-    }
-
     if (this.controls.isActionJustDown('back')) {
       this.exitToWorld();
     }
@@ -186,15 +180,8 @@ export class BasementScene extends Phaser.Scene {
     });
   }
 
-  private enterZombieDepths() {
-    if (this.inTransition) return;
-    this.inTransition = true;
-    transitionToScene(this, 'ZombiesScene', {
-      returnScene: 'BasementScene',
-      returnX: BASEMENT_ZOMBIES_ENTRY.x,
-      returnY: BASEMENT_ZOMBIES_ENTRY.y,
-      entryLabel: 'BASEMENT',
-    });
+  private isNearZombieAccess() {
+    return Phaser.Math.Distance.Between(this.px, this.py, 1540, 1410) <= 170;
   }
 
   // ---------------------------------------------------------------------------
@@ -761,18 +748,10 @@ export class BasementScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(12000);
 
-    this.add.text(this.cameras.main.width / 2, 48, 'WASD / FLECHAS EXPLORAR  |  SPACE BAJAR  |  ESC VOLVER', {
+    this.add.text(this.cameras.main.width / 2, 48, 'WASD / FLECHAS EXPLORAR  |  ESC VOLVER', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#C8A96E',
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(12000);
-
-    this.add.text(this.cameras.main.width / 2, 68, 'EL NIVEL ZOMBIES REAL ESTA ABAJO', {
-      fontSize: '7px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FF9DC8',
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(12000);
@@ -797,52 +776,7 @@ export class BasementScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(DEPTH_FURNITURE + 4);
 
-    const descentGlow = this.add.ellipse(BASEMENT_ZOMBIES_ENTRY.x, BASEMENT_ZOMBIES_ENTRY.y + 18, 134, 56, 0xFF6EA8, 0.08)
-      .setDepth(DEPTH_FURNITURE + 2)
-      .setStrokeStyle(2, 0xFF6EA8, 0.42);
-    this.tweens.add({
-      targets: descentGlow,
-      alpha: { from: 0.08, to: 0.24 },
-      scaleX: 1.05,
-      scaleY: 1.12,
-      yoyo: true,
-      repeat: -1,
-      duration: 960,
-      ease: 'Sine.easeInOut',
-    });
-
-    const guide = this.add.graphics().setDepth(DEPTH_FURNITURE + 3);
-    guide.fillStyle(0x090811, 1);
-    guide.fillRoundedRect(BASEMENT_ZOMBIES_ENTRY.x - 82, BASEMENT_ZOMBIES_ENTRY.y - 40, 164, 88, 10);
-    guide.lineStyle(2, 0xFF6EA8, 0.85);
-    guide.strokeRoundedRect(BASEMENT_ZOMBIES_ENTRY.x - 82, BASEMENT_ZOMBIES_ENTRY.y - 40, 164, 88, 10);
-    guide.fillStyle(0x1e1323, 1);
-    for (let i = 0; i < 5; i += 1) {
-      guide.fillRect(BASEMENT_ZOMBIES_ENTRY.x - 36 + i * 8, BASEMENT_ZOMBIES_ENTRY.y - 8 + i * 11, 72 - i * 16, 7);
-    }
-    guide.lineStyle(2, 0x9E89B4, 0.85);
-    guide.lineBetween(BASEMENT_ZOMBIES_ENTRY.x - 58, BASEMENT_ZOMBIES_ENTRY.y + 34, BASEMENT_ZOMBIES_ENTRY.x - 20, BASEMENT_ZOMBIES_ENTRY.y - 14);
-    guide.lineBetween(BASEMENT_ZOMBIES_ENTRY.x + 58, BASEMENT_ZOMBIES_ENTRY.y + 34, BASEMENT_ZOMBIES_ENTRY.x + 20, BASEMENT_ZOMBIES_ENTRY.y - 14);
-
-    this.add.text(BASEMENT_ZOMBIES_ENTRY.x, BASEMENT_ZOMBIES_ENTRY.y - 68, 'LOWER ACCESS', {
-      fontSize: '7px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FF9DC8',
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(DEPTH_FURNITURE + 4);
-
-    this.add.text(BASEMENT_ZOMBIES_ENTRY.x, BASEMENT_ZOMBIES_ENTRY.y + 66, 'DESCENSO', {
-      fontSize: '7px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(DEPTH_FURNITURE + 4);
-  }
-
-  private isNearZombieAccess() {
-    return Phaser.Math.Distance.Between(this.px, this.py, BASEMENT_ZOMBIES_ENTRY.x, BASEMENT_ZOMBIES_ENTRY.y) <= 170;
+    // Zombies entrance has moved to plaza; basement is now exploration-only.
   }
 
   private isPositionBlocked(x: number, y: number) {
