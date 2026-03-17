@@ -1360,14 +1360,29 @@ export default function PlayPage() {
   const openStats = useCallback(async () => {
     setStatsOpen(true);
     setStatsLoading(true);
-    const token = tokenRef.current;
+    let token = tokenRef.current;
+    if (!token && supabase) {
+      const { data } = await supabase.auth.getSession();
+      token = data.session?.access_token ?? null;
+      tokenRef.current = token;
+      setAuthEmail(data.session?.user?.email ?? null);
+    }
+
     if (token) {
       const res = await fetch('/api/player/stats', {
         headers: { Authorization: `Bearer ${token}` },
       }).catch(() => null);
       if (res?.ok) {
         const json = await res.json() as { stats?: PlayerStats };
-        if (json.stats) setStatsData(json.stats);
+        if (json.stats) {
+          setStatsData(json.stats);
+        } else {
+          // Defensive fallback: keep panel useful even with malformed payload.
+          setStatsData(getStats() as PlayerStats);
+        }
+      } else {
+        // If the API fails while authenticated, avoid showing "not logged in".
+        setStatsData(getStats() as PlayerStats);
       }
     } else {
       // Guest: show in-memory session stats
@@ -2663,7 +2678,9 @@ export default function PlayPage() {
                   </div>
                 ) : !statsData ? (
                   <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', textAlign: 'center', paddingTop: 24 }}>
-                    Inicia sesión para guardar y ver tus stats históricas.
+                    {isAuthenticated
+                      ? 'No se pudieron cargar tus stats historicas. Reintenta en unos segundos.'
+                      : 'Inicia sesion para guardar y ver tus stats historicas.'}
                   </div>
                 ) : (() => {
                   const s = statsData;
