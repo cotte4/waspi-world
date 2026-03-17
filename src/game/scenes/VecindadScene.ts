@@ -22,6 +22,8 @@ import { getTenksBalance } from '../systems/TenksSystem';
 import { SkillTreePanel } from '../systems/SkillTreePanel';
 import { SkillShopPanel } from '../systems/SkillShopPanel';
 import { getSkillSystem } from '../systems/SkillSystem';
+import { getContractSystem } from '../systems/ContractSystem';
+import { ContractPanel } from '../systems/ContractPanel';
 
 type ParcelVisual = {
   title: Phaser.GameObjects.Text;
@@ -157,8 +159,10 @@ export class VecindadScene extends Phaser.Scene {
   private parcelRefreshTimeout?: ReturnType<typeof setTimeout>;
   private skillTreePanel?: SkillTreePanel;
   private skillShopPanel?: SkillShopPanel;
+  private contractPanel?: ContractPanel;
   private keyT?: Phaser.Input.Keyboard.Key;
   private keyY?: Phaser.Input.Keyboard.Key;
+  private keyC?: Phaser.Input.Keyboard.Key;
 
   constructor() {
     super({ key: 'VecindadScene' });
@@ -202,8 +206,10 @@ export class VecindadScene extends Phaser.Scene {
     this.keyE = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.E);
     this.skillTreePanel = new SkillTreePanel(this);
     this.skillShopPanel = new SkillShopPanel(this);
+    this.contractPanel  = new ContractPanel(this);
     this.keyT = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.T);
     this.keyY = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Y);
+    this.keyC = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.C);
     this.bridgeCleanupFns.push(bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', {
         returnX: SAFE_PLAZA_RETURN.X,
@@ -246,6 +252,9 @@ export class VecindadScene extends Phaser.Scene {
     }
     if (this.keyY && Phaser.Input.Keyboard.JustDown(this.keyY)) {
       this.skillShopPanel?.toggle();
+    }
+    if (this.keyC && Phaser.Input.Keyboard.JustDown(this.keyC)) {
+      this.contractPanel?.toggle();
     }
   }
 
@@ -1504,6 +1513,10 @@ export class VecindadScene extends Phaser.Scene {
       // Roll quality server-side using the dominant skill for this plant
       const qr = await sys.rollQuality(skillId, 'farm_harvest');
 
+      // Track harvest for contracts (gardening + weed if cannabis)
+      void getContractSystem().trackAction('farm_harvest', 'gardening', qr.quality);
+      if (isWeed) void getContractSystem().trackAction('farm_harvest', 'weed', qr.quality);
+
       // Quality feedback
       const qualityMsg = `COSECHA [${qr.label}]`;
       eventBus.emit(EVENTS.UI_NOTICE, { message: qualityMsg, color: qr.color });
@@ -1698,5 +1711,7 @@ export class VecindadScene extends Phaser.Scene {
 
     this.skillTreePanel?.destroy();
     this.skillTreePanel = undefined;
+    this.contractPanel?.destroy();
+    this.contractPanel = undefined;
   }
 }

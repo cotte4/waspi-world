@@ -5,6 +5,7 @@ import { SceneControls } from '../systems/SceneControls';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
 import { getSkillSystem } from '../systems/SkillSystem';
+import { getContractSystem } from '../systems/ContractSystem';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const W = 1600;
@@ -653,6 +654,9 @@ export class BosqueMaterialesScene extends Phaser.Scene {
 
       // Roll quality server-side first
       const qr = await sys.rollQuality('mining', 'node_collect');
+
+      // Track mining action for contracts
+      void getContractSystem().trackAction('node_collect', 'mining', qr.quality);
 
       // Show quality feedback
       this.showPrompt(`+1 MATERIAL [${qr.label}]`);

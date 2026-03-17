@@ -36,6 +36,7 @@ import { EnemySprite, registerZombieAnims, type ZombieType } from '../systems/En
 import { SkillTreePanel } from '../systems/SkillTreePanel';
 import { SkillShopPanel } from '../systems/SkillShopPanel';
 import { getSkillSystem } from '../systems/SkillSystem';
+import { ContractPanel } from '../systems/ContractPanel';
 
 interface RemotePlayer {
   avatar: AvatarRenderer;
@@ -450,8 +451,10 @@ export class WorldScene extends Phaser.Scene {
   private keySix!: Phaser.Input.Keyboard.Key;
   private skillTreePanel?: SkillTreePanel;
   private skillShopPanel?: SkillShopPanel;
+  private contractPanel?: ContractPanel;
   private keyT?: Phaser.Input.Keyboard.Key;
   private keyY?: Phaser.Input.Keyboard.Key;
+  private keyC?: Phaser.Input.Keyboard.Key;
   private bullets!: Phaser.Physics.Arcade.Group;
   private enemyBullets!: Phaser.Physics.Arcade.Group;
   private playerHitbox!: HitboxArc;
@@ -790,11 +793,13 @@ export class WorldScene extends Phaser.Scene {
     // Minimap
     this.runBootStep('minimap', () => this.setupMinimap());
 
-    // Skill tree panel (T) + Skill shop panel (Y)
+    // Skill tree panel (T) + Skill shop panel (Y) + Contract panel (C)
     this.skillTreePanel = new SkillTreePanel(this);
     this.skillShopPanel = new SkillShopPanel(this);
+    this.contractPanel  = new ContractPanel(this);
     this.keyT = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.T);
     this.keyY = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Y);
+    this.keyC = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.C);
 
     // Scene music
     this.sceneMusic = startSceneMusic(this, 'world_ambient', 0.35);
@@ -5641,6 +5646,7 @@ export class WorldScene extends Phaser.Scene {
 
     if (this.keyT && Phaser.Input.Keyboard.JustDown(this.keyT)) { this.skillTreePanel?.toggle(); }
     if (this.keyY && Phaser.Input.Keyboard.JustDown(this.keyY)) { this.skillShopPanel?.toggle(); }
+    if (this.keyC && Phaser.Input.Keyboard.JustDown(this.keyC)) { this.contractPanel?.toggle(); }
 
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyQ))     { this.switchWeapon(); }
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyOne))   { this.switchWeapon('pistol'); }
@@ -6017,6 +6023,8 @@ export class WorldScene extends Phaser.Scene {
     this.chatSystem?.destroy();
     this.skillTreePanel?.destroy();
     this.skillTreePanel = undefined;
+    this.contractPanel?.destroy();
+    this.contractPanel = undefined;
     this.bridgeCleanupFns.forEach((cleanup) => cleanup());
     this.bridgeCleanupFns = [];
     this.audioSettingsCleanup?.();

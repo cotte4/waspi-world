@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { getSkillSystem, initSkillSystem } from '../systems/SkillSystem';
+import { initContractSystem } from '../systems/ContractSystem';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -11,6 +12,7 @@ export class BootScene extends Phaser.Scene {
     void initSkillSystem();
     void getSkillSystem().loadPurchasedItems();
     void getSkillSystem().loadSpecs();
+    void initContractSystem();
 
     const { width, height } = this.scale;
 
