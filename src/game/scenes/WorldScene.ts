@@ -2342,10 +2342,24 @@ export class WorldScene extends Phaser.Scene {
       ease: 'Sine.easeOut',
     });
 
+    // Per-weapon tracer config
+    const tracerCfg: Record<WeaponMode, { len: number; width: number; alpha: number; dur: number; glow: boolean }> = {
+      pistol:  { len: 48,  width: 1.5, alpha: 0.7, dur: 80,  glow: false },
+      smg:     { len: 28,  width: 1,   alpha: 0.6, dur: 50,  glow: false },
+      shotgun: { len: 22,  width: 2.5, alpha: 0.6, dur: 100, glow: false },
+      rifle:   { len: 90,  width: 1,   alpha: 0.85, dur: 110, glow: false },
+      deagle:  { len: 60,  width: 2,   alpha: 0.8, dur: 100, glow: false },
+      cannon:  { len: 36,  width: 4,   alpha: 0.7, dur: 130, glow: false },
+      raygun:  { len: 110, width: 2.5, alpha: 1.0, dur: 180, glow: true  },
+    };
+    const tc = tracerCfg[this.currentWeapon];
+
     for (let i = 0; i < weapon.pellets; i++) {
-      const spreadOffset = weapon.pellets === 1 ? Phaser.Math.FloatBetween(-weapon.spread, weapon.spread) : Phaser.Math.FloatBetween(-weapon.spread, weapon.spread);
+      const spreadOffset = Phaser.Math.FloatBetween(-weapon.spread, weapon.spread);
       const shotAngle = ang + spreadOffset;
-      const b = this.add.rectangle(this.px, this.py, this.currentWeapon === 'shotgun' ? 8 : 10, this.currentWeapon === 'shotgun' ? 3 : 3, weapon.color, 1) as ShotBullet;
+
+      // Bullet starts at muzzle position
+      const b = this.add.rectangle(muzzleX, muzzleY, this.currentWeapon === 'cannon' ? 7 : this.currentWeapon === 'shotgun' ? 6 : 10, this.currentWeapon === 'cannon' ? 7 : 3, weapon.color, 1) as ShotBullet;
       b.damage = weapon.damage;
       b.knockback = weapon.knockback;
       this.physics.add.existing(b);
@@ -2357,20 +2371,23 @@ export class WorldScene extends Phaser.Scene {
       b.setDepth(2000);
       this.bullets.add(b);
 
-      const tracer = this.add.line(
-        0,
-        0,
-        this.px,
-        this.py,
-        this.px + Math.cos(shotAngle) * (this.currentWeapon === 'shotgun' ? 24 : 18),
-        this.py + Math.sin(shotAngle) * (this.currentWeapon === 'shotgun' ? 24 : 18),
-        weapon.color,
-        this.currentWeapon === 'shotgun' ? 0.55 : 0.4,
-      ).setLineWidth(this.currentWeapon === 'shotgun' ? 3 : 2, this.currentWeapon === 'shotgun' ? 3 : 2).setDepth(1999);
+      // Tracer from muzzle outward
+      const tx2 = muzzleX + Math.cos(shotAngle) * tc.len;
+      const ty2 = muzzleY + Math.sin(shotAngle) * tc.len;
+      const tracer = this.add.line(0, 0, muzzleX, muzzleY, tx2, ty2, weapon.color, tc.alpha)
+        .setLineWidth(tc.width, tc.width).setDepth(1999);
+
+      // Raygun: add glow layer (wider, dimmer line underneath)
+      if (tc.glow) {
+        const glow = this.add.line(0, 0, muzzleX, muzzleY, tx2, ty2, weapon.color, 0.3)
+          .setLineWidth(tc.width * 4, tc.width * 4).setDepth(1998);
+        this.tweens.add({ targets: glow, alpha: 0, duration: tc.dur * 0.6, onComplete: () => glow.destroy() });
+      }
+
       this.tweens.add({
         targets: tracer,
-        alpha: { from: tracer.alpha, to: 0 },
-        duration: this.currentWeapon === 'shotgun' ? 90 : 70,
+        alpha: { from: tc.alpha, to: 0 },
+        duration: tc.dur,
         onComplete: () => tracer.destroy(),
       });
 

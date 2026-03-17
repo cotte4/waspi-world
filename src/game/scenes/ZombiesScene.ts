@@ -1446,11 +1446,28 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private drawShotFxFrom(originX: number, originY: number, endX: number, endY: number, color: number) {
-    const tracer = this.add.line(0, 0, originX, originY - 8, endX, endY, color, 0.9).setOrigin(0, 0).setDepth(160);
-    tracer.setLineWidth(2, 2);
-    const flash = this.add.circle(originX, originY - 10, 8, color, 0.8).setDepth(170);
-    this.tweens.add({ targets: tracer, alpha: 0, duration: 90, onComplete: () => tracer.destroy() });
-    this.tweens.add({ targets: flash, alpha: 0, scale: 1.9, duration: 110, onComplete: () => flash.destroy() });
+    type TracerCfg = { width: number; alpha: number; dur: number; flashR: number; glow: boolean };
+    const cfgMap: Partial<Record<ZombiesWeaponId, TracerCfg>> = {
+      pistol:  { width: 1.5, alpha: 0.75, dur: 80,  flashR: 7,  glow: false },
+      smg:     { width: 1,   alpha: 0.6,  dur: 50,  flashR: 6,  glow: false },
+      shotgun: { width: 2.5, alpha: 0.65, dur: 100, flashR: 11, glow: false },
+      rifle:   { width: 1,   alpha: 0.9,  dur: 120, flashR: 7,  glow: false },
+      deagle:  { width: 2,   alpha: 0.8,  dur: 100, flashR: 9,  glow: false },
+      cannon:  { width: 4,   alpha: 0.7,  dur: 130, flashR: 14, glow: false },
+      raygun:  { width: 2.5, alpha: 1.0,  dur: 180, flashR: 10, glow: true  },
+    };
+    const tc: TracerCfg = cfgMap[this.currentWeapon] ?? { width: 2, alpha: 0.9, dur: 90, flashR: 8, glow: false };
+
+    if (tc.glow) {
+      const glow = this.add.line(0, 0, originX, originY - 8, endX, endY, color, 0.25)
+        .setOrigin(0, 0).setDepth(159).setLineWidth(tc.width * 4, tc.width * 4);
+      this.tweens.add({ targets: glow, alpha: 0, duration: tc.dur * 0.6, onComplete: () => glow.destroy() });
+    }
+    const tracer = this.add.line(0, 0, originX, originY - 8, endX, endY, color, tc.alpha).setOrigin(0, 0).setDepth(160);
+    tracer.setLineWidth(tc.width, tc.width);
+    const flash = this.add.circle(originX, originY - 10, tc.flashR, color, 0.85).setDepth(170);
+    this.tweens.add({ targets: tracer, alpha: 0, duration: tc.dur, onComplete: () => tracer.destroy() });
+    this.tweens.add({ targets: flash, alpha: 0, scale: 2.0, duration: tc.dur * 1.2, onComplete: () => flash.destroy() });
   }
 
   private findZombieTargetFrom(originX: number, originY: number, angle: number, maxRange: number) {
