@@ -22,6 +22,16 @@ import {
 const VALID_SKILL_IDS = ['mining', 'fishing', 'gardening', 'cooking', 'gym', 'weed'] as const;
 type SkillId = (typeof VALID_SKILL_IDS)[number];
 
+// Specializations that grant +1 quality tier on their skill's rolls.
+// Defined inline — never import from src/game (browser code) in a route.
+const QUALITY_SHIFT_SPECS = new Set([
+  'mining_prospector',
+  'gardening_cultivator',
+  'weed_grower',
+  'fishing_hunter',
+  'cooking_alchemist',
+]);
+
 const VALID_SOURCES = [
   'node_collect',   // mining
   'farm_harvest',   // gardening / weed
@@ -40,6 +50,10 @@ const VALID_SOURCES = [
 
 interface SkillRow {
   level: number;
+}
+
+interface SpecRow {
+  spec_id: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -76,24 +90,37 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid source.' }, { status: 400 });
   }
 
-  // Read player's current skill level from DB (never trust client)
-  const { data: skillRow, error: skillError } = await admin
-    .from('player_skills')
-    .select('level')
-    .eq('user_id', user.id)
-    .eq('skill_id', skillId)
-    .maybeSingle<SkillRow>();
+  // Read player's skill level and active specialization in parallel
+  const [skillResult, specResult] = await Promise.all([
+    admin
+      .from('player_skills')
+      .select('level')
+      .eq('user_id', user.id)
+      .eq('skill_id', skillId)
+      .maybeSingle<SkillRow>(),
+    admin
+      .from('player_specializations')
+      .select('spec_id')
+      .eq('user_id', user.id)
+      .eq('skill_id', skillId)
+      .maybeSingle<SpecRow>(),
+  ]);
 
-  if (skillError) {
-    return NextResponse.json({ error: skillError.message }, { status: 500 });
+  if (skillResult.error) {
+    return NextResponse.json({ error: skillResult.error.message }, { status: 500 });
   }
+  // spec errors are non-fatal — degrade gracefully
+  const level   = skillResult.data?.level ?? 0;
+  const specId  = specResult.data?.spec_id ?? null;
 
-  const level = skillRow?.level ?? 0;
+  // Apply +1 quality tier shift if the player has a quality_shift spec
+  const hasQualityShift = specId !== null && QUALITY_SHIFT_SPECS.has(specId);
+  const effectiveLevel  = hasQualityShift ? Math.min(level + 1, 5) : level;
 
   // Select roll weights: auto mode is capped at basic/normal
   const weights = isAuto
     ? QUALITY_ROLL_WEIGHTS_AUTO
-    : (QUALITY_ROLL_WEIGHTS[level] ?? QUALITY_ROLL_WEIGHTS[0]);
+    : (QUALITY_ROLL_WEIGHTS[effectiveLevel] ?? QUALITY_ROLL_WEIGHTS[0]);
 
   const quality: QualityTier = rollQualityFromWeights(weights);
 

@@ -4,6 +4,7 @@
 // to scenes. All API failures are caught silently so the game never crashes.
 
 import type { QualityTier } from '../config/qualityTiers';
+import type { SpecId } from '../config/specializations';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -142,6 +143,12 @@ function clampXp(xp: unknown): number {
 }
 
 // ---------------------------------------------------------------------------
+// API response shape for specializations
+// ---------------------------------------------------------------------------
+
+type SpecRow = { skill_id: string; spec_id: string };
+
+// ---------------------------------------------------------------------------
 // SkillSystem class
 // ---------------------------------------------------------------------------
 
@@ -149,6 +156,7 @@ export class SkillSystem {
   private skills: Map<SkillId, SkillState> = new Map();
   private loaded = false;
   private purchasedItems: Set<string> = new Set();
+  private specs: Map<string, SpecId> = new Map(); // skill_id → spec_id
 
   // -------------------------------------------------------------------------
   // loadSkills — called once at game start
@@ -342,6 +350,57 @@ export class SkillSystem {
         this.purchasedItems = new Set(data.purchased);
       }
     } catch { /* silent */ }
+  }
+
+  // -------------------------------------------------------------------------
+  // loadSpecs — fetches the player's chosen specializations from the API
+  // -------------------------------------------------------------------------
+
+  async loadSpecs(): Promise<void> {
+    try {
+      const res = await fetch('/api/skills/specialize');
+      if (!res.ok) return;
+      const data = (await res.json()) as { specializations?: SpecRow[] };
+      if (!Array.isArray(data?.specializations)) return;
+      for (const row of data.specializations) {
+        if (typeof row.skill_id === 'string' && typeof row.spec_id === 'string') {
+          this.specs.set(row.skill_id, row.spec_id as SpecId);
+        }
+      }
+    } catch { /* silent */ }
+  }
+
+  // -------------------------------------------------------------------------
+  // getSpec — returns the chosen SpecId for a skill, or null if none chosen
+  // -------------------------------------------------------------------------
+
+  getSpec(skillId: string): SpecId | null {
+    return this.specs.get(skillId) ?? null;
+  }
+
+  // -------------------------------------------------------------------------
+  // chooseSpec — sends POST /api/skills/specialize to lock in a specialization
+  // -------------------------------------------------------------------------
+
+  async chooseSpec(
+    skillId: string,
+    specId: SpecId,
+  ): Promise<{ success: boolean; notice?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/skills/specialize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skill_id: skillId, spec_id: specId }),
+      });
+      const data = (await res.json()) as { notice?: string; error?: string; spec_id?: string };
+      if (res.ok && data.spec_id) {
+        this.specs.set(skillId, data.spec_id as SpecId);
+        return { success: true, notice: data.notice };
+      }
+      return { success: false, error: data.error ?? 'Error al especializar.' };
+    } catch {
+      return { success: false, error: 'Error de red.' };
+    }
   }
 
   // -------------------------------------------------------------------------

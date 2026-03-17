@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { getSkillSystem, initSkillSystem } from '../systems/SkillSystem';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -6,6 +7,11 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload() {
+    // Kick off skill data fetch in the background — non-blocking
+    void initSkillSystem();
+    void getSkillSystem().loadPurchasedItems();
+    void getSkillSystem().loadSpecs();
+
     const { width, height } = this.scale;
 
     // Background
