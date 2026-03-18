@@ -40,7 +40,6 @@ export class BasketMinigame extends Phaser.Scene {
   private footer!: Phaser.GameObjects.Text;
   private resultLabel!: Phaser.GameObjects.Text;
   private powerBar!: Phaser.GameObjects.Rectangle;
-  private sweetSpotZone!: Phaser.GameObjects.Rectangle;
   private arcGuide!: Phaser.GameObjects.Graphics;
   private hoop!: Phaser.GameObjects.Container;
   private hoopRim!: Phaser.GameObjects.Rectangle;
@@ -140,7 +139,7 @@ export class BasketMinigame extends Phaser.Scene {
       color: '#F5C842',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, 86, 'PRESIONA EN LA ZONA DORADA PARA TIRAR', {
+    this.add.text(width / 2, 86, 'CALCULA LA TRAYECTORIA Y EL MOMENTO', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#A0A0B4',
@@ -172,16 +171,6 @@ export class BasketMinigame extends Phaser.Scene {
     // Fill bar (green/yellow/red based on power)
     this.powerBar = this.add.rectangle(62, 158, 0, 12, 0x39ff14, 1).setOrigin(0, 0.5);
 
-    // Sweet spot zone — moves based on hoop position, shows where to aim
-    this.sweetSpotZone = this.add.rectangle(62, 158, 20, 12, 0xF5C842, 0.45)
-      .setOrigin(0, 0.5)
-      .setStrokeStyle(1, 0xF5C842, 0.9);
-
-    this.add.text(120, 172, 'PRESIONA EN LA ZONA', {
-      fontSize: '6px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-    }).setOrigin(0.5).setAlpha(0.7);
 
     this.arcGuide = this.add.graphics();
 
@@ -296,6 +285,7 @@ export class BasketMinigame extends Phaser.Scene {
     if (this.countdownActive) return;
 
     if (this.controls.isActionJustDown('back')) {
+      this.rewardPending = false; // allow ESC to force-exit even while saving
       this.finishAndExit();
       return;
     }
@@ -368,21 +358,6 @@ export class BasketMinigame extends Phaser.Scene {
 
     this.powerBar.width = 116 * this.currentPower;
     this.powerBar.fillColor = this.currentPower > 0.82 ? 0xff6b00 : this.currentPower > 0.55 ? 0xf5c842 : 0x39ff14;
-
-    // Update sweet spot zone position (follows hoop movement)
-    const center = this.getSweetSpotCenter();
-    const halfW = this.getSweetSpotHalfWidth();
-    const barLeft = 62;
-    const barTotalW = 116;
-    const zoneX = barLeft + (center - halfW) * barTotalW;
-    const zoneW = Math.max(6, halfW * 2 * barTotalW);
-    this.sweetSpotZone.setX(zoneX);
-    this.sweetSpotZone.width = zoneW;
-
-    // Zone pulses green when power bar is inside it
-    const error = Math.abs(this.currentPower - center);
-    this.sweetSpotZone.fillColor = error <= halfW ? 0x39FF14 : 0xF5C842;
-    this.sweetSpotZone.fillAlpha = error <= halfW ? 0.6 : 0.4;
   }
 
   private updateHoopMotion(delta: number) {
@@ -407,27 +382,37 @@ export class BasketMinigame extends Phaser.Scene {
     return Phaser.Math.Clamp(0.58 + (this.hoopOffset / swingRange) * 0.12, 0.44, 0.76);
   }
 
-  /** Half-width of the make window — shrinks with streak (more pressure) */
-  private getSweetSpotHalfWidth(): number {
-    return Math.max(0.05, (0.18 - this.streak * 0.015) / 2);
-  }
-
+  /**
+   * Evaluates the shot outcome based on where the arc actually points vs the hoop.
+   * - Direct make ("de chas"): arc endpoint within ±20px of rim center
+   * - Bank shot: arc overshoots toward backboard (20–54px right of rim)
+   * - Rim: near miss on either side
+   * - Miss: everything else
+   */
   private evaluateShot(): { isMake: boolean; isRim: boolean; isBankShot: boolean } {
     const center = this.getSweetSpotCenter();
-    const halfW = this.getSweetSpotHalfWidth();
-    const error = this.currentPower - center; // signed: positive = too much power
+    const xError = (this.currentPower - center) * 150;
+    const rimX = this.hoop.x;
+    const targetX = Phaser.Math.Clamp(rimX + xError, rimX - 60, rimX + 60);
+    const dist = targetX - rimX; // signed: positive = toward backboard
 
-    if (Math.abs(error) <= halfW) {
+    // Direct make — ball drops through the hoop
+    if (Math.abs(dist) <= 20) {
       return { isMake: true, isRim: false, isBankShot: false };
     }
-    // Too much power = ball goes toward backboard → bank shot opportunity
-    if (error > halfW && error <= halfW * 2.2) {
-      const bankIn = Math.random() < 0.4;
+
+    // Bank shot — overshoot toward backboard
+    if (dist > 20 && dist <= 54) {
+      const closeness = 1 - (dist - 20) / 34; // 1.0 at dist=20, 0.0 at dist=54
+      const bankIn = Math.random() < closeness * 0.7;
       return { isMake: bankIn, isRim: !bankIn, isBankShot: true };
     }
-    if (Math.abs(error) <= halfW * 2.6) {
+
+    // Rim — near miss on either side
+    if (Math.abs(dist) <= 30) {
       return { isMake: false, isRim: true, isBankShot: false };
     }
+
     return { isMake: false, isRim: false, isBankShot: false };
   }
 
@@ -437,16 +422,11 @@ export class BasketMinigame extends Phaser.Scene {
     this.arcGuide.clear();
     if (this.phase !== 'aiming') return;
 
-    const center = this.getSweetSpotCenter();
-    const halfW = this.getSweetSpotHalfWidth();
-    const error = Math.abs(this.currentPower - center);
-    const inZone = error <= halfW;
-    const nearZone = error <= halfW * 2.2;
-
-    const color = inZone ? 0x39FF14 : nearZone ? 0xF5C842 : 0x46b3ff;
-    const alpha = inZone ? 0.75 : 0.48;
+    const color = 0x46b3ff;
+    const alpha = 0.55;
 
     // Overshoot shifts arc endpoint right (toward backboard)
+    const center = this.getSweetSpotCenter();
     const xError = (this.currentPower - center) * 150;
     const targetX = Phaser.Math.Clamp(this.hoop.x + xError, this.hoop.x - 60, this.hoop.x + 60);
 
@@ -792,6 +772,17 @@ export class BasketMinigame extends Phaser.Scene {
     this.rewardPending = this.grantedRewardTenks > 0;
     void this.resolveReward();
     this.resultTimerMs = 1650;
+
+    // Hard safety: if reward resolution hangs (auth timeout, network error),
+    // clear the block after 10s so the player is never permanently frozen.
+    if (this.rewardPending) {
+      window.setTimeout(() => {
+        if (!this.rewardPending || this.isFinished) return;
+        this.rewardPending = false;
+        this.footer.setText('NO SE PUDO GUARDAR. VOLVIENDO...');
+        this.footer.setColor('#FF006E');
+      }, 10000);
+    }
   }
 
   private refreshHud() {

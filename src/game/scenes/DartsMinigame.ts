@@ -161,7 +161,12 @@ export class DartsMinigame extends Phaser.Scene {
   }
 
   private throwDart() {
-    if (this.phase !== 'aiming' || this.isFinished) return;
+    if (this.isFinished) return;
+    if (this.phase === 'done') {
+      this.finishAndExit(this.computeReward());
+      return;
+    }
+    if (this.phase !== 'aiming') return;
     this.phase = 'result';
     this.thrown += 1;
     const x = this.cursor.x;
@@ -198,6 +203,8 @@ export class DartsMinigame extends Phaser.Scene {
       this.resultLabel.setText(`FINAL ${this.score} / +${reward} TENKS`);
       this.resultLabel.setColor('#39FF14');
       this.resultTimerMs = 1600;
+      this.footer.setText('CLICK / SPACE PARA SALIR');
+      this.footer.setColor('#F5C842');
     }
   }
 
