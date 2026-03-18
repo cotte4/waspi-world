@@ -35,6 +35,10 @@ export class CafeInterior extends Phaser.Scene {
     super({ key: 'CafeInterior' });
   }
 
+  init() {
+    this.inTransition = false;
+  }
+
   create() {
     const { width, height } = this.scale;
     announceScene(this);

@@ -79,6 +79,10 @@ export class CasinoInterior extends Phaser.Scene {
 
   constructor() { super({ key: 'CasinoInterior' }); }
 
+  init() {
+    this.inTransition = false;
+  }
+
   create() {
     const { width, height } = this.scale;
     announceScene(this);

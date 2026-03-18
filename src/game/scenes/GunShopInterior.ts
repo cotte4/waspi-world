@@ -39,10 +39,15 @@ export class GunShopInterior extends Phaser.Scene {
     super({ key: 'GunShopInterior' });
   }
 
+  init() {
+    this.inTransition = false;
+  }
+
   create() {
     const { width, height } = this.scale;
     announceScene(this);
     showSceneTitle(this, 'GUN SHOP', 0x46B3FF);
+    this.input.enabled = true;
     this.controls = new SceneControls(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     bindSafeResetToPlaza(this, () => {

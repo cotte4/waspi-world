@@ -100,9 +100,14 @@ export class BasementScene extends Phaser.Scene {
   // create
   // ---------------------------------------------------------------------------
 
+  init() {
+    this.inTransition = false;
+  }
+
   create() {
     announceScene(this);
     showSceneTitle(this, 'BASEMENT', 0xB48BFF);
+    this.input.enabled = true;
     this.controls = new SceneControls(this);
     bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', {

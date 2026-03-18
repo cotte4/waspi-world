@@ -66,6 +66,10 @@ export class StoreInterior extends Phaser.Scene {
     super({ key: 'StoreInterior' });
   }
 
+  init() {
+    this.inTransition = false;
+  }
+
   create() {
     const { width, height } = this.scale;
     announceScene(this);

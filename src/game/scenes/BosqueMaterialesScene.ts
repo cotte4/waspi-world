@@ -140,6 +140,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   }
 
   create() {
+    this.input.enabled = true;
     announceScene(this);
     this.controls = new SceneControls(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.onShutdown, this);
