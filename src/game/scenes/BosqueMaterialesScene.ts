@@ -8,6 +8,7 @@ import { getSkillSystem } from '../systems/SkillSystem';
 import { getContractSystem } from '../systems/ContractSystem';
 import { MiningMinigame } from '../systems/MiningMinigame';
 import { getMasterySystem } from '../systems/MasterySystem';
+import { getEventSystem } from '../systems/EventSystem';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const W = 1600;
@@ -694,8 +695,9 @@ export class BosqueMaterialesScene extends Phaser.Scene {
         this.time.delayedCall(1600, () => this.hudText?.setColor('#B9FF9E'));
       }
 
-      // XP: base + quality bonus + minigame bonus
-      const xpTotal = 10 + qr.xp_bonus + minigameBonus;
+      // XP: base + quality bonus + minigame bonus × event multiplier
+      const eventMult = getEventSystem().getXpMultiplier('mining');
+      const xpTotal = Math.round((10 + qr.xp_bonus + minigameBonus) * eventMult);
       const xpResult = await sys.addXp('mining', xpTotal, 'node_collect');
       if (xpResult.leveled_up) {
         eventBus.emit(EVENTS.UI_NOTICE, { message: `⛏️ MINERÍA LVL ${xpResult.new_level}!`, color: '#F5C842' });

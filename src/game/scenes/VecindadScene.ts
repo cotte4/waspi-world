@@ -26,6 +26,7 @@ import { getContractSystem } from '../systems/ContractSystem';
 import { ContractPanel } from '../systems/ContractPanel';
 import { FishingMinigame } from '../systems/FishingMinigame';
 import { getMasterySystem } from '../systems/MasterySystem';
+import { getEventSystem } from '../systems/EventSystem';
 
 type ParcelVisual = {
   title: Phaser.GameObjects.Text;
@@ -1400,7 +1401,8 @@ export class VecindadScene extends Phaser.Scene {
 
     eventBus.emit(EVENTS.UI_NOTICE, { message: `🐟 PESCADO [${qr.label}]`, color: qr.color });
 
-    const xpTotal = 12 + qr.xp_bonus + minigameBonus;
+    const eventMult = getEventSystem().getXpMultiplier('fishing');
+    const xpTotal = Math.round((12 + qr.xp_bonus + minigameBonus) * eventMult);
     const xpResult = await sys.addXp('fishing', xpTotal, 'fish_catch');
     if (xpResult.leveled_up) {
       eventBus.emit(EVENTS.UI_NOTICE, { message: `🎣 PESCA LVL ${xpResult.new_level}!`, color: '#4A9ECC' });
@@ -1606,8 +1608,9 @@ export class VecindadScene extends Phaser.Scene {
         eventBus.emit(EVENTS.UI_NOTICE, { message: '✨ COSECHA LEGENDARIA!', color: '#F5C842' });
       }
 
-      // XP: base 15 + quality bonus; gardening always, weed only if cannabis
-      const xpTotal = 15 + qr.xp_bonus;
+      // XP: base 15 + quality bonus × event multiplier; gardening always, weed only if cannabis
+      const gardenEventMult = getEventSystem().getXpMultiplier('gardening');
+      const xpTotal = Math.round((15 + qr.xp_bonus) * gardenEventMult);
       const gardenResult = await sys.addXp('gardening', xpTotal, 'farm_harvest');
       if (gardenResult.leveled_up) {
         eventBus.emit(EVENTS.UI_NOTICE, { message: `🌿 JARDINERÍA LVL ${gardenResult.new_level}!`, color: '#39FF14' });

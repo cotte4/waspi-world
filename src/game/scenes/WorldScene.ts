@@ -39,6 +39,7 @@ import { getSkillSystem } from '../systems/SkillSystem';
 import { ContractPanel } from '../systems/ContractPanel';
 import { GuildPanel } from '../systems/GuildPanel';
 import { MasteryPanel } from '../systems/MasteryPanel';
+import { EventBanner } from '../systems/EventBanner';
 
 interface RemotePlayer {
   avatar: AvatarRenderer;
@@ -456,6 +457,7 @@ export class WorldScene extends Phaser.Scene {
   private contractPanel?: ContractPanel;
   private guildPanel?: GuildPanel;
   private masteryPanel?: MasteryPanel;
+  private eventBanner?: EventBanner;
   private keyT?: Phaser.Input.Keyboard.Key;
   private keyY?: Phaser.Input.Keyboard.Key;
   private keyC?: Phaser.Input.Keyboard.Key;
@@ -805,6 +807,9 @@ export class WorldScene extends Phaser.Scene {
     this.contractPanel  = new ContractPanel(this);
     this.guildPanel     = new GuildPanel(this);
     this.masteryPanel   = new MasteryPanel(this);
+    this.eventBanner    = new EventBanner(this);
+    this.eventBanner.refresh();
+    this.eventBanner.startAutoRefresh();
     this.keyT = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.T);
     this.keyY = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Y);
     this.keyC = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.C);

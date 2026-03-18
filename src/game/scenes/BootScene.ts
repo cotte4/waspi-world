@@ -3,6 +3,7 @@ import { getSkillSystem, initSkillSystem } from '../systems/SkillSystem';
 import { initContractSystem } from '../systems/ContractSystem';
 import { initGuildSystem } from '../systems/GuildSystem';
 import { initMasterySystem } from '../systems/MasterySystem';
+import { initEventSystem, getEventSystem } from '../systems/EventSystem';
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -17,6 +18,8 @@ export class BootScene extends Phaser.Scene {
     void initContractSystem();
     void initGuildSystem();
     void initMasterySystem();
+    void initEventSystem();
+    getEventSystem().startPolling();
 
     const { width, height } = this.scale;
 
