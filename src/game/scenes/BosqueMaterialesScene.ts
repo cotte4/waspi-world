@@ -774,6 +774,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     transitionToScene(this, 'VecindadScene', {
       returnX: RETURN_VECINDAD_X,
       returnY: RETURN_VECINDAD_Y,
+      materialsCollected: this.collectedTotal,
     });
   }
 

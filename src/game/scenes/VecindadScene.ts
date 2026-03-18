@@ -40,6 +40,7 @@ type ParcelVisual = {
 type VecindadSceneData = {
   returnX?: number;
   returnY?: number;
+  materialsCollected?: number;
 };
 
 type SeedType = 'basica' | 'indica' | 'sativa' | 'purple_haze' | 'og_kush';
@@ -96,6 +97,7 @@ export class VecindadScene extends Phaser.Scene {
   private shiftKey?: Phaser.Input.Keyboard.Key;
   private inTransition = false;
   private fishingActive = false;
+  private pendingMaterials = 0;
   private activeFishingMinigame: FishingMinigame | null = null;
   private px: number = VECINDAD_MAP.SPAWN_X;
   private py: number = VECINDAD_MAP.SPAWN_Y;
@@ -143,6 +145,9 @@ export class VecindadScene extends Phaser.Scene {
     this.inTransition = false;
     this.px = data?.returnX ?? VECINDAD_MAP.SPAWN_X;
     this.py = data?.returnY ?? VECINDAD_MAP.SPAWN_Y;
+    if (data?.materialsCollected && data.materialsCollected > 0) {
+      this.pendingMaterials = data.materialsCollected;
+    }
   }
 
   create() {
@@ -156,6 +161,18 @@ export class VecindadScene extends Phaser.Scene {
       if (this.input.keyboard) this.input.keyboard.enabled = true;
     });
     this.loadVecindadState();
+
+    if (this.pendingMaterials > 0) {
+      this.vecindadState = {
+        ...this.vecindadState,
+        materials: this.vecindadState.materials + this.pendingMaterials,
+      };
+      eventBus.emit(EVENTS.VECINDAD_UPDATE_REQUEST, {
+        vecindad: this.vecindadState,
+        notice: `+${this.pendingMaterials} materiales del bosque`,
+      });
+      this.pendingMaterials = 0;
+    }
 
     this.drawDistrict();
     this.drawParcels();
