@@ -7,6 +7,7 @@ import type { QualityTier } from '../config/qualityTiers';
 import type { SpecId } from '../config/specializations';
 import { SYNERGY_DEFS, type SynergyDef } from '../config/synergies';
 import { getAuthHeaders } from './authHelper';
+import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -219,11 +220,11 @@ export class SkillSystem {
 
     try {
       const authH = await getAuthHeaders();
-      const res = await fetch('/api/skills', {
+      const res = await fetchWithTimeout('/api/skills', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authH },
         body: JSON.stringify({ skill_id: skillId, xp_gain: amount, source }),
-      });
+      }, 6000);
 
       if (!res.ok) return fallback;
 
@@ -274,11 +275,11 @@ export class SkillSystem {
 
     try {
       const authH = await getAuthHeaders();
-      const res = await fetch('/api/skills/quality', {
+      const res = await fetchWithTimeout('/api/skills/quality', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authH },
         body: JSON.stringify({ skill_id: skillId, source, is_auto: isAuto }),
-      });
+      }, 6000);
       if (!res.ok) return fallback;
 
       const data = (await res.json()) as Partial<QualityRollResult>;

@@ -671,6 +671,13 @@ export class BosqueMaterialesScene extends Phaser.Scene {
 
     this.minigameActive = true;
 
+    // Hard safety: if any API call hangs (auth, rollQuality, addXp),
+    // unblock movement after 12s so the player is never permanently stuck.
+    const safetyTimer = window.setTimeout(() => {
+      this.minigameActive = false;
+      this.activeMiningMinigame = null;
+    }, 12000);
+
     void (async () => {
       try {
         const sys = getSkillSystem();
@@ -725,7 +732,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
           eventBus.emit(EVENTS.UI_NOTICE, { message: '✨ MATERIAL LEGENDARIO!', color: '#F5C842' });
         }
       } finally {
-        // Always reset the flag so future interactions aren't blocked
+        window.clearTimeout(safetyTimer);
         this.minigameActive = false;
         this.activeMiningMinigame = null;
       }
