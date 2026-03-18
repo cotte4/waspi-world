@@ -6,6 +6,7 @@ import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
 import { calculateBasketReward, calculateBasketShotReward } from '../../lib/basketRewards';
 import { SceneControls } from '../systems/SceneControls';
+import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 
 type BasketPhase = 'aiming' | 'flying' | 'result' | 'done' | 'exiting';
 
@@ -23,8 +24,6 @@ export class BasketMinigame extends Phaser.Scene {
   private streak = 0;
   private currentPower = 0.5;
   private powerDir = 1;
-  private currentAngle = -88;
-  private angleDir = 1;
   private hoopOffset = 0;
   private hoopDir = 1;
   private lastResult = '';
@@ -35,16 +34,13 @@ export class BasketMinigame extends Phaser.Scene {
   private rewardStatus: 'granted' | 'pending' | 'local' = 'local';
   private rewardRunId = '';
   private rewardRunPromise: Promise<void> | null = null;
-
   private countdownActive = false;
 
-  private keySpace!: Phaser.Input.Keyboard.Key;
-  private keyEsc!: Phaser.Input.Keyboard.Key;
   private hud!: Phaser.GameObjects.Text;
   private footer!: Phaser.GameObjects.Text;
   private resultLabel!: Phaser.GameObjects.Text;
   private powerBar!: Phaser.GameObjects.Rectangle;
-  private angleNeedle!: Phaser.GameObjects.Line;
+  private sweetSpotZone!: Phaser.GameObjects.Rectangle;
   private arcGuide!: Phaser.GameObjects.Graphics;
   private hoop!: Phaser.GameObjects.Container;
   private hoopRim!: Phaser.GameObjects.Rectangle;
@@ -81,8 +77,6 @@ export class BasketMinigame extends Phaser.Scene {
     this.streak = 0;
     this.currentPower = 0.5;
     this.powerDir = 1;
-    this.currentAngle = -88;
-    this.angleDir = 1;
     this.hoopOffset = 0;
     this.hoopDir = 1;
     this.lastResult = '';
@@ -95,6 +89,12 @@ export class BasketMinigame extends Phaser.Scene {
     this.rewardRunPromise = null;
   }
 
+  init() {
+    this.isFinished = false;
+    this.phase = 'aiming';
+    this.countdownActive = false;
+  }
+
   create() {
     const { width, height } = this.scale;
     this.resetSceneState();
@@ -102,6 +102,13 @@ export class BasketMinigame extends Phaser.Scene {
     this.controls = new SceneControls(this);
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
+
+    // Anti-freeze: reset if scene is woken instead of started fresh
+    this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.isFinished = false;
+      this.input.enabled = true;
+      if (this.input.keyboard) this.input.keyboard.enabled = true;
+    });
 
     const hoopBaseX = width / 2 + 150;
     this.hoopBaseX = hoopBaseX;
@@ -133,7 +140,7 @@ export class BasketMinigame extends Phaser.Scene {
       color: '#F5C842',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, 86, 'CALIBRA ANGULO Y POTENCIA. EMBOCA PARA GANAR TENKS.', {
+    this.add.text(width / 2, 86, 'PRESIONA EN LA ZONA DORADA PARA TIRAR', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#A0A0B4',
@@ -146,32 +153,39 @@ export class BasketMinigame extends Phaser.Scene {
       lineSpacing: 6,
     });
 
-    this.footer = this.add.text(width / 2, height - 28, 'SPACE O CLICK PARA TIRAR - ESC SALIR', {
+    this.footer = this.add.text(width / 2, height - 28, 'SPACE O CLICK PARA TIRAR  |  ESC SALIR', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#777777',
     }).setOrigin(0.5);
 
-    this.add.text(120, 136, 'POTENCIA', {
+    // ── Power meter ──────────────────────────────────────────────────────
+    this.add.text(120, 128, 'POTENCIA', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#bbbbbb',
     }).setOrigin(0.5);
-    this.add.rectangle(120, 166, 120, 16, 0x121212, 1).setStrokeStyle(1, 0x4a4a4a, 1);
-    this.powerBar = this.add.rectangle(62, 166, 0, 10, 0x39ff14, 1).setOrigin(0, 0.5);
 
-    this.add.text(120, 210, 'ANGULO', {
-      fontSize: '8px',
+    // Bar background
+    this.add.rectangle(120, 158, 120, 18, 0x121212, 1).setStrokeStyle(1, 0x4a4a4a, 1);
+
+    // Fill bar (green/yellow/red based on power)
+    this.powerBar = this.add.rectangle(62, 158, 0, 12, 0x39ff14, 1).setOrigin(0, 0.5);
+
+    // Sweet spot zone — moves based on hoop position, shows where to aim
+    this.sweetSpotZone = this.add.rectangle(62, 158, 20, 12, 0xF5C842, 0.45)
+      .setOrigin(0, 0.5)
+      .setStrokeStyle(1, 0xF5C842, 0.9);
+
+    this.add.text(120, 172, 'PRESIONA EN LA ZONA', {
+      fontSize: '6px',
       fontFamily: '"Press Start 2P", monospace',
-      color: '#bbbbbb',
-    }).setOrigin(0.5);
-    this.add.circle(120, 255, 34, 0x0d0d17, 1).setStrokeStyle(1, 0x4a4a4a, 1);
-    this.angleNeedle = this.add.line(120, 255, 0, 0, 0, -28, 0x46b3ff, 1)
-      .setLineWidth(4, 4)
-      .setOrigin(0.5, 1);
+      color: '#F5C842',
+    }).setOrigin(0.5).setAlpha(0.7);
 
     this.arcGuide = this.add.graphics();
 
+    // ── Hoop ─────────────────────────────────────────────────────────────
     this.hoop = this.add.container(hoopBaseX, this.hoopY);
     this.hoopBoard = this.add.rectangle(34, -62, 14, 88, 0xdbe7ff, 1).setStrokeStyle(2, 0x0d1530, 1);
     this.hoopRim = this.add.rectangle(0, 0, 74, 7, 0xff6b00, 1).setStrokeStyle(2, 0x000000, 0.35);
@@ -185,7 +199,7 @@ export class BasketMinigame extends Phaser.Scene {
     this.shadow = this.add.ellipse(this.ballStartX, this.ballStartY + 16, 26, 10, 0x000000, 0.28);
     this.ball = this.add.circle(this.ballStartX, this.ballStartY, 11, 0xf2872f, 1).setStrokeStyle(2, 0x5b2e0a, 1);
 
-    // Score text — larger with neon stroke
+    // ── Score panel ───────────────────────────────────────────────────────
     this.scoreText = this.add.text(width - 16, 16, '', {
       fontSize: '14px',
       fontFamily: '"Press Start 2P", monospace',
@@ -196,7 +210,7 @@ export class BasketMinigame extends Phaser.Scene {
       lineSpacing: 8,
     }).setOrigin(1, 0);
 
-    // Timer bar — below HUD
+    // ── Timer bar ─────────────────────────────────────────────────────────
     const timerBarW = width - 36;
     this.timerBarBg = this.add.rectangle(18, height - 16, timerBarW, 8, 0x111111, 1)
       .setStrokeStyle(1, 0x333344, 1)
@@ -212,9 +226,10 @@ export class BasketMinigame extends Phaser.Scene {
       strokeThickness: 4,
     }).setOrigin(0.5).setAlpha(0);
 
-    this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-    this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.input.on('pointerdown', this.handleShootInput, this);
+
     this.refreshHud();
     this.refreshScorePanel();
     this.redrawAimGuide();
@@ -287,10 +302,8 @@ export class BasketMinigame extends Phaser.Scene {
 
     if (this.phase !== 'done' && this.phase !== 'exiting') {
       this.roundTimerMs = Math.max(0, this.roundTimerMs - delta);
-      // Update timer bar width
       const timerBarW = this.scale.width - 36;
       this.timerBar.width = timerBarW * (this.roundTimerMs / ROUND_MS);
-      // Color shifts red as time runs low
       const pct = this.roundTimerMs / ROUND_MS;
       if (pct < 0.25) {
         this.timerBar.fillColor = 0xFF006E;
@@ -342,6 +355,7 @@ export class BasketMinigame extends Phaser.Scene {
   }
 
   private updateMeters(delta: number) {
+    // Oscillate power bar
     this.currentPower += this.powerDir * (delta * 0.00095);
     if (this.currentPower >= 1) {
       this.currentPower = 1;
@@ -352,19 +366,23 @@ export class BasketMinigame extends Phaser.Scene {
       this.powerDir = 1;
     }
 
-    this.currentAngle += this.angleDir * (delta * 0.05);
-    if (this.currentAngle >= -58) {
-      this.currentAngle = -58;
-      this.angleDir = -1;
-    }
-    if (this.currentAngle <= -128) {
-      this.currentAngle = -128;
-      this.angleDir = 1;
-    }
-
     this.powerBar.width = 116 * this.currentPower;
     this.powerBar.fillColor = this.currentPower > 0.82 ? 0xff6b00 : this.currentPower > 0.55 ? 0xf5c842 : 0x39ff14;
-    this.angleNeedle.setRotation(Phaser.Math.DegToRad(this.currentAngle + 90));
+
+    // Update sweet spot zone position (follows hoop movement)
+    const center = this.getSweetSpotCenter();
+    const halfW = this.getSweetSpotHalfWidth();
+    const barLeft = 62;
+    const barTotalW = 116;
+    const zoneX = barLeft + (center - halfW) * barTotalW;
+    const zoneW = Math.max(6, halfW * 2 * barTotalW);
+    this.sweetSpotZone.setX(zoneX);
+    this.sweetSpotZone.width = zoneW;
+
+    // Zone pulses green when power bar is inside it
+    const error = Math.abs(this.currentPower - center);
+    this.sweetSpotZone.fillColor = error <= halfW ? 0x39FF14 : 0xF5C842;
+    this.sweetSpotZone.fillAlpha = error <= halfW ? 0.6 : 0.4;
   }
 
   private updateHoopMotion(delta: number) {
@@ -381,21 +399,65 @@ export class BasketMinigame extends Phaser.Scene {
     this.hoop.setX(this.hoopBaseX + this.hoopOffset);
   }
 
+  // ── Sweet spot logic ────────────────────────────────────────────────────
+
+  /** Ideal power based on hoop horizontal offset — closer = less power needed */
+  private getSweetSpotCenter(): number {
+    const swingRange = this.score >= 6 ? 84 : this.score >= 3 ? 58 : 36;
+    return Phaser.Math.Clamp(0.58 + (this.hoopOffset / swingRange) * 0.12, 0.44, 0.76);
+  }
+
+  /** Half-width of the make window — shrinks with streak (more pressure) */
+  private getSweetSpotHalfWidth(): number {
+    return Math.max(0.05, (0.18 - this.streak * 0.015) / 2);
+  }
+
+  private evaluateShot(): { isMake: boolean; isRim: boolean; isBankShot: boolean } {
+    const center = this.getSweetSpotCenter();
+    const halfW = this.getSweetSpotHalfWidth();
+    const error = this.currentPower - center; // signed: positive = too much power
+
+    if (Math.abs(error) <= halfW) {
+      return { isMake: true, isRim: false, isBankShot: false };
+    }
+    // Too much power = ball goes toward backboard → bank shot opportunity
+    if (error > halfW && error <= halfW * 2.2) {
+      const bankIn = Math.random() < 0.4;
+      return { isMake: bankIn, isRim: !bankIn, isBankShot: true };
+    }
+    if (Math.abs(error) <= halfW * 2.6) {
+      return { isMake: false, isRim: true, isBankShot: false };
+    }
+    return { isMake: false, isRim: false, isBankShot: false };
+  }
+
+  // ── Aim guide ───────────────────────────────────────────────────────────
+
   private redrawAimGuide() {
     this.arcGuide.clear();
     if (this.phase !== 'aiming') return;
 
+    const center = this.getSweetSpotCenter();
+    const halfW = this.getSweetSpotHalfWidth();
+    const error = Math.abs(this.currentPower - center);
+    const inZone = error <= halfW;
+    const nearZone = error <= halfW * 2.2;
+
+    const color = inZone ? 0x39FF14 : nearZone ? 0xF5C842 : 0x46b3ff;
+    const alpha = inZone ? 0.75 : 0.48;
+
+    // Overshoot shifts arc endpoint right (toward backboard)
+    const xError = (this.currentPower - center) * 150;
+    const targetX = Phaser.Math.Clamp(this.hoop.x + xError, this.hoop.x - 60, this.hoop.x + 60);
+
     const start = new Phaser.Math.Vector2(this.ballStartX, this.ballStartY);
+    const end = new Phaser.Math.Vector2(targetX, this.hoopY);
     const apex = new Phaser.Math.Vector2(
-      Phaser.Math.Linear(this.ballStartX, this.hoop.x, 0.48),
-      this.ballStartY - (140 + this.currentPower * 120),
-    );
-    const end = new Phaser.Math.Vector2(
-      this.hoop.x + Phaser.Math.Clamp((this.currentAngle + 90) * 1.6, -52, 52),
-      this.hoopY - 2,
+      (start.x + end.x) / 2,
+      start.y - (140 + this.currentPower * 120),
     );
 
-    this.arcGuide.lineStyle(2, 0x46b3ff, 0.58);
+    this.arcGuide.lineStyle(2, color, alpha);
     for (let i = 0; i < 18; i++) {
       if (i % 2 === 1) continue;
       const t0 = i / 18;
@@ -419,6 +481,8 @@ export class BasketMinigame extends Phaser.Scene {
     );
   }
 
+  // ── Shot mechanics ──────────────────────────────────────────────────────
+
   private handleShootInput() {
     if (this.phase !== 'aiming' || this.cooldownMs > 0 || this.isFinished) return;
     this.takeShot();
@@ -434,22 +498,23 @@ export class BasketMinigame extends Phaser.Scene {
     this.arcGuide.clear();
 
     const rimX = this.hoop.x;
-    const idealPower = Phaser.Math.Clamp(0.58 + (Math.abs(this.hoopOffset) / 220) * 0.2, 0.54, 0.84);
-    const idealAngle = Phaser.Math.Clamp(-90 + (this.hoopOffset / 96) * 12, -112, -68);
-    const powerError = Math.abs(this.currentPower - idealPower);
-    const angleError = Math.abs(this.currentAngle - idealAngle);
-    const pressure = Phaser.Math.Clamp(this.streak * 0.015, 0, 0.07);
-    const makeWindow = 0.18 - pressure;
-    const likelyMake = powerError < makeWindow && angleError < 12;
-    const likelyRim = !likelyMake && powerError < makeWindow + 0.1 && angleError < 18;
+    const { isMake, isRim, isBankShot } = this.evaluateShot();
 
-    const endX = likelyMake
+    if (isBankShot) {
+      this.animateBankShot(rimX, isMake);
+    } else {
+      this.animateDirectShot(rimX, isMake, isRim);
+    }
+  }
+
+  private animateDirectShot(rimX: number, isMake: boolean, isRim: boolean) {
+    const apexY = this.ballStartY - (150 + this.currentPower * 170);
+    const endX = isMake
       ? rimX + Phaser.Math.Between(-7, 7)
-      : rimX + Phaser.Math.Between(likelyRim ? -26 : -64, likelyRim ? 26 : 64);
-    const endY = likelyMake
+      : rimX + Phaser.Math.Between(isRim ? -26 : -64, isRim ? 26 : 64);
+    const endY = isMake
       ? this.hoopY + Phaser.Math.Between(34, 56)
       : this.hoopY + Phaser.Math.Between(8, 74);
-    const apexY = this.ballStartY - (150 + this.currentPower * 170);
 
     const curve = new Phaser.Curves.QuadraticBezier(
       new Phaser.Math.Vector2(this.ballStartX, this.ballStartY),
@@ -473,59 +538,109 @@ export class BasketMinigame extends Phaser.Scene {
         );
         this.shadow.setScale(1 - follower.t * 0.18, 1 - follower.t * 0.18);
       },
+      onComplete: () => this.resolveShot(isMake, isRim, false),
+    });
+  }
+
+  /** Two-arc shot: ball goes to backboard, bounces toward hoop */
+  private animateBankShot(rimX: number, isMake: boolean) {
+    const boardX = rimX + 30;
+    const boardY = this.hoopY - 48 + Phaser.Math.Between(-8, 8);
+    const apexY1 = this.ballStartY - (120 + this.currentPower * 140);
+
+    const curve1 = new Phaser.Curves.QuadraticBezier(
+      new Phaser.Math.Vector2(this.ballStartX, this.ballStartY),
+      new Phaser.Math.Vector2(Phaser.Math.Linear(this.ballStartX, boardX, 0.5), apexY1),
+      new Phaser.Math.Vector2(boardX, boardY),
+    );
+
+    const endX = isMake
+      ? rimX + Phaser.Math.Between(-8, 8)
+      : rimX + Phaser.Math.Between(-32, 32);
+    const endY = isMake
+      ? this.hoopY + Phaser.Math.Between(34, 56)
+      : this.hoopY + Phaser.Math.Between(10, 60);
+
+    const curve2 = new Phaser.Curves.QuadraticBezier(
+      new Phaser.Math.Vector2(boardX, boardY),
+      new Phaser.Math.Vector2(rimX, boardY - 22),
+      new Phaser.Math.Vector2(endX, endY),
+    );
+
+    const follower = { t: 0 };
+
+    this.tweens.add({
+      targets: follower,
+      t: 1,
+      duration: 300,
+      ease: 'Sine.easeIn',
+      onUpdate: () => {
+        const point = curve1.getPoint(follower.t);
+        this.ball.setPosition(point.x, point.y);
+        this.ball.setScale(1 - follower.t * 0.08);
+        this.shadow.setPosition(
+          Phaser.Math.Linear(this.ballStartX, rimX, follower.t * 0.65),
+          this.ballStartY + 16 - follower.t * 4,
+        );
+      },
       onComplete: () => {
-        const outcome = this.evaluateShotOutcome(curve, rimX);
-        this.resolveShot(outcome.isMake, outcome.isRim);
+        this.spawnBoardImpact(boardX, boardY);
+        follower.t = 0;
+        this.tweens.add({
+          targets: follower,
+          t: 1,
+          duration: 260,
+          ease: 'Sine.easeOut',
+          onUpdate: () => {
+            const point = curve2.getPoint(follower.t);
+            this.ball.setPosition(point.x, point.y);
+            this.ball.setScale(0.92 - follower.t * 0.2);
+            this.shadow.setPosition(
+              Phaser.Math.Linear(boardX, endX, follower.t),
+              this.ballStartY + 8,
+            );
+            this.shadow.setScale(0.82 - follower.t * 0.18, 0.82 - follower.t * 0.18);
+          },
+          onComplete: () => this.resolveShot(isMake, !isMake, true),
+        });
       },
     });
   }
 
-  private evaluateShotOutcome(curve: Phaser.Curves.QuadraticBezier, rimX: number) {
-    const samples = 42;
-    const innerRimHalfWidth = 25;
-    const rimHalfWidth = 36;
-    let crossedFromAbove = false;
-    let crossedInRimWindow = false;
-    let nearRim = false;
-    let prevPoint = curve.getPoint(0);
-    let peakY = prevPoint.y;
-
-    for (let i = 1; i <= samples; i++) {
-      const t = i / samples;
-      const point = curve.getPoint(t);
-      const dy = point.y - prevPoint.y;
-      const xWithinInnerRim = Math.abs(point.x - rimX) <= innerRimHalfWidth;
-      const xNearRim = Math.abs(point.x - rimX) <= rimHalfWidth;
-      const crossedHoopLine = prevPoint.y < this.hoopY && point.y >= this.hoopY;
-      if (xNearRim) nearRim = true;
-      if (crossedHoopLine && xWithinInnerRim && dy > 0) {
-        crossedFromAbove = true;
-      }
-      if (crossedHoopLine && xNearRim) {
-        crossedInRimWindow = true;
-      }
-      if (point.y < peakY) peakY = point.y;
-      prevPoint = point;
-    }
-
-    const startedAboveRim = peakY < this.hoopY - 16;
-    const isMake = crossedFromAbove && startedAboveRim;
-    const isRim = !isMake && (crossedInRimWindow || nearRim);
-    return { isMake, isRim };
+  private spawnBoardImpact(x: number, y: number) {
+    try {
+      const flash = this.add.rectangle(x, y, 22, 18, 0xFFFFDD, 0.85).setDepth(200);
+      this.tweens.add({
+        targets: flash,
+        alpha: 0,
+        scaleX: 2.5,
+        scaleY: 2,
+        duration: 130,
+        ease: 'Sine.easeOut',
+        onComplete: () => flash.destroy(),
+      });
+      this.cameras.main.shake(80, 0.003, false);
+    } catch { /* scene may be shutting down */ }
   }
 
-  private resolveShot(isMake: boolean, isRim: boolean) {
+  // ── Shot resolution ─────────────────────────────────────────────────────
+
+  private resolveShot(isMake: boolean, isRim: boolean, isBankShot: boolean) {
     if (isMake) {
       this.score += 1;
       this.streak += 1;
       const shotReward = calculateBasketShotReward(this.streak);
       this.grantedRewardTenks += shotReward;
-      this.lastResult = this.streak >= 3 ? 'HEAT CHECK!' : 'SWISH!';
+      if (isBankShot) {
+        this.lastResult = 'BANCO!';
+      } else if (this.streak >= 3) {
+        this.lastResult = 'HEAT CHECK!';
+      } else {
+        this.lastResult = 'SWISH!';
+      }
       this.lastResultColor = '#39FF14';
       this.animateNet(true);
       this.spawnScoreFlash();
-      console.log('SFX: basket_score');
-      // Score punch-scale animation
       this.tweens.add({
         targets: this.scoreText,
         scaleX: 1.4,
@@ -546,7 +661,7 @@ export class BasketMinigame extends Phaser.Scene {
       this.showFloatingLabel(`+${shotReward} TENKS`, '#F5C842');
     } else if (isRim) {
       this.streak = 0;
-      this.lastResult = 'ARO!';
+      this.lastResult = isBankShot ? 'TABLERO!' : 'ARO!';
       this.lastResultColor = '#F5C842';
       this.animateNet(false);
     } else {
@@ -606,7 +721,12 @@ export class BasketMinigame extends Phaser.Scene {
       duration: 180,
       ease: 'Sine.easeOut',
       onComplete: () => {
-        this.time.delayedCall(240, () => {
+        // window.setTimeout so this fires even if Phaser timer is busy
+        window.setTimeout(() => {
+          if (!this.scene.isActive('BasketMinigame')) {
+            label.destroy();
+            return;
+          }
           this.tweens.add({
             targets: label,
             alpha: 0,
@@ -615,7 +735,7 @@ export class BasketMinigame extends Phaser.Scene {
             ease: 'Sine.easeIn',
             onComplete: () => label.destroy(),
           });
-        });
+        }, 240);
       },
     });
   }
@@ -651,7 +771,6 @@ export class BasketMinigame extends Phaser.Scene {
     this.shadow.setPosition(this.ballStartX, this.ballStartY + 16);
     this.shadow.setScale(1, 1);
     this.currentPower = Phaser.Math.FloatBetween(0.28, 0.48);
-    this.currentAngle = Phaser.Math.FloatBetween(-104, -78);
     this.redrawAimGuide();
   }
 
@@ -662,7 +781,7 @@ export class BasketMinigame extends Phaser.Scene {
     eventBus.emit(EVENTS.STATS_BASKET_GAME, {
       score: this.score,
       shots: this.shotsTaken,
-      makes: this.score, // each scored basket = 1 make
+      makes: this.score,
     });
     this.resultLabel.setAlpha(1);
     this.resultLabel.setY(322);
@@ -707,6 +826,8 @@ export class BasketMinigame extends Phaser.Scene {
     });
   }
 
+  // ── Reward ─────────────────────────────────────────────────────────────
+
   private async getAuthToken() {
     if (!supabase || !isConfigured) return null;
     const { data } = await supabase.auth.getSession();
@@ -724,12 +845,11 @@ export class BasketMinigame extends Phaser.Scene {
       const token = await this.getAuthToken();
       if (!token) return;
 
-      const res = await fetch('/api/minigames/basket/start', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }).catch(() => null);
+      const res = await fetchWithTimeout(
+        '/api/minigames/basket/start',
+        { method: 'POST', headers: { Authorization: `Bearer ${token}` } },
+        6000,
+      ).catch(() => null);
 
       if (!res?.ok) return;
       const json = await res.json().catch(() => null) as { runId?: string } | null;
@@ -782,18 +902,23 @@ export class BasketMinigame extends Phaser.Scene {
       return;
     }
 
-    const res = await fetch('/api/minigames/basket/reward', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+    // 8s timeout: if network hangs, never block finishAndExit
+    const res = await fetchWithTimeout(
+      '/api/minigames/basket/reward',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          score: this.score,
+          shots: this.shotsTaken,
+          runId: this.rewardRunId,
+        }),
       },
-      body: JSON.stringify({
-        score: this.score,
-        shots: this.shotsTaken,
-        runId: this.rewardRunId,
-      }),
-    }).catch(() => null);
+      8000,
+    ).catch(() => null);
 
     if (!res?.ok) {
       this.rewardStatus = 'pending';

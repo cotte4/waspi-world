@@ -201,6 +201,8 @@ export class SkillShopPanel {
   // ---------------------------------------------------------------------------
 
   private refreshButtonStates(): void {
+    // Guard: if container was destroyed (scene changed), don't touch dead objects
+    if (!this.container?.active) return;
     const balance = getTenksBalance();
 
     SHOP_ITEMS.forEach((item, i) => {

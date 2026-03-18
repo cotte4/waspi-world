@@ -66,7 +66,7 @@ type HitboxArc = Phaser.GameObjects.Arc & { body: Phaser.Physics.Arcade.Body };
 type ArcadeObject = Phaser.GameObjects.GameObject & { destroy: () => void };
 type CombatDummy = Phaser.GameObjects.Arc & { body: Phaser.Physics.Arcade.Body };
 type EquippedPayload = { top?: string; bottom?: string };
-type ShotBullet = Phaser.GameObjects.Rectangle & { damage?: number; knockback?: number; resolvedHit?: boolean };
+type ShotBullet = Phaser.GameObjects.Rectangle & { damage?: number; knockback?: number; resolvedHit?: boolean; hitColor?: number };
 type RemoteMoveEvent = {
   player_id: string;
   username: string;
@@ -2303,6 +2303,7 @@ export class WorldScene extends Phaser.Scene {
       const bullet = bObj as ShotBullet;
       if (bullet.resolvedHit) return;
       bullet.resolvedHit = true;
+      this.spawnBulletImpact(bullet.x, bullet.y, bullet.hitColor ?? 0xFFFF88);
       this.destroyArcadeObject(bObj);
       this.damageDummy(dObj as CombatDummy, bullet.damage ?? WEAPON_STATS[this.currentWeapon].damage, bullet.knockback ?? 12);
     });
@@ -2340,9 +2341,15 @@ export class WorldScene extends Phaser.Scene {
 
     const ang = Phaser.Math.Angle.Between(this.px, this.py, wx, wy);
 
+    // Muzzle offset per weapon — tip of the gun barrel, not the body center
+    const muzzleOffsets: Record<WeaponMode, number> = {
+      pistol: 22, smg: 18, shotgun: 20, rifle: 28, deagle: 24, cannon: 22, raygun: 26,
+    };
+    const muzzleOffset = muzzleOffsets[this.currentWeapon] ?? 22;
+
     // Muzzle flash — colored outer ring expanding
-    const muzzleX = this.px + Math.cos(ang) * 14;
-    const muzzleY = this.py + Math.sin(ang) * 14;
+    const muzzleX = this.px + Math.cos(ang) * muzzleOffset;
+    const muzzleY = this.py + Math.sin(ang) * muzzleOffset;
     const flash = this.add.circle(muzzleX, muzzleY, this.currentWeapon === 'shotgun' ? 10 : 7, weapon.color, 0.95);
     flash.setDepth(2100);
     this.tweens.add({
@@ -2431,9 +2438,37 @@ export class WorldScene extends Phaser.Scene {
         onComplete: () => tracer.destroy(),
       });
 
+      // Tracer tip spark — bright dot at the bullet's leading edge
+      const tipSpark = this.add.circle(tx2, ty2, Math.max(2, tc.width * 1.5), weapon.color, tc.alpha)
+        .setDepth(2002);
+      this.tweens.add({
+        targets: tipSpark,
+        alpha: 0,
+        scale: { from: 1, to: 2 },
+        duration: tc.dur * 0.5,
+        ease: 'Sine.easeOut',
+        onComplete: () => tipSpark.destroy(),
+      });
+
+      // Store hit color for impact flash
+      b.hitColor = weapon.color;
+
+      // Bullet alpha fade — loses energy over lifetime
+      const bulletLifetime = this.currentWeapon === 'shotgun' ? 420 : 900;
+      this.tweens.add({
+        targets: b,
+        alpha: { from: 1, to: 0.3 },
+        duration: bulletLifetime,
+        ease: 'Sine.easeIn',
+      });
+
       this.resolveImmediateShot(shotAngle, weapon, b);
 
-      this.time.delayedCall(this.currentWeapon === 'shotgun' ? 420 : 900, () => this.destroyArcadeObject(b));
+      // window.setTimeout so cleanup fires even if Phaser scene loop is busy
+      window.setTimeout(() => {
+        this.spawnBulletImpact(b.x, b.y, weapon.color);
+        this.destroyArcadeObject(b);
+      }, bulletLifetime);
     }
 
     this.cameras.main.shake(this.currentWeapon === 'shotgun' ? 70 : 40, this.currentWeapon === 'shotgun' ? 0.0024 : 0.0012, false);
@@ -2446,6 +2481,7 @@ export class WorldScene extends Phaser.Scene {
     const bestDummy = this.findImmediateDummyTarget(angle, maxRange);
     if (bestDummy) {
       bullet.resolvedHit = true;
+      this.spawnBulletImpact(bullet.x, bullet.y, weapon.color);
       this.damageDummy(bestDummy, weapon.damage, weapon.knockback);
       this.destroyArcadeObject(bullet);
       return;
@@ -2456,6 +2492,7 @@ export class WorldScene extends Phaser.Scene {
     if (!bestRemote) return;
 
     bullet.resolvedHit = true;
+    this.spawnBulletImpact(bullet.x, bullet.y, weapon.color);
     const remoteForKnockback = this.remotePlayers.get(bestRemote);
     const hitAngle = remoteForKnockback
       ? Phaser.Math.Angle.Between(this.px, this.py, remoteForKnockback.x, remoteForKnockback.y)
@@ -5119,6 +5156,7 @@ export class WorldScene extends Phaser.Scene {
       const bullet = bObj as ShotBullet;
       if (bullet.resolvedHit) return;
       bullet.resolvedHit = true;
+      this.spawnBulletImpact(bullet.x, bullet.y, bullet.hitColor ?? 0xFFFF88);
       this.destroyArcadeObject(bObj);
       const rp = this.remotePlayers.get(id);
       const hitAngle = rp
@@ -5233,6 +5271,31 @@ export class WorldScene extends Phaser.Scene {
     hitbox.setPosition(x, y);
     hitbox.body.updateFromGameObject();
     hitbox.body.setVelocity(0, 0);
+  }
+
+  private spawnBulletImpact(x: number, y: number, color: number) {
+    try {
+      // Outer ring — expands and fades
+      const ring = this.add.circle(x, y, 3, color, 0.9).setDepth(2050);
+      this.tweens.add({
+        targets: ring,
+        scale: { from: 1, to: 3.5 },
+        alpha: { from: 0.9, to: 0 },
+        duration: 160,
+        ease: 'Sine.easeOut',
+        onComplete: () => ring.destroy(),
+      });
+      // Inner white spark — quick pop
+      const spark = this.add.circle(x, y, 2, 0xFFFFDD, 1).setDepth(2051);
+      this.tweens.add({
+        targets: spark,
+        alpha: { from: 1, to: 0 },
+        scale: { from: 1.2, to: 0.3 },
+        duration: 90,
+        ease: 'Sine.easeIn',
+        onComplete: () => spark.destroy(),
+      });
+    } catch { /* scene may be shutting down */ }
   }
 
   private destroyArcadeObject(obj: unknown) {

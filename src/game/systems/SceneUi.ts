@@ -1,6 +1,5 @@
 import Phaser from 'phaser';
 import { eventBus, EVENTS } from '../config/eventBus';
-import { safeSceneDelayedCall } from './AnimationSafety';
 import { clearVirtualJoystickState } from './ControlSettings';
 
 const transitioningScenes = new WeakSet<Phaser.Scene>();
