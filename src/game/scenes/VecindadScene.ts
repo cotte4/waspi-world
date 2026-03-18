@@ -36,30 +36,6 @@ type ParcelVisual = {
   structure: Phaser.GameObjects.Graphics;
 };
 
-type MaterialNode = {
-  id: string;
-  x: number;
-  y: number;
-  value: number;
-  available: boolean;
-  respawnAt: number;
-  crate: Phaser.GameObjects.Rectangle;
-  band: Phaser.GameObjects.Rectangle;
-  label: Phaser.GameObjects.Text;
-};
-
-type ForestMob = {
-  id: string;
-  x: number;
-  y: number;
-  homeX: number;
-  homeY: number;
-  targetX: number;
-  targetY: number;
-  speed: number;
-  body: Phaser.GameObjects.Ellipse;
-  label: Phaser.GameObjects.Text;
-};
 
 type VecindadSceneData = {
   returnX?: number;
@@ -103,14 +79,6 @@ const FARM_SEEDS: Array<{
 export class VecindadScene extends Phaser.Scene {
   private static readonly MOVE_SPEED = 145;
   private static readonly SPRINT_MULTIPLIER = 1.55;
-  private static readonly FOREST_BOUNDS = {
-    x: 140,
-    y: 128,
-    w: 2520,
-    h: 360,
-  } as const;
-  private static readonly FOREST_MOB_AGGRO_RANGE = 220;
-  private static readonly FOREST_MOB_BLOCK_RADIUS = 92;
   private static readonly FISHING_SPOT = { x: 2440, y: 1540, range: 80 };
   private player!: AvatarRenderer;
   private room?: InteriorRoom;
@@ -143,9 +111,6 @@ export class VecindadScene extends Phaser.Scene {
   };
   private sharedParcels = new Map<string, SharedParcelState>();
   private parcelVisuals = new Map<string, ParcelVisual>();
-  private materialNodes: MaterialNode[] = [];
-  private forestMobs: ForestMob[] = [];
-  private lastForestHitAt = 0;
   private promptText?: Phaser.GameObjects.Text;
   private hudText?: Phaser.GameObjects.Text;
   private farmHintText?: Phaser.GameObjects.Text;
@@ -193,8 +158,6 @@ export class VecindadScene extends Phaser.Scene {
     this.loadVecindadState();
 
     this.drawDistrict();
-    this.setupMaterialNodes();
-    this.setupForestMobs();
     this.drawParcels();
     this.createPlayer();
     this.setupUi();
@@ -247,8 +210,6 @@ export class VecindadScene extends Phaser.Scene {
     }
     this.handleMovement(delta);
     this.room?.update();
-    this.updateForestMobs(delta);
-    this.updateMaterialNodes();
     this.updatePrompt();
     this.checkForestEntry();
 
@@ -282,13 +243,6 @@ export class VecindadScene extends Phaser.Scene {
 
     g.fillStyle(0x0a130a, 0.8);
     g.fillRect(0, 0, VECINDAD_MAP.WIDTH, 180);
-
-    const forest = VecindadScene.FOREST_BOUNDS;
-    g.fillStyle(0x0f2a11, 0.98);
-    g.fillRoundedRect(forest.x, forest.y, forest.w, forest.h, 36);
-    g.lineStyle(4, 0x315a2f, 0.88);
-    g.strokeRoundedRect(forest.x, forest.y, forest.w, forest.h, 36);
-    this.drawForestCanopy(g, forest.x, forest.y, forest.w, forest.h);
 
     g.fillStyle(0x203318, 0.95);
     g.fillRoundedRect(1040, 430, 720, 76, 24);
@@ -367,33 +321,30 @@ export class VecindadScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 3,
     }).setOrigin(0.5);
-    this.add.text(VECINDAD_MAP.WIDTH / 2, 165, 'BOSQUE NORTE = RECOLECCION DE MATERIALES', {
-      fontSize: '7px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#8DE17A',
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5);
+    // Portal gate al bosque (reemplaza el forest strip embebido)
+    const portalG = this.add.graphics().setDepth(1);
+    portalG.fillStyle(0x0f2a11, 0.9);
+    portalG.fillRoundedRect(1300, 60, 200, 80, 12);
+    portalG.lineStyle(2, 0xF5C842, 0.8);
+    portalG.strokeRoundedRect(1300, 60, 200, 80, 12);
+    portalG.fillStyle(0xF5C842, 0.08);
+    portalG.fillRect(1302, 62, 196, 76);
 
-    // Forest entry portal gate (north-centre of forest strip)
-    g.fillStyle(0x0f2a11, 1);
-    g.fillRoundedRect(1350, 128, 100, 28, 6);
-    g.lineStyle(2, 0xf5c842, 0.7);
-    g.strokeRoundedRect(1350, 128, 100, 28, 6);
-    g.fillStyle(0xf5c842, 0.15);
-    g.fillRect(1352, 130, 96, 24);
-    this.add.text(1400, 142, '▲ BOSQUE', {
-      fontSize: '5px',
+    this.add.text(1400, 90, '▲ BOSQUE', {
+      fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842',
       stroke: '#000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+
+    this.add.text(1400, 118, 'ENTRAR AL BOSQUE DE MATERIALES', {
+      fontSize: '5px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#8DE17A',
+      stroke: '#000',
       strokeThickness: 2,
     }).setOrigin(0.5).setDepth(2);
-    this.add.text(VECINDAD_MAP.WIDTH / 2, 194, 'SUBI POR EL CAMINO CENTRAL Y LEVANTA CACHES', {
-      fontSize: '6px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#B6C19C',
-    }).setOrigin(0.5);
 
     g.fillStyle(0x132113, 0.95);
     g.fillRoundedRect(1200, 820, 400, 116, 14);
@@ -411,44 +362,6 @@ export class VecindadScene extends Phaser.Scene {
       fontFamily: '"Press Start 2P", monospace',
       color: '#C9D8B7',
     }).setOrigin(0.5);
-  }
-
-  private drawForestCanopy(
-    g: Phaser.GameObjects.Graphics,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-  ) {
-    g.lineStyle(1, 0x1f3f1f, 0.35);
-    for (let gy = y + 24; gy <= y + h - 24; gy += 26) {
-      g.lineBetween(x + 24, gy, x + w - 24, gy);
-    }
-    for (let gx = x + 24; gx <= x + w - 24; gx += 28) {
-      g.lineBetween(gx, y + 24, gx, y + h - 24);
-    }
-
-    const trees = [
-      { x: 320, y: 220, r: 28 },
-      { x: 520, y: 300, r: 30 },
-      { x: 760, y: 210, r: 34 },
-      { x: 970, y: 315, r: 30 },
-      { x: 1250, y: 240, r: 32 },
-      { x: 1520, y: 300, r: 30 },
-      { x: 1770, y: 220, r: 32 },
-      { x: 2010, y: 310, r: 30 },
-      { x: 2260, y: 230, r: 30 },
-      { x: 2470, y: 300, r: 28 },
-    ];
-
-    trees.forEach((tree) => {
-      g.fillStyle(0x5e3f22, 0.95);
-      g.fillRoundedRect(tree.x - 6, tree.y + 18, 12, 26, 4);
-      g.fillStyle(0x2c5a2e, 0.95);
-      g.fillCircle(tree.x, tree.y, tree.r);
-      g.fillStyle(0x3a7d3e, 0.35);
-      g.fillCircle(tree.x - 6, tree.y - 6, Math.max(12, tree.r * 0.58));
-    });
   }
 
   private drawDistrictLights(g: Phaser.GameObjects.Graphics) {
@@ -873,132 +786,6 @@ export class VecindadScene extends Phaser.Scene {
     }
   }
 
-  private setupMaterialNodes() {
-    const defs = [
-      { x: 360, y: 250, value: 3 },
-      { x: 590, y: 328, value: 4 },
-      { x: 860, y: 245, value: 3 },
-      { x: 1150, y: 320, value: 5 },
-      { x: 1450, y: 252, value: 3 },
-      { x: 1730, y: 326, value: 4 },
-      { x: 2030, y: 255, value: 3 },
-      { x: 2320, y: 320, value: 5 },
-    ];
-
-    defs.forEach((def, index) => {
-      const crate = this.add.rectangle(def.x, def.y, 38, 28, 0x8b5a2b, 1)
-        .setStrokeStyle(2, 0x3c2412, 1)
-        .setDepth(2.6);
-      const band = this.add.rectangle(def.x, def.y, 42, 6, 0xf5c842, 0.8).setDepth(2.7);
-      const label = this.add.text(def.x, def.y - 26, `+${def.value}`, {
-        fontSize: '6px',
-        fontFamily: '"Press Start 2P", monospace',
-        color: '#8DE17A',
-        stroke: '#000000',
-        strokeThickness: 2,
-      }).setOrigin(0.5).setDepth(2.8);
-
-      this.materialNodes.push({
-        id: `cache_${index + 1}`,
-        x: def.x,
-        y: def.y,
-        value: def.value,
-        available: true,
-        respawnAt: 0,
-        crate,
-        band,
-        label,
-      });
-    });
-  }
-
-  private setupForestMobs() {
-    if (this.forestMobs.length) return;
-    const defs = [
-      { x: 460, y: 210, speed: 48 },
-      { x: 760, y: 338, speed: 52 },
-      { x: 1100, y: 220, speed: 50 },
-      { x: 1460, y: 332, speed: 54 },
-      { x: 1820, y: 214, speed: 49 },
-      { x: 2210, y: 336, speed: 53 },
-    ];
-
-    defs.forEach((def, index) => {
-      const body = this.add.ellipse(def.x, def.y, 26, 18, 0x8d1f2d, 0.95)
-        .setStrokeStyle(2, 0x2b0c12, 0.95)
-        .setDepth(3.1);
-      const label = this.add.text(def.x, def.y - 20, 'MOB', {
-        fontSize: '6px',
-        fontFamily: '"Press Start 2P", monospace',
-        color: '#FF8D8D',
-        stroke: '#000000',
-        strokeThickness: 2,
-      }).setOrigin(0.5).setDepth(3.2);
-      this.forestMobs.push({
-        id: `forest_mob_${index + 1}`,
-        x: def.x,
-        y: def.y,
-        homeX: def.x,
-        homeY: def.y,
-        targetX: def.x,
-        targetY: def.y,
-        speed: def.speed,
-        body,
-        label,
-      });
-    });
-  }
-
-  private updateForestMobs(delta: number) {
-    const forest = VecindadScene.FOREST_BOUNDS;
-    const now = this.time.now;
-    const dt = Math.max(0.001, delta / 1000);
-
-    for (const mob of this.forestMobs) {
-      const distToPlayer = Phaser.Math.Distance.Between(mob.x, mob.y, this.px, this.py);
-      if (distToPlayer <= VecindadScene.FOREST_MOB_AGGRO_RANGE) {
-        mob.targetX = this.px;
-        mob.targetY = this.py;
-      } else if (Phaser.Math.Distance.Between(mob.x, mob.y, mob.targetX, mob.targetY) < 18) {
-        mob.targetX = Phaser.Math.Clamp(mob.homeX + Phaser.Math.Between(-120, 120), forest.x + 24, forest.x + forest.w - 24);
-        mob.targetY = Phaser.Math.Clamp(mob.homeY + Phaser.Math.Between(-92, 92), forest.y + 24, forest.y + forest.h - 24);
-      }
-
-      const angle = Phaser.Math.Angle.Between(mob.x, mob.y, mob.targetX, mob.targetY);
-      mob.x = Phaser.Math.Clamp(mob.x + Math.cos(angle) * mob.speed * dt, forest.x + 18, forest.x + forest.w - 18);
-      mob.y = Phaser.Math.Clamp(mob.y + Math.sin(angle) * mob.speed * dt, forest.y + 18, forest.y + forest.h - 18);
-
-      mob.body.setPosition(mob.x, mob.y);
-      mob.body.setDepth(3 + Math.floor(mob.y / 400));
-      mob.label.setPosition(mob.x, mob.y - 20);
-
-      if (distToPlayer < 26 && now - this.lastForestHitAt > 1200) {
-        this.lastForestHitAt = now;
-        const knockAngle = Phaser.Math.Angle.Between(mob.x, mob.y, this.px, this.py);
-        this.px = Phaser.Math.Clamp(this.px + Math.cos(knockAngle) * 40, 84, VECINDAD_MAP.WIDTH - 84);
-        this.py = Phaser.Math.Clamp(this.py + Math.sin(knockAngle) * 40, 84, VECINDAD_MAP.HEIGHT - 84);
-        this.player.setPosition(this.px, this.py);
-        this.player.setDepth(50 + Math.floor(this.py / 10));
-
-        const lost = Math.min(2, this.vecindadState.materials);
-        if (lost > 0) {
-          const nextState: VecindadState = {
-            ...this.vecindadState,
-            materials: this.vecindadState.materials - lost,
-          };
-          this.vecindadState = nextState;
-          this.refreshParcelVisuals();
-          eventBus.emit(EVENTS.VECINDAD_UPDATE_REQUEST, {
-            vecindad: nextState,
-            notice: `Un mob te golpeo: -${lost} materiales`,
-          });
-        } else {
-          eventBus.emit(EVENTS.UI_NOTICE, { msg: 'Un mob te golpeo en el bosque.', color: '#FF8D8D' });
-        }
-      }
-    }
-  }
-
   private renderHud() {
     if (!this.hudText) return;
     const stage = normalizeVecindadBuildStage(this.vecindadState.buildStage);
@@ -1040,51 +827,12 @@ export class VecindadScene extends Phaser.Scene {
     ]);
   }
 
-  private updateMaterialNodes() {
-    const now = this.time.now;
-    for (const node of this.materialNodes) {
-      if (node.available || now < node.respawnAt) continue;
-      node.available = true;
-      node.crate.setVisible(true);
-      node.band.setVisible(true);
-      node.label.setVisible(true);
-      eventBus.emit(EVENTS.UI_NOTICE, {
-        msg: `+${node.value} materiales disponibles en Bosque Norte`,
-        color: '#46B3FF',
-      });
-    }
-  }
-
-  private getNearbyMaterialNode() {
-    return this.materialNodes.find((node) =>
-      node.available && Phaser.Math.Distance.Between(this.px, this.py, node.x, node.y) < 56
-    );
-  }
-
-  private isNodeContested(node: MaterialNode) {
-    return this.forestMobs.some((mob) =>
-      Phaser.Math.Distance.Between(mob.x, mob.y, node.x, node.y) < VecindadScene.FOREST_MOB_BLOCK_RADIUS
-    );
-  }
-
   private updatePrompt() {
     if (!this.promptText) return;
 
     if (this.isNearExitGate()) {
       this.promptText.setText('SPACE VOLVER A PLAZA');
       this.promptText.setColor('#F5C842');
-      return;
-    }
-
-    const material = this.getNearbyMaterialNode();
-    if (material) {
-      if (this.isNodeContested(material)) {
-        this.promptText.setText('MOBS CERCA: ALEJALOS PARA RECOGER');
-        this.promptText.setColor('#FF8D8D');
-      } else {
-        this.promptText.setText(`E RECOGER CACHE DEL BOSQUE +${material.value} MATS`);
-        this.promptText.setColor('#B9FF9E');
-      }
       return;
     }
 
@@ -1163,16 +911,6 @@ export class VecindadScene extends Phaser.Scene {
 
     if (this.isNearOwnedFarmSpot()) {
       this.handleFarmPrimaryAction();
-      return;
-    }
-
-    const material = this.getNearbyMaterialNode();
-    if (material) {
-      if (this.isNodeContested(material)) {
-        eventBus.emit(EVENTS.UI_NOTICE, { msg: 'Hay mobs vigilando ese cache.', color: '#FF8D8D' });
-        return;
-      }
-      this.collectMaterial(material);
       return;
     }
 
@@ -1639,26 +1377,6 @@ export class VecindadScene extends Phaser.Scene {
         if (sys.getLevel('weed') >= 5) void getMasterySystem().earnMp('weed');
       }
     })();
-  }
-
-  private collectMaterial(node: MaterialNode) {
-    node.available = false;
-    // Slight respawn variance keeps routes dynamic and avoids robotic loops.
-    node.respawnAt = this.time.now + Phaser.Math.Between(18000, 26000);
-    node.crate.setVisible(false);
-    node.band.setVisible(false);
-    node.label.setVisible(false);
-
-    const nextState: VecindadState = {
-      ...this.vecindadState,
-      materials: this.vecindadState.materials + node.value,
-    };
-    this.vecindadState = nextState;
-    this.refreshParcelVisuals();
-    eventBus.emit(EVENTS.VECINDAD_UPDATE_REQUEST, {
-      vecindad: nextState,
-      notice: `Cache del bosque +${node.value} materiales`,
-    });
   }
 
   private buildOwnedParcel() {
