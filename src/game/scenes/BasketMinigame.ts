@@ -383,11 +383,15 @@ export class BasketMinigame extends Phaser.Scene {
   }
 
   /**
-   * Evaluates the shot outcome based on where the arc actually points vs the hoop.
-   * - Direct make ("de chas"): arc endpoint within ±20px of rim center
-   * - Bank shot: arc overshoots toward backboard (20–54px right of rim)
-   * - Rim: near miss on either side
-   * - Miss: everything else
+   * Fully deterministic shot evaluation — same inputs always produce the same outcome.
+   * Outcome depends entirely on where the arc points relative to the rim at shoot time.
+   *
+   *  dist = targetX - rimX  (positive = toward backboard)
+   *  |dist| ≤ 20            → direct make ("de chas")
+   *  dist  20–38            → bank make (sweet board zone)
+   *  dist  38–54            → rim off board (too much overshoot)
+   *  dist -20 to -30        → rim (undershoot)
+   *  everything else        → miss
    */
   private evaluateShot(): { isMake: boolean; isRim: boolean; isBankShot: boolean } {
     const center = this.getSweetSpotCenter();
@@ -396,20 +400,23 @@ export class BasketMinigame extends Phaser.Scene {
     const targetX = Phaser.Math.Clamp(rimX + xError, rimX - 60, rimX + 60);
     const dist = targetX - rimX; // signed: positive = toward backboard
 
-    // Direct make — ball drops through the hoop
+    // Direct make — arc lands through the hoop center
     if (Math.abs(dist) <= 20) {
       return { isMake: true, isRim: false, isBankShot: false };
     }
 
-    // Bank shot — overshoot toward backboard
-    if (dist > 20 && dist <= 54) {
-      const closeness = 1 - (dist - 20) / 34; // 1.0 at dist=20, 0.0 at dist=54
-      const bankIn = Math.random() < closeness * 0.7;
-      return { isMake: bankIn, isRim: !bankIn, isBankShot: true };
+    // Bank make — slight overshoot into the board sweet zone
+    if (dist > 20 && dist <= 38) {
+      return { isMake: true, isRim: false, isBankShot: true };
     }
 
-    // Rim — near miss on either side
-    if (Math.abs(dist) <= 30) {
+    // Rim off board — too much overshoot
+    if (dist > 38 && dist <= 54) {
+      return { isMake: false, isRim: true, isBankShot: true };
+    }
+
+    // Rim — undershoot (near miss left side)
+    if (dist < -20 && dist >= -30) {
       return { isMake: false, isRim: true, isBankShot: false };
     }
 
