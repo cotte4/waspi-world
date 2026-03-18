@@ -29,7 +29,7 @@ import {
 import { announceScene, bindSafeResetToPlaza } from '../systems/SceneUi';
 import { SceneControls } from '../systems/SceneControls';
 import { getVoiceChat, destroyVoiceChat } from '../systems/voiceChatInstance';
-import { recordDistanceDelta, recordNpcTalk } from '../systems/StatsSystem';
+import { recordDistanceDelta, recordNpcTalk, initStatsSystem, teardownStatsSystem } from '../systems/StatsSystem';
 import type { VecindadState } from '../../lib/playerState';
 import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
 import { EnemySprite, registerZombieAnims, type ZombieType } from '../systems/EnemySprite';
@@ -662,6 +662,14 @@ export class WorldScene extends Phaser.Scene {
 
     // Init TENKS balance (local-only for ahora)
     initTenks(5000);
+
+    // Init stats system with authenticated user ID (fire-and-forget)
+    if (supabase && isConfigured) {
+      void supabase.auth.getSession().then(({ data }) => {
+        const uid = data.session?.user?.id;
+        if (uid) void initStatsSystem(uid);
+      });
+    }
 
     // Draw world layers
     this.drawBackground();
@@ -5227,6 +5235,13 @@ export class WorldScene extends Phaser.Scene {
     }
     if (next.action) {
       this.playAvatarAction(rp.avatar, next.action);
+      // If remote player died and we hit them recently → count as PvP kill
+      if (next.action === 'death') {
+        const lastHitTime = this.remoteHitTimes.get(next.player_id) ?? 0;
+        if (this.time.now - lastHitTime < 3000) {
+          eventBus.emit(EVENTS.STATS_PVP_RESULT, { won: true });
+        }
+      }
     }
 
     if (next.avatar) {
@@ -6069,10 +6084,8 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
-    // Flush any pending stat changes before leaving the scene
-    import('../systems/StatsSystem').then(({ flushStatsSystem }) => {
-      void flushStatsSystem();
-    }).catch(() => {});
+    // Flush + teardown stats system on scene exit
+    teardownStatsSystem();
 
     if (this.worldPointerShootHandler) {
       this.input.off('pointerdown', this.worldPointerShootHandler);

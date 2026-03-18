@@ -18,6 +18,7 @@ import { startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { getInventory } from '../systems/InventorySystem';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
+import { recordDistanceDelta } from '../systems/StatsSystem';
 import { supabase, isConfigured } from '../../lib/supabase';
 import {
   ZOMBIES_PLAYER,
@@ -1330,7 +1331,13 @@ export class ZombiesScene extends Phaser.Scene {
     const speed = ZOMBIES_PLAYER.speed * (this.reloadEndsAt > this.time.now ? 0.78 : 1);
     const nextX = this.px + dx * speed * this.game.loop.delta / 1000;
     const nextY = this.py + dy * speed * this.game.loop.delta / 1000;
+    const prevX = this.px;
+    const prevY = this.py;
     const moved = this.tryMovePlayer(nextX, nextY);
+    if (moved) {
+      const dist = Math.hypot(this.px - prevX, this.py - prevY);
+      if (dist > 0.5) recordDistanceDelta(dist);
+    }
     this.lastIsMoving = moved;
     this.lastMoveDx = moved ? dx : 0;
     this.lastMoveDy = moved ? dy : 0;
@@ -2250,6 +2257,7 @@ export class ZombiesScene extends Phaser.Scene {
     }
     const killReward = zombie.killReward * pointMultiplier;
     this.points += killReward;
+    eventBus.emit(EVENTS.STATS_ZOMBIE_KILL);
     if (zombie.shadow?.scene && zombie.shadow.active !== false) {
       zombie.shadow.setAlpha(0.18);
     }
@@ -2303,6 +2311,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.lastIsMoving = false;
     this.lastMoveDx = 0;
     this.player.playDeath();
+    eventBus.emit(EVENTS.STATS_PVP_RESULT, { won: false }); // reuse death event for zombie death
     this.showNotice('GAME OVER - SPACE REINICIAR', '#FF6A6A');
   }
 
