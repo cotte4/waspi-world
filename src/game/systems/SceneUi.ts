@@ -106,19 +106,28 @@ export function transitionToScene(
   lastTransitionTime = now;
   if (transitioningScenes.has(scene)) return;
   transitioningScenes.add(scene);
+
   const camera = scene.cameras.main;
   let finished = false;
+
+  // Hard fallback via window.setTimeout — fires even if Phaser scene loop pauses/stops.
+  // This is the key guard against permanent freeze: if FADE_OUT_COMPLETE never fires,
+  // this guarantees the transition completes within duration + 300ms.
+  const hardTimeout = window.setTimeout(() => finalize(), duration + 300);
+
   const finalize = () => {
     if (finished) return;
     finished = true;
+    window.clearTimeout(hardTimeout);
     transitioningScenes.delete(scene);
+    try { camera.resetFX(); camera.setAlpha(1); } catch { /* scene may already be gone */ }
     try {
-      if (!scene.scene || scene.sys?.isActive?.() === false) return;
-      camera.resetFX();
-      camera.setAlpha(1);
       scene.scene.start(targetKey, data);
     } catch (error) {
       console.error(`[Waspi] Failed to transition to ${targetKey}.`, error);
+      // Last resort: re-enable input so the player is never permanently stuck
+      try { scene.input.enabled = true; } catch { /* ignore */ }
+      try { if (scene.input.keyboard) scene.input.keyboard.enabled = true; } catch { /* ignore */ }
     }
   };
 
@@ -131,9 +140,10 @@ export function transitionToScene(
   camera.setAlpha(1);
   camera.fadeOut(duration, 0, 0, 0);
   camera.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, finalize);
-  safeSceneDelayedCall(scene, duration + 100, finalize, `transition fallback:${targetKey}`);
+
   scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
     transitioningScenes.delete(scene);
+    window.clearTimeout(hardTimeout);
   });
 }
 
