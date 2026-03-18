@@ -96,14 +96,14 @@ export function transitionToScene(
   targetKey: string,
   data: Record<string, unknown> = {},
   duration = 250,
-) {
+): boolean {
   const now = Date.now();
   if (now - lastTransitionTime < TRANSITION_THROTTLE_MS) {
     console.warn('[Waspi] transitionToScene throttled');
-    return;
+    return false;
   }
   lastTransitionTime = now;
-  if (transitioningScenes.has(scene)) return;
+  if (transitioningScenes.has(scene)) return false;
   transitioningScenes.add(scene);
 
   const camera = scene.cameras.main;
@@ -144,6 +144,8 @@ export function transitionToScene(
     transitioningScenes.delete(scene);
     window.clearTimeout(hardTimeout);
   });
+
+  return true;
 }
 
 /**

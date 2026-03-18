@@ -1024,11 +1024,11 @@ export class ZombiesScene extends Phaser.Scene {
 
     // ─── 2. SECTION DIVIDER COLLIDERS ─────────────────────────────────────────
     // START → YARD divider (x=685), door gap y=590-700
-    this.addWallCollider(685, 420, 25, 170);   // above door
+    this.addWallCollider(685, 138, 25, 452);   // above door (extends from top wall down to door)
     this.addWallCollider(685, 700, 25, 240);   // below door
 
     // YARD → WORKSHOP divider (x=1110), door gap y=560-670
-    this.addWallCollider(1110, 380, 20, 180);  // above door
+    this.addWallCollider(1110, 138, 20, 422);  // above door (extends from top wall down to door)
     this.addWallCollider(1110, 670, 20, 100);  // below door
 
     // STREET horizontal divider (y=770), door gap x=880-1000

@@ -24,7 +24,7 @@ const CAVE_INTERACT_RANGE = 110;
 const ENTRY_X = 800;
 const ENTRY_Y = 1080;
 const RETURN_VECINDAD_X = 1400;
-const RETURN_VECINDAD_Y = 200;
+const RETURN_VECINDAD_Y = 400;  // far enough south so player doesn't re-trigger forest portal (trigger at py<155)
 
 // ─── Tree layout (trunk center x/y, canopy radius) ────────────────────────────
 const TREES: Array<{ x: number; y: number; r: number }> = [
@@ -706,16 +706,16 @@ export class BosqueMaterialesScene extends Phaser.Scene {
         // Track for contracts
         void getContractSystem().trackAction('node_collect', 'mining', qr.quality);
 
-        // Quality feedback
-        this.showPrompt(`+1 MATERIAL [${qr.label}]`);
+        // XP: base + quality bonus + minigame bonus × event multiplier
+        const eventMult = getEventSystem().getXpMultiplier('mining');
+        const xpTotal = Math.round((10 + qr.xp_bonus + minigameBonus) * eventMult);
+
+        // Quality + XP feedback together so player sees the difference
+        this.showPrompt(`+1 MATERIAL [${qr.label}]  +${xpTotal} XP`);
         if (this.hudText) {
           this.hudText.setText(`MATS: ${this.collectedTotal}`).setColor(qr.color);
           this.time.delayedCall(1600, () => this.hudText?.setColor('#B9FF9E'));
         }
-
-        // XP: base + quality bonus + minigame bonus × event multiplier
-        const eventMult = getEventSystem().getXpMultiplier('mining');
-        const xpTotal = Math.round((10 + qr.xp_bonus + minigameBonus) * eventMult);
         const xpResult = await sys.addXp('mining', xpTotal, 'node_collect');
         if (xpResult.leveled_up) {
           eventBus.emit(EVENTS.UI_NOTICE, { message: `⛏️ MINERÍA LVL ${xpResult.new_level}!`, color: '#F5C842' });
@@ -771,11 +771,13 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   private leaveToVecindad() {
     if (this.inTransition) return;
     this.inTransition = true;
-    transitionToScene(this, 'VecindadScene', {
+    const started = transitionToScene(this, 'VecindadScene', {
       returnX: RETURN_VECINDAD_X,
       returnY: RETURN_VECINDAD_Y,
       materialsCollected: this.collectedTotal,
     });
+    // If throttled, reset so the player can retry rather than freezing forever
+    if (!started) this.inTransition = false;
   }
 
   // ─── Shutdown ─────────────────────────────────────────────────────────────
