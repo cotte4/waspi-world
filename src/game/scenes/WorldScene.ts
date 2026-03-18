@@ -38,6 +38,7 @@ import { SkillShopPanel } from '../systems/SkillShopPanel';
 import { getSkillSystem } from '../systems/SkillSystem';
 import { ContractPanel } from '../systems/ContractPanel';
 import { GuildPanel } from '../systems/GuildPanel';
+import { MasteryPanel } from '../systems/MasteryPanel';
 
 interface RemotePlayer {
   avatar: AvatarRenderer;
@@ -454,10 +455,12 @@ export class WorldScene extends Phaser.Scene {
   private skillShopPanel?: SkillShopPanel;
   private contractPanel?: ContractPanel;
   private guildPanel?: GuildPanel;
+  private masteryPanel?: MasteryPanel;
   private keyT?: Phaser.Input.Keyboard.Key;
   private keyY?: Phaser.Input.Keyboard.Key;
   private keyC?: Phaser.Input.Keyboard.Key;
   private keyG?: Phaser.Input.Keyboard.Key;
+  private keyM?: Phaser.Input.Keyboard.Key;
   private bullets!: Phaser.Physics.Arcade.Group;
   private enemyBullets!: Phaser.Physics.Arcade.Group;
   private playerHitbox!: HitboxArc;
@@ -801,10 +804,12 @@ export class WorldScene extends Phaser.Scene {
     this.skillShopPanel = new SkillShopPanel(this);
     this.contractPanel  = new ContractPanel(this);
     this.guildPanel     = new GuildPanel(this);
+    this.masteryPanel   = new MasteryPanel(this);
     this.keyT = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.T);
     this.keyY = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Y);
     this.keyC = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.C);
     this.keyG = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.G);
+    this.keyM = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.M);
 
     // Scene music
     this.sceneMusic = startSceneMusic(this, 'world_ambient', 0.35);
@@ -5653,6 +5658,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.keyY && Phaser.Input.Keyboard.JustDown(this.keyY)) { this.skillShopPanel?.toggle(); }
     if (this.keyC && Phaser.Input.Keyboard.JustDown(this.keyC)) { this.contractPanel?.toggle(); }
     if (this.keyG && Phaser.Input.Keyboard.JustDown(this.keyG)) { this.guildPanel?.toggle(); }
+    if (this.keyM && Phaser.Input.Keyboard.JustDown(this.keyM)) { this.masteryPanel?.toggle(); }
 
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyQ))     { this.switchWeapon(); }
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyOne))   { this.switchWeapon('pistol'); }

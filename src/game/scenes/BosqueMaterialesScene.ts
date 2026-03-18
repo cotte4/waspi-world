@@ -7,6 +7,7 @@ import { SAFE_PLAZA_RETURN } from '../config/constants';
 import { getSkillSystem } from '../systems/SkillSystem';
 import { getContractSystem } from '../systems/ContractSystem';
 import { MiningMinigame } from '../systems/MiningMinigame';
+import { getMasterySystem } from '../systems/MasterySystem';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const W = 1600;
@@ -698,8 +699,11 @@ export class BosqueMaterialesScene extends Phaser.Scene {
       const xpResult = await sys.addXp('mining', xpTotal, 'node_collect');
       if (xpResult.leveled_up) {
         eventBus.emit(EVENTS.UI_NOTICE, { message: `⛏️ MINERÍA LVL ${xpResult.new_level}!`, color: '#F5C842' });
-        // Refresh auto HUD after level up
         this.autoHud?.setVisible(sys.getLevel('mining') >= 4);
+      }
+      // Earn mastery MP if at Lv5
+      if (sys.getLevel('mining') >= 5) {
+        void getMasterySystem().earnMp('mining');
       }
 
       // Legendary flash

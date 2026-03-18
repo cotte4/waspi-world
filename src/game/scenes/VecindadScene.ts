@@ -25,6 +25,7 @@ import { getSkillSystem } from '../systems/SkillSystem';
 import { getContractSystem } from '../systems/ContractSystem';
 import { ContractPanel } from '../systems/ContractPanel';
 import { FishingMinigame } from '../systems/FishingMinigame';
+import { getMasterySystem } from '../systems/MasterySystem';
 
 type ParcelVisual = {
   title: Phaser.GameObjects.Text;
@@ -1404,6 +1405,9 @@ export class VecindadScene extends Phaser.Scene {
     if (xpResult.leveled_up) {
       eventBus.emit(EVENTS.UI_NOTICE, { message: `🎣 PESCA LVL ${xpResult.new_level}!`, color: '#4A9ECC' });
     }
+    if (sys.getLevel('fishing') >= 5) {
+      void getMasterySystem().earnMp('fishing');
+    }
 
     if (qr.quality === 'legendary') {
       this.cameras.main.flash(400, 74, 159, 204, false);
@@ -1608,12 +1612,14 @@ export class VecindadScene extends Phaser.Scene {
       if (gardenResult.leveled_up) {
         eventBus.emit(EVENTS.UI_NOTICE, { message: `🌿 JARDINERÍA LVL ${gardenResult.new_level}!`, color: '#39FF14' });
       }
+      if (sys.getLevel('gardening') >= 5) void getMasterySystem().earnMp('gardening');
 
       if (isWeed) {
         const weedResult = await sys.addXp('weed', xpTotal, 'farm_harvest');
         if (weedResult.leveled_up) {
           eventBus.emit(EVENTS.UI_NOTICE, { message: `🌿 WEED LVL ${weedResult.new_level}!`, color: '#39FF14' });
         }
+        if (sys.getLevel('weed') >= 5) void getMasterySystem().earnMp('weed');
       }
     })();
   }
