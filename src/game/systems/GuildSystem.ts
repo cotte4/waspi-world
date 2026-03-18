@@ -5,6 +5,7 @@
 
 import type { GuildId, GuildRank } from '../config/guilds';
 import { GUILD_RANK_ORDER, RANK_THRESHOLDS } from '../config/guilds';
+import { getAuthHeaders } from './authHelper';
 
 // Re-export for convenience
 export type { GuildId, GuildRank };
@@ -46,7 +47,8 @@ class GuildSystem {
 
   async loadGuilds(): Promise<void> {
     try {
-      const res = await fetch('/api/guilds');
+      const authH = await getAuthHeaders();
+      const res = await fetch('/api/guilds', { headers: authH });
       if (!res.ok) return;
       const data = await res.json() as { guilds?: GuildWithRep[] };
       if (Array.isArray(data.guilds)) {
@@ -116,9 +118,10 @@ class GuildSystem {
     guildId: GuildId,
   ): Promise<{ success: boolean; notice?: string; error?: string }> {
     try {
+      const authH = await getAuthHeaders();
       const res = await fetch('/api/guilds/join', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authH },
         body: JSON.stringify({ guild_id: guildId }),
       });
       const data = await res.json() as { notice?: string; error?: string };
@@ -144,9 +147,10 @@ class GuildSystem {
     amount: number,
   ): Promise<{ rank_up: boolean; new_rank: GuildRank }> {
     try {
+      const authH = await getAuthHeaders();
       const res = await fetch('/api/guilds/rep', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authH },
         body: JSON.stringify({ guild_id: guildId, action, amount }),
       });
       if (!res.ok) return { rank_up: false, new_rank: this.getRank(guildId) };

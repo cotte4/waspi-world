@@ -5,6 +5,7 @@
 
 import type { SkillId } from './SkillSystem';
 import { MASTERY_TREES } from '../config/masteryTrees';
+import { getAuthHeaders } from './authHelper';
 
 export type MasteryNodeEffect = {
   stat: string;
@@ -89,7 +90,8 @@ export class MasterySystem {
 
   async loadMastery(): Promise<void> {
     try {
-      const res = await fetch('/api/mastery');
+      const authH = await getAuthHeaders();
+      const res = await fetch('/api/mastery', { headers: authH });
       if (!res.ok) {
         this.applyDefaults();
         return;
@@ -155,9 +157,10 @@ export class MasterySystem {
     this.lastEarnMpAt.set(skillId, now);
 
     try {
+      const authH = await getAuthHeaders();
       const res = await fetch('/api/mastery/earn', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authH },
         body: JSON.stringify({ skill_id: skillId }),
       });
       if (!res.ok) return fallback;
@@ -189,9 +192,10 @@ export class MasterySystem {
     nodeId: string,
   ): Promise<{ success: boolean; new_mp?: number; error?: string }> {
     try {
+      const authH = await getAuthHeaders();
       const res = await fetch('/api/mastery/unlock', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authH },
         body: JSON.stringify({ skill_id: skillId, node_id: nodeId }),
       });
       const data = (await res.json()) as UnlockNodeResponse;

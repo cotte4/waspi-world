@@ -305,9 +305,17 @@ export class SkillShopPanel {
     // Title
     const titleText = this.scene.add.text(
       pcx - PANEL_W / 2 + 20,
-      pcy - PANEL_H / 2 + 22,
+      pcy - PANEL_H / 2 + 16,
       'SKILL SHOP',
       { fontSize: '11px', fontFamily: FONT, color: GOLD_HEX, stroke: '#000', strokeThickness: 3 },
+    ).setOrigin(0, 0.5).setScrollFactor(0);
+
+    // Subtitle
+    const subtitleText = this.scene.add.text(
+      pcx - PANEL_W / 2 + 20,
+      pcy - PANEL_H / 2 + 30,
+      'Comprá items con TENKS para potenciar tus skills',
+      { fontSize: '6px', fontFamily: FONT, color: '#888899' },
     ).setOrigin(0, 0.5).setScrollFactor(0);
 
     // TENKS balance (top right)
@@ -343,7 +351,7 @@ export class SkillShopPanel {
 
     this.container.add([
       dim, panelBg, borderGfx, sepGfx,
-      titleText, tenksIcon, this.balanceText,
+      titleText, subtitleText, tenksIcon, this.balanceText,
       this.noticeText, closeHint,
     ]);
 

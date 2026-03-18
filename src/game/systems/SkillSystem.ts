@@ -6,6 +6,7 @@
 import type { QualityTier } from '../config/qualityTiers';
 import type { SpecId } from '../config/specializations';
 import { SYNERGY_DEFS, type SynergyDef } from '../config/synergies';
+import { getAuthHeaders } from './authHelper';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -165,7 +166,8 @@ export class SkillSystem {
 
   async loadSkills(): Promise<void> {
     try {
-      const res = await fetch('/api/skills');
+      const authH = await getAuthHeaders();
+      const res = await fetch('/api/skills', { headers: authH });
       if (!res.ok) {
         // API returned an error — fall back to defaults silently
         this.applyDefaults();
@@ -216,9 +218,10 @@ export class SkillSystem {
     const fallback = { leveled_up: false, new_level: this.getLevel(skillId) };
 
     try {
+      const authH = await getAuthHeaders();
       const res = await fetch('/api/skills', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authH },
         body: JSON.stringify({ skill_id: skillId, xp_gain: amount, source }),
       });
 
@@ -270,9 +273,10 @@ export class SkillSystem {
     };
 
     try {
+      const authH = await getAuthHeaders();
       const res = await fetch('/api/skills/quality', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authH },
         body: JSON.stringify({ skill_id: skillId, source, is_auto: isAuto }),
       });
       if (!res.ok) return fallback;
@@ -367,7 +371,8 @@ export class SkillSystem {
 
   async loadPurchasedItems(): Promise<void> {
     try {
-      const res = await fetch('/api/skills/purchase');
+      const authH = await getAuthHeaders();
+      const res = await fetch('/api/skills/purchase', { headers: authH });
       if (!res.ok) return;
       const data = await res.json() as { purchased?: string[] };
       if (Array.isArray(data?.purchased)) {
@@ -382,7 +387,8 @@ export class SkillSystem {
 
   async loadSpecs(): Promise<void> {
     try {
-      const res = await fetch('/api/skills/specialize');
+      const authH = await getAuthHeaders();
+      const res = await fetch('/api/skills/specialize', { headers: authH });
       if (!res.ok) return;
       const data = (await res.json()) as { specializations?: SpecRow[] };
       if (!Array.isArray(data?.specializations)) return;
@@ -411,9 +417,10 @@ export class SkillSystem {
     specId: SpecId,
   ): Promise<{ success: boolean; notice?: string; error?: string }> {
     try {
+      const authH = await getAuthHeaders();
       const res = await fetch('/api/skills/specialize', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authH },
         body: JSON.stringify({ skill_id: skillId, spec_id: specId }),
       });
       const data = (await res.json()) as { notice?: string; error?: string; spec_id?: string };
@@ -441,9 +448,10 @@ export class SkillSystem {
 
   async buyItem(itemId: string): Promise<{ success: boolean; notice?: string; error?: string; new_balance?: number }> {
     try {
+      const authH = await getAuthHeaders();
       const res = await fetch('/api/skills/purchase', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authH },
         body: JSON.stringify({ item_id: itemId }),
       });
       const data = await res.json() as { notice?: string; error?: string; new_balance?: number; already_owned?: boolean };

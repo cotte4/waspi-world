@@ -145,6 +145,12 @@ export class ArcadeInterior extends Phaser.Scene {
     announceScene(this);
     showSceneTitle(this, 'ARCADE', 0xFF006E);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
+    // Defensive: reset inTransition if scene is resumed (e.g. after a minigame returns)
+    this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.inTransition = false;
+      this.input.enabled = true;
+      if (this.input.keyboard) this.input.keyboard.enabled = true;
+    });
     bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', {
         returnX: SAFE_PLAZA_RETURN.X,

@@ -5,6 +5,7 @@
 import type { SkillSystem } from './SkillSystem';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { initTenks } from './TenksSystem';
+import { getAuthHeaders } from './authHelper';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -64,7 +65,8 @@ class ContractSystem {
 
   async loadContracts(): Promise<void> {
     try {
-      const res = await fetch('/api/contracts');
+      const authH = await getAuthHeaders();
+      const res = await fetch('/api/contracts', { headers: authH });
       if (!res.ok) return;
       const data = await res.json() as { week_id?: string; contracts?: Contract[] };
       if (Array.isArray(data.contracts)) {
@@ -121,9 +123,10 @@ class ContractSystem {
       if (minQ && !meetsMinQuality(quality, minQ)) continue;
 
       try {
+        const authH = await getAuthHeaders();
         const res = await fetch('/api/contracts/progress', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authH },
           body: JSON.stringify({
             contract_id: contract.id,
             action,
@@ -161,9 +164,10 @@ class ContractSystem {
     contractId: string,
   ): Promise<{ success: boolean; reward_tenks?: number; notice?: string; error?: string }> {
     try {
+      const authH = await getAuthHeaders();
       const res = await fetch('/api/contracts/claim', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authH },
         body: JSON.stringify({ contract_id: contractId }),
       });
       const data = await res.json() as {

@@ -255,12 +255,19 @@ export class SkillTreePanel {
     borderGfx.strokeRoundedRect(cx - PANEL_W / 2, cy - PANEL_H / 2, PANEL_W, PANEL_H, 10);
 
     // Title
-    const titleText = this.scene.add.text(cx, cy - PANEL_H / 2 + 22, 'SKILL TREES', {
+    const titleText = this.scene.add.text(cx, cy - PANEL_H / 2 + 16, 'SKILL TREES', {
       fontSize: '12px',
       fontFamily: FONT,
       color: '#F5C842',
       stroke: '#000000',
       strokeThickness: 3,
+    }).setOrigin(0.5, 0.5).setScrollFactor(0);
+
+    // Subtitle
+    const subtitleText = this.scene.add.text(cx, cy - PANEL_H / 2 + 30, 'Acumulá XP en cada actividad para subir de nivel', {
+      fontSize: '6px',
+      fontFamily: FONT,
+      color: '#888899',
     }).setOrigin(0.5, 0.5).setScrollFactor(0);
 
     // Close hint
@@ -275,7 +282,7 @@ export class SkillTreePanel {
       },
     ).setOrigin(1, 1).setScrollFactor(0);
 
-    this.container.add([overlay, panelBg, borderGfx, titleText, closeHint]);
+    this.container.add([overlay, panelBg, borderGfx, titleText, subtitleText, closeHint]);
 
     // Build the 6 skill cards
     ALL_SKILL_IDS.forEach((skillId, index) => {
