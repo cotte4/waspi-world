@@ -103,6 +103,88 @@ TEE-BLK-01, TEE-WHT-01, TEE-RED-01, CRG-BLK-01, CRG-OLV-01, HOD-GRY-01
 - Shop/economy: todas las transacciones por Route Handlers
 - No mezcles UI React con canvas Phaser logic
 
+---
+
+## Scene Transition — Reglas Anti-Freeze (CRÍTICO)
+
+Este juego tiene historial de freezes donde el jugador no puede salir de una escena.
+**SIEMPRE** seguir estas reglas al implementar transiciones o escenas nuevas.
+
+### Causa raíz documentada
+`scene.input.enabled = false` se setea al iniciar la transición.
+Si `FADE_OUT_COMPLETE` no dispara (race condition con audio tweens, minijuegos, etc.),
+y el fallback usa `scene.time.delayedCall` que chequea `isActive()`,
+**ambos fallan silenciosamente** → input permanece disabled → freeze permanente.
+
+### Regla 1 — SIEMPRE usar `transitionToScene()` de SceneUi.ts
+```ts
+import { transitionToScene } from '../systems/SceneUi';
+transitionToScene(this, 'WorldScene', { returnX, returnY });
+```
+**NUNCA** hacer manualmente `camera.fadeOut() + scene.start()` para salir de una escena.
+Las únicas excepciones aceptadas son transiciones INTERNAS (entrar a minijuego dentro del mismo interior).
+
+### Regla 2 — Todo `create()` debe llamar `announceScene(this)`
+```ts
+create() {
+  this.inTransition = false;
+  this.input.enabled = true;
+  announceScene(this); // re-habilita input y resetea teclado
+  ...
+}
+```
+
+### Regla 3 — `inTransition` debe resetearse en `init()` Y en WAKE
+```ts
+init(data = {}) {
+  this.inTransition = false; // reset al volver de un minijuego
+}
+
+create() {
+  ...
+  // Defensive: cubre el caso de scene.wake() vs scene.start()
+  this.events.on(Phaser.Scenes.Events.WAKE, () => {
+    this.inTransition = false;
+    this.input.enabled = true;
+    if (this.input.keyboard) this.input.keyboard.enabled = true;
+  });
+}
+```
+
+### Regla 4 — Nuevas escenas deben registrar SHUTDOWN cleanup
+```ts
+this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+  // limpiar timers, tweens, listeners externos, supabase channels
+  this.room?.shutdown();
+  this.audioCleanup?.();
+});
+```
+
+### Regla 5 — Sistemas singleton con fetch: siempre incluir auth header
+```ts
+import { getAuthHeaders } from '../systems/authHelper';
+// En cualquier fetch a /api/*:
+const authH = await getAuthHeaders();
+const res = await fetch('/api/...', { headers: authH });
+// Para POST:
+const res = await fetch('/api/...', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', ...authH },
+  body: JSON.stringify(payload),
+});
+```
+Sin el header → 401 Unauthorized silencioso en todos los sistemas (skills, guilds, mastery, contracts).
+
+### Checklist para nueva escena interior
+- [ ] `create()` llama `announceScene(this)` y `this.input.enabled = true`
+- [ ] `init()` setea `this.inTransition = false`
+- [ ] Salida usa `transitionToScene()`, nunca `camera.fadeOut() + scene.start()` manual
+- [ ] WAKE listener resetea `inTransition` y re-habilita input
+- [ ] SHUTDOWN listener limpia todos los recursos (audio, timers, channels)
+- [ ] `bindSafeResetToPlaza()` registrado para casos de emergencia
+
+---
+
 ## Review Checklist (verificar antes de proponer código)
 1. ¿Mantiene TypeScript strict sin `any`?
 2. ¿La lógica Phaser está aislada de React components?
@@ -112,3 +194,5 @@ TEE-BLK-01, TEE-WHT-01, TEE-RED-01, CRG-BLK-01, CRG-OLV-01, HOD-GRY-01
 6. ¿Optimiza para mobile (scale, draw calls, touch)?
 7. ¿Usa asset keys y tipos consistentes?
 8. ¿Evita mezclar UI React con canvas Phaser logic?
+9. ¿Nueva escena interior sigue el checklist anti-freeze?
+10. ¿Nuevos fetch en sistemas singleton incluyen `getAuthHeaders()`?
