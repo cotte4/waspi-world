@@ -2474,6 +2474,8 @@ export class WorldScene extends Phaser.Scene {
 
       // window.setTimeout so cleanup fires even if Phaser scene loop is busy
       window.setTimeout(() => {
+        if (!this.scene?.isActive('WorldScene')) return; // scene may have transitioned
+        if (b.resolvedHit || !b.active) return;           // already hit something
         this.spawnBulletImpact(b.x, b.y, weapon.color);
         this.destroyArcadeObject(b);
       }, bulletLifetime);
