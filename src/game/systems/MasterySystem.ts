@@ -79,6 +79,9 @@ const ALL_SKILL_IDS: SkillId[] = [
 export class MasterySystem {
   private data: Map<SkillId, MasterySkillData> = new Map();
   private loaded = false;
+  // Debounce: track last earnMp call time per skill to avoid rapid-fire MP farming
+  private lastEarnMpAt: Map<SkillId, number> = new Map();
+  private static readonly EARN_MP_DEBOUNCE_MS = 2_000;
 
   // -------------------------------------------------------------------------
   // loadMastery — GET /api/mastery
@@ -142,6 +145,15 @@ export class MasterySystem {
 
   async earnMp(skillId: SkillId): Promise<{ awarded: boolean; new_mp: number }> {
     const fallback = { awarded: false, new_mp: this.getMp(skillId) };
+
+    // Client-side debounce: ignore calls within 2 seconds of the last one for this skill
+    const now = Date.now();
+    const lastAt = this.lastEarnMpAt.get(skillId) ?? 0;
+    if (now - lastAt < MasterySystem.EARN_MP_DEBOUNCE_MS) {
+      return fallback;
+    }
+    this.lastEarnMpAt.set(skillId, now);
+
     try {
       const res = await fetch('/api/mastery/earn', {
         method: 'POST',
@@ -201,17 +213,21 @@ export class MasterySystem {
   }
 
   // -------------------------------------------------------------------------
-  // getMasteryBuffTotal — sums all buff values from unlocked nodes for a stat
-  // 'percent' and 'flat' values are both accumulated numerically.
-  // The caller is responsible for knowing the mode by context.
+  // getMasteryBuffTotal — sums buff values from unlocked nodes for a given
+  // stat AND mode. Callers must specify the mode explicitly to avoid
+  // incorrectly summing flat (+10 HP) and percent (+15%) values together.
   // -------------------------------------------------------------------------
 
-  getMasteryBuffTotal(stat: string): number {
+  getMasteryBuffTotal(stat: string, mode: 'percent' | 'flat'): number {
     let total = 0;
     for (const tree of MASTERY_TREES) {
       const unlocked = this.getUnlocked(tree.skillId);
       for (const node of tree.nodes) {
-        if (unlocked.has(node.id) && node.effect.stat === stat) {
+        if (
+          unlocked.has(node.id) &&
+          node.effect.stat === stat &&
+          node.effect.mode === mode
+        ) {
           total += node.effect.value;
         }
       }

@@ -151,12 +151,13 @@ class GuildSystem {
       });
       if (!res.ok) return { rank_up: false, new_rank: this.getRank(guildId) };
 
-      const data = await res.json() as { rank_up?: boolean; new_rank?: GuildRank };
+      const data = await res.json() as { rank_up?: boolean; new_rank?: GuildRank; new_rep?: number };
 
-      // Update local state optimistically
+      // Update local state with the server-confirmed values (not the raw client amount,
+      // which may have been capped by the server's MAX_REP_PER_CALL guard).
       const guild = this.guilds.find((g) => g.id === guildId);
       if (guild?.player_rep) {
-        guild.player_rep.rep += amount;
+        if (typeof data.new_rep === 'number') guild.player_rep.rep = data.new_rep;
         if (data.new_rank) guild.player_rep.rank = data.new_rank;
       }
 

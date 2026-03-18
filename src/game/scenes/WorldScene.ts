@@ -6042,6 +6042,10 @@ export class WorldScene extends Phaser.Scene {
     this.skillTreePanel = undefined;
     this.contractPanel?.destroy();
     this.contractPanel = undefined;
+    this.masteryPanel?.destroy();
+    this.masteryPanel = undefined;
+    this.eventBanner?.destroy();
+    this.eventBanner = undefined;
     this.bridgeCleanupFns.forEach((cleanup) => cleanup());
     this.bridgeCleanupFns = [];
     this.audioSettingsCleanup?.();

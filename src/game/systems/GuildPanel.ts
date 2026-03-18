@@ -434,17 +434,22 @@ export class GuildPanel {
           getGuildSystem()
             .joinGuild(guildId)
             .then((result) => {
+              // Guard: panel or container may have been destroyed while awaiting
+              if (!this.container || !this.container.scene) return;
               if (result.success) {
                 const msg = result.notice ?? `¡Te uniste a ${guild.name}!`;
                 this.showNotice(msg, GREEN_HEX);
                 this.refresh();
               } else {
+                if (!btnText.active) return;
                 btnText.setText(btnLabel);
                 btnBg.setInteractive({ useHandCursor: true });
                 this.showNotice(result.error ?? 'Error al unirse.', '#FF4444');
               }
             })
             .catch(() => {
+              if (!this.container || !this.container.scene) return;
+              if (!btnText.active) return;
               btnText.setText(btnLabel);
               btnBg.setInteractive({ useHandCursor: true });
               this.showNotice('Error de red.', '#FF4444');

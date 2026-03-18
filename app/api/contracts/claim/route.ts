@@ -49,9 +49,9 @@ interface SkillRow {
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function computeLevel(xp: number): number {
-  let level = 1;
+  let level = 0;
   for (let lv = MAX_LEVEL; lv >= 1; lv--) {
-    if (xp >= XP_THRESHOLDS[lv]) {
+    if (xp >= (XP_THRESHOLDS[lv] ?? Infinity)) {
       level = lv;
       break;
     }

@@ -168,6 +168,7 @@ class ContractSystem {
       });
       const data = await res.json() as {
         reward_tenks?: number;
+        new_balance?: number;
         notice?: string;
         error?: string;
       };
@@ -177,9 +178,10 @@ class ContractSystem {
         const contract = this.contracts.find((c) => c.id === contractId);
         if (contract) contract.reward_claimed = true;
 
-        // Sync TENKS balance if the API returned a new value
-        if (typeof data.reward_tenks === 'number') {
-          initTenks(data.reward_tenks, { preferStored: false });
+        // Sync TENKS balance using the server-authoritative total (new_balance),
+        // not the partial reward amount (reward_tenks).
+        if (typeof data.new_balance === 'number') {
+          initTenks(data.new_balance, { preferStored: false });
         }
 
         return { success: true, reward_tenks: data.reward_tenks, notice: data.notice };

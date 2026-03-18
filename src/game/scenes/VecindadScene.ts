@@ -128,6 +128,7 @@ export class VecindadScene extends Phaser.Scene {
   private shiftKey?: Phaser.Input.Keyboard.Key;
   private inTransition = false;
   private fishingActive = false;
+  private activeFishingMinigame: FishingMinigame | null = null;
   private px: number = VECINDAD_MAP.SPAWN_X;
   private py: number = VECINDAD_MAP.SPAWN_Y;
   private lastMoveDx = 0;
@@ -1379,44 +1380,49 @@ export class VecindadScene extends Phaser.Scene {
   private async handleFishing(): Promise<void> {
     this.fishingActive = true;
 
-    const sys = getSkillSystem();
-    const fishingLevel = sys.getLevel('fishing');
-    const isAutoMode = fishingLevel >= 4;
+    try {
+      const sys = getSkillSystem();
+      const fishingLevel = sys.getLevel('fishing');
+      const isAutoMode = fishingLevel >= 4;
 
-    const minigame = new FishingMinigame(this);
-    const result = await minigame.play(isAutoMode);
-    minigame.destroy();
+      const minigame = new FishingMinigame(this);
+      this.activeFishingMinigame = minigame;
+      const result = await minigame.play(isAutoMode);
+      minigame.destroy();
+      this.activeFishingMinigame = null;
 
-    if (result === 'miss') {
+      if (result === 'miss') {
+        eventBus.emit(EVENTS.UI_NOTICE, { message: '🎣 Se escapó...', color: '#888899' });
+        return;
+      }
+
+      const isAuto = isAutoMode;
+      const minigameBonus = result === 'perfect' ? 5 : result === 'good' ? 3 : 0;
+
+      const qr = await sys.rollQuality('fishing', 'fish_catch', isAuto);
+      void getContractSystem().trackAction('fish_catch', 'fishing', qr.quality);
+
+      eventBus.emit(EVENTS.UI_NOTICE, { message: `🐟 PESCADO [${qr.label}]`, color: qr.color });
+
+      const eventMult = getEventSystem().getXpMultiplier('fishing');
+      const xpTotal = Math.round((12 + qr.xp_bonus + minigameBonus) * eventMult);
+      const xpResult = await sys.addXp('fishing', xpTotal, 'fish_catch');
+      if (xpResult.leveled_up) {
+        eventBus.emit(EVENTS.UI_NOTICE, { message: `🎣 PESCA LVL ${xpResult.new_level}!`, color: '#4A9ECC' });
+      }
+      if (sys.getLevel('fishing') >= 5) {
+        void getMasterySystem().earnMp('fishing');
+      }
+
+      if (qr.quality === 'legendary') {
+        this.cameras.main.flash(400, 74, 159, 204, false);
+        eventBus.emit(EVENTS.UI_NOTICE, { message: '✨ PESCA LEGENDARIA!', color: '#4A9ECC' });
+      }
+    } finally {
+      // Always release the lock so future fishing interactions aren't blocked
       this.fishingActive = false;
-      eventBus.emit(EVENTS.UI_NOTICE, { message: '🎣 Se escapó...', color: '#888899' });
-      return;
+      this.activeFishingMinigame = null;
     }
-
-    const isAuto = isAutoMode;
-    const minigameBonus = result === 'perfect' ? 5 : result === 'good' ? 3 : 0;
-
-    const qr = await sys.rollQuality('fishing', 'fish_catch', isAuto);
-    void getContractSystem().trackAction('fish_catch', 'fishing', qr.quality);
-
-    eventBus.emit(EVENTS.UI_NOTICE, { message: `🐟 PESCADO [${qr.label}]`, color: qr.color });
-
-    const eventMult = getEventSystem().getXpMultiplier('fishing');
-    const xpTotal = Math.round((12 + qr.xp_bonus + minigameBonus) * eventMult);
-    const xpResult = await sys.addXp('fishing', xpTotal, 'fish_catch');
-    if (xpResult.leveled_up) {
-      eventBus.emit(EVENTS.UI_NOTICE, { message: `🎣 PESCA LVL ${xpResult.new_level}!`, color: '#4A9ECC' });
-    }
-    if (sys.getLevel('fishing') >= 5) {
-      void getMasterySystem().earnMp('fishing');
-    }
-
-    if (qr.quality === 'legendary') {
-      this.cameras.main.flash(400, 74, 159, 204, false);
-      eventBus.emit(EVENTS.UI_NOTICE, { message: '✨ PESCA LEGENDARIA!', color: '#4A9ECC' });
-    }
-
-    this.fishingActive = false;
   }
 
   private handleFarmPrimaryAction() {
@@ -1618,7 +1624,10 @@ export class VecindadScene extends Phaser.Scene {
       if (sys.getLevel('gardening') >= 5) void getMasterySystem().earnMp('gardening');
 
       if (isWeed) {
-        const weedResult = await sys.addXp('weed', xpTotal, 'farm_harvest');
+        // Use the weed-specific event multiplier, not the gardening one
+        const weedEventMult = getEventSystem().getXpMultiplier('weed');
+        const weedXpTotal = Math.round((15 + qr.xp_bonus) * weedEventMult);
+        const weedResult = await sys.addXp('weed', weedXpTotal, 'farm_harvest');
         if (weedResult.leveled_up) {
           eventBus.emit(EVENTS.UI_NOTICE, { message: `🌿 WEED LVL ${weedResult.new_level}!`, color: '#39FF14' });
         }
@@ -1776,6 +1785,13 @@ export class VecindadScene extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
+    // Destroy any active fishing minigame so its SPACE key listener doesn't leak
+    if (this.activeFishingMinigame) {
+      this.activeFishingMinigame.destroy();
+      this.activeFishingMinigame = null;
+    }
+    this.fishingActive = false;
+
     if (this.parcelRefreshTimeout) {
       clearTimeout(this.parcelRefreshTimeout);
       this.parcelRefreshTimeout = undefined;

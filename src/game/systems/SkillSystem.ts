@@ -311,7 +311,7 @@ export class SkillSystem {
   getSynergyBuff(stat: string): number {
     return this.getActiveSynergies()
       .flatMap((syn) => syn.effects)
-      .filter((fx) => fx.type === 'speed_bonus' && fx.stat === stat)
+      .filter((fx) => fx.stat === stat)
       .reduce((sum, fx) => sum + fx.value, 0);
   }
 

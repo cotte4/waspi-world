@@ -523,6 +523,8 @@ export class SkillTreePanel {
       btnBg.on('pointerover', () => btnBg.setFillStyle(0x245a24, 1));
       btnBg.on('pointerout', () => btnBg.setFillStyle(0x1a3a1a, 1));
       btnBg.on('pointerdown', () => {
+        // Disable immediately to prevent spam-clicks before the API responds
+        btnBg.disableInteractive();
         btnLabel.setText('...');
         void getSkillSystem().chooseSpec(skillId, spec.id).then((result) => {
           if (result.success) {
@@ -531,7 +533,11 @@ export class SkillTreePanel {
             eventBus.emit(EVENTS.UI_NOTICE, { message: `SPEC: ${spec.name} elegida!`, color: spec.color });
           } else {
             btnLabel.setText('ERROR');
-            this.scene.time.delayedCall(1500, () => btnLabel.setText('ELEGIR'));
+            // Re-enable only on error so the player can retry
+            this.scene.time.delayedCall(1500, () => {
+              btnLabel.setText('ELEGIR');
+              btnBg.setInteractive({ useHandCursor: true });
+            });
           }
         });
       });

@@ -126,6 +126,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   private autoHud?: Phaser.GameObjects.Text;
   private collectedTotal = 0;
   private minigameActive = false;
+  private activeMiningMinigame: MiningMinigame | null = null;
   private bridgeCleanupFns: Array<() => void> = [];
 
   constructor() {
@@ -530,10 +531,11 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     }).setOrigin(0.5).setScrollFactor(0).setDepth(1000);
 
     // Auto-mode label: shown when mining skill >= 4
+    const isAutoMode = getSkillSystem().getLevel('mining') >= 4;
     this.autoHud = this.add.text(this.scale.width - 12, 76, '⚙ AUTO', {
       fontSize: '7px', fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842', stroke: '#000', strokeThickness: 3,
-    }).setOrigin(1, 0).setScrollFactor(0).setDepth(1000).setVisible(false);
+    }).setOrigin(1, 0).setScrollFactor(0).setDepth(1000).setVisible(isAutoMode);
   }
 
   // ─── Input ────────────────────────────────────────────────────────────────
@@ -664,57 +666,63 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     this.minigameActive = true;
 
     void (async () => {
-      const sys = getSkillSystem();
-      const miningLevel = sys.getLevel('mining');
-      const isAutoMode = miningLevel >= 4;
+      try {
+        const sys = getSkillSystem();
+        const miningLevel = sys.getLevel('mining');
+        const isAutoMode = miningLevel >= 4;
 
-      // Show auto HUD if applicable
-      this.autoHud?.setVisible(isAutoMode);
+        // Show auto HUD if applicable
+        this.autoHud?.setVisible(isAutoMode);
 
-      let minigameBonus = 0;
-      let isAuto = isAutoMode;
+        let minigameBonus = 0;
+        let isAuto = isAutoMode;
 
-      if (!isAutoMode) {
-        const minigame = new MiningMinigame(this);
-        const result = await minigame.play(false);
-        minigame.destroy();
-        isAuto = result === 'miss';
-        minigameBonus = result === 'perfect' ? 5 : result === 'good' ? 3 : 0;
+        if (!isAutoMode) {
+          const minigame = new MiningMinigame(this);
+          this.activeMiningMinigame = minigame;
+          const result = await minigame.play(false);
+          minigame.destroy();
+          this.activeMiningMinigame = null;
+          isAuto = result === 'miss';
+          minigameBonus = result === 'perfect' ? 5 : result === 'good' ? 3 : 0;
+        }
+
+        // Roll quality server-side
+        const qr = await sys.rollQuality('mining', 'node_collect', isAuto);
+
+        // Track for contracts
+        void getContractSystem().trackAction('node_collect', 'mining', qr.quality);
+
+        // Quality feedback
+        this.showPrompt(`+1 MATERIAL [${qr.label}]`);
+        if (this.hudText) {
+          this.hudText.setText(`MATS: ${this.collectedTotal}`).setColor(qr.color);
+          this.time.delayedCall(1600, () => this.hudText?.setColor('#B9FF9E'));
+        }
+
+        // XP: base + quality bonus + minigame bonus × event multiplier
+        const eventMult = getEventSystem().getXpMultiplier('mining');
+        const xpTotal = Math.round((10 + qr.xp_bonus + minigameBonus) * eventMult);
+        const xpResult = await sys.addXp('mining', xpTotal, 'node_collect');
+        if (xpResult.leveled_up) {
+          eventBus.emit(EVENTS.UI_NOTICE, { message: `⛏️ MINERÍA LVL ${xpResult.new_level}!`, color: '#F5C842' });
+          this.autoHud?.setVisible(sys.getLevel('mining') >= 4);
+        }
+        // Earn mastery MP if at Lv5
+        if (sys.getLevel('mining') >= 5) {
+          void getMasterySystem().earnMp('mining');
+        }
+
+        // Legendary flash
+        if (qr.quality === 'legendary') {
+          this.cameras.main.flash(400, 245, 200, 66, false);
+          eventBus.emit(EVENTS.UI_NOTICE, { message: '✨ MATERIAL LEGENDARIO!', color: '#F5C842' });
+        }
+      } finally {
+        // Always reset the flag so future interactions aren't blocked
+        this.minigameActive = false;
+        this.activeMiningMinigame = null;
       }
-
-      // Roll quality server-side
-      const qr = await sys.rollQuality('mining', 'node_collect', isAuto);
-
-      // Track for contracts
-      void getContractSystem().trackAction('node_collect', 'mining', qr.quality);
-
-      // Quality feedback
-      this.showPrompt(`+1 MATERIAL [${qr.label}]`);
-      if (this.hudText) {
-        this.hudText.setText(`MATS: ${this.collectedTotal}`).setColor(qr.color);
-        this.time.delayedCall(1600, () => this.hudText?.setColor('#B9FF9E'));
-      }
-
-      // XP: base + quality bonus + minigame bonus × event multiplier
-      const eventMult = getEventSystem().getXpMultiplier('mining');
-      const xpTotal = Math.round((10 + qr.xp_bonus + minigameBonus) * eventMult);
-      const xpResult = await sys.addXp('mining', xpTotal, 'node_collect');
-      if (xpResult.leveled_up) {
-        eventBus.emit(EVENTS.UI_NOTICE, { message: `⛏️ MINERÍA LVL ${xpResult.new_level}!`, color: '#F5C842' });
-        this.autoHud?.setVisible(sys.getLevel('mining') >= 4);
-      }
-      // Earn mastery MP if at Lv5
-      if (sys.getLevel('mining') >= 5) {
-        void getMasterySystem().earnMp('mining');
-      }
-
-      // Legendary flash
-      if (qr.quality === 'legendary') {
-        this.cameras.main.flash(400, 245, 200, 66, false);
-        eventBus.emit(EVENTS.UI_NOTICE, { message: '✨ MATERIAL LEGENDARIO!', color: '#F5C842' });
-      }
-
-      this.minigameActive = false;
     })();
   }
 
@@ -759,6 +767,12 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   // ─── Shutdown ─────────────────────────────────────────────────────────────
 
   private onShutdown() {
+    // Destroy any active minigame so its SPACE key listener doesn't leak
+    if (this.activeMiningMinigame) {
+      this.activeMiningMinigame.destroy();
+      this.activeMiningMinigame = null;
+    }
+    this.minigameActive = false;
     this.bridgeCleanupFns.forEach((fn) => fn());
     this.bridgeCleanupFns = [];
     this.controls.destroy();

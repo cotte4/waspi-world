@@ -40,11 +40,18 @@ interface PlayerContractRow {
 
 function getCurrentWeekId(): string {
   const now = new Date();
-  const year = now.getUTCFullYear();
-  const startOfYear = new Date(Date.UTC(year, 0, 1));
-  const dayOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / 86400000);
-  const weekNum = Math.ceil((dayOfYear + startOfYear.getUTCDay() + 1) / 7);
-  return `${year}-W${String(weekNum).padStart(2, '0')}`;
+  // ISO 8601: Thursday of the week determines the year; week 1 is the week
+  // containing the year's first Thursday.
+  const thursday = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() + 4 - (now.getUTCDay() || 7),
+  ));
+  const startOfYear = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 1));
+  const weekNum = Math.ceil(
+    ((thursday.getTime() - startOfYear.getTime()) / 86400000 + 1) / 7,
+  );
+  return `${thursday.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
 }
 
 // ── GET /api/contracts ─────────────────────────────────────────────────────

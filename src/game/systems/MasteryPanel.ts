@@ -508,6 +508,8 @@ export class MasteryPanel {
       btnBg.on('pointerover', () => btnBg.setFillStyle(0x245a24, 1));
       btnBg.on('pointerout', () => btnBg.setFillStyle(0x1a2a1a, 1));
       btnBg.on('pointerdown', () => {
+        // Disable immediately to prevent double-spend on double-click
+        btnBg.disableInteractive();
         btnLabel.setText('...');
         void getMasterySystem().unlockNode(skillId, selectedNode.id).then((result) => {
           if (result.success) {
@@ -519,6 +521,8 @@ export class MasteryPanel {
           } else {
             btnLabel.setText(result.error ?? 'ERROR');
             this.scene.time.delayedCall(2000, () => {
+              // Re-enable the button only on failure so the player can retry
+              btnBg.setInteractive({ useHandCursor: true });
               btnLabel.setText(`DESBLOQUEAR — ${selectedNode.mp_cost} MP`);
             });
           }
