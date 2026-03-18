@@ -496,6 +496,7 @@ export class GunShopInterior extends Phaser.Scene {
         if (!buyBtn.active) return;
         if (result.success) {
           buyBtn.setText('✓ LISTO').setColor('#39FF14');
+          if (!rowBg.active) return; // panel was closed while purchase was in-flight
           rowBg.clear();
           rowBg.fillStyle(0x121A2D, 0.45);
           rowBg.fillRoundedRect(panelX + 16, rowY, panelW - 32, 60, 6);

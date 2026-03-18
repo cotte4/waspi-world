@@ -710,6 +710,7 @@ export class BasketMinigame extends Phaser.Scene {
       onComplete: () => {
         // window.setTimeout so this fires even if Phaser timer is busy
         window.setTimeout(() => {
+          if (!label.active) return; // already destroyed by scene shutdown
           if (!this.scene.isActive('BasketMinigame')) {
             label.destroy();
             return;
@@ -720,7 +721,7 @@ export class BasketMinigame extends Phaser.Scene {
             y: 250,
             duration: 380,
             ease: 'Sine.easeIn',
-            onComplete: () => label.destroy(),
+            onComplete: () => { if (label.active) label.destroy(); },
           });
         }, 240);
       },

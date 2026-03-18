@@ -185,6 +185,78 @@ Sin el header → 401 Unauthorized silencioso en todos los sistemas (skills, gui
 
 ---
 
+## Reglas Anti-Crash — Objetos Phaser en Callbacks Asíncronos (CRÍTICO)
+
+Este juego ha tenido crashes por acceder a objetos Phaser ya destruidos desde callbacks asíncronos.
+Los callbacks asíncronos (setTimeout, promise .then, tween onComplete) pueden dispararse **después** de que la escena ya hizo shutdown y destruyó sus objetos.
+
+### Causa raíz documentada
+- `window.setTimeout` con bullet cleanup: `b.x` / `b.y` accedidos después de que el bullet fue destruido por `resolveImmediateShot` → `add.circle(NaN, NaN)` → crash.
+- Promise `.then()` en compra de arma: `rowBg.clear()` llamado después de que el panel fue cerrado → operación sobre objeto destruido → crash.
+- `window.setTimeout` en floating labels: `label.destroy()` llamado sobre objeto ya destruido por SHUTDOWN → crash silencioso o error.
+
+### Regla 6 — `window.setTimeout` que accede a objetos Phaser SIEMPRE necesita doble guard
+```ts
+window.setTimeout(() => {
+  // 1. Verificar que la escena sigue activa
+  if (!this.scene?.isActive('NombreEscena')) return;
+  // 2. Verificar que el objeto Phaser sigue vivo
+  if (!obj.active) return;
+  // Recién aquí es seguro acceder a obj.x, obj.y, etc.
+  this.spawnEffect(obj.x, obj.y);
+  this.destroyObject(obj);
+}, delay);
+```
+
+### Regla 7 — Promise `.then()` que accede a objetos Phaser SIEMPRE necesita guard
+```ts
+this.someAsyncOperation().then((result) => {
+  // Verificar que el objeto target sigue vivo antes de operar
+  if (!targetObj.active) return;
+  targetObj.setText(result);
+  targetObj.setColor('#fff');
+});
+```
+
+### Regla 8 — `tween onComplete` que destruye objetos usa guard de `.active`
+```ts
+// CORRECTO:
+this.tweens.add({
+  targets: label,
+  alpha: 0,
+  duration: 380,
+  onComplete: () => { if (label.active) label.destroy(); },
+});
+
+// INCORRECTO (puede double-destroy si SHUTDOWN corrió antes del tween):
+this.tweens.add({
+  targets: label,
+  alpha: 0,
+  duration: 380,
+  onComplete: () => label.destroy(), // ← crash si ya fue destruido
+});
+```
+
+**Nota:** Tweens Phaser-nativos (`this.tweens.add`) son administrados por el TweenManager de la escena y se cancelan en SHUTDOWN — sus `onComplete` NO disparan después del shutdown. El peligro está específicamente en callbacks combinados: tween → `window.setTimeout` → destroy.
+
+### Patrones seguros ya establecidos
+- `safeSceneDelayedCall(this, ms, fn)` — `this.time.delayedCall` con guard de `isActive()`
+- `safeDestroyGameObject(obj)` — destrucción con guard
+- `fetchWithTimeout(url, opts, ms)` — fetch con AbortController y timeout de 6s
+- Guard de bullet: `if (b.resolvedHit || !b.active) return;` antes del cleanup
+
+### Checklist para nueva escena interior
+- [ ] `create()` llama `announceScene(this)` y `this.input.enabled = true`
+- [ ] `init()` setea `this.inTransition = false`
+- [ ] Salida usa `transitionToScene()`, nunca `camera.fadeOut() + scene.start()` manual
+- [ ] WAKE listener resetea `inTransition` y re-habilita input
+- [ ] SHUTDOWN listener limpia todos los recursos (audio, timers, channels)
+- [ ] `bindSafeResetToPlaza()` registrado para casos de emergencia
+- [ ] Todo `window.setTimeout` que accede a objetos Phaser tiene doble guard (scene + obj.active)
+- [ ] Todo Promise `.then()` que accede a objetos Phaser tiene guard de `.active`
+
+---
+
 ## Review Checklist (verificar antes de proponer código)
 1. ¿Mantiene TypeScript strict sin `any`?
 2. ¿La lógica Phaser está aislada de React components?
@@ -196,3 +268,5 @@ Sin el header → 401 Unauthorized silencioso en todos los sistemas (skills, gui
 8. ¿Evita mezclar UI React con canvas Phaser logic?
 9. ¿Nueva escena interior sigue el checklist anti-freeze?
 10. ¿Nuevos fetch en sistemas singleton incluyen `getAuthHeaders()`?
+11. ¿`window.setTimeout` con objetos Phaser tiene doble guard (scene + obj.active)?
+12. ¿Promise `.then()` con objetos Phaser tiene guard de `.active`?
