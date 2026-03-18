@@ -149,6 +149,11 @@ export class BasementScene extends Phaser.Scene {
     this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.cameras.main.fadeIn(220, 0, 0, 0);
+    this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.inTransition = false;
+      this.input.enabled = true;
+      if (this.input.keyboard) this.input.keyboard.enabled = true;
+    });
   }
 
   update(_time: number, delta: number) {

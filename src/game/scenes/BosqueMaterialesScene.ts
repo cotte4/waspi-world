@@ -144,6 +144,11 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     announceScene(this);
     this.controls = new SceneControls(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.onShutdown, this);
+    this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.inTransition = false;
+      this.input.enabled = true;
+      if (this.input.keyboard) this.input.keyboard.enabled = true;
+    });
 
     this.drawBackground();
     this.drawPond();

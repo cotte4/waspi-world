@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { addTenks } from '../systems/TenksSystem';
 import { eventBus, EVENTS } from '../config/eventBus';
-import { transitionToScene } from '../systems/SceneUi';
+import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { SceneControls } from '../systems/SceneControls';
 
 type DartsPhase = 'aiming' | 'result' | 'done' | 'exiting';
@@ -34,12 +34,28 @@ export class DartsMinigame extends Phaser.Scene {
     super({ key: 'DartsMinigame' });
   }
 
+  init() {
+    this.isFinished = false;
+    this.phase = 'aiming';
+    this.score = 0;
+    this.thrown = 0;
+    this.bullseyes = 0;
+  }
+
   create() {
     const { width, height } = this.scale;
     this.boardX = width / 2;
     this.boardY = height / 2 + 24;
     this.controls = new SceneControls(this);
+    announceScene(this);
+    this.input.enabled = true;
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
+    this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.isFinished = false;
+      this.phase = 'aiming';
+      this.input.enabled = true;
+      if (this.input.keyboard) this.input.keyboard.enabled = true;
+    });
 
     this.add.rectangle(0, 0, width, height, 0x0E0E14, 1).setOrigin(0);
     this.add.text(width / 2, 48, 'DARDOS', {

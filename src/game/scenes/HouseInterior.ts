@@ -87,6 +87,11 @@ export class HouseInterior extends Phaser.Scene {
     announceScene(this);
     this.input.enabled = true;
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
+    this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.inTransition = false;
+      this.input.enabled = true;
+      if (this.input.keyboard) this.input.keyboard.enabled = true;
+    });
 
     this.layout = {
       roomW: 620,

@@ -185,6 +185,11 @@ export class VecindadScene extends Phaser.Scene {
     this.input.enabled = true;
     this.controls = new SceneControls(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
+    this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.inTransition = false;
+      this.input.enabled = true;
+      if (this.input.keyboard) this.input.keyboard.enabled = true;
+    });
     this.loadVecindadState();
 
     this.drawDistrict();

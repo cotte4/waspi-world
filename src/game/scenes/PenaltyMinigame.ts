@@ -61,6 +61,10 @@ export class PenaltyMinigame extends Phaser.Scene {
     this.resultColor = '#FFFFFF';
   }
 
+  init() {
+    this.resetSceneState();
+  }
+
   create() {
     const { width, height } = this.scale;
     this.resetSceneState();
@@ -173,6 +177,11 @@ export class PenaltyMinigame extends Phaser.Scene {
     this.keyEsc = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.input.on('pointerdown', this.handleShootInput, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
+    this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.resetSceneState();
+      this.input.enabled = true;
+      if (this.input.keyboard) this.input.keyboard.enabled = true;
+    });
     this.refreshHud();
     this.redrawAimGuide();
     this.cameras.main.resetFX();

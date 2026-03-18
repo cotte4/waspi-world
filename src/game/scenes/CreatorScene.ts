@@ -97,6 +97,10 @@ export class CreatorScene extends Phaser.Scene {
     this.selectedSeed = storedConfig.avatarKind;
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
+    this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.input.enabled = true;
+      if (this.input.keyboard) this.input.keyboard.enabled = true;
+    });
 
     // ── BACKGROUND ────────────────────────────────────────────────
     this.cameras.main.setBackgroundColor('#05050A');

@@ -193,6 +193,11 @@ export class PvpArenaScene extends Phaser.Scene {
     this.controls = new SceneControls(this);
     announceScene(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
+    this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.inTransition = false;
+      this.input.enabled = true;
+      if (this.input.keyboard) this.input.keyboard.enabled = true;
+    });
 
     this.playerId = this.getOrCreatePlayerId();
     this.username = this.getOrCreateUsername();
