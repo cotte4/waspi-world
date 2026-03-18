@@ -176,6 +176,10 @@ export class BasementScene extends Phaser.Scene {
 
     this.updateInteractionUi();
 
+    if (this.controls.isActionJustDown('interact') && this.isNearZombieAccess()) {
+      this.enterZombiesMode();
+    }
+
     if (this.controls.isActionJustDown('back')) {
       this.exitToWorld();
     }
@@ -187,6 +191,18 @@ export class BasementScene extends Phaser.Scene {
     transitionToScene(this, 'WorldScene', {
       returnX: BASEMENT_RETURN.x,
       returnY: BASEMENT_RETURN.y,
+    });
+  }
+
+  private enterZombiesMode() {
+    if (this.inTransition) return;
+    this.inTransition = true;
+    transitionToScene(this, 'ZombiesScene', {
+      returnScene: 'WorldScene',
+      returnX: BASEMENT_RETURN.x,
+      returnY: BASEMENT_RETURN.y,
+      entryLabel: 'BASEMENT',
+      allowDepthsGate: true,
     });
   }
 
@@ -786,7 +802,27 @@ export class BasementScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(DEPTH_FURNITURE + 4);
 
-    // Zombies entrance has moved to plaza; basement is now exploration-only.
+    // Zombies access portal — pulsing pink ring in the OWL ROOM floor
+    const ZAX = 1540;
+    const ZAY = 1410;
+    const portalRing = this.add.circle(ZAX, ZAY, 52, 0xFF6EA8, 0.08).setDepth(DEPTH_FURNITURE + 2);
+    portalRing.setStrokeStyle(2, 0xFF6EA8, 0.5);
+    this.tweens.add({
+      targets: portalRing,
+      alpha: { from: 0.08, to: 0.28 },
+      scale: { from: 0.94, to: 1.06 },
+      yoyo: true,
+      repeat: -1,
+      duration: 900,
+      ease: 'Sine.easeInOut',
+    });
+    this.add.text(ZAX, ZAY - 64, 'MODO ZOMBIES', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FF9DC8',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(DEPTH_FURNITURE + 3);
   }
 
   private isPositionBlocked(x: number, y: number) {

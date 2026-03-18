@@ -739,43 +739,185 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private buildArena() {
-    const g = this.add.graphics();
-    g.fillStyle(0x05070a, 1);
-    g.fillRect(0, 0, ZOMBIES_WORLD.WIDTH, ZOMBIES_WORLD.HEIGHT);
+    // ─── 1. VOID BACKGROUND ────────────────────────────────────────────────
+    const bg = this.add.graphics().setDepth(0).setName('arena-bg');
+    bg.fillStyle(0x020406, 1);
+    bg.fillRect(0, 0, ZOMBIES_WORLD.WIDTH, ZOMBIES_WORLD.HEIGHT);
 
-    g.fillStyle(0x10171f, 1);
-    g.fillRoundedRect(60, 120, 1700, 980, 28);
-    g.lineStyle(3, 0x26384a, 0.85);
-    g.strokeRoundedRect(60, 120, 1700, 980, 28);
+    // ─── 2. ARENA BASE FLOOR ───────────────────────────────────────────────
+    const floorBase = this.add.graphics().setDepth(1).setName('arena-floor');
+    floorBase.fillStyle(0x0D1318, 1);
+    floorBase.fillRect(ARENA_MIN_X, ARENA_MIN_Y,
+      ARENA_MAX_X - ARENA_MIN_X, ARENA_MAX_Y - ARENA_MIN_Y);
+    // 32px grid overlay on full floor
+    floorBase.lineStyle(1, 0x111A22, 0.25);
+    for (let x = ARENA_MIN_X; x <= ARENA_MAX_X; x += 32) {
+      floorBase.lineBetween(x, ARENA_MIN_Y, x, ARENA_MAX_Y);
+    }
+    for (let y = ARENA_MIN_Y; y <= ARENA_MAX_Y; y += 32) {
+      floorBase.lineBetween(ARENA_MIN_X, y, ARENA_MAX_X, y);
+    }
 
+    // ─── 3. SECTION FLOORS (distinct tile patterns per zone) ───────────────
+    const sFloor = this.add.graphics().setDepth(2).setName('section-floors');
+    const sFloorData: { [k: string]: { color: number; grid: number; gridColor: number } } = {
+      start:    { color: 0x131C26, grid: 16, gridColor: 0x0D1520 },
+      yard:     { color: 0x111B12, grid: 24, gridColor: 0x0C1710 },
+      workshop: { color: 0x141618, grid: 12, gridColor: 0x0F1214 },
+      street:   { color: 0x0F0F17, grid: 28, gridColor: 0x0A0B12 },
+    };
     for (const section of ZOMBIES_SECTIONS) {
-      const baseColor = section.unlockedByDefault ? 0x15202a : 0x0f1419;
-      g.fillStyle(baseColor, 1);
-      g.fillRoundedRect(section.x, section.y, section.w, section.h, 26);
-      g.lineStyle(2, section.unlockedByDefault ? 0x395774 : 0x273340, 0.8);
-      g.strokeRoundedRect(section.x, section.y, section.w, section.h, 26);
-      this.add.text(section.x + 24, section.y + 24, section.label, {
-        fontSize: '10px',
-        fontFamily: '"Press Start 2P", monospace',
-        color: section.unlockedByDefault ? '#7CC9FF' : '#62798F',
-      }).setDepth(40);
+      const st = sFloorData[section.id] ?? sFloorData['start'];
+      sFloor.fillStyle(st.color, 1);
+      sFloor.fillRect(section.x, section.y, section.w, section.h);
+      // Tile grid lines
+      sFloor.lineStyle(1, st.gridColor, 1);
+      for (let gx = section.x; gx <= section.x + section.w; gx += st.grid) {
+        sFloor.lineBetween(gx, section.y, gx, section.y + section.h);
+      }
+      for (let gy = section.y; gy <= section.y + section.h; gy += st.grid) {
+        sFloor.lineBetween(section.x, gy, section.x + section.w, gy);
+      }
+      // Room border
+      sFloor.lineStyle(2, 0x1E2A36, 0.9);
+      sFloor.strokeRect(section.x, section.y, section.w, section.h);
     }
 
-    g.fillStyle(0x1f1710, 1);
-    g.fillRect(120, 602, 990, 76);
-    g.fillStyle(0x322314, 1);
-    g.fillRect(120, 620, 990, 18);
-    for (let x = 140; x < 1080; x += 56) {
-      g.fillStyle(0x614126, 0.9);
-      g.fillRect(x, 627, 26, 4);
+    // ─── 4. FLOOR DECOR (blood, scorch, puddles) ───────────────────────────
+    const decor = this.add.graphics().setDepth(3).setName('floor-decor');
+    // Blood pools
+    decor.fillStyle(0x1E0008, 0.7);
+    for (const s of [
+      { x: 300, y: 680, rx: 26, ry: 12 }, { x: 440, y: 820, rx: 20, ry: 9 },
+      { x: 578, y: 534, rx: 16, ry: 7 },  { x: 212, y: 772, rx: 14, ry: 6 },
+      { x: 352, y: 908, rx: 18, ry: 8 },  { x: 510, y: 718, rx: 12, ry: 5 },
+      { x: 842, y: 522, rx: 16, ry: 7 },  { x: 962, y: 692, rx: 22, ry: 10 },
+      { x: 1238, y: 492, rx: 17, ry: 7 }, { x: 1498, y: 634, rx: 20, ry: 9 },
+      { x: 902, y: 908, rx: 28, ry: 11 }, { x: 1198, y: 962, rx: 18, ry: 7 },
+      { x: 1428, y: 878, rx: 22, ry: 9 },
+    ] as Array<{ x: number; y: number; rx: number; ry: number }>) {
+      decor.fillEllipse(s.x, s.y, s.rx * 2, s.ry * 2);
+    }
+    // Scorch marks
+    decor.fillStyle(0x040408, 0.58);
+    for (const s of [
+      { x: 380, y: 758, r: 30 }, { x: 538, y: 898, r: 22 },
+      { x: 802, y: 472, r: 26 }, { x: 1058, y: 702, r: 20 },
+      { x: 1338, y: 528, r: 24 }, { x: 1108, y: 882, r: 32 },
+      { x: 858, y: 962, r: 18 },
+    ] as Array<{ x: number; y: number; r: number }>) {
+      decor.fillCircle(s.x, s.y, s.r);
+    }
+    // Dark puddles (oil / water)
+    decor.fillStyle(0x07111C, 0.55);
+    decor.fillEllipse(462, 598, 48, 18);
+    decor.fillEllipse(908, 742, 38, 14);
+    decor.fillEllipse(1378, 462, 42, 16);
+    decor.fillEllipse(1018, 922, 52, 18);
+
+    // ─── 5. PERIMETER WALLS (visual) ───────────────────────────────────────
+    const wallGfx = this.add.graphics().setDepth(8).setName('perimeter-walls');
+    const drawThickWall = (wx: number, wy: number, ww: number, wh: number) => {
+      // Base stone
+      wallGfx.fillStyle(0x181D26, 1);
+      wallGfx.fillRect(wx, wy, ww, wh);
+      // Interior edge highlight
+      wallGfx.fillStyle(0x252C3A, 0.8);
+      if (wh > ww) {
+        wallGfx.fillRect(wx + ww - 4, wy, 4, wh); // right highlight (inner face)
+      } else {
+        wallGfx.fillRect(wx, wy + wh - 4, ww, 4); // bottom highlight (inner face)
+      }
+      // Brick pattern lines
+      wallGfx.lineStyle(1, 0x0F1420, 0.7);
+      if (wh > ww) {
+        for (let by = wy + 8; by < wy + wh; by += 10) {
+          wallGfx.lineBetween(wx, by, wx + ww, by);
+        }
+      } else {
+        for (let bx = wx + 8; bx < wx + ww; bx += 10) {
+          wallGfx.lineBetween(bx, wy, bx, wy + wh);
+        }
+      }
+      // Outer border
+      wallGfx.lineStyle(2, 0x0A0E16, 1);
+      wallGfx.strokeRect(wx, wy, ww, wh);
+    };
+    const VW = 40; // visual wall thickness
+    const VH = 22; // horizontal wall height
+    drawThickWall(ARENA_MIN_X, ARENA_MIN_Y, ARENA_MAX_X - ARENA_MIN_X, VH); // top
+    drawThickWall(ARENA_MIN_X, ARENA_MAX_Y - VH, ARENA_MAX_X - ARENA_MIN_X, VH); // bottom
+    drawThickWall(ARENA_MIN_X, ARENA_MIN_Y, VW, ARENA_MAX_Y - ARENA_MIN_Y); // left
+    drawThickWall(ARENA_MAX_X - VW, ARENA_MIN_Y, VW, ARENA_MAX_Y - ARENA_MIN_Y); // right
+    // Corner reinforcements
+    wallGfx.fillStyle(0x1E2534, 1);
+    wallGfx.lineStyle(1, 0x303A4A, 0.9);
+    for (const [cx, cy] of [
+      [ARENA_MIN_X, ARENA_MIN_Y],
+      [ARENA_MAX_X - VW - 4, ARENA_MIN_Y],
+      [ARENA_MIN_X, ARENA_MAX_Y - VH - 4],
+      [ARENA_MAX_X - VW - 4, ARENA_MAX_Y - VH - 4],
+    ] as [number, number][]) {
+      wallGfx.fillRect(cx, cy, VW + 4, VH + 4);
+      wallGfx.strokeRect(cx, cy, VW + 4, VH + 4);
     }
 
+    // ─── 6. SECTION DIVIDER WALLS + DOOR FRAMES ────────────────────────────
+    const divGfx = this.add.graphics().setDepth(9).setName('divider-walls');
+    const drawDivSeg = (dx: number, dy: number, dw: number, dh: number) => {
+      divGfx.fillStyle(0x181D26, 1);
+      divGfx.fillRect(dx, dy, dw, dh);
+      divGfx.fillStyle(0x252C3A, 0.65);
+      if (dh > dw) divGfx.fillRect(dx + dw - 3, dy, 3, dh);
+      else divGfx.fillRect(dx, dy + dh - 3, dw, 3);
+      divGfx.lineStyle(1, 0x0F1420, 0.55);
+      if (dh > dw) {
+        for (let by = dy + 5; by < dy + dh; by += 10) divGfx.lineBetween(dx, by, dx + dw, by);
+      } else {
+        for (let bx = dx + 5; bx < dx + dw; bx += 10) divGfx.lineBetween(bx, dy, bx, dy + dh);
+      }
+      divGfx.lineStyle(1, 0x0A0E16, 1);
+      divGfx.strokeRect(dx, dy, dw, dh);
+    };
+    const drawDoorFrame = (fx: number, fy: number, fw: number, fh: number) => {
+      divGfx.lineStyle(2, 0xF5C842, 0.42);
+      divGfx.strokeRect(fx - 2, fy - 2, fw + 4, fh + 4);
+    };
+    // START → YARD  (vertical x≈685, door gap y=590-700)
+    drawDivSeg(685, 420, 25, 170);
+    drawDivSeg(685, 700, 25, 240);
+    drawDoorFrame(685, 590, 25, 110);
+    // YARD → WORKSHOP  (vertical x≈1110, door gap y=560-670)
+    drawDivSeg(1110, 380, 20, 180);
+    drawDivSeg(1110, 670, 20, 100);
+    drawDoorFrame(1110, 560, 20, 110);
+    // YARD+WORKSHOP → STREET  (horizontal y≈770, door gap x=880-1000)
+    drawDivSeg(700, 770, 180, 30);
+    drawDivSeg(1000, 770, 650, 30);
+    drawDoorFrame(880, 770, 120, 30);
+
+    // ─── 7. AMBIENT LIGHT POOLS ────────────────────────────────────────────
+    const light = this.add.graphics().setDepth(4).setName('lighting');
+    for (const lp of [
+      { x: 400, y: 700, c: 0xFFCC66 },  // start room
+      { x: 900, y: 580, c: 0xFFCC66 },  // yard
+      { x: 1380, y: 560, c: 0x66AAFF }, // workshop (industrial cool)
+      { x: 1100, y: 940, c: 0xFF6622 }, // street (fire glow)
+    ] as Array<{ x: number; y: number; c: number }>) {
+      light.fillStyle(lp.c, 0.042);
+      light.fillCircle(lp.x, lp.y, 180);
+      light.fillStyle(lp.c, 0.022);
+      light.fillCircle(lp.x, lp.y, 320);
+    }
+
+    // ─── 8. MYSTERY BOX LABEL ──────────────────────────────────────────────
     this.add.text(BOX_POS.x, BOX_POS.y - 72, 'MYSTERY BOX', {
       fontSize: '10px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#FF7CCE',
     }).setOrigin(0.5).setDepth(50);
 
+    // ─── 9. EXIT PAD ───────────────────────────────────────────────────────
     const exitRing = this.add.circle(EXIT_PAD.x, EXIT_PAD.y, EXIT_PAD.radius, 0x39FF14, 0.08).setDepth(15);
     exitRing.setStrokeStyle(2, 0x39FF14, 0.45);
     this.tweens.add({
@@ -795,6 +937,17 @@ export class ZombiesScene extends Phaser.Scene {
 
     this.drawExitPad();
     this.drawDepthsPad();
+
+    // ─── 10. SECTION LABELS ────────────────────────────────────────────────
+    for (const section of ZOMBIES_SECTIONS) {
+      this.add.text(section.x + 24, section.y + 24, section.label, {
+        fontSize: '10px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: section.unlockedByDefault ? '#7CC9FF' : '#62798F',
+      }).setDepth(40);
+    }
+
+    // ─── 11. OBSTACLES + SPAWN NODES ───────────────────────────────────────
     this.buildObstacles();
     this.buildSpawnNodes();
   }
@@ -841,25 +994,99 @@ export class ZombiesScene extends Phaser.Scene {
     this.depthsLabel.setVisible(this.allowDepthsGate);
   }
 
-  private buildObstacles() {
-    const rects = [
-      new Phaser.Geom.Rectangle(322, 804, 116, 52),
-      new Phaser.Geom.Rectangle(540, 544, 124, 60),
-      new Phaser.Geom.Rectangle(822, 822, 146, 54),
-      new Phaser.Geom.Rectangle(870, 512, 74, 152),
-      new Phaser.Geom.Rectangle(1232, 506, 138, 58),
-      new Phaser.Geom.Rectangle(1400, 842, 136, 54),
-      new Phaser.Geom.Rectangle(1310, 666, 80, 160),
-      new Phaser.Geom.Rectangle(980, 942, 210, 38),
-    ];
+  // ─── OBSTACLE HELPERS ────────────────────────────────────────────────────
+  private addObstacle(rx: number, ry: number, rw: number, rh: number, fillColor: number, strokeColor: number) {
+    const rect = new Phaser.Geom.Rectangle(rx, ry, rw, rh);
+    const fill = this.add.rectangle(rx + rw / 2, ry + rh / 2, rw, rh, fillColor, 1).setDepth(12);
+    const outline = this.add.rectangle(rx + rw / 2, ry + rh / 2, rw, rh)
+      .setDepth(13)
+      .setStrokeStyle(2, strokeColor, 0.5);
+    this.obstacles.push({ rect, fill, outline });
+  }
 
-    for (const rect of rects) {
-      const fill = this.add.rectangle(rect.centerX, rect.centerY, rect.width, rect.height, 0x263341, 1).setDepth(12);
-      const outline = this.add.rectangle(rect.centerX, rect.centerY, rect.width, rect.height)
-        .setDepth(13)
-        .setStrokeStyle(2, 0x7AB7FF, 0.38);
-      this.obstacles.push({ rect, fill, outline });
-    }
+  private addWallCollider(rx: number, ry: number, rw: number, rh: number) {
+    const rect = new Phaser.Geom.Rectangle(rx, ry, rw, rh);
+    const fill = this.add.rectangle(rx + rw / 2, ry + rh / 2, rw, rh, 0x000000, 0).setDepth(0);
+    const outline = this.add.rectangle(rx + rw / 2, ry + rh / 2, rw, rh).setDepth(0).setAlpha(0);
+    this.obstacles.push({ rect, fill, outline });
+  }
+
+  private buildObstacles() {
+    // ─── 1. PERIMETER WALL COLLIDERS (18px invisible, matches buildArena 40px visual walls) ─
+    // Left wall — right edge at x=78 so spawn at x=110 (dx=32 > radius=18) is safe
+    this.addWallCollider(60, 120, 18, 980);
+    // Right wall
+    this.addWallCollider(1742, 120, 18, 980);
+    // Top wall
+    this.addWallCollider(60, 120, 1700, 18);
+    // Bottom wall
+    this.addWallCollider(60, 1082, 1700, 18);
+
+    // ─── 2. SECTION DIVIDER COLLIDERS ─────────────────────────────────────────
+    // START → YARD divider (x=685), door gap y=590-700
+    this.addWallCollider(685, 420, 25, 170);   // above door
+    this.addWallCollider(685, 700, 25, 240);   // below door
+
+    // YARD → WORKSHOP divider (x=1110), door gap y=560-670
+    this.addWallCollider(1110, 380, 20, 180);  // above door
+    this.addWallCollider(1110, 670, 20, 100);  // below door
+
+    // STREET horizontal divider (y=770), door gap x=880-1000
+    this.addWallCollider(700, 770, 180, 30);   // left of door
+    this.addWallCollider(1000, 770, 650, 30);  // right of door
+
+    // ─── 3. START ROOM obstacles (crates + barrels) ──────────────────────────
+    // wooden crates cluster — left side, away from spawn at (110,575)
+    this.addObstacle(200, 540, 52, 44, 0x2E1F0E, 0x8B5E2A);  // crate 1
+    this.addObstacle(260, 540, 52, 44, 0x2E1F0E, 0x8B5E2A);  // crate 2
+    this.addObstacle(200, 590, 52, 44, 0x2E1F0E, 0x7A5020);  // crate 3
+    // metal barrels near bottom-left
+    this.addObstacle(310, 820, 36, 44, 0x1E2830, 0x4A7A9B);  // barrel 1
+    this.addObstacle(354, 820, 36, 44, 0x1E2830, 0x4A7A9B);  // barrel 2
+    this.addObstacle(332, 870, 36, 44, 0x1A2428, 0x3A6070);  // barrel 3
+    // small crate stack
+    this.addObstacle(530, 550, 44, 38, 0x2E1F0E, 0x8B5E2A);
+    this.addObstacle(530, 594, 44, 38, 0x251A0C, 0x7A5020);
+
+    // ─── 4. YARD obstacles (rubble + burnt car) ───────────────────────────────
+    // rubble pile 1
+    this.addObstacle(750, 460, 68, 36, 0x2A2520, 0x6B5E4A);
+    this.addObstacle(760, 500, 50, 28, 0x252018, 0x5A4E38);
+    // rubble pile 2
+    this.addObstacle(960, 540, 56, 32, 0x2A2520, 0x6B5E4A);
+    this.addObstacle(968, 574, 44, 22, 0x221C14, 0x4E4230);
+    // burnt car body (large)
+    this.addObstacle(820, 490, 120, 58, 0x1A1208, 0x5C3A12);  // car body
+    this.addObstacle(826, 552, 108, 18, 0x120E06, 0x3E2808);  // car undercarriage
+
+    // ─── 5. WORKSHOP obstacles (machinery + workbench) ───────────────────────
+    // large machine block — back-left
+    this.addObstacle(1160, 400, 90, 70, 0x0E1820, 0x2A4A6A);
+    this.addObstacle(1256, 400, 60, 70, 0x0C1418, 0x1E3A50);
+    // workbench — center
+    this.addObstacle(1240, 510, 140, 36, 0x1E1408, 0x6B4A20);
+    this.addObstacle(1248, 548, 124, 12, 0x14100A, 0x4A3018);  // shelf under bench
+    // equipment rack — right
+    this.addObstacle(1540, 420, 40, 120, 0x0E1820, 0x2A4A6A);
+    this.addObstacle(1584, 440, 40, 80, 0x0C1418, 0x1E3A50);
+    // generator / tank
+    this.addObstacle(1340, 660, 60, 48, 0x141C20, 0x3A5A6A);
+
+    // ─── 6. BURNT STREET obstacles (destroyed cars + concrete blocks) ─────────
+    // concrete barrier left
+    this.addObstacle(730, 820, 70, 30, 0x1E1E22, 0x484850);
+    this.addObstacle(730, 854, 70, 20, 0x18181C, 0x383840);
+    // destroyed car 1
+    this.addObstacle(880, 810, 130, 50, 0x120C08, 0x3E2818);
+    this.addObstacle(888, 864, 114, 16, 0x0E0A06, 0x2A1C10);
+    // concrete barrier mid
+    this.addObstacle(1100, 825, 60, 28, 0x1E1E22, 0x484850);
+    // destroyed car 2
+    this.addObstacle(1260, 808, 130, 52, 0x120C08, 0x3E2818);
+    this.addObstacle(1268, 862, 114, 16, 0x0E0A06, 0x2A1C10);
+    // large concrete block far right
+    this.addObstacle(1540, 820, 80, 36, 0x1E1E22, 0x484850);
+    this.addObstacle(1540, 858, 80, 22, 0x18181C, 0x383840);
   }
 
   private buildSpawnNodes() {
