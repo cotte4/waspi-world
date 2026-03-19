@@ -2523,8 +2523,9 @@ export default function PlayPage() {
               {shopTab === 'orders' && (
                 <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
                   {!isAuthenticated ? (
-                    <div style={{ textAlign: 'center', padding: '24px 0', fontFamily: '"Press Start 2P", monospace', fontSize: '8px', color: 'rgba(255,255,255,0.3)', lineHeight: 2 }}>
-                      ☠<br />Iniciá sesión para ver tus pedidos.
+                    <div style={{ textAlign: 'center', padding: '24px 0', fontFamily: '"Press Start 2P", monospace', fontSize: '8px', color: 'rgba(255,255,255,0.25)', lineHeight: 2.2, letterSpacing: '0.04em' }}>
+                      <div style={{ fontSize: 28, marginBottom: 8 }}>☠</div>
+                      Iniciá sesión para<br />ver tus pedidos.
                     </div>
                   ) : ordersLoading ? (
                     <div style={{ textAlign: 'center', padding: '24px 0', fontFamily: '"Press Start 2P", monospace', fontSize: '8px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em' }}>
