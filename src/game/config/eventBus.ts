@@ -70,4 +70,11 @@ export const EVENTS = {
   SKILL_MILESTONE_UNLOCKED: 'skill:milestone:unlocked',
   ACTIVITY_STARTED: 'activity:started',
   ACTIVITY_STOPPED: 'activity:stopped',
+  JUKEBOX_OPEN: 'jukebox:open',
+  JUKEBOX_CLOSE: 'jukebox:close',
+  JUKEBOX_ADD_SONG: 'jukebox:add:song',
+  JUKEBOX_TENKS_DEDUCTED: 'jukebox:tenks:deducted',
+  JUKEBOX_SKIP_REQUESTED: 'jukebox:skip:requested',
+  JUKEBOX_REACTION_SENT: 'jukebox:reaction:sent',
+  JUKEBOX_STATE_UPDATED: 'jukebox:state:updated',
 } as const;
