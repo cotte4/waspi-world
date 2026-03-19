@@ -5,9 +5,11 @@
 import { getSkillSystem } from './SkillSystem';
 import type { SkillId } from './SkillSystem';
 import { getSkillDef, getXpForNextLevel, ALL_SKILL_IDS, SKILL_XP_THRESHOLDS } from '../config/skillTrees';
+import type { MilestoneDef } from '../config/skillTrees';
 import { getSpecsForSkill, type SpecDef } from '../config/specializations';
 import { eventBus, EVENTS } from '../config/eventBus';
 import type { SynergyDef } from '../config/synergies';
+import { getAuthHeaders } from './authHelper';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -45,9 +47,18 @@ const SKILL_COLORS_HEX: Record<SkillId, string> = {
 const CARD_W = 220;
 const CARD_H = 200;
 const GRID_COLS = 3;
-const GRID_ROWS = 2;
 const GRID_GAP_X = 16;
 const GRID_GAP_Y = 14;
+
+// ---------------------------------------------------------------------------
+// Types for milestone fetch
+// ---------------------------------------------------------------------------
+
+interface CompletedMilestone {
+  skill_id: string;
+  milestone_id: string;
+  reached_at: string;
+}
 
 // ---------------------------------------------------------------------------
 // SkillTreePanel
@@ -77,6 +88,29 @@ export class SkillTreePanel {
   // Synergy display
   private synergyRows: Phaser.GameObjects.Text[] = [];
   private synergyContainer?: Phaser.GameObjects.Container;
+
+  // Tab state
+  private activeTab: 'skills' | 'logros' = 'skills';
+  private tabSkillsBtn?: Phaser.GameObjects.Text;
+  private tabLogrosBtn?: Phaser.GameObjects.Text;
+  private tabSkillsBg?: Phaser.GameObjects.Rectangle;
+  private tabLogrosBg?: Phaser.GameObjects.Rectangle;
+  private logrosBadge?: Phaser.GameObjects.Text;
+
+  // Skills view container (card grid + synergy strip)
+  private skillsView?: Phaser.GameObjects.Container;
+
+  // Logros view container (rebuilt on each open)
+  private logrosView?: Phaser.GameObjects.Container;
+
+  // Milestone data
+  private completedMilestones: CompletedMilestone[] = [];
+  private milestonesLoaded = false;
+  private milestonesLoading = false;
+  // milestones newly unlocked this session (tracked by milestone_id)
+  private sessionNewMilestones: Set<string> = new Set();
+  // milestones that were known-completed when the panel first opened this session
+  private knownMilestonesOnOpen: Set<string> = new Set();
 
   // ---------------------------------------------------------------------------
   // Constructor — builds the full panel DOM once
@@ -254,7 +288,7 @@ export class SkillTreePanel {
     const panelLeft  = width  / 2 - PANEL_W / 2;
     const panelTop   = height / 2 - PANEL_H / 2;
 
-    // Cards start below the title bar (50px) with padding
+    // Cards start below the title bar (50px) + tab row (28px) with padding
     const gridOriginX = panelLeft + (PANEL_W - (GRID_COLS * CARD_W + (GRID_COLS - 1) * GRID_GAP_X)) / 2 + CARD_W / 2;
     const gridOriginY = panelTop  + 74 + CARD_H / 2;
 
@@ -319,7 +353,13 @@ export class SkillTreePanel {
 
     this.container.add([overlay, panelBg, borderGfx, titleText, subtitleText, closeHint]);
 
-    // Build the 6 skill cards
+    // Build tab toggle row
+    this.buildTabRow();
+
+    // Build the 6 skill cards inside a sub-container (skillsView)
+    this.skillsView = this.scene.add.container(0, 0).setScrollFactor(0);
+    this.container.add(this.skillsView);
+
     ALL_SKILL_IDS.forEach((skillId, index) => {
       this.buildCard(skillId, index);
     });
@@ -327,6 +367,370 @@ export class SkillTreePanel {
     // Synergy strip at the bottom of the panel
     this.buildSynergyStrip();
   }
+
+  // ---------------------------------------------------------------------------
+  // Tab row
+  // ---------------------------------------------------------------------------
+
+  private buildTabRow(): void {
+    const { width, height } = this.scene.scale;
+    const cx = width / 2;
+    const cy = height / 2;
+    const panelTop = cy - PANEL_H / 2;
+
+    const tabY = panelTop + 46;
+    const tabW = 110;
+    const tabH = 20;
+    const gap = 6;
+
+    // SKILLS tab
+    const skillsTabX = cx - tabW - gap / 2;
+    const skillsBg = this.scene.add.rectangle(skillsTabX, tabY, tabW, tabH, 0x1a1a2e, 1)
+      .setScrollFactor(0)
+      .setInteractive({ useHandCursor: true });
+    skillsBg.setStrokeStyle(1, 0xf5c842, 1);
+    const skillsLabel = this.scene.add.text(skillsTabX, tabY, '[SKILLS]', {
+      fontSize: '7px',
+      fontFamily: FONT,
+      color: '#F5C842',
+    }).setOrigin(0.5, 0.5).setScrollFactor(0);
+
+    // LOGROS tab
+    const logrosTabX = cx + tabW / 2 + gap / 2;
+    const logrosBg = this.scene.add.rectangle(logrosTabX, tabY, tabW, tabH, 0x0d0d14, 1)
+      .setScrollFactor(0)
+      .setInteractive({ useHandCursor: true });
+    logrosBg.setStrokeStyle(1, 0x444455, 0.8);
+    const logrosLabel = this.scene.add.text(logrosTabX, tabY, '[LOGROS]', {
+      fontSize: '7px',
+      fontFamily: FONT,
+      color: '#888899',
+    }).setOrigin(0.5, 0.5).setScrollFactor(0);
+
+    // New-milestone badge (red pill, hidden by default)
+    const badge = this.scene.add.text(logrosTabX + tabW / 2 - 4, tabY - tabH / 2 + 4, '', {
+      fontSize: '5px',
+      fontFamily: FONT,
+      color: '#FF4444',
+      backgroundColor: '#330000',
+      padding: { x: 3, y: 1 },
+    }).setOrigin(1, 0).setScrollFactor(0).setVisible(false);
+
+    this.tabSkillsBg   = skillsBg;
+    this.tabLogrosBg   = logrosBg;
+    this.tabSkillsBtn  = skillsLabel;
+    this.tabLogrosBtn  = logrosLabel;
+    this.logrosBadge   = badge;
+
+    // Interactivity
+    skillsBg.on('pointerdown', () => this.switchTab('skills'));
+    logrosBg.on('pointerdown', () => this.switchTab('logros'));
+
+    this.container.add([skillsBg, skillsLabel, logrosBg, logrosLabel, badge]);
+  }
+
+  private switchTab(tab: 'skills' | 'logros'): void {
+    this.activeTab = tab;
+
+    if (tab === 'skills') {
+      this.skillsView?.setVisible(true);
+      this.logrosView?.setVisible(false);
+      // Update tab visuals
+      this.tabSkillsBg?.setFillStyle(0x1a1a2e, 1);
+      this.tabSkillsBg?.setStrokeStyle(1, 0xf5c842, 1);
+      this.tabSkillsBtn?.setColor('#F5C842');
+      this.tabLogrosBg?.setFillStyle(0x0d0d14, 1);
+      this.tabLogrosBg?.setStrokeStyle(1, 0x444455, 0.8);
+      this.tabLogrosBtn?.setColor('#888899');
+    } else {
+      this.skillsView?.setVisible(false);
+      // Update tab visuals
+      this.tabSkillsBg?.setFillStyle(0x0d0d14, 1);
+      this.tabSkillsBg?.setStrokeStyle(1, 0x444455, 0.8);
+      this.tabSkillsBtn?.setColor('#888899');
+      this.tabLogrosBg?.setFillStyle(0x1a1a2e, 1);
+      this.tabLogrosBg?.setStrokeStyle(1, 0xf5c842, 1);
+      this.tabLogrosBtn?.setColor('#F5C842');
+
+      // Load milestones if not yet loaded, then render
+      if (!this.milestonesLoaded && !this.milestonesLoading) {
+        this.fetchAndRenderLogros();
+      } else {
+        this.renderLogrosView();
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Logros fetch + render
+  // ---------------------------------------------------------------------------
+
+  private fetchAndRenderLogros(): void {
+    this.milestonesLoading = true;
+
+    // Show loading indicator while fetching
+    this.buildLogrosLoading();
+
+    void (async () => {
+      try {
+        const authH = await getAuthHeaders();
+        const res = await fetch('/api/skills/milestones', { headers: authH });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const body = await res.json() as { milestones: CompletedMilestone[] };
+        this.completedMilestones = body.milestones ?? [];
+        this.milestonesLoaded = true;
+
+        // Record which milestones were completed when the panel opened
+        this.knownMilestonesOnOpen = new Set(
+          this.completedMilestones.map((m) => m.milestone_id),
+        );
+        this.sessionNewMilestones = new Set();
+      } catch {
+        this.completedMilestones = [];
+        this.milestonesLoaded = true;
+      } finally {
+        this.milestonesLoading = false;
+
+        // Guard: only render if panel is still visible and we are on logros tab
+        if (!this.visible) return;
+        if (this.activeTab !== 'logros') return;
+        this.renderLogrosView();
+      }
+    })();
+  }
+
+  private buildLogrosLoading(): void {
+    this.logrosView?.destroy();
+    const { width, height } = this.scene.scale;
+    const cx = width / 2;
+    const cy = height / 2;
+
+    const view = this.scene.add.container(0, 0).setScrollFactor(0);
+    view.add(
+      this.scene.add.text(cx, cy, 'CARGANDO LOGROS...', {
+        fontSize: '7px',
+        fontFamily: FONT,
+        color: '#444455',
+      }).setOrigin(0.5, 0.5).setScrollFactor(0),
+    );
+    this.logrosView = view;
+    this.container.add(view);
+  }
+
+  private renderLogrosView(): void {
+    // Destroy old logros view if exists
+    this.logrosView?.destroy();
+    this.logrosView = undefined;
+
+    const { width, height } = this.scene.scale;
+    const cx = width / 2;
+    const cy = height / 2;
+    const panelLeft  = cx - PANEL_W / 2;
+    const panelTop   = cy - PANEL_H / 2;
+
+    const view = this.scene.add.container(0, 0).setScrollFactor(0);
+
+    const sys = getSkillSystem();
+
+    // Content area: from below tab row to above close hint
+    const contentTop    = panelTop + 66;
+    const contentBottom = panelTop + PANEL_H - 28;
+    const contentH      = contentBottom - contentTop;
+    const rowH          = 16; // height per milestone row
+    const skillBlockGap = 10; // gap between skill blocks
+    const skillLabelH   = 14;
+
+    // Compute total milestones: 6 skills × 3 = 18 rows + 6 skill headers
+    // Layout: column-based, 2 cols of 3 skills each
+    const colW     = (PANEL_W - 32) / 2;
+    const colLeftX = panelLeft + 16;
+    const colRightX = colLeftX + colW;
+
+    const leftSkills  = ALL_SKILL_IDS.slice(0, 3); // mining, fishing, gardening
+    const rightSkills = ALL_SKILL_IDS.slice(3);    // cooking, gym, weed
+
+    const completedSet = new Map<string, string>(); // milestone_id → reached_at
+    for (const m of this.completedMilestones) {
+      completedSet.set(m.milestone_id, m.reached_at);
+    }
+
+    const renderSkillBlock = (skillId: SkillId, startX: number, startY: number): void => {
+      const def       = getSkillDef(skillId);
+      const colorHex  = SKILL_COLORS_HEX[skillId];
+      const actionCount = sys.getActionCount(skillId);
+
+      // Skill header
+      view.add(
+        this.scene.add.text(startX, startY, `${def.emoji} ${def.label.toUpperCase()}`, {
+          fontSize: '6px',
+          fontFamily: FONT,
+          color: colorHex,
+        }).setOrigin(0, 0.5).setScrollFactor(0),
+      );
+
+      // Separator line
+      const sepGfx = this.scene.add.graphics().setScrollFactor(0);
+      sepGfx.lineStyle(1, SKILL_COLORS[skillId], 0.3);
+      sepGfx.lineBetween(startX, startY + 8, startX + colW - 16, startY + 8);
+      view.add(sepGfx);
+
+      // Milestone rows
+      def.milestones.forEach((ms: MilestoneDef, mIdx: number) => {
+        const rowY    = startY + skillLabelH + mIdx * (rowH + 4);
+        const reachedAt = completedSet.get(ms.id);
+        const isDone  = reachedAt !== undefined;
+
+        // Bar width available
+        const barTotalW = colW - 16;
+        const barY      = rowY + rowH - 5;
+
+        if (isDone) {
+          // Completed milestone — green check + name
+          view.add(
+            this.scene.add.text(startX, rowY, `✓ ${ms.name.toUpperCase()}`, {
+              fontSize: '5px',
+              fontFamily: FONT,
+              color: '#39FF14',
+            }).setOrigin(0, 0).setScrollFactor(0),
+          );
+
+          // Reward label
+          view.add(
+            this.scene.add.text(startX + barTotalW, rowY, ms.reward, {
+              fontSize: '4px',
+              fontFamily: FONT,
+              color: '#555566',
+            }).setOrigin(1, 0).setScrollFactor(0),
+          );
+
+          // Date of completion (truncated)
+          const dateStr = reachedAt.substring(0, 10); // YYYY-MM-DD
+          view.add(
+            this.scene.add.text(startX, rowY + 8, dateStr, {
+              fontSize: '4px',
+              fontFamily: FONT,
+              color: '#2a6a2a',
+            }).setOrigin(0, 0).setScrollFactor(0),
+          );
+
+          // Full bar (gold)
+          const barBg = this.scene.add.rectangle(startX, barY, barTotalW, 3, 0x1a1a28, 1)
+            .setOrigin(0, 0.5).setScrollFactor(0);
+          const barFill = this.scene.add.rectangle(startX, barY, barTotalW, 3, 0x39aa14, 1)
+            .setOrigin(0, 0.5).setScrollFactor(0);
+          view.add([barBg, barFill]);
+        } else {
+          // Pending milestone — lock + progress
+          const ratio  = Math.min(1, actionCount / ms.count);
+          const fillW  = Math.max(2, Math.floor(ratio * barTotalW));
+          const pct    = Math.floor(ratio * 100);
+          const isNear = pct >= 80;
+
+          const labelColor = isNear ? '#C8A45A' : '#444455';
+          const barColor   = isNear ? 0xc8a45a : 0x3a3a6a;
+
+          view.add(
+            this.scene.add.text(startX, rowY, `🔒 ${ms.name.toUpperCase()}`, {
+              fontSize: '5px',
+              fontFamily: FONT,
+              color: labelColor,
+            }).setOrigin(0, 0).setScrollFactor(0),
+          );
+
+          // Progress text
+          view.add(
+            this.scene.add.text(startX + barTotalW, rowY, `${actionCount}/${ms.count}`, {
+              fontSize: '4px',
+              fontFamily: FONT,
+              color: isNear ? '#C8A45A' : '#333344',
+            }).setOrigin(1, 0).setScrollFactor(0),
+          );
+
+          // Reward preview
+          view.add(
+            this.scene.add.text(startX, rowY + 8, ms.reward, {
+              fontSize: '4px',
+              fontFamily: FONT,
+              color: '#333344',
+            }).setOrigin(0, 0).setScrollFactor(0),
+          );
+
+          // Progress bar
+          const barBg = this.scene.add.rectangle(startX, barY, barTotalW, 3, 0x1a1a28, 1)
+            .setOrigin(0, 0.5).setScrollFactor(0);
+          const barFill = this.scene.add.rectangle(startX, barY, fillW, 3, barColor, 1)
+            .setOrigin(0, 0.5).setScrollFactor(0);
+          view.add([barBg, barFill]);
+        }
+      });
+    };
+
+    // Determine block heights for vertical positioning
+    // Each skill block = skillLabelH + 3 * (rowH + 4) + skillBlockGap
+    const blockH = skillLabelH + 3 * (rowH + 4) + skillBlockGap;
+
+    // Vertical centering of the two columns within content area
+    const totalH   = 3 * blockH;
+    const startY   = contentTop + Math.max(0, (contentH - totalH) / 2) + 4;
+
+    leftSkills.forEach((skillId, i) => {
+      renderSkillBlock(skillId, colLeftX, startY + i * blockH);
+    });
+
+    rightSkills.forEach((skillId, i) => {
+      renderSkillBlock(skillId, colRightX, startY + i * blockH);
+    });
+
+    this.logrosView = view;
+    this.container.add(view);
+
+    // Detect newly completed milestones this session and update badge
+    this.updateLogrosBadge();
+  }
+
+  /**
+   * Checks if any milestones completed after knownMilestonesOnOpen and updates badge.
+   */
+  private updateLogrosBadge(): void {
+    const newCount = this.completedMilestones.filter(
+      (m) => !this.knownMilestonesOnOpen.has(m.milestone_id),
+    ).length;
+
+    if (newCount > 0 && this.logrosBadge) {
+      this.logrosBadge.setText(`+${newCount}`).setVisible(true);
+    } else {
+      this.logrosBadge?.setVisible(false);
+    }
+  }
+
+  /**
+   * Call this when a milestone is unlocked during the session (from SkillSystem events).
+   * Adds to sessionNewMilestones and triggers badge update.
+   */
+  notifyMilestoneUnlocked(milestoneId: string): void {
+    if (!this.knownMilestonesOnOpen.has(milestoneId)) {
+      this.sessionNewMilestones.add(milestoneId);
+    }
+    // If the panel is open on logros tab, re-fetch to refresh data
+    if (this.visible && this.activeTab === 'logros') {
+      this.milestonesLoaded = false;
+      this.fetchAndRenderLogros();
+    } else {
+      // Just update badge if panel is visible on skills tab
+      if (this.logrosBadge?.active) {
+        const newCount = this.sessionNewMilestones.size;
+        if (newCount > 0) {
+          this.logrosBadge.setText(`+${newCount}`).setVisible(true);
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build — skill cards (added to skillsView)
+  // ---------------------------------------------------------------------------
 
   private buildCard(skillId: SkillId, index: number): void {
     const def = getSkillDef(skillId);
@@ -451,7 +855,7 @@ export class SkillTreePanel {
     this.xpBarFills[index] = barFill;
     this.xpBarBacks[index] = barBack;
 
-    this.container.add([
+    const cardObjects: Phaser.GameObjects.GameObject[] = [
       gfx,
       emojiLabel,
       levelText,
@@ -463,7 +867,12 @@ export class SkillTreePanel {
       msBarBack,
       msBarFill,
       nextText,
-    ]);
+    ];
+
+    cardObjects.forEach((obj) => {
+      this.skillsView?.add(obj);
+      this.container.add(obj);
+    });
 
     // Spec badge — visible when Lv3+ and no spec chosen yet
     const specBadge = this.scene.add.text(
@@ -474,6 +883,7 @@ export class SkillTreePanel {
     ).setOrigin(1, 0.5).setScrollFactor(0).setVisible(false);
 
     this.specBadges[index] = specBadge;
+    this.skillsView?.add(specBadge);
     this.container.add(specBadge);
 
     // Transparent hit area for spec selection
@@ -487,6 +897,7 @@ export class SkillTreePanel {
         this.openSpecModal(skillId);
       }
     });
+    this.skillsView?.add(hitArea);
     this.container.add(hitArea);
   }
 
@@ -672,7 +1083,13 @@ export class SkillTreePanel {
     }).setOrigin(0, 0.5).setScrollFactor(0);
 
     this.synergyRows = [row1, row2, row3, row4];
-    this.container.add([stripGfx, synergyLabel, row1, row2, row3, row4]);
+
+    // Synergy strip is always part of skillsView (only visible on skills tab)
+    const stripObjects: Phaser.GameObjects.GameObject[] = [stripGfx, synergyLabel, row1, row2, row3, row4];
+    stripObjects.forEach((obj) => {
+      this.skillsView?.add(obj);
+      this.container.add(obj);
+    });
   }
 
   private refreshSynergies(): void {
