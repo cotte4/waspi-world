@@ -4,6 +4,9 @@ import { createSupabaseAdminClient } from '@/src/lib/supabaseServer';
 import { stripe, stripeWebhookSecret, isStripeConfigured, isStripeWebhookConfigured } from '@/src/lib/stripe';
 import { DEFAULT_PLAYER_STATE, normalizePlayerState, creditTenks, grantInventoryItem } from '@/src/lib/playerState';
 import { ensureCatalogSeeded, ensurePlayerRow, createOrderRecord, addInventoryFromOrder, appendTenksTransaction, markDiscountCodeUsed } from '@/src/lib/commercePersistence';
+import { resend, isResendConfigured, buildProductConfirmationEmail, buildTenksConfirmationEmail } from '@/src/lib/resend';
+import { getItem } from '@/src/game/config/catalog';
+import { getTenksPack } from '@/src/lib/tenksPacks';
 
 export async function POST(request: NextRequest) {
   if (!isStripeConfigured || !stripe || !isStripeWebhookConfigured) {
@@ -129,6 +132,60 @@ export async function POST(request: NextRequest) {
         console.error('[Waspi] Webhook: user_metadata update failed for user', userId, 'session', sessionId, updateError.message);
         // Return 500 so Stripe retries — DB records are already written and idempotent.
         return NextResponse.json({ error: updateError.message }, { status: 500 });
+      }
+
+      // Send confirmation email — non-fatal: failure must never block webhook 200 response.
+      if (isResendConfigured && resend && session.customer_details?.email) {
+        try {
+          const email = session.customer_details.email;
+          const name = session.customer_details.name ?? null;
+
+          if (purchaseType === 'product') {
+            const itemId = session.metadata?.itemId;
+            const item = itemId ? getItem(itemId) : null;
+            if (item) {
+              const totalArs = session.amount_total ? Math.round(session.amount_total / 100) : 0;
+              const emailData = buildProductConfirmationEmail({
+                customerEmail: email,
+                customerName: name,
+                itemName: item.name,
+                size: session.metadata?.size ?? '',
+                totalArs,
+                orderId: sessionId,
+              });
+              await resend.emails.send({
+                from: 'WASPI WORLD <noreply@waspiworld.com>',
+                to: emailData.to,
+                subject: emailData.subject,
+                html: emailData.html,
+              });
+            }
+          }
+
+          if (purchaseType === 'tenks_pack') {
+            const packId = session.metadata?.packId;
+            const pack = packId ? getTenksPack(packId) : null;
+            if (pack) {
+              const totalArs = session.amount_total ? Math.round(session.amount_total / 100) : pack.priceArs;
+              const emailData = buildTenksConfirmationEmail({
+                customerEmail: email,
+                customerName: name,
+                packName: pack.name,
+                tenks: pack.tenks,
+                totalArs,
+              });
+              await resend.emails.send({
+                from: 'WASPI WORLD <noreply@waspiworld.com>',
+                to: emailData.to,
+                subject: emailData.subject,
+                html: emailData.html,
+              });
+            }
+          }
+        } catch (emailErr) {
+          // Email failure is non-fatal — log but don't fail the webhook
+          console.error('[Waspi] Webhook: email send failed', emailErr);
+        }
       }
     }
   }
