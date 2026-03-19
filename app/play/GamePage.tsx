@@ -840,6 +840,7 @@ export default function PlayPage() {
     if ((!bindingCaptureDirection && !bindingCaptureAction) || !settingsOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (jukeboxOpen) return;
       if (event.repeat) return;
       event.preventDefault();
       event.stopPropagation();
@@ -884,7 +885,7 @@ export default function PlayPage() {
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [bindingCaptureAction, bindingCaptureDirection, settingsOpen]);
+  }, [bindingCaptureAction, bindingCaptureDirection, jukeboxOpen, settingsOpen]);
 
   useEffect(() => {
     if (!magicLinkCooldownUntil || magicLinkCooldownUntil <= Date.now()) return;
@@ -1318,6 +1319,7 @@ export default function PlayPage() {
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
+      if (jukeboxOpen) return;
       // Toggle chat visibility (keeps ENTER for focusing the input)
       if (CHAT_SCENES.has(activeScene) && e.code === 'KeyT' && document.activeElement !== inputRef.current) {
         e.preventDefault();
@@ -1340,7 +1342,7 @@ export default function PlayPage() {
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [activeScene, chatEnabled, chatVisible, controlSettings.actionBindings.chat, controlSettings.actionBindings.inventory]);
+  }, [activeScene, chatEnabled, chatVisible, controlSettings.actionBindings.chat, controlSettings.actionBindings.inventory, jukeboxOpen]);
 
   useEffect(() => {
     if (!chatVisible) {
