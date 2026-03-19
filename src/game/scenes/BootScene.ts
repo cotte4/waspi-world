@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { getSkillSystem, initSkillSystem } from '../systems/SkillSystem';
 import { initContractSystem } from '../systems/ContractSystem';
+import { initQuestSystem } from '../systems/QuestSystem';
 import { initGuildSystem } from '../systems/GuildSystem';
 import { initMasterySystem } from '../systems/MasterySystem';
 import { initEventSystem, getEventSystem } from '../systems/EventSystem';
@@ -16,6 +17,7 @@ export class BootScene extends Phaser.Scene {
     void getSkillSystem().loadPurchasedItems();
     void getSkillSystem().loadSpecs();
     void initContractSystem();
+    void initQuestSystem();
     void initGuildSystem();
     void initMasterySystem();
     void initEventSystem();
