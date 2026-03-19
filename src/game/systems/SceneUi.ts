@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { eventBus, EVENTS } from '../config/eventBus';
+import { clearGlobalBgm } from './AudioManager';
 import { clearVirtualJoystickState } from './ControlSettings';
 
 const transitioningScenes = new WeakSet<Phaser.Scene>();
@@ -135,6 +136,8 @@ export function transitionToScene(
     scene.input.keyboard.enabled = false;
   }
   clearVirtualJoystickState();
+  // Un solo BGM a la vez: cortar tema al salir (evita zombies + mundo + tienda mezclados).
+  clearGlobalBgm(scene);
   camera.resetFX();
   camera.setAlpha(1);
   camera.fadeOut(duration, 0, 0, 0);

@@ -103,6 +103,17 @@ TEE-BLK-01, TEE-WHT-01, TEE-RED-01, CRG-BLK-01, CRG-OLV-01, HOD-GRY-01
 - Shop/economy: todas las transacciones por Route Handlers
 - No mezcles UI React con canvas Phaser logic
 
+## Audio BGM — un solo tema a la vez (CRÍTICO)
+
+Phaser **no** limpia los `sound.add()` al cambiar de escena: si cada escena arranca su loop sin cortar el anterior, se superponen (mundo + tienda + zombies + arcade).
+
+**Reglas:**
+
+1. **Música de escena** — usar siempre `startSceneMusic()` / `stopSceneMusic()` de `AudioManager.ts` (registran un único slot global y barren huérfanos por clave).
+2. **Transiciones** — `transitionToScene()` en `SceneUi.ts` ya llama `clearGlobalBgm()` al iniciar el fade; no dupliques lógica salvo que hagas un `fadeOut + scene.start` manual (entonces llamá `clearGlobalBgm(this)` antes del fade, como en `WorldScene.transitionToScene`).
+3. **Excepción Arcade** — el tema `arcade_theme` usa `this.sound.add()` por el unlock de audio; antes de crear el sonido: `clearGlobalBgm(this)`, después: `attachGlobalBgm(this.arcadeMusic)`; al parar: `detachGlobalBgmIfMatch(sound)` antes del fade (ver `ArcadeInterior.ts`).
+4. **Nuevas escenas con música** — añadir la clave a `MusicTrack` + `BGM_TRACK_KEYS` en `AudioManager.ts` y usar `startSceneMusic` o el patrón clear + attach anterior.
+
 ---
 
 ## Scene Transition — Reglas Anti-Freeze (CRÍTICO)

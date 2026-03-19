@@ -1,7 +1,6 @@
 // JukeboxPlayer.ts
-// Wrapper for the YouTube IFrame API.
-// Only the "host" client instantiates and controls the player.
-// All other clients receive playback state via Supabase Realtime broadcast.
+// YouTube IFrame API — all clients in the café play audio; only the presence "host"
+// reports ENDED/errors so the queue advances once per track.
 
 // Extend the Window type for the YouTube IFrame API
 declare global {
@@ -19,6 +18,7 @@ declare global {
             fs: number;
             rel: number;
             modestbranding: number;
+            playsinline: number;
           };
           events: {
             onStateChange?: (event: { data: number }) => void;
@@ -43,6 +43,8 @@ interface YTPlayer {
   loadVideoById(videoId: string): void;
   stopVideo(): void;
   destroy(): void;
+  unMute?: () => void;
+  setVolume?: (volume: number) => void;
 }
 
 const PLAYER_CONTAINER_ID = 'jukebox-yt-player';
@@ -52,7 +54,8 @@ export class JukeboxPlayer {
   private static apiScriptInjected = false;
 
   private player: YTPlayer | null = null;
-  private isHost = false;
+  /** Only the presence "host" reports ENDED so the queue advances once for the room. */
+  private shouldReportEnded = false;
   private pendingVideoId: string | null = null;
   private onSongEnded: () => void;
   private apiLoaded = false;
@@ -69,24 +72,15 @@ export class JukeboxPlayer {
   // -------------------------------------------------------------------------
 
   setHost(isHost: boolean) {
-    this.isHost = isHost;
-
-    if (isHost && !this.player && this.apiLoaded) {
-      this.initPlayer();
-    } else if (!isHost && this.player) {
-      this.player.stopVideo();
-    }
+    this.shouldReportEnded = isHost;
   }
 
   // -------------------------------------------------------------------------
-  // play — load and autoplay a videoId (host only)
+  // play — load and autoplay a videoId
   // -------------------------------------------------------------------------
 
   play(videoId: string) {
-    if (!this.isHost) return;
-
     if (!this.player) {
-      // Queue the video until the player is ready
       this.pendingVideoId = videoId;
       if (this.apiLoaded) {
         this.initPlayer();
@@ -95,6 +89,15 @@ export class JukeboxPlayer {
     }
 
     this.player.loadVideoById(videoId);
+    this.tryUnmutePlaying();
+  }
+
+  stop() {
+    this.pendingVideoId = null;
+    if (!this.player) return;
+    try {
+      this.player.stopVideo();
+    } catch { /* player may be torn down */ }
   }
 
   // -------------------------------------------------------------------------
@@ -118,7 +121,7 @@ export class JukeboxPlayer {
     const container = document.getElementById(PLAYER_CONTAINER_ID);
     if (container) container.remove();
 
-    this.isHost = false;
+    this.shouldReportEnded = false;
     this.pendingVideoId = null;
   }
 
@@ -143,13 +146,14 @@ export class JukeboxPlayer {
 
     if (window.YT?.Player) {
       this.apiLoaded = true;
+      if (this.pendingVideoId && !this.player) this.initPlayer();
       return;
     }
 
     // Register callback in the shared static Set (safe across multiple instances)
     this.myApiCallback = () => {
       this.apiLoaded = true;
-      if (this.isHost) this.initPlayer();
+      if (this.pendingVideoId && !this.player) this.initPlayer();
     };
     JukeboxPlayer.apiReadyCallbacks.add(this.myApiCallback);
 
@@ -169,6 +173,14 @@ export class JukeboxPlayer {
     }
   }
 
+  private tryUnmutePlaying() {
+    if (!this.player) return;
+    try {
+      this.player.unMute?.();
+      this.player.setVolume?.(100);
+    } catch { /* iframe may not be ready */ }
+  }
+
   private initPlayer() {
     if (!window.YT?.Player) return;
     if (this.player) return;
@@ -183,24 +195,29 @@ export class JukeboxPlayer {
         fs: 0,
         rel: 0,
         modestbranding: 1,
+        playsinline: 1,
       },
       events: {
         onReady: () => {
+          this.tryUnmutePlaying();
           if (this.pendingVideoId) {
             this.player?.loadVideoById(this.pendingVideoId);
             this.pendingVideoId = null;
+            this.tryUnmutePlaying();
           }
         },
         onStateChange: (event) => {
           if (!window.YT?.PlayerState) return;
-          if (event.data === window.YT.PlayerState.ENDED) {
+          if (event.data === window.YT.PlayerState.PLAYING) {
+            this.tryUnmutePlaying();
+          }
+          if (event.data === window.YT.PlayerState.ENDED && this.shouldReportEnded) {
             this.onSongEnded();
           }
         },
         onError: (event) => {
           console.error('JukeboxPlayer YouTube error code:', event.data);
-          // Treat errors as song ended so the queue advances
-          this.onSongEnded();
+          if (this.shouldReportEnded) this.onSongEnded();
         },
       },
     });

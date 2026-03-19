@@ -157,7 +157,7 @@ function QueueList({ queue }: { queue: JukeboxSong[] }) {
 export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProps) {
   const handleClose = useCallback(() => {
     eventBus.emit(EVENTS.JUKEBOX_CLOSE);
-    handleClose();
+    onClose();
   }, [onClose]);
   const [state, setState]               = useState<JukeboxState>(() => JukeboxSystem.getInstance().getState());
   const [balance, setBalance]           = useState(() => getTenksBalance());

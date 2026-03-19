@@ -13,6 +13,17 @@ export type MusicTrack =
   | 'zombies_dark'     // public/assets/audio/zombies-dark.ogg (pendiente)
   | 'store_upbeat';    // public/assets/audio/store-upbeat.ogg (pendiente)
 
+/** Claves de música loop (una sola puede sonar a la vez). */
+export const BGM_TRACK_KEYS = new Set<string>([
+  'arcade_theme',
+  'world_ambient',
+  'zombies_dark',
+  'store_upbeat',
+]);
+
+/** Último BGM activo — Phaser no destruye sonidos al cambiar de escena; esto evita mezclas. */
+let globalBgmSound: Phaser.Sound.BaseSound | null = null;
+
 // Tipos de SFX sintéticos (generados con Web Audio API, sin assets)
 export type SfxEvent =
   | 'chat_send'
@@ -87,8 +98,58 @@ export function playSfx(event: SfxEvent): void {
 }
 
 /**
+ * Detiene y destruye cualquier BGM conocido (registrado + huérfanos en el SoundManager).
+ * Llamar antes de arrancar otro tema y al iniciar `transitionToScene()`.
+ */
+export function clearGlobalBgm(scene: Phaser.Scene): void {
+  if (globalBgmSound) {
+    try {
+      scene.tweens.killTweensOf(globalBgmSound);
+    } catch { /* ignore */ }
+    try {
+      globalBgmSound.stop();
+      globalBgmSound.destroy();
+    } catch { /* ignore */ }
+    globalBgmSound = null;
+  }
+
+  // Por si quedó una instancia sin referencia (orden de shutdown / race).
+  try {
+    const mgr = scene.game.sound as Phaser.Sound.BaseSoundManager & {
+      sounds?: Phaser.Sound.BaseSound[];
+    };
+    const list = mgr.sounds;
+    if (!Array.isArray(list)) return;
+    for (const s of [...list]) {
+      if (!s || typeof s.key !== 'string') continue;
+      if (!BGM_TRACK_KEYS.has(s.key)) continue;
+      try {
+        scene.tweens.killTweensOf(s);
+        s.stop();
+        s.destroy();
+      } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+}
+
+/**
+ * Registra el BGM actual (p. ej. Arcade que no usa startSceneMusic).
+ * El caller debe haber llamado antes a `clearGlobalBgm` si reemplaza otro tema.
+ */
+export function attachGlobalBgm(sound: Phaser.Sound.BaseSound | null): void {
+  globalBgmSound = sound;
+}
+
+/** Cuando una escena hace fade-out manual del BGM, suelta el slot si coincide. */
+export function detachGlobalBgmIfMatch(sound: Phaser.Sound.BaseSound | null | undefined): void {
+  if (!sound) return;
+  if (globalBgmSound === sound) globalBgmSound = null;
+}
+
+/**
  * Inicia música de una escena en Phaser.
  * Fallback silencioso si el asset no existe.
+ * Garantiza un solo stream: corta cualquier BGM previo.
  */
 export function startSceneMusic(
   scene: Phaser.Scene,
@@ -101,7 +162,10 @@ export function startSceneMusic(
   try {
     if (!scene.cache.audio.exists(track)) return null; // asset no cargado aún
 
+    clearGlobalBgm(scene);
+
     const sound = scene.sound.add(track, { loop: true, volume: 0 });
+    globalBgmSound = sound;
     sound.play();
     scene.tweens.add({ targets: sound, volume, duration: 700, ease: 'Sine.easeIn' });
     return sound;
@@ -119,6 +183,10 @@ export function stopSceneMusic(
   duration = 500,
 ): void {
   if (!sound) return;
+  detachGlobalBgmIfMatch(sound);
+  try {
+    scene.tweens.killTweensOf(sound);
+  } catch { /* ignore */ }
   try {
     scene.tweens.add({
       targets: sound,

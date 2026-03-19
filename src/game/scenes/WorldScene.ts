@@ -11,7 +11,8 @@ import { DialogSystem } from '../systems/DialogSystem';
 import { BranchedDialog, type DialogNode } from '../systems/BranchedDialog';
 import { CATALOG, getItem } from '../config/catalog';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
-import { startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
+import { clearGlobalBgm, startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
+import { getShootTargetWorld } from '../systems/shootingAim';
 import { loadHudSettings, type HudSettings } from '../systems/HudSettings';
 import { addXpToProgression, getMaxProgressionLevel, loadProgressionState, saveProgressionState, type ProgressionState } from '../systems/ProgressionSystem';
 import { loadCombatStats, saveCombatStats, type CombatStats } from '../systems/CombatStats';
@@ -1504,10 +1505,11 @@ export class WorldScene extends Phaser.Scene {
 
     const pointer = this.input.activePointer;
     if (pointer) {
-      const dx = pointer.worldX - this.px;
-      const dy = pointer.worldY - this.py;
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
-        this.weaponAimAngle = Phaser.Math.Angle.Between(this.px, this.py, pointer.worldX, pointer.worldY);
+      const wp = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      const dx = wp.x - this.px;
+      const dy = wp.y - this.py;
+      if (Math.hypot(dx, dy) > 14) {
+        this.weaponAimAngle = Phaser.Math.Angle.Between(this.px, this.py, wp.x, wp.y);
       }
     }
 
@@ -2320,10 +2322,10 @@ export class WorldScene extends Phaser.Scene {
       maxSize: 80,
     });
 
-    this.worldPointerShootHandler = (p: Phaser.Input.Pointer) => {
+    this.worldPointerShootHandler = () => {
       if (!this.gunEnabled) return;
       if (this.inputBlocked) return;
-      this.shootAt(p.worldX, p.worldY);
+      this.shootAt();
     };
     this.input.on('pointerdown', this.worldPointerShootHandler);
 
@@ -2350,11 +2352,12 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
-  private shootAt(wx: number, wy: number) {
+  private shootAt() {
     const now = this.time.now;
     const weapon = WEAPON_STATS[this.currentWeapon];
     if (now - this.lastShotAt < weapon.cooldownMs) return;
     this.lastShotAt = now;
+    const { x: wx, y: wy } = getShootTargetWorld(this, this.px, this.py, this.weaponAimAngle);
     this.weaponAimAngle = Phaser.Math.Angle.Between(this.px, this.py, wx, wy);
     this.playerAvatar.playShoot();
     if (this.gunSprite) {
@@ -6078,11 +6081,10 @@ export class WorldScene extends Phaser.Scene {
 
     // Gun shoot with keyboard
     if (this.gunEnabled && this.controls.isActionDown('shoot') && !this.inputBlocked) {
-      const p = this.input.activePointer;
-      this.shootAt(p.worldX, p.worldY);
+      this.shootAt();
     }
     if (this.gunEnabled && !this.isTouch && this.input.activePointer.isDown && !this.inputBlocked) {
-      this.shootAt(this.input.activePointer.worldX, this.input.activePointer.worldY);
+      this.shootAt();
     }
 
     this.runFrameStep('weapon visuals', () => this.updateWeaponSpritePosition());
@@ -6426,6 +6428,7 @@ export class WorldScene extends Phaser.Scene {
 
   private transitionToScene(targetKey: string) {
     this.inTransition = true;
+    clearGlobalBgm(this);
     this.cameras.main.fadeOut(250, 0, 0, 0);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
       this.scene.start(targetKey);

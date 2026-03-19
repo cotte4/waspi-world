@@ -106,7 +106,7 @@ export const ZOMBIES_WEAPONS: Record<ZombiesWeaponId, ZombiesWeaponConfig> = {
     color: 0xFF8B3D,
     damage: 28,
     pellets: 5,
-    spread: 0.17,
+    spread: 0.1,
     fireDelayMs: 540,
     range: 290,
     magazineSize: 6,

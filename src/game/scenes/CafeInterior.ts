@@ -46,6 +46,7 @@ export class CafeInterior extends Phaser.Scene {
   private jukeboxPlayer?: JukeboxPlayer;
   private jukeboxGlowUnsub?: () => void;
   private jukeboxHostUnsub?: () => void;
+  private jukeboxOverlayKbUnsub?: () => void;
   private static readonly JUKEBOX_INTERACT_RADIUS = 70;
   // Plato del Día (Cooking Lv4)
   private platoPrompt?: Phaser.GameObjects.Text;
@@ -437,14 +438,28 @@ export class CafeInterior extends Phaser.Scene {
       this.jukeboxHostUnsub = eventBus.on(EVENTS.JUKEBOX_STATE_UPDATED, (p: unknown) => {
         if (!this.scene?.isActive('CafeInterior')) return;
         const s = p as { hostId?: string | null; nowPlaying?: { videoId?: string } | null } | null;
-        if (typeof s?.hostId !== 'undefined') {
-          const isHost = s.hostId === playerId;
-          this.jukeboxPlayer?.setHost(isHost);
-          if (isHost && s.nowPlaying?.videoId) {
-            this.jukeboxPlayer?.play(s.nowPlaying.videoId);
-          }
+        if (s && typeof s.hostId !== 'undefined') {
+          this.jukeboxPlayer?.setHost(s.hostId === playerId);
+        }
+        if (s?.nowPlaying?.videoId) {
+          this.jukeboxPlayer?.play(s.nowPlaying.videoId);
+        } else {
+          this.jukeboxPlayer?.stop();
         }
       });
+
+      const unsubKbOpen = eventBus.on(EVENTS.JUKEBOX_OPEN, () => {
+        if (!this.scene?.isActive('CafeInterior')) return;
+        if (this.input.keyboard) this.input.keyboard.enabled = false;
+      });
+      const unsubKbClose = eventBus.on(EVENTS.JUKEBOX_CLOSE, () => {
+        if (!this.scene?.isActive('CafeInterior')) return;
+        if (this.input.keyboard) this.input.keyboard.enabled = true;
+      });
+      this.jukeboxOverlayKbUnsub = () => {
+        unsubKbOpen();
+        unsubKbClose();
+      };
 
     } catch (e) { console.error('[CafeInterior] jukebox setup failed', e); }
 
@@ -606,6 +621,9 @@ export class CafeInterior extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
+    try {
+      if (this.input.keyboard) this.input.keyboard.enabled = true;
+    } catch { /* scene tearing down */ }
     this.cafeTableXpAccMs = 0;
     this.room?.shutdown();
     this.room = undefined;
@@ -613,6 +631,8 @@ export class CafeInterior extends Phaser.Scene {
     this.jukeboxGlowUnsub = undefined;
     this.jukeboxHostUnsub?.();
     this.jukeboxHostUnsub = undefined;
+    this.jukeboxOverlayKbUnsub?.();
+    this.jukeboxOverlayKbUnsub = undefined;
     this.jukeboxGlowTween?.stop();
     this.jukeboxGlowTween = undefined;
     this.jukeboxPlayer?.destroy();

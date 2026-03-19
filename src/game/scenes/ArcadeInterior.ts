@@ -3,6 +3,7 @@ import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRendere
 import { BUILDINGS, COLORS, SAFE_PLAZA_RETURN, WORLD, ZONES } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
+import { attachGlobalBgm, clearGlobalBgm, detachGlobalBgmIfMatch } from '../systems/AudioManager';
 import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { SceneControls } from '../systems/SceneControls';
@@ -658,10 +659,13 @@ export class ArcadeInterior extends Phaser.Scene {
     if (!this.audioSettings.musicEnabled) return;
     if (!this.cache.audio.exists('arcade_theme') || this.arcadeMusic) return;
 
+    clearGlobalBgm(this);
     this.arcadeMusic = this.sound.add('arcade_theme', {
       loop: true,
       volume: 0,
     });
+
+    attachGlobalBgm(this.arcadeMusic);
 
     const fadeIn = () => {
       if (!this.arcadeMusic || this.arcadeMusic.isPlaying) return;
@@ -702,6 +706,7 @@ export class ArcadeInterior extends Phaser.Scene {
     if (!this.arcadeMusic) return;
     const sound = this.arcadeMusic;
     this.arcadeMusic = undefined;
+    detachGlobalBgmIfMatch(sound);
     this.tweens.add({
       targets: sound,
       volume: 0,

@@ -15,6 +15,7 @@ import {
 } from '../systems/AnimationSafety';
 import { SceneControls } from '../systems/SceneControls';
 import { startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
+import { getShootTargetWorld } from '../systems/shootingAim';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { getInventory } from '../systems/InventorySystem';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
@@ -55,6 +56,17 @@ const ARENA_MIN_X = 60;
 const ARENA_MIN_Y = 120;
 const ARENA_MAX_X = 1760;
 const ARENA_MAX_Y = 1100;
+/** Grosor del muro visual (debe coincidir con buildArena). Colisión = interior útil. */
+const WALL_TOP_H = 22;
+const WALL_BOTTOM_H = 22;
+const WALL_SIDE_W = 40;
+const PLAY_MIN_X = ARENA_MIN_X + WALL_SIDE_W;
+const PLAY_MAX_X = ARENA_MAX_X - WALL_SIDE_W;
+const PLAY_MIN_Y = ARENA_MIN_Y + WALL_TOP_H;
+const PLAY_MAX_Y = ARENA_MAX_Y - WALL_BOTTOM_H;
+/** Boca aproximada del arma (mismo origen para hitscan y FX). */
+const ZOMBIES_MUZZLE_FORWARD = 20;
+const ZOMBIES_MUZZLE_UP = 12;
 
 type ZombiesSceneInitData = {
   returnScene?: string;
@@ -1242,10 +1254,10 @@ export class ZombiesScene extends Phaser.Scene {
     this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.keySpace = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
-    this.pointerDownHandler = (pointer: Phaser.Input.Pointer) => {
+    this.pointerDownHandler = () => {
       this.ensureAudioContext();
       if (this.gameOver) return;
-      this.tryShoot(pointer.worldX, pointer.worldY);
+      this.tryShoot();
     };
     this.input.on('pointerdown', this.pointerDownHandler);
   }
@@ -1612,7 +1624,7 @@ export class ZombiesScene extends Phaser.Scene {
     if (this.boxRollingUntil > this.time.now) return;
 
     if (this.controls.isActionDown('shoot')) {
-      this.tryShoot(this.input.activePointer.worldX, this.input.activePointer.worldY);
+      this.tryShoot();
     }
 
     if (Phaser.Input.Keyboard.JustDown(this.keyQ)) {
@@ -1640,7 +1652,18 @@ export class ZombiesScene extends Phaser.Scene {
     }
   }
 
-  private tryShoot(targetX: number, targetY: number) {
+  private getZombiesAimAngle(): number {
+    const p = this.input.activePointer;
+    const wp = this.cameras.main.getWorldPoint(p.x, p.y);
+    const d = Phaser.Math.Distance.Between(this.px, this.py, wp.x, wp.y);
+    if (d > 14) return Phaser.Math.Angle.Between(this.px, this.py, wp.x, wp.y);
+    if (Math.abs(this.lastMoveDx) + Math.abs(this.lastMoveDy) > 0.04) {
+      return Math.atan2(this.lastMoveDy, this.lastMoveDx);
+    }
+    return -Math.PI / 2;
+  }
+
+  private tryShoot() {
     if (this.gameOver) return;
     if (this.reloadEndsAt > this.time.now) return;
     if (this.boxRollingUntil > this.time.now) return;
@@ -1656,13 +1679,20 @@ export class ZombiesScene extends Phaser.Scene {
     ammo.ammoInMag -= 1;
     this.lastShotAt = this.time.now;
     this.player.playShoot();
-    this.fireShotBurst(this.playerId, this.playerUsername, this.px, this.py, targetX, targetY, weapon, !this.isSharedCoopEnabled() || this.isSharedRunHost());
+
+    const aim = this.getZombiesAimAngle();
+    const { x: targetX, y: targetY } = getShootTargetWorld(this, this.px, this.py, aim);
+    const baseAng = Phaser.Math.Angle.Between(this.px, this.py, targetX, targetY);
+    const originX = this.px + Math.cos(baseAng) * ZOMBIES_MUZZLE_FORWARD;
+    const originY = this.py - ZOMBIES_MUZZLE_UP + Math.sin(baseAng) * (ZOMBIES_MUZZLE_FORWARD * 0.35);
+
+    this.fireShotBurst(this.playerId, this.playerUsername, originX, originY, targetX, targetY, weapon, !this.isSharedCoopEnabled() || this.isSharedRunHost());
     if (this.isSharedCoopEnabled()) {
       this.broadcastSharedShot({
         player_id: this.playerId,
         username: this.playerUsername,
-        originX: this.px,
-        originY: this.py,
+        originX,
+        originY,
         targetX,
         targetY,
         pellets: weapon.pellets,
@@ -1803,13 +1833,13 @@ export class ZombiesScene extends Phaser.Scene {
     const tc: TracerCfg = cfgMap[this.currentWeapon] ?? { width: 2, alpha: 0.9, dur: 90, flashR: 8, glow: false };
 
     if (tc.glow) {
-      const glow = this.add.line(0, 0, originX, originY - 8, endX, endY, color, 0.25)
+      const glow = this.add.line(0, 0, originX, originY, endX, endY, color, 0.25)
         .setOrigin(0, 0).setDepth(159).setLineWidth(tc.width * 4, tc.width * 4);
       this.tweens.add({ targets: glow, alpha: 0, duration: tc.dur * 0.6, onComplete: () => glow.destroy() });
     }
-    const tracer = this.add.line(0, 0, originX, originY - 8, endX, endY, color, tc.alpha).setOrigin(0, 0).setDepth(160);
+    const tracer = this.add.line(0, 0, originX, originY, endX, endY, color, tc.alpha).setOrigin(0, 0).setDepth(160);
     tracer.setLineWidth(tc.width, tc.width);
-    const flash = this.add.circle(originX, originY - 10, tc.flashR, color, 0.85).setDepth(170);
+    const flash = this.add.circle(originX, originY, tc.flashR, color, 0.85).setDepth(170);
     this.tweens.add({ targets: tracer, alpha: 0, duration: tc.dur, onComplete: () => tracer.destroy() });
     this.tweens.add({ targets: flash, alpha: 0, scale: 2.0, duration: tc.dur * 1.2, onComplete: () => flash.destroy() });
   }
@@ -3194,7 +3224,7 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private isBlocked(x: number, y: number, radius: number) {
-    if (x - radius < ARENA_MIN_X || y - radius < ARENA_MIN_Y || x + radius > ARENA_MAX_X || y + radius > ARENA_MAX_Y) {
+    if (x - radius < PLAY_MIN_X || y - radius < PLAY_MIN_Y || x + radius > PLAY_MAX_X || y + radius > PLAY_MAX_Y) {
       return true;
     }
 
