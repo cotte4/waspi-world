@@ -48,11 +48,15 @@ interface YTPlayer {
 const PLAYER_CONTAINER_ID = 'jukebox-yt-player';
 
 export class JukeboxPlayer {
+  private static apiReadyCallbacks = new Set<() => void>();
+  private static apiScriptInjected = false;
+
   private player: YTPlayer | null = null;
   private isHost = false;
   private pendingVideoId: string | null = null;
   private onSongEnded: () => void;
   private apiLoaded = false;
+  private myApiCallback: (() => void) | null = null;
 
   constructor(onSongEnded: () => void) {
     this.onSongEnded = onSongEnded;
@@ -106,6 +110,11 @@ export class JukeboxPlayer {
       this.player = null;
     }
 
+    if (this.myApiCallback) {
+      JukeboxPlayer.apiReadyCallbacks.delete(this.myApiCallback);
+      this.myApiCallback = null;
+    }
+
     const container = document.getElementById(PLAYER_CONTAINER_ID);
     if (container) container.remove();
 
@@ -137,16 +146,23 @@ export class JukeboxPlayer {
       return;
     }
 
-    const prevReady = window.onYouTubeIframeAPIReady;
-    window.onYouTubeIframeAPIReady = () => {
-      prevReady?.();
+    // Register callback in the shared static Set (safe across multiple instances)
+    this.myApiCallback = () => {
       this.apiLoaded = true;
-      if (this.isHost) {
-        this.initPlayer();
-      }
+      if (this.isHost) this.initPlayer();
     };
+    JukeboxPlayer.apiReadyCallbacks.add(this.myApiCallback);
 
-    if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+    // Only set the global handler once
+    if (!window.onYouTubeIframeAPIReady) {
+      window.onYouTubeIframeAPIReady = () => {
+        JukeboxPlayer.apiReadyCallbacks.forEach((cb) => cb());
+      };
+    }
+
+    // Only inject the script once
+    if (!JukeboxPlayer.apiScriptInjected && !document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+      JukeboxPlayer.apiScriptInjected = true;
       const tag = document.createElement('script');
       tag.src = 'https://www.youtube.com/iframe_api';
       document.head.appendChild(tag);

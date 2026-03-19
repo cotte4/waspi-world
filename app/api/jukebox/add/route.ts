@@ -21,7 +21,6 @@ type AddSongBody = {
 
 type BalanceRow = { balance: number };
 type PlayerRow = { tenks: number };
-type QueueCountRow = { count: number };
 
 export async function POST(request: NextRequest) {
   if (!isServerSupabaseConfigured || !hasServiceRole) {
@@ -137,12 +136,12 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Get queue position ---
-  const { data: positionResult } = await admin
+  const { count: queueCount } = await admin
     .from('jukebox_queue')
     .select('*', { count: 'exact', head: true })
-    .eq('status', 'queued') as { data: QueueCountRow | null };
+    .eq('status', 'queued');
 
-  const queuePosition = typeof positionResult === 'number' ? positionResult : 0;
+  const queuePosition = queueCount ?? 0;
 
   // --- Log TENKS transaction ---
   try {

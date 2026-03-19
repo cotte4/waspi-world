@@ -44,6 +44,8 @@ export class CafeInterior extends Phaser.Scene {
   private jukeboxPrompt?: Phaser.GameObjects.Text;
   private isNearJukebox = false;
   private jukeboxPlayer?: JukeboxPlayer;
+  private jukeboxGlowUnsub?: () => void;
+  private jukeboxHostUnsub?: () => void;
   private static readonly JUKEBOX_INTERACT_RADIUS = 70;
   // Plato del Día (Cooking Lv4)
   private platoPrompt?: Phaser.GameObjects.Text;
@@ -405,7 +407,7 @@ export class CafeInterior extends Phaser.Scene {
       }).setOrigin(0.5).setDepth(20).setVisible(false);
 
       // Subscribe to jukebox state changes to drive the glow
-      eventBus.on(EVENTS.JUKEBOX_STATE_UPDATED, (p: unknown) => {
+      this.jukeboxGlowUnsub = eventBus.on(EVENTS.JUKEBOX_STATE_UPDATED, (p: unknown) => {
         if (!this.scene?.isActive('CafeInterior')) return;
         const s = p as { nowPlaying?: unknown } | null;
         const playing = s?.nowPlaying != null;
@@ -432,15 +434,14 @@ export class CafeInterior extends Phaser.Scene {
       });
 
       // Wire host changes to JukeboxPlayer
-      eventBus.on(EVENTS.JUKEBOX_STATE_UPDATED, (p: unknown) => {
+      this.jukeboxHostUnsub = eventBus.on(EVENTS.JUKEBOX_STATE_UPDATED, (p: unknown) => {
         if (!this.scene?.isActive('CafeInterior')) return;
-        const s = p as { hostId?: string | null } | null;
+        const s = p as { hostId?: string | null; nowPlaying?: { videoId?: string } | null } | null;
         if (typeof s?.hostId !== 'undefined') {
           const isHost = s.hostId === playerId;
           this.jukeboxPlayer?.setHost(isHost);
-          if (isHost && s?.nowPlaying != null) {
-            const song = s.nowPlaying as { videoId?: string };
-            if (song.videoId) this.jukeboxPlayer?.play(song.videoId);
+          if (isHost && s.nowPlaying?.videoId) {
+            this.jukeboxPlayer?.play(s.nowPlaying.videoId);
           }
         }
       });
@@ -608,6 +609,10 @@ export class CafeInterior extends Phaser.Scene {
     this.cafeTableXpAccMs = 0;
     this.room?.shutdown();
     this.room = undefined;
+    this.jukeboxGlowUnsub?.();
+    this.jukeboxGlowUnsub = undefined;
+    this.jukeboxHostUnsub?.();
+    this.jukeboxHostUnsub = undefined;
     this.jukeboxGlowTween?.stop();
     this.jukeboxGlowTween = undefined;
     this.jukeboxPlayer?.destroy();

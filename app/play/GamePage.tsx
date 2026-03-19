@@ -404,6 +404,10 @@ export default function PlayPage() {
         return [{ playerId: next.playerId, username: next.username }, ...filtered];
       });
       setConnected(true);
+      // Persist player identity for game systems that read it (e.g. JukeboxSystem)
+      try {
+        localStorage.setItem('waspi_player_info', JSON.stringify({ playerId: next.playerId, username: next.username }));
+      } catch { /* silent */ }
     });
 
     const unsubPresence = eventBus.on(EVENTS.PLAYER_PRESENCE, (payload: unknown) => {

@@ -155,6 +155,10 @@ function QueueList({ queue }: { queue: JukeboxSong[] }) {
 // ---------------------------------------------------------------------------
 
 export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProps) {
+  const handleClose = useCallback(() => {
+    eventBus.emit(EVENTS.JUKEBOX_CLOSE);
+    handleClose();
+  }, [onClose]);
   const [state, setState]               = useState<JukeboxState>(() => JukeboxSystem.getInstance().getState());
   const [balance, setBalance]           = useState(() => getTenksBalance());
   const [searchTab, setSearchTab]       = useState<SearchTab>('open');
@@ -317,7 +321,7 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
   // ---------------------------------------------------------------------------
 
   return (
-    <div style={overlayStyle} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div style={overlayStyle} onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}>
       <div style={modalStyle}>
 
         {/* Header */}

@@ -395,7 +395,7 @@ class JukeboxSystem {
     if (!this.isLocalHost()) return;
     if (this.state.nowPlaying) return;
 
-    const next = this.state.queue.find((s) => s.videoId !== this.state.nowPlaying?.videoId);
+    const next = this.state.queue[0];
     if (!next) {
       if (!this.state.isFallback) {
         this.state.isFallback = true;
