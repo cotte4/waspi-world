@@ -1805,6 +1805,19 @@ export default function PlayPage() {
         .ww-toolbar-btn:hover:not(:disabled) img {
           opacity: 1;
         }
+        .ww-toolbar-btn svg.ww-toolbar-icon {
+          width: 22px;
+          height: 22px;
+          display: block;
+          pointer-events: none;
+          flex-shrink: 0;
+          opacity: 0.92;
+          filter: drop-shadow(0 0 4px rgba(245, 200, 66, 0.35));
+        }
+        .ww-toolbar-btn:hover:not(:disabled) svg.ww-toolbar-icon {
+          opacity: 1;
+          filter: drop-shadow(0 0 6px rgba(245, 200, 66, 0.5));
+        }
         .ww-toolbar-btn:hover:not(:disabled) {
           background: rgba(255,255,255,0.07) !important;
           border-color: rgba(255,255,255,0.14) !important;
@@ -2168,9 +2181,16 @@ export default function PlayPage() {
 
           <div className="ww-toolbar-divider" />
 
-          {/* Settings */}
+          {/* Settings — SVG (el PNG era RGB sin alpha; el “tablero” quedaba como fondo gris) */}
           <button type="button" onClick={openSettings} className="ww-toolbar-btn" title="Ajustes" aria-label="Ajustes">
-            <img src="/assets/ui/icon_settings_gear.png" alt="" width={22} height={22} decoding="async" />
+            <svg className="ww-toolbar-icon" viewBox="0 0 24 24" aria-hidden>
+              <path
+                fill="#F5C842"
+                fillRule="evenodd"
+                clipRule="evenodd"
+                d="M11.078 2.25c.63-1.121 2.193-1.121 2.824 0l.357.63c.155.274.425.458.722.519.155.031.31.064.465.097.295.063.564.255.718.525l.22.4c.609 1.109 2.047 1.109 2.656 0l.155-.282a.978.978 0 011.639-.97l.389.689c.615 1.078-.325 2.393-1.51 2.393H19.5v.883c0 .615-.299 1.191-.797 1.541l-3.647 2.484a.978.978 0 00-.354 1.343l.11.192a.98.98 0 01-.97 1.422l-3.308-.769a.98.98 0 01-.63-.363l-.219-.312a1.125 1.125 0 00-1.851.086l-.45.677A1.125 1.125 0 018.583 21h-1.167c-.603 0-1.15-.363-1.384-.92l-.45-.677a1.125 1.125 0 00-1.852-.086l-.219.313a.982.982 0 01-.63.363l-3.308.769a.98.98 0 01-.97-1.422l.11-.192a.978.978 0 00-.354-1.343L2.303 13.33A1.989 1.989 0 012 11.883V11h.5c1.185 0 2.125-1.315 1.51-2.393l.389-.689a.978.978 0 011.639-.97l.155.282c.609 1.109 2.047 1.109 2.656 0l.22-.4c.154-.27.423-.462.718-.525.155-.033.31-.066.465-.097.297-.061.567-.245.722-.519l.357-.63zM12 15a3 3 0 100-6 3 3 0 000 6z"
+              />
+            </svg>
           </button>
 
           {/* Stats */}
