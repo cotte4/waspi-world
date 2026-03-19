@@ -80,7 +80,9 @@ const FARM_SEEDS: Array<{
 export class VecindadScene extends Phaser.Scene {
   private static readonly MOVE_SPEED = 145;
   private static readonly SPRINT_MULTIPLIER = 1.55;
-  private static readonly FISHING_SPOT = { x: 2440, y: 1540, range: 80 };
+  private static readonly FISHING_SPOT      = { x: 2440, y: 1540, range: 80 };
+  // Deep spot — unlocked at Fishing Lv3; better quality odds
+  private static readonly FISHING_SPOT_DEEP = { x: 2440, y: 1568, range: 50 };
   private player!: AvatarRenderer;
   private room?: InteriorRoom;
   private keySpace!: Phaser.Input.Keyboard.Key;
@@ -478,11 +480,17 @@ export class VecindadScene extends Phaser.Scene {
 
   private drawFishingPond(g: Phaser.GameObjects.Graphics) {
     const { x, y } = VecindadScene.FISHING_SPOT;
+    const ds = VecindadScene.FISHING_SPOT_DEEP;
     // Pond water
     g.fillStyle(0x0a2233, 1);
     g.fillEllipse(x, y, 180, 100);
     g.lineStyle(2, 0x1A4A6A, 0.9);
     g.strokeEllipse(x, y, 180, 100);
+    // Deep zone — darker inner circle
+    g.fillStyle(0x061422, 1);
+    g.fillEllipse(ds.x, ds.y, 80, 44);
+    g.lineStyle(1, 0x2A6A8A, 0.6);
+    g.strokeEllipse(ds.x, ds.y, 80, 44);
     // Water shimmer lines
     g.lineStyle(1, 0x2A6A8A, 0.45);
     g.lineBetween(x - 55, y - 8, x + 30, y - 8);
@@ -494,10 +502,14 @@ export class VecindadScene extends Phaser.Scene {
     g.fillStyle(0x5a3a1a, 1);
     g.fillRoundedRect(x - 8, y - 62, 16, 56, 4);
     g.fillRoundedRect(x - 30, y - 68, 60, 10, 4);
-    // Label
-    this.add.text(x, y + 68, '🎣 PESCAR [E]', {
+    // Labels
+    this.add.text(x, y - 76, '🎣 PESCAR [E]', {
       fontSize: '7px', fontFamily: '"Press Start 2P", monospace',
       color: '#4A9ECC', stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+    this.add.text(ds.x, ds.y + 34, '🌊 PROFUNDO [E] LV3+', {
+      fontSize: '5px', fontFamily: '"Press Start 2P", monospace',
+      color: '#2A5A8A', stroke: '#000', strokeThickness: 2,
     }).setOrigin(0.5).setDepth(2);
   }
 
@@ -921,10 +933,22 @@ export class VecindadScene extends Phaser.Scene {
   private handlePrimaryAction() {
     if (this.fishingActive) return;
 
-    // Fishing spot
+    // Deep fishing spot (Lv3+) — check first since it sits inside the main pond range
+    const ds = VecindadScene.FISHING_SPOT_DEEP;
+    if (Phaser.Math.Distance.Between(this.px, this.py, ds.x, ds.y) < ds.range) {
+      const fishLv = getSkillSystem().getLevel('fishing');
+      if (fishLv >= 3) {
+        void this.handleFishing(true);
+      } else {
+        eventBus.emit(EVENTS.UI_NOTICE, { message: '🌊 REQUIERE PESCA LV3', color: '#2A5A8A' });
+      }
+      return;
+    }
+
+    // Regular fishing spot
     const fs = VecindadScene.FISHING_SPOT;
     if (Phaser.Math.Distance.Between(this.px, this.py, fs.x, fs.y) < fs.range) {
-      void this.handleFishing();
+      void this.handleFishing(false);
       return;
     }
 
@@ -1139,13 +1163,18 @@ export class VecindadScene extends Phaser.Scene {
     }
   }
 
-  private async handleFishing(): Promise<void> {
+  private async handleFishing(deep = false): Promise<void> {
     this.fishingActive = true;
 
     try {
       const sys = getSkillSystem();
       const fishingLevel = sys.getLevel('fishing');
       const isAutoMode = fishingLevel >= 4;
+      const source = deep ? 'fish_catch_deep' : 'fish_catch';
+
+      if (deep) {
+        eventBus.emit(EVENTS.UI_NOTICE, { message: '🌊 Lanzado profundo...', color: '#4A9ECC' });
+      }
 
       const minigame = new FishingMinigame(this);
       this.activeFishingMinigame = minigame;
@@ -1160,21 +1189,28 @@ export class VecindadScene extends Phaser.Scene {
 
       const isAuto = isAutoMode;
       const minigameBonus = result === 'perfect' ? 5 : result === 'good' ? 3 : 0;
+      // Deep water gives a flat +6 XP bonus and uses a dedicated source for quality roll
+      const deepBonus = deep ? 6 : 0;
 
-      const qr = await sys.rollQuality('fishing', 'fish_catch', isAuto);
+      const qr = await sys.rollQuality('fishing', source, isAuto);
       void getContractSystem().trackAction('fish_catch', 'fishing', qr.quality);
 
-      eventBus.emit(EVENTS.UI_NOTICE, { message: `🐟 PESCADO [${qr.label}]`, color: qr.color });
+      const label = deep ? `🌊 PROFUNDO [${qr.label}]` : `🐟 PESCADO [${qr.label}]`;
+      eventBus.emit(EVENTS.UI_NOTICE, { message: label, color: qr.color });
+
+      if (!this.scene?.isActive('VecindadScene')) return;
 
       const eventMult = getEventSystem().getXpMultiplier('fishing');
-      const xpTotal = Math.round((12 + qr.xp_bonus + minigameBonus) * eventMult);
-      const xpResult = await sys.addXp('fishing', xpTotal, 'fish_catch');
+      const xpTotal = Math.round((12 + qr.xp_bonus + minigameBonus + deepBonus) * eventMult);
+      const xpResult = await sys.addXp('fishing', xpTotal, source);
       if (xpResult.leveled_up) {
         eventBus.emit(EVENTS.UI_NOTICE, { message: `🎣 PESCA LVL ${xpResult.new_level}!`, color: '#4A9ECC' });
       }
       if (sys.getLevel('fishing') >= 5) {
         void getMasterySystem().earnMp('fishing');
       }
+
+      if (!this.scene?.isActive('VecindadScene')) return;
 
       if (qr.quality === 'legendary') {
         this.cameras.main.flash(400, 74, 159, 204, false);

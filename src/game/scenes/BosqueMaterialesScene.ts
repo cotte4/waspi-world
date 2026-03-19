@@ -80,6 +80,8 @@ type MaterialNode = {
   body: Phaser.GameObjects.Rectangle;
   glow: Phaser.GameObjects.Rectangle;
   label: Phaser.GameObjects.Text;
+  qualityRing: Phaser.GameObjects.Arc; // Mining Lv3: quality hint ring
+  qualityColor: number;                // assigned per-node deterministically
 };
 
 type Mob = {
@@ -467,6 +469,13 @@ export class BosqueMaterialesScene extends Phaser.Scene {
 
   // ─── Material Nodes ───────────────────────────────────────────────────────
 
+  // Quality hint color per node (Mining Lv3 unlock) — deterministic by index
+  private static nodeQualityColor(i: number): number {
+    if (i % 6 === 5)                    return 0xF5C842; // gold  — rare hint
+    if (i % 6 === 3 || i % 6 === 4)    return 0x4A9ECC; // blue  — uncommon hint
+    return 0x556655;                                      // green — common hint
+  }
+
   private setupMaterialNodes() {
     MATERIAL_DEFS.forEach((def, i) => {
       const glow = this.add.rectangle(def.x, def.y, 22, 22, 0xf5c842, 0.18).setDepth(2);
@@ -475,6 +484,13 @@ export class BosqueMaterialesScene extends Phaser.Scene {
         fontSize: '5px', fontFamily: '"Press Start 2P", monospace',
         color: '#F5C842', stroke: '#000', strokeThickness: 3,
       }).setOrigin(0.5).setDepth(2.2);
+
+      // Quality hint ring — visible only when Mining >= 3
+      const qColor = BosqueMaterialesScene.nodeQualityColor(i);
+      const qualityRing = this.add.arc(def.x, def.y, 18, 0, 360, false, qColor, 0)
+        .setStrokeStyle(2, qColor, 0.7)
+        .setDepth(1.9)
+        .setVisible(false);
 
       this.tweens.add({
         targets: [glow, body],
@@ -492,7 +508,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
         x: def.x, y: def.y,
         available: true,
         respawnAt: 0,
-        body, glow, label,
+        body, glow, label, qualityRing, qualityColor: qColor,
       });
     });
   }
@@ -641,12 +657,18 @@ export class BosqueMaterialesScene extends Phaser.Scene {
 
   private updateMaterialNodes() {
     const now = this.time.now;
+    const showRings = getSkillSystem().getLevel('mining') >= 3;
     for (const node of this.materialNodes) {
       if (!node.available && now >= node.respawnAt) {
         node.available = true;
         node.body.setVisible(true);
         node.glow.setVisible(true);
         node.label.setVisible(true);
+        node.qualityRing.setVisible(showRings);
+      }
+      // Keep rings in sync with current skill level every frame (cheap boolean)
+      if (node.available) {
+        node.qualityRing.setVisible(showRings);
       }
     }
   }
@@ -675,6 +697,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     nearest.body.setVisible(false);
     nearest.glow.setVisible(false);
     nearest.label.setVisible(false);
+    nearest.qualityRing.setVisible(false);
     this.collectedTotal++;
     this.hudText?.setText(`MATS: ${this.collectedTotal}`);
 

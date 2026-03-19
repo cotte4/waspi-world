@@ -35,6 +35,13 @@ export class CafeInterior extends Phaser.Scene {
   private cafeTableXpAccMs = 0;
   private static readonly CAFE_TABLE_XP_INTERVAL_MS = 30_000;
   private static readonly CAFE_TABLE_RADIUS = 70;
+  // Plato del Día (Cooking Lv4)
+  private platoPrompt?: Phaser.GameObjects.Text;
+  private static readonly PLATO_BUFFS = [
+    'VELOCIDAD +20% — 5 MIN', 'HP +15 — PERMANENTE (SESIÓN)',
+    'DAÑO +10% — 3 MIN', 'EXTRACCIÓN +25% — 3 MIN',
+    'SUERTE DE PESCA +30% — 5 MIN',
+  ];
 
   constructor() {
     super({ key: 'CafeInterior' });
@@ -364,6 +371,12 @@ export class CafeInterior extends Phaser.Scene {
     });
     this.room.start();
 
+    // ── Plato del Día prompt (Cooking Lv4 unlock) ────────────
+    this.platoPrompt = this.add.text(cx, roomY + 82, '', {
+      fontSize: '6px', fontFamily: '"Press Start 2P", monospace',
+      color: '#FF7043', stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(20).setVisible(false);
+
     // ── UI ───────────────────────────────────────────────────
     this.add.text(cx, roomB + 16, 'ESC  ·  SALIR', {
       fontSize: '7px',
@@ -392,6 +405,7 @@ export class CafeInterior extends Phaser.Scene {
     if (this.inTransition) return;
     this.handleMovement(delta);
     this.updateCafeTableXp(delta);
+    this.updatePlatoDelDia();
     this.room?.update();
     if (this.controls.isActionJustDown('back')) {
       this.exitToWorld();
@@ -425,6 +439,39 @@ export class CafeInterior extends Phaser.Scene {
     this.lastMoveDx = dx;
     this.lastMoveDy = dy;
     this.lastIsMoving = dx !== 0 || dy !== 0;
+  }
+
+  private updatePlatoDelDia() {
+    if (!this.platoPrompt) return;
+    const cookLv = getSkillSystem().getLevel('cooking');
+    if (cookLv < 4) { this.platoPrompt.setVisible(false); return; }
+
+    const { width, height } = this.scale;
+    const roomX = (width - 640) / 2;
+    const roomY = (height - 360) / 2;
+    const barCx  = roomX + 44 + (640 - 88) / 2;  // barX + barW/2
+    const barFrontY = roomY + 98 + 44 + 16;        // barY + barH + some gap
+
+    const nearBar = Phaser.Math.Distance.Between(this.px, this.py, barCx, barFrontY) < 80;
+    const today = new Date().toISOString().slice(0, 10);
+    const alreadyCooked = localStorage.getItem(`waspi_plato_${today}`) === '1';
+
+    if (nearBar && !alreadyCooked) {
+      this.platoPrompt.setText('🍳 PLATO DEL DÍA [E]').setVisible(true);
+      if (this.controls.isActionJustDown('interact')) {
+        this.cookPlatoDelDia(today);
+      }
+    } else {
+      this.platoPrompt.setText(nearBar && alreadyCooked ? 'PLATO YA PREPARADO HOY' : '')
+        .setVisible(nearBar && alreadyCooked);
+    }
+  }
+
+  private cookPlatoDelDia(today: string) {
+    localStorage.setItem(`waspi_plato_${today}`, '1');
+    const buff = CafeInterior.PLATO_BUFFS[Math.floor(Math.random() * CafeInterior.PLATO_BUFFS.length)];
+    eventBus.emit(EVENTS.UI_NOTICE, { message: `🍳 PLATO DEL DÍA: ${buff}`, color: '#FF7043' });
+    void getSkillSystem().addXp('cooking', 15, 'plato_del_dia');
   }
 
   private updateCafeTableXp(delta: number) {
