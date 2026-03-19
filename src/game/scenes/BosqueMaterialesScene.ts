@@ -752,7 +752,19 @@ export class BosqueMaterialesScene extends Phaser.Scene {
 
     // Cave check
     if (Phaser.Math.Distance.Between(this.px, this.py, 1430, 175) < CAVE_INTERACT_RANGE) {
-      this.showPrompt('LAS PIEDRAS NO SE MUEVEN...');
+      const miningLv = getSkillSystem().getLevel('mining');
+      if (miningLv >= 5) {
+        // Enter the cave expedition
+        if (this.inTransition) return;
+        this.inTransition = true;
+        const started = transitionToScene(this, 'CaveScene', {
+          returnX: 300,
+          returnY: 60,
+        });
+        if (!started) this.inTransition = false;
+      } else {
+        this.showPrompt(`BLOQUEADO — Mining Lv5 requerido [Lv actual: ${miningLv}]`);
+      }
       return;
     }
 
@@ -882,7 +894,10 @@ export class BosqueMaterialesScene extends Phaser.Scene {
         ? '[E] CUIDAR PLANTAS DEL JARDÍN +10 XP'
         : `🌱 JARDÍN COMUNAL [REQUIERE JARDINERÍA LV5 — LV ACTUAL: ${gLv}]`;
     } else if (dist2cave < CAVE_INTERACT_RANGE) {
-      hint = '[E] EXAMINAR CUEVA';
+      const miningLv = getSkillSystem().getLevel('mining');
+      hint = miningLv >= 5
+        ? '[E] ENTRAR A LA CUEVA OSCURA'
+        : `🔒 CUEVA [Mining Lv5 requerido — Lv actual: ${miningLv}]`;
     } else {
       // minero_atletico sinergia: +15% rango de recolección
       const promptRange = MATERIAL_COLLECT_RANGE * (getSkillSystem().hasSynergy('minero_atletico') ? 1.15 : 1);
