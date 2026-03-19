@@ -1,7 +1,41 @@
 # WASPI WORLD — PRD Estado Actual
-**Fecha:** 2026-03-16
-**Nota:** Actualizado post sesión de visual polish y bug fixes.
+**Fecha:** 2026-03-19
+**Nota:** Actualizado post sesión de Stripe integration, shop UI polish, env vars, y QA end-to-end.
 **Archivos fuente:** `PRD_WASPI_WORLD.md` (v1.2), código real en `src/` y `app/`.
+
+---
+
+## Sesión 2026-03-19 — Lo que se hizo
+
+### Stripe Integration — end-to-end funcionando
+- Shop overlay: 4 tabs (ROPA VIRTUAL / ROPA FÍSICA / + TENKS / MIS ÓRDENES)
+- `startStripeCheckout()` — POST `/api/checkout` → redirect a Stripe hosted checkout
+- TENKS packs: 3-card grid con "MÁS POPULAR" badge, precios en USD temporalmente
+- ROPA FÍSICA: size selector pixel-art, campo CUPÓN con gold border
+- MIS ÓRDENES: status pills (PAGADO/ENVIADO/ENTREGADO), fechas DD/MM/YYYY, ☠ empty state
+- `checkoutRedirecting`: overlay fullscreen spinner "CONECTANDO CON STRIPE..."
+- `shopStatus`: banner animado verde/dorado post-checkout
+- Webhook Stripe: `checkout.session.completed` → acredita TENKS, crea orders en DB
+- `/api/checkout`: shipping address collection AR, phone collection habilitados
+- `/api/player/orders`: GET historial de órdenes del jugador
+- `src/lib/resend.ts`: templates de email de confirmación (no-fatal, pendiente RESEND_API_KEY)
+
+### Env vars configuradas en .env.local
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+- `STRIPE_SECRET_KEY` (test), `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (test), `STRIPE_WEBHOOK_SECRET`
+- `NEXT_PUBLIC_APP_URL=http://localhost:3000`
+
+### Supabase schema aplicado
+- Tablas: `products`, `players`, `orders`, `player_inventory`, `tenks_transactions`
+- Todos los 503s del juego resueltos (ahora responden 401 cuando no hay auth)
+
+### QA end-to-end
+- Compra de TENKS pack: checkout Stripe → webhook 200 → TENKS acreditados ✅
+- Nota: moneda `usd` temporalmente (Stripe no soporta ARS para cuentas no-AR)
+
+### Planes creados
+- `planning/features/mercadopago-integration.md` — integración MP para cobros en ARS (próximo)
+- `planning/features/resend-emails.md` — emails de confirmación (pendiente RESEND_API_KEY)
 
 ---
 
@@ -82,16 +116,16 @@ Waspi World está significativamente más avanzado de lo que el PRD original v1.
 | Avatar / customización | Funcional — procedural + 4 seeds especiales + sprite overhaul iniciado |
 | Inventario / tienda | Funcional — 13 items en catálogo (6 ropa + 7 utility/armas), StoreInterior implementado |
 | Economía TENKS | Parcialmente funcional — TENKS operativos pero en localStorage, sin auth real |
-| Pagos Stripe | Wired — endpoints configurados, flujo end-to-end sin testear en producción |
-| Auth Supabase | NO implementado — player_id es UUID local (localStorage) |
+| Pagos Stripe | Funcional en test mode — flujo end-to-end verificado (USD temporal, pendiente MP para ARS) |
+| Auth Supabase | Funcional — magic link + Google, TENKS y skills server-side |
 | Audio | Mínimo — 1 archivo (arcade-theme.mp3), sistema preparado sin SFX |
 | Tests | Ninguno implementado |
 | Tilemaps Tiled | NO existen — mundo dibujado con Phaser Graphics primitivos |
 
 **Qué falta para lanzamiento:**
-1. Auth Supabase (blocker de todo lo demás)
-2. TENKS server-side con validación real
-3. Stripe end-to-end smoke test en producción
+1. **Mercado Pago** — cobros en ARS (plan: `mercadopago-integration.md`)
+2. Live keys de Stripe en Vercel + webhook endpoint registrado en Stripe Dashboard
+3. Resend emails — agregar `RESEND_API_KEY` y verificar dominio
 4. Audio SFX por escena
 5. Definir si Phaser Graphics es decisión final o si se migra a Tiled
 

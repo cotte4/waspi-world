@@ -60,7 +60,9 @@ export async function POST(request: NextRequest) {
       discountPercent = discount.percent_off;
     }
 
-    const unitAmount = item.priceArs * 100;
+    // TODO: switch to 'ars' once Stripe account is registered as AR business
+    // For now using USD with a ~1:1300 ARS/USD conversion for testing
+    const unitAmount = Math.round((item.priceArs / 1300) * 100);
     const coupon = discountPercent
       ? await stripe.coupons.create({
           percent_off: discountPercent,
@@ -86,7 +88,7 @@ export async function POST(request: NextRequest) {
             ? { price: catalogEntry.stripePriceId }
             : {
                 price_data: {
-                  currency: 'ars',
+                  currency: 'usd',
                   unit_amount: unitAmount,
                   product_data: {
                     name: item.name,
@@ -131,8 +133,9 @@ export async function POST(request: NextRequest) {
         {
           quantity: 1,
           price_data: {
-            currency: 'ars',
-            unit_amount: pack.priceArs * 100,
+            // TODO: switch to 'ars' once Stripe account is registered as AR business
+            currency: 'usd',
+            unit_amount: Math.round((pack.priceArs / 1300) * 100),
             product_data: {
               name: pack.name,
               description: pack.description,
