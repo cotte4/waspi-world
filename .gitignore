@@ -42,3 +42,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# QA — volcados locales de Playwright MCP (las capturas manuales van en docs/qa/screenshots)
+.playwright-mcp/
+docs/qa/playwright-mcp/
