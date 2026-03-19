@@ -94,6 +94,7 @@ export class MiningMinigame {
   private scene: Phaser.Scene;
   private container: Phaser.GameObjects.Container | null = null;
   private cursorObj: Phaser.GameObjects.Rectangle | null = null;
+  private cursorGlow: Phaser.GameObjects.Rectangle | null = null;
   private cursorTween: Phaser.Tweens.Tween | null = null;
   private spaceKey: Phaser.Input.Keyboard.Key | null = null;
   private resolvePromise: ((result: MinigameResult) => void) | null = null;
@@ -139,11 +140,25 @@ export class MiningMinigame {
 
     const objects: Phaser.GameObjects.GameObject[] = [];
 
-    // Background panel
-    const bg = this.scene.add.rectangle(0, 0, PANEL_W, PANEL_H, 0x0e0e14)
-      .setAlpha(0.92)
-      .setStrokeStyle(2, 0xf5c842);
+    // Background panel — rounded rect with gold border
+    const bg = this.scene.add.graphics();
+    bg.fillStyle(0x0d0d16, 0.96);
+    bg.fillRoundedRect(-PANEL_W / 2, -PANEL_H / 2, PANEL_W, PANEL_H, 10);
+    bg.lineStyle(2, 0xf5c842, 1);
+    bg.strokeRoundedRect(-PANEL_W / 2, -PANEL_H / 2, PANEL_W, PANEL_H, 10);
     objects.push(bg);
+
+    // Corner brackets — tactical feel
+    const corners = this.scene.add.graphics();
+    const cLen = 10;
+    ([[-PANEL_W / 2, -PANEL_H / 2], [PANEL_W / 2, -PANEL_H / 2], [-PANEL_W / 2, PANEL_H / 2], [PANEL_W / 2, PANEL_H / 2]] as [number, number][]).forEach(([bx, by], i) => {
+      const sx = i % 2 === 0 ? 1 : -1;
+      const sy = i < 2 ? 1 : -1;
+      corners.lineStyle(2, 0xf5c842, 0.6);
+      corners.lineBetween(bx, by, bx + sx * cLen, by);
+      corners.lineBetween(bx, by, bx, by + sy * cLen);
+    });
+    objects.push(corners);
 
     // Title
     const title = autoMode
@@ -169,7 +184,7 @@ export class MiningMinigame {
       const zoneX = barLeft + zone.start + zoneW / 2;
       const zoneRect = this.scene.add.rectangle(zoneX, 8, zoneW, BAR_H, zone.color)
         .setOrigin(0.5, 0.5)
-        .setAlpha(0.75);
+        .setAlpha(0.9);
       objects.push(zoneRect);
     }
 
@@ -178,6 +193,8 @@ export class MiningMinigame {
       fontSize: '6px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#000000',
+      stroke: '#ffffff',
+      strokeThickness: 1,
     };
     for (const zone of this.zones) {
       const zoneW = zone.end - zone.start;
@@ -187,6 +204,13 @@ export class MiningMinigame {
         .setOrigin(0.5, 0.5);
       objects.push(zLabel);
     }
+
+    // Cursor glow — wide semi-transparent rect behind the cursor
+    const cursorGlow = this.scene.add.rectangle(barLeft, 8, CURSOR_W + 8, CURSOR_H + 4, 0xffffff)
+      .setOrigin(0.5, 0.5)
+      .setAlpha(0.18);
+    objects.push(cursorGlow);
+    this.cursorGlow = cursorGlow;
 
     // Cursor (will be moved in animation)
     const cursor = this.scene.add.rectangle(barLeft, 8, CURSOR_W, CURSOR_H, 0xffffff)
@@ -210,6 +234,16 @@ export class MiningMinigame {
       .setScrollFactor(0)
       .setDepth(DEPTH);
     this.container = container;
+
+    // Pulse the cursor glow
+    this.scene.tweens.add({
+      targets: cursorGlow,
+      alpha: { from: 0.10, to: 0.28 },
+      duration: 280,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -225,9 +259,13 @@ export class MiningMinigame {
 
     // Start at left edge
     this.cursorObj.setX(barLeft);
+    if (this.cursorGlow) this.cursorGlow.setX(barLeft);
+
+    const tweenTargets: Phaser.GameObjects.Rectangle[] = [this.cursorObj];
+    if (this.cursorGlow) tweenTargets.push(this.cursorGlow);
 
     this.cursorTween = this.scene.tweens.add({
-      targets: this.cursorObj,
+      targets: tweenTargets,
       x: { from: barLeft, to: barRight },
       duration,
       ease: 'Linear',
@@ -272,6 +310,7 @@ export class MiningMinigame {
         this.cursorTween.stop();
         const barLeft = -BAR_W / 2;
         this.cursorObj.setX(barLeft + targetX);
+        if (this.cursorGlow) this.cursorGlow.setX(barLeft + targetX);
       }
 
       this._finish(zone.label);
@@ -333,6 +372,7 @@ export class MiningMinigame {
       this.container = null;
     }
     this.cursorObj = null;
+    this.cursorGlow = null;
     this.resolvePromise = null;
   }
 }

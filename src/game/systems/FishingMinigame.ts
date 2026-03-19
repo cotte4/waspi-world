@@ -112,14 +112,23 @@ export class FishingMinigame {
       waterGraphics.fillRect(-waterW / 2, waterY + s.yOff, waterW, s.h);
     }
 
-    // --- float circle ---
+    // --- depth gradient below water strips ---
+    const depthGfx = this.scene.add.graphics();
+    depthGfx.fillStyle(0x0d2233, 0.35);
+    depthGfx.fillRect(-waterW / 2, waterY + 14, waterW, 28);
+
+    // --- float glow (static decorative ring behind the float) ---
     const floatX = 20;
     const floatY = waterY - 2;
+    const floatGlow = this.scene.add.arc(floatX, floatY, 12, 0, 360, false, 0xff6b35);
+    floatGlow.setAlpha(0.22);
+
+    // --- float circle ---
     const floatCircle = this.scene.add.arc(floatX, floatY, 7, 0, 360, false, FLOAT_COLOR);
 
     // --- fishing line from top-left corner to float ---
     const lineGraphics = this.scene.add.graphics();
-    lineGraphics.lineStyle(1, LINE_COLOR, 0.8);
+    lineGraphics.lineStyle(2, 0xaaaaaa, 1);
     lineGraphics.beginPath();
     lineGraphics.moveTo(-PANEL_W / 2 + 30, -PANEL_H / 2 + 10);
     lineGraphics.lineTo(floatX, floatY - 7);
@@ -129,8 +138,21 @@ export class FishingMinigame {
     const statusText = this.scene.add.text(0, PANEL_H / 2 - 48, 'Espera el pique...', {
       fontSize: '9px',
       fontFamily: FONT_SMALL,
-      color: WHITE_HEX,
+      color: '#C8E8FF',
     }).setOrigin(0.5, 0.5);
+
+    // --- header separator ---
+    const headerSep = this.scene.add.graphics();
+    headerSep.lineStyle(1, 0xf5c842, 0.25);
+    headerSep.lineBetween(-PANEL_W / 2 + 20, -PANEL_H / 2 + 34, PANEL_W / 2 - 20, -PANEL_H / 2 + 34);
+
+    // --- atmospheric bubbles ---
+    const bubblesGfx = this.scene.add.graphics();
+    const bubblePositions: [number, number][] = [[-60, waterY + 8], [-20, waterY + 18], [30, waterY + 5], [70, waterY + 14], [-40, waterY + 22]];
+    bubblePositions.forEach(([bx, by]) => {
+      bubblesGfx.fillStyle(0x4a9ecc, 0.25);
+      bubblesGfx.fillCircle(bx, by, 3);
+    });
 
     // --- hint text (hidden until bite) ---
     const hintText = this.scene.add.text(0, PANEL_H / 2 - 28, '[ESPACIO] Halar', {
@@ -143,8 +165,12 @@ export class FishingMinigame {
     const container = this.scene.add.container(cx, cy, [
       bg,
       title,
+      headerSep,
       waterGraphics,
+      depthGfx,
+      bubblesGfx,
       lineGraphics,
+      floatGlow,
       floatCircle,
       statusText,
       hintText,
