@@ -5,7 +5,8 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 import { CHAT } from '@/src/game/config/constants';
-import { CATALOG, getItem as getCatalogItem, type CatalogItem } from '@/src/game/config/catalog';
+import { CATALOG, getItem as getCatalogItem, getPhysicalCatalog, type CatalogItem } from '@/src/game/config/catalog';
+import { TENKS_PACKS } from '@/src/lib/tenksPacks';
 import { getInventory, equipItem, hasUtilityEquipped, replaceInventory } from '@/src/game/systems/InventorySystem';
 import { loadAudioSettings, saveAudioSettings, type AudioSettings } from '@/src/game/systems/AudioSettings';
 import { loadHudSettings, saveHudSettings, type HudSettings } from '@/src/game/systems/HudSettings';
@@ -63,7 +64,7 @@ interface CombatStats {
   deaths: number;
 }
 
-type ShopTab = 'products';
+type ShopTab = 'tenks_virtual' | 'physical' | 'tenks_packs';
 
 interface ShopOpenPayload {
   tab?: ShopTab;
@@ -166,9 +167,13 @@ export default function PlayPage() {
   const [uiNotice, setUiNotice] = useState<{ msg: string; color?: string } | null>(null);
   const [shopOpen, setShopOpen] = useState(initialCheckout.open);
   const [shopSource, setShopSource] = useState(initialCheckout.open ? 'checkout_return' : '');
+  const [shopTab, setShopTab] = useState<ShopTab>(initialCheckout.tab);
   const [shopItems, setShopItems] = useState<CatalogItem[]>([]);
   const [checkoutBusyId, setCheckoutBusyId] = useState<string | null>(null);
   const [shopStatus, setShopStatus] = useState(initialCheckout.status);
+  const [selectedSize, setSelectedSize] = useState<string>('');
+  const [discountCodeInput, setDiscountCodeInput] = useState('');
+  const [checkoutRedirecting, setCheckoutRedirecting] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isPortrait, setIsPortrait] = useState(false);
   const [showMobileHint, setShowMobileHint] = useState(false);
@@ -1092,6 +1097,43 @@ export default function PlayPage() {
       ?? `${item.name} comprado por ${item.priceTenks.toLocaleString('es-AR')} TENKS y equipado.`
     );
   }, [applyPlayerState]);
+
+  const startStripeCheckout = useCallback(async (
+    type: 'product' | 'tenks_pack',
+    payload: { itemId?: string; size?: string; discountCode?: string; packId?: string }
+  ) => {
+    if (!tokenRef.current) {
+      setShopStatus('Iniciá sesión para comprar.');
+      return;
+    }
+    setCheckoutRedirecting(true);
+    setShopStatus('');
+
+    const body = type === 'product'
+      ? { type: 'product', itemId: payload.itemId, size: payload.size, discountCode: payload.discountCode || undefined }
+      : { type: 'tenks_pack', packId: payload.packId };
+
+    const res = await fetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenRef.current}` },
+      body: JSON.stringify(body),
+    }).catch(() => null);
+
+    if (!res?.ok) {
+      const json = await res?.json().catch(() => null);
+      setCheckoutRedirecting(false);
+      setShopStatus((json as { error?: string } | null)?.error ?? 'No se pudo iniciar el checkout.');
+      return;
+    }
+
+    const json = await res.json() as { url?: string };
+    if (json.url) {
+      window.location.href = json.url;
+    } else {
+      setCheckoutRedirecting(false);
+      setShopStatus('Error al obtener la URL de pago.');
+    }
+  }, []);
 
   const handleMutePlayer = useCallback(() => {
     if (!playerActions || !playerState) return;
@@ -2114,85 +2156,257 @@ export default function PlayPage() {
                 </button>
               </div>
 
-              <div className="flex gap-2 mb-3">
-                <button style={tabButtonStyle(true)}>
+              <div className="flex gap-1 mb-3">
+                <button onClick={() => setShopTab('tenks_virtual')} style={tabButtonStyle(shopTab === 'tenks_virtual')}>
                   ROPA TENKS
+                </button>
+                <button onClick={() => setShopTab('physical')} style={tabButtonStyle(shopTab === 'physical')}>
+                  ROPA FÍSICA
+                </button>
+                <button onClick={() => setShopTab('tenks_packs')} style={tabButtonStyle(shopTab === 'tenks_packs')}>
+                  + TENKS
                 </button>
               </div>
 
-              <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
-                <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: 10 }}>
-                  Compra ropa con TENKS. La prenda se agrega al inventario y se equipa al instante.
+              {shopTab === 'tenks_virtual' && (
+                <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: 10 }}>
+                    Compra ropa con TENKS. La prenda se agrega al inventario y se equipa al instante.
+                  </div>
+                  <div className="space-y-2">
+                    {clothingItems.map((item) => {
+                      const ownedItem = owned.includes(item.id);
+                      const active = item.slot === 'top' ? equipped.top === item.id : equipped.bottom === item.id;
+                      return (
+                        <div
+                          key={item.id}
+                          className="ww-panel"
+                          style={{
+                            padding: '12px',
+                            border: active ? '1px solid rgba(57,255,20,0.45)' : '1px solid rgba(255,255,255,0.1)',
+                            background: active ? 'rgba(57,255,20,0.07)' : 'rgba(255,255,255,0.04)',
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="inline-block"
+                                  style={{
+                                    width: 12,
+                                    height: 12,
+                                    background: `#${(item.color ?? 0x777777).toString(16).padStart(6, '0')}`,
+                                    border: '1px solid rgba(0,0,0,0.35)',
+                                  }}
+                                />
+                                <div style={{ fontSize: '15px', color: '#FFFFFF' }}>{item.name}</div>
+                                {active && <span style={{ fontSize: '11px', color: '#39FF14' }}>PUESTO</span>}
+                                {!active && ownedItem && <span style={{ fontSize: '11px', color: '#39FF14' }}>TUYO</span>}
+                              </div>
+                              <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.58)', marginTop: 4 }}>{item.description}</div>
+                              <div style={{ fontSize: '12px', color: '#F5C842', marginTop: 4 }}>
+                                {item.priceTenks.toLocaleString('es-AR')} TENKS
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => {
+                                if (ownedItem) {
+                                  handleEquipOwnedItem(item.id);
+                                  setShopStatus(active ? `${item.name} ya esta equipado.` : `${item.name} equipado.`);
+                                  return;
+                                }
+                                void buyShopItem(item);
+                              }}
+                              disabled={checkoutBusyId === item.id || active || (!ownedItem && !isAuthenticated)}
+                              style={authButtonStyle(
+                                active ? 'rgba(57,255,20,0.25)' : '#F5C842',
+                                active ? '#39FF14' : '#0E0E14',
+                                checkoutBusyId === item.id || active || (!ownedItem && !isAuthenticated),
+                                active
+                              )}
+                            >
+                              {active
+                                ? 'PUESTO'
+                                : checkoutBusyId === item.id
+                                  ? 'CARGANDO...'
+                                  : ownedItem
+                                    ? 'EQUIPAR'
+                                    : 'COMPRAR'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  {clothingItems.map((item) => {
-                    const ownedItem = owned.includes(item.id);
-                    const active = item.slot === 'top' ? equipped.top === item.id : equipped.bottom === item.id;
-                    return (
+              )}
+
+              {shopTab === 'physical' && (
+                <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: 10 }}>
+                    Ropa física WASPI. Pagás con ARS y te llega a casa.
+                  </div>
+                  <div className="space-y-2">
+                    {getPhysicalCatalog().map((item) => {
+                      const isSelected = selectedSize !== '' && checkoutRedirecting;
+                      return (
+                        <div
+                          key={item.id}
+                          className="ww-panel"
+                          style={{
+                            padding: '12px',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            background: 'rgba(255,255,255,0.04)',
+                          }}
+                        >
+                          <div className="flex items-center gap-2" style={{ marginBottom: 4 }}>
+                            <span
+                              className="inline-block"
+                              style={{
+                                width: 12,
+                                height: 12,
+                                background: `#${(item.color ?? 0x777777).toString(16).padStart(6, '0')}`,
+                                border: '1px solid rgba(0,0,0,0.35)',
+                              }}
+                            />
+                            <div style={{ fontSize: '15px', color: '#FFFFFF' }}>{item.name}</div>
+                            {item.isLimited && <span style={{ fontSize: '10px', color: '#F5C842' }}>LIMITED</span>}
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.58)', marginBottom: 6 }}>{item.description}</div>
+                          <div style={{ fontSize: '13px', color: '#F5C842', marginBottom: 8 }}>
+                            ${(item.priceArs ?? 0).toLocaleString('es-AR')} ARS
+                          </div>
+                          {item.sizes && item.sizes.length > 0 && (
+                            <div style={{ marginBottom: 8 }}>
+                              <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>TALLE</div>
+                              <div className="flex gap-1 flex-wrap">
+                                {item.sizes.map((size) => (
+                                  <button
+                                    key={size}
+                                    onClick={() => setSelectedSize(selectedSize === size ? '' : size)}
+                                    style={{
+                                      fontFamily: '"Press Start 2P", monospace',
+                                      fontSize: '8px',
+                                      padding: '6px 8px',
+                                      background: selectedSize === size ? '#F5C842' : 'rgba(255,255,255,0.08)',
+                                      color: selectedSize === size ? '#0E0E14' : '#FFFFFF',
+                                      border: selectedSize === size ? 'none' : '1px solid rgba(255,255,255,0.15)',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {size}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          <div style={{ marginBottom: 8 }}>
+                            <input
+                              type="text"
+                              placeholder="Código de descuento (opcional)"
+                              value={discountCodeInput}
+                              onChange={(e) => setDiscountCodeInput(e.target.value)}
+                              style={{
+                                width: '100%',
+                                background: 'rgba(255,255,255,0.05)',
+                                border: '1px solid rgba(255,255,255,0.12)',
+                                color: '#FFFFFF',
+                                fontFamily: '"Silkscreen", monospace',
+                                fontSize: '12px',
+                                padding: '6px 8px',
+                                outline: 'none',
+                              }}
+                            />
+                          </div>
+                          <button
+                            onClick={() => {
+                              void startStripeCheckout('product', {
+                                itemId: item.id,
+                                size: selectedSize,
+                                discountCode: discountCodeInput,
+                              });
+                            }}
+                            disabled={!selectedSize || checkoutRedirecting || !isAuthenticated}
+                            style={authButtonStyle(
+                              '#F5C842',
+                              '#0E0E14',
+                              !selectedSize || checkoutRedirecting || !isAuthenticated
+                            )}
+                          >
+                            {checkoutRedirecting && isSelected
+                              ? 'REDIRIGIENDO...'
+                              : !isAuthenticated
+                                ? 'INICIÁ SESIÓN'
+                                : !selectedSize
+                                  ? 'ELEGÍ UN TALLE'
+                                  : `COMPRAR $${(item.priceArs ?? 0).toLocaleString('es-AR')} ARS`}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: 10 }}>
+                    Pago seguro via Stripe · Entrega en Argentina 3-5 días hábiles
+                  </div>
+                </div>
+              )}
+
+              {shopTab === 'tenks_packs' && (
+                <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
+                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: 10 }}>
+                    Comprá TENKS con ARS y gastálos en ropa virtual, armas y más.
+                  </div>
+                  <div className="space-y-2">
+                    {TENKS_PACKS.map((pack) => (
                       <div
-                        key={item.id}
+                        key={pack.id}
                         className="ww-panel"
                         style={{
                           padding: '12px',
-                          border: active ? '1px solid rgba(57,255,20,0.45)' : '1px solid rgba(255,255,255,0.1)',
-                          background: active ? 'rgba(57,255,20,0.07)' : 'rgba(255,255,255,0.04)',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          background: 'rgba(255,255,255,0.04)',
                         }}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <div className="flex items-center gap-2">
-                              <span
-                                className="inline-block"
-                                style={{
-                                  width: 12,
-                                  height: 12,
-                                  background: `#${(item.color ?? 0x777777).toString(16).padStart(6, '0')}`,
-                                  border: '1px solid rgba(0,0,0,0.35)',
-                                }}
-                              />
-                              <div style={{ fontSize: '15px', color: '#FFFFFF' }}>{item.name}</div>
-                              {active && <span style={{ fontSize: '11px', color: '#39FF14' }}>PUESTO</span>}
-                              {!active && ownedItem && <span style={{ fontSize: '11px', color: '#39FF14' }}>TUYO</span>}
+                            <div style={{ fontSize: '15px', color: '#F5C842', marginBottom: 4 }}>{pack.name}</div>
+                            <div style={{ fontSize: '13px', color: '#FFFFFF', marginBottom: 4 }}>
+                              {pack.tenks.toLocaleString('es-AR')} TENKS
                             </div>
-                            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.58)', marginTop: 4 }}>{item.description}</div>
-                            <div style={{ fontSize: '12px', color: '#F5C842', marginTop: 4 }}>
-                              {item.priceTenks.toLocaleString('es-AR')} TENKS
+                            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.58)', marginBottom: 4 }}>{pack.description}</div>
+                            <div style={{ fontSize: '13px', color: '#F5C842' }}>
+                              ${pack.priceArs.toLocaleString('es-AR')} ARS
                             </div>
                           </div>
                           <button
                             onClick={() => {
-                              if (ownedItem) {
-                                handleEquipOwnedItem(item.id);
-                                setShopStatus(active ? `${item.name} ya esta equipado.` : `${item.name} equipado.`);
-                                return;
-                              }
-                              void buyShopItem(item);
+                              void startStripeCheckout('tenks_pack', { packId: pack.id });
                             }}
-                            disabled={checkoutBusyId === item.id || active || (!ownedItem && !isAuthenticated)}
+                            disabled={checkoutRedirecting || !isAuthenticated}
                             style={authButtonStyle(
-                              active ? 'rgba(57,255,20,0.25)' : '#F5C842',
-                              active ? '#39FF14' : '#0E0E14',
-                              checkoutBusyId === item.id || active || (!ownedItem && !isAuthenticated),
-                              active
+                              '#F5C842',
+                              '#0E0E14',
+                              checkoutRedirecting || !isAuthenticated
                             )}
                           >
-                            {active
-                              ? 'PUESTO'
-                              : checkoutBusyId === item.id
-                                ? 'CARGANDO...'
-                                : ownedItem
-                                  ? 'EQUIPAR'
-                                  : 'COMPRAR'}
+                            {checkoutRedirecting
+                              ? 'REDIRIGIENDO...'
+                              : !isAuthenticated
+                                ? 'INICIÁ SESIÓN'
+                                : 'COMPRAR'}
                           </button>
                         </div>
                       </div>
-                    );
-                  })}
+                    ))}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: 10 }}>
+                    Los TENKS se acreditan automáticamente tras el pago.
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div style={{ fontSize: '12px', color: shopStatus ? '#BBBBBB' : 'rgba(255,255,255,0.35)', marginTop: 10, minHeight: 16 }}>
-                {shopStatus || 'Toda la ropa de la tienda se compra con TENKS y se equipa al instante.'}
+                {shopStatus || (shopTab === 'tenks_virtual' ? 'Toda la ropa de la tienda se compra con TENKS y se equipa al instante.' : '')}
               </div>
             </div>
           </div>
@@ -3313,31 +3527,31 @@ function getInitialMagicLinkCooldownUntil() {
 
 function getInitialCheckoutState(): { open: boolean; tab: ShopTab; status: string } {
   if (typeof window === 'undefined') {
-    return { open: false, tab: 'products', status: '' };
+    return { open: false, tab: 'tenks_virtual', status: '' };
   }
   const status = new URLSearchParams(window.location.search).get('checkout');
   if (status === 'success') {
     return {
       open: true,
-      tab: 'products',
-      status: 'La tienda ya usa TENKS para ropa. Si venias de un checkout viejo, ya podes comprar directo en la tienda.',
+      tab: 'tenks_packs',
+      status: '¡TENKS acreditados! Ya están disponibles en tu cuenta.',
     };
   }
   if (status === 'product_success') {
     return {
       open: true,
-      tab: 'products',
-      status: 'La ropa ahora se compra directo con TENKS y se equipa al instante.',
+      tab: 'physical',
+      status: '¡Compra exitosa! Tu prenda llegará en 3-5 días hábiles. Te enviamos un email de confirmación.',
     };
   }
   if (status === 'cancelled') {
     return {
       open: true,
-      tab: 'products',
-      status: 'La tienda ya no necesita checkout para ropa. Compra directo con TENKS.',
+      tab: 'tenks_virtual',
+      status: '',
     };
   }
-  return { open: false, tab: 'products', status: '' };
+  return { open: false, tab: 'tenks_virtual', status: '' };
 }
 
 function getInitialSelectedMicDeviceId(): string {
