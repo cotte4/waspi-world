@@ -360,6 +360,20 @@ export class GunShopInterior extends Phaser.Scene {
     bg.strokeRoundedRect(px, py, pw, ph, 12);
     container.add(bg);
 
+    const headerGlow = this.add.rectangle(cx, py + 22, pw - 4, 36, 0x46B3FF, 0.06);
+    container.add(headerGlow);
+
+    const corners = this.add.graphics();
+    const cLen = 14; const cThick = 2;
+    ([[px, py], [px + pw, py], [px, py + ph], [px + pw, py + ph]] as [number, number][]).forEach(([bx, by], i) => {
+      const sx = i % 2 === 0 ? 1 : -1;
+      const sy = i < 2 ? 1 : -1;
+      corners.lineStyle(cThick, 0x8ED8FF, 0.9);
+      corners.lineBetween(bx, by, bx + sx * cLen, by);
+      corners.lineBetween(bx, by, bx, by + sy * cLen);
+    });
+    container.add(corners);
+
     const title = this.add.text(cx, py + 22, 'ARMS DEALER', {
       fontSize: '11px',
       fontFamily: '"Press Start 2P", monospace',
@@ -377,7 +391,7 @@ export class GunShopInterior extends Phaser.Scene {
     closeBtn.on('pointerout', () => closeBtn.setColor('#FF5A5A'));
     container.add(closeBtn);
 
-    const balText = this.add.text(cx, py + 44, `TENKS: ${getTenksBalance().toLocaleString('es-AR')}`, {
+    const balText = this.add.text(cx, py + 44, `🪙 ${getTenksBalance().toLocaleString('es-AR')} T`, {
       fontSize: '8px',
       fontFamily: '"Silkscreen", monospace',
       color: '#F5C842',
@@ -387,7 +401,7 @@ export class GunShopInterior extends Phaser.Scene {
     // On open, refresh local TENKS from server-authoritative balance.
     void this.syncAuthoritativeTenks().then((balance) => {
       if (balance === null || !this.dealerPanel || !balText.active) return;
-      balText.setText(`TENKS: ${balance.toLocaleString('es-AR')}`);
+      balText.setText(`🪙 ${balance.toLocaleString('es-AR')} T`);
     });
 
     const divider = this.add.graphics();
@@ -439,6 +453,17 @@ export class GunShopInterior extends Phaser.Scene {
     rowBg.strokeRoundedRect(panelX + 16, rowY, panelW - 32, 60, 6);
     container.add(rowBg);
 
+    if (owned) {
+      const ownedBadge = this.add.text(panelX + panelW - 32, rowY + 10, 'OWNED', {
+        fontSize: '5px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#39FF14',
+        backgroundColor: '#001100',
+        padding: { x: 3, y: 1 },
+      });
+      container.add(ownedBadge);
+    }
+
     const nameText = this.add.text(panelX + 30, rowY + 13, item.name + (item.isLimited ? ' ★' : ''), {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
@@ -453,10 +478,12 @@ export class GunShopInterior extends Phaser.Scene {
     });
     container.add(descText);
 
-    const priceText = this.add.text(panelX + panelW - 164, rowY + 22, `${item.priceTenks.toLocaleString('es-AR')} T`, {
-      fontSize: '9px',
+    const priceLabel = owned ? '—' : `${item.priceTenks.toLocaleString('es-AR')} T`;
+    const priceColor = owned ? '#39FF14' : comingSoon ? '#6E7B95' : '#F5C842';
+    const priceText = this.add.text(panelX + panelW - 164, rowY + 22, priceLabel, {
+      fontSize: '8px',
       fontFamily: '"Silkscreen", monospace',
-      color: comingSoon ? '#6E7B95' : '#F5C842',
+      color: priceColor,
     }).setOrigin(0, 0.5);
     container.add(priceText);
 
@@ -502,7 +529,7 @@ export class GunShopInterior extends Phaser.Scene {
           rowBg.fillRoundedRect(panelX + 16, rowY, panelW - 32, 60, 6);
           rowBg.lineStyle(1, 0x39FF14, 0.8);
           rowBg.strokeRoundedRect(panelX + 16, rowY, panelW - 32, 60, 6);
-          balText.setText(`TENKS: ${getTenksBalance().toLocaleString('es-AR')}`);
+          balText.setText(`🪙 ${getTenksBalance().toLocaleString('es-AR')} T`);
           return;
         }
         buyBtn.setText('ERROR').setColor('#FF4455');
