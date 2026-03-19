@@ -64,7 +64,17 @@ interface CombatStats {
   deaths: number;
 }
 
-type ShopTab = 'tenks_virtual' | 'physical' | 'tenks_packs';
+type ShopTab = 'tenks_virtual' | 'physical' | 'tenks_packs' | 'orders';
+
+interface OrderRow {
+  id: string;
+  created_at: string;
+  items: Array<{ product_id: string; size: string }>;
+  total: number;
+  currency: string;
+  status: string;
+  discount_code: string | null;
+}
 
 interface ShopOpenPayload {
   tab?: ShopTab;
@@ -174,6 +184,9 @@ export default function PlayPage() {
   const [selectedSize, setSelectedSize] = useState<string>('');
   const [discountCodeInput, setDiscountCodeInput] = useState('');
   const [checkoutRedirecting, setCheckoutRedirecting] = useState(false);
+  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isPortrait, setIsPortrait] = useState(false);
   const [showMobileHint, setShowMobileHint] = useState(false);
@@ -1098,6 +1111,22 @@ export default function PlayPage() {
     );
   }, [applyPlayerState]);
 
+  const loadOrders = useCallback(async () => {
+    if (!tokenRef.current || ordersLoading) return;
+    setOrdersLoading(true);
+    try {
+      const res = await fetch('/api/player/orders', {
+        headers: { Authorization: `Bearer ${tokenRef.current}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json() as { orders?: OrderRow[] };
+      setOrders(data.orders ?? []);
+      setOrdersLoaded(true);
+    } catch { /* silent */ } finally {
+      setOrdersLoading(false);
+    }
+  }, [ordersLoading]);
+
   const startStripeCheckout = useCallback(async (
     type: 'product' | 'tenks_pack',
     payload: { itemId?: string; size?: string; discountCode?: string; packId?: string }
@@ -1260,6 +1289,12 @@ export default function PlayPage() {
       inputRef.current?.blur();
     }
   }, [chatVisible]);
+
+  useEffect(() => {
+    if (shopTab === 'orders' && !ordersLoaded && isAuthenticated) {
+      void loadOrders();
+    }
+  }, [shopTab, ordersLoaded, isAuthenticated, loadOrders]);
 
   useEffect(() => {
     if (shopSource !== 'store_interior') return;
@@ -2148,6 +2183,8 @@ export default function PlayPage() {
                   onClick={() => {
                     setShopSource('');
                     setShopOpen(false);
+                    setOrdersLoaded(false);
+                    setOrders([]);
                     eventBus.emit(EVENTS.SHOP_CLOSE);
                   }}
                   style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: '#999999' }}
@@ -2165,6 +2202,9 @@ export default function PlayPage() {
                 </button>
                 <button onClick={() => setShopTab('tenks_packs')} style={tabButtonStyle(shopTab === 'tenks_packs')}>
                   + TENKS
+                </button>
+                <button onClick={() => setShopTab('orders')} style={tabButtonStyle(shopTab === 'orders')}>
+                  MIS ÓRDENES
                 </button>
               </div>
 
@@ -2402,6 +2442,46 @@ export default function PlayPage() {
                   <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: 10 }}>
                     Los TENKS se acreditan automáticamente tras el pago.
                   </div>
+                </div>
+              )}
+
+              {shopTab === 'orders' && (
+                <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
+                  {!isAuthenticated ? (
+                    <p style={{ color: '#888', fontSize: '11px' }}>Iniciá sesión para ver tus pedidos.</p>
+                  ) : ordersLoading ? (
+                    <p style={{ color: '#888', fontSize: '11px' }}>CARGANDO...</p>
+                  ) : orders.length === 0 ? (
+                    <p style={{ color: '#888', fontSize: '11px' }}>Todavía no compraste nada físico.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {orders.map((order) => {
+                        const item = order.items[0];
+                        const catalogItem = item ? getCatalogItem(item.product_id) : null;
+                        const dateStr = new Date(order.created_at).toLocaleDateString('es-AR');
+                        const totalArs = Math.round(order.total / 100);
+                        return (
+                          <div key={order.id} className="ww-panel" style={{ padding: '10px 12px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                              <div>
+                                <div style={{ fontSize: '13px', color: '#fff' }}>{catalogItem?.name ?? item?.product_id}</div>
+                                <div style={{ fontSize: '11px', color: '#888', marginTop: 2 }}>
+                                  Talle {item?.size} · {dateStr}
+                                </div>
+                                {order.discount_code && (
+                                  <div style={{ fontSize: '10px', color: '#39FF14', marginTop: 2 }}>Descuento: {order.discount_code}</div>
+                                )}
+                              </div>
+                              <div style={{ textAlign: 'right' }}>
+                                <div style={{ fontSize: '12px', color: '#F5C842' }}>${totalArs.toLocaleString('es-AR')}</div>
+                                <div style={{ fontSize: '10px', color: '#555', marginTop: 2, textTransform: 'uppercase' }}>{order.status}</div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
