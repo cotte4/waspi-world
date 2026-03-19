@@ -433,6 +433,14 @@ export class SkillSystem {
   }
 
   // -------------------------------------------------------------------------
+  // hasSpec — true if the player has already chosen a spec for a skill
+  // -------------------------------------------------------------------------
+
+  hasSpec(skillId: string): boolean {
+    return this.specs.has(skillId);
+  }
+
+  // -------------------------------------------------------------------------
   // chooseSpec — sends POST /api/skills/specialize to lock in a specialization
   // -------------------------------------------------------------------------
 

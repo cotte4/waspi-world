@@ -18,8 +18,11 @@ import { startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { getInventory } from '../systems/InventorySystem';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
+import { SpecializationModal } from '../systems/SpecializationModal';
+import type { SkillId } from '../systems/SkillSystem';
 import { recordDistanceDelta } from '../systems/StatsSystem';
 import { getSkillSystem } from '../systems/SkillSystem';
+import { getQuestSystem } from '../systems/QuestSystem';
 import { supabase, isConfigured } from '../../lib/supabase';
 import {
   ZOMBIES_PLAYER,
@@ -414,6 +417,7 @@ export class ZombiesScene extends Phaser.Scene {
   private pointerDownHandler?: (pointer: Phaser.Input.Pointer) => void;
   private restartPending = false;
   private controls!: SceneControls;
+  private specModal?: SpecializationModal;
   private returnScene: string = 'WorldScene';
   private returnX: number = PLAYER_RETURN.x;
   private returnY: number = PLAYER_RETURN.y;
@@ -454,6 +458,7 @@ export class ZombiesScene extends Phaser.Scene {
     }
     this.controls = new SceneControls(this);
     announceScene(this);
+    this.specModal = new SpecializationModal(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
 
     this.playerId = this.getOrCreatePlayerId();
@@ -1723,7 +1728,10 @@ export class ZombiesScene extends Phaser.Scene {
     this.furiaUntil  = now + ZombiesScene.FURIA_DURATION_MS;
     this.furiaCooldownUntil = now + ZombiesScene.FURIA_COOLDOWN_MS;
     this.cameras.main.flash(200, 255, 60, 60, false);
-    this.showNotice('FURIA ACTIVA — +30% DAÑO', '#FF4444');
+    const furiaLabel = getSkillSystem().getSpec('gym') === 'gym_fighter'
+      ? 'FURIA ACTIVA — +80% DAÑO [PELEADOR]'
+      : 'FURIA ACTIVA — +30% DAÑO';
+    this.showNotice(furiaLabel, '#FF4444');
   }
 
   private updateFuria() {
@@ -1871,7 +1879,10 @@ export class ZombiesScene extends Phaser.Scene {
     if (aliveZombies === 0 && !this.bossAlive && this.zombieProjectiles.size === 0 && this.roundBreakUntil === 0) {
       this.roundBreakUntil = this.time.now + ZOMBIES_POINTS.roundBreakMs;
       this.showNotice(`LIMPIASTE LA RONDA ${this.round}`, '#9EFFB7');
-      void getSkillSystem().addXp('gym', 10, 'wave_clear');
+      void getSkillSystem().addXp('gym', 10, 'wave_clear').then((r) => {
+        if (!this.scene?.isActive('ZombiesScene')) return;
+        if (r.leveled_up) this.maybeShowSpecModal('gym', r.new_level);
+      });
     }
 
     if (this.roundBreakUntil !== 0 && this.time.now >= this.roundBreakUntil) {
@@ -2533,7 +2544,8 @@ export class ZombiesScene extends Phaser.Scene {
 
   private damageZombie(zombie: ZombieState, damage: number) {
     if (!zombie.alive) return;
-    const furiaMult = this.furiaActive && this.time.now < this.furiaUntil ? 1.3 : 1.0;
+    const furiaBonusMult = getSkillSystem().getSpec('gym') === 'gym_fighter' ? 1.8 : 1.3;
+    const furiaMult = this.furiaActive && this.time.now < this.furiaUntil ? furiaBonusMult : 1.0;
     const appliedDamage = this.instaKillUntil > this.time.now ? zombie.hp : Math.round(damage * furiaMult);
     const pointMultiplier = this.getPointsMultiplier();
     const hitReward = zombie.hitReward * pointMultiplier;
@@ -2554,7 +2566,12 @@ export class ZombiesScene extends Phaser.Scene {
     const killReward = zombie.killReward * pointMultiplier;
     this.points += killReward;
     eventBus.emit(EVENTS.STATS_ZOMBIE_KILL);
-    void getSkillSystem().addXp('gym', zombie.isBoss ? 10 : 3, 'zombie_kill');
+    void getSkillSystem().addXp('gym', zombie.isBoss ? 10 : 3, 'zombie_kill').then((r) => {
+      if (!this.scene?.isActive('ZombiesScene')) return;
+      if (r.leveled_up) this.maybeShowSpecModal('gym', r.new_level);
+    });
+    // Track for daily quests (fire-and-forget)
+    void getQuestSystem().trackAction('zombie_kill', 'gym');
     if (zombie.shadow?.scene && zombie.shadow.active !== false) {
       zombie.shadow.setAlpha(0.18);
     }
@@ -4049,6 +4066,16 @@ export class ZombiesScene extends Phaser.Scene {
     }));
   }
 
+  /** Shows the specialization modal if the player just hit Lv3 and hasn't chosen a spec yet. */
+  private maybeShowSpecModal(skillId: SkillId, newLevel: number): void {
+    if (newLevel !== 3) return;
+    if (!this.scene?.isActive('ZombiesScene')) return;
+    const sys = getSkillSystem();
+    if (!sys.hasSpec(skillId) && this.specModal && !this.specModal.isVisible()) {
+      this.specModal.show(skillId);
+    }
+  }
+
   private handleShutdown() {
     this.restartPending = false;
     try {
@@ -4084,6 +4111,8 @@ export class ZombiesScene extends Phaser.Scene {
     }
     stopSceneMusic(this, this.sceneMusic);
     this.sceneMusic = null;
+    this.specModal?.destroy();
+    this.specModal = undefined;
   }
 }
 

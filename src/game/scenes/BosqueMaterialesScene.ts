@@ -6,9 +6,12 @@ import { eventBus, EVENTS } from '../config/eventBus';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
 import { getSkillSystem } from '../systems/SkillSystem';
 import { getContractSystem } from '../systems/ContractSystem';
+import { getQuestSystem } from '../systems/QuestSystem';
 import { MiningMinigame } from '../systems/MiningMinigame';
 import { getMasterySystem } from '../systems/MasterySystem';
 import { getEventSystem } from '../systems/EventSystem';
+import { SpecializationModal } from '../systems/SpecializationModal';
+import type { SkillId } from '../systems/SkillSystem';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const W = 1600;
@@ -142,6 +145,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   private bridgeCleanupFns: Array<() => void> = [];
   private gardeningXpTimer?: Phaser.Time.TimerEvent;
   private gardenGateText?: Phaser.GameObjects.Text;
+  private specModal?: SpecializationModal;
 
   constructor() {
     super({ key: 'BosqueMaterialesScene' });
@@ -178,6 +182,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     this.setupUi();
     this.setupInput();
 
+    this.specModal = new SpecializationModal(this);
     createBackButton(this, () => this.leaveToVecindad(), 'VECINDAD');
     this.bridgeCleanupFns.push(
       eventBus.on(EVENTS.SAFE_RESET_TO_PLAZA, () => {
@@ -776,8 +781,10 @@ export class BosqueMaterialesScene extends Phaser.Scene {
         if (!this.scene?.isActive('BosqueMaterialesScene')) return;
         if (result.leveled_up) {
           eventBus.emit(EVENTS.UI_NOTICE, { message: `🌱 JARDINERÍA LVL ${result.new_level}!`, color: '#39FF14' });
+          this.maybeShowSpecModal('gardening', result.new_level);
         }
         if (getSkillSystem().getLevel('gardening') >= 5) void getMasterySystem().earnMp('gardening');
+        void getQuestSystem().trackAction('communal_tend', 'gardening');
       })();
       return;
     }
@@ -823,6 +830,8 @@ export class BosqueMaterialesScene extends Phaser.Scene {
 
         // Track for contracts
         void getContractSystem().trackAction('node_collect', 'mining', qr.quality);
+        // Track for daily quests
+        void getQuestSystem().trackAction('node_collect', 'mining');
 
         // XP: base + quality bonus + minigame bonus × event multiplier
         const eventMult = getEventSystem().getXpMultiplier('mining');
@@ -839,6 +848,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
         if (xpResult.leveled_up) {
           eventBus.emit(EVENTS.UI_NOTICE, { message: `⛏️ MINERÍA LVL ${xpResult.new_level}!`, color: '#F5C842' });
           this.autoHud?.setVisible(sys.getLevel('mining') >= 4);
+          this.maybeShowSpecModal('mining', xpResult.new_level);
         }
         // Earn mastery MP if at Lv5
         if (sys.getLevel('mining') >= 5) {
@@ -958,6 +968,16 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     void getSkillSystem().addXp('gardening', 5, 'forest_time');
   }
 
+  /** Shows the specialization modal if the player just hit Lv3 and hasn't chosen a spec yet. */
+  private maybeShowSpecModal(skillId: SkillId, newLevel: number): void {
+    if (newLevel !== 3) return;
+    if (!this.scene?.isActive('BosqueMaterialesScene')) return;
+    const sys = getSkillSystem();
+    if (!sys.hasSpec(skillId) && this.specModal && !this.specModal.isVisible()) {
+      this.specModal.show(skillId);
+    }
+  }
+
   private onShutdown() {
     this.gardeningXpTimer?.remove();
     this.gardeningXpTimer = undefined;
@@ -971,5 +991,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     this.bridgeCleanupFns = [];
     this.controls.destroy();
     this.mobs.forEach((m) => { m.eyes.destroy(); });
+    this.specModal?.destroy();
+    this.specModal = undefined;
   }
 }

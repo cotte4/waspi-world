@@ -471,7 +471,9 @@ export class CafeInterior extends Phaser.Scene {
     localStorage.setItem(`waspi_plato_${today}`, '1');
     const buff = CafeInterior.PLATO_BUFFS[Math.floor(Math.random() * CafeInterior.PLATO_BUFFS.length)];
     eventBus.emit(EVENTS.UI_NOTICE, { message: `🍳 PLATO DEL DÍA: ${buff}`, color: '#FF7043' });
-    void getSkillSystem().addXp('cooking', 15, 'plato_del_dia');
+    // alquimista spec: +30 XP instead of 15 for plato del dia
+    const xpGain = getSkillSystem().getSpec('cooking') === 'cooking_alchemist' ? 30 : 15;
+    void getSkillSystem().addXp('cooking', xpGain, 'plato_del_dia');
   }
 
   private updateCafeTableXp(delta: number) {

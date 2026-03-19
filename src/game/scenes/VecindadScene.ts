@@ -24,9 +24,13 @@ import { SkillShopPanel } from '../systems/SkillShopPanel';
 import { getSkillSystem } from '../systems/SkillSystem';
 import { getContractSystem } from '../systems/ContractSystem';
 import { ContractPanel } from '../systems/ContractPanel';
+import { getQuestSystem } from '../systems/QuestSystem';
+import { QuestPanel } from '../systems/QuestPanel';
 import { FishingMinigame } from '../systems/FishingMinigame';
 import { getMasterySystem } from '../systems/MasterySystem';
 import { getEventSystem } from '../systems/EventSystem';
+import { SpecializationModal } from '../systems/SpecializationModal';
+import type { SkillId } from '../systems/SkillSystem';
 
 type ParcelVisual = {
   title: Phaser.GameObjects.Text;
@@ -144,9 +148,12 @@ export class VecindadScene extends Phaser.Scene {
   private skillTreePanel?: SkillTreePanel;
   private skillShopPanel?: SkillShopPanel;
   private contractPanel?: ContractPanel;
+  private questPanel?: QuestPanel;
   private keyT?: Phaser.Input.Keyboard.Key;
   private keyY?: Phaser.Input.Keyboard.Key;
   private keyC?: Phaser.Input.Keyboard.Key;
+  private keyQ?: Phaser.Input.Keyboard.Key;
+  private specModal?: SpecializationModal;
 
   constructor() {
     super({ key: 'VecindadScene' });
@@ -209,9 +216,12 @@ export class VecindadScene extends Phaser.Scene {
     this.skillTreePanel = new SkillTreePanel(this);
     this.skillShopPanel = new SkillShopPanel(this);
     this.contractPanel  = new ContractPanel(this);
+    this.questPanel     = new QuestPanel(this);
+    this.specModal      = new SpecializationModal(this);
     this.keyT = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.T);
     this.keyY = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Y);
     this.keyC = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.C);
+    this.keyQ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
     this.bridgeCleanupFns.push(bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', {
         returnX: SAFE_PLAZA_RETURN.X,
@@ -255,6 +265,9 @@ export class VecindadScene extends Phaser.Scene {
     }
     if (this.keyC && Phaser.Input.Keyboard.JustDown(this.keyC)) {
       this.contractPanel?.toggle();
+    }
+    if (this.keyQ && Phaser.Input.Keyboard.JustDown(this.keyQ)) {
+      this.questPanel?.toggle();
     }
   }
 
@@ -962,10 +975,11 @@ export class VecindadScene extends Phaser.Scene {
     const ds = VecindadScene.FISHING_SPOT_DEEP;
     if (Phaser.Math.Distance.Between(this.px, this.py, ds.x, ds.y) < ds.range) {
       const fishLv = getSkillSystem().getLevel('fishing');
-      if (fishLv >= 3) {
+      const deepReq = getSkillSystem().getSpec('fishing') === 'fishing_baitmaster' ? 2 : 3;
+      if (fishLv >= deepReq) {
         void this.handleFishing(true);
       } else {
-        eventBus.emit(EVENTS.UI_NOTICE, { message: '🌊 REQUIERE PESCA LV3', color: '#2A5A8A' });
+        eventBus.emit(EVENTS.UI_NOTICE, { message: `🌊 REQUIERE PESCA LV${deepReq}`, color: '#2A5A8A' });
       }
       return;
     }
@@ -1224,6 +1238,7 @@ export class VecindadScene extends Phaser.Scene {
 
       const qr = await sys.rollQuality('fishing', source, isAuto);
       void getContractSystem().trackAction('fish_catch', 'fishing', qr.quality);
+      void getQuestSystem().trackAction('fish_catch', 'fishing');
 
       const label = deep ? `🌊 PROFUNDO [${qr.label}]` : `🐟 PESCADO [${qr.label}]`;
       eventBus.emit(EVENTS.UI_NOTICE, { message: label, color: qr.color });
@@ -1235,6 +1250,7 @@ export class VecindadScene extends Phaser.Scene {
       const xpResult = await sys.addXp('fishing', xpTotal, source);
       if (xpResult.leveled_up) {
         eventBus.emit(EVENTS.UI_NOTICE, { message: `🎣 PESCA LVL ${xpResult.new_level}!`, color: '#4A9ECC' });
+        this.maybeShowSpecModal('fishing', xpResult.new_level);
       }
       if (sys.getLevel('fishing') >= 5) {
         void getMasterySystem().earnMp('fishing');
@@ -1379,6 +1395,7 @@ export class VecindadScene extends Phaser.Scene {
           if (r.leveled_up) {
             const label = skill === 'gardening' ? '🌿 JARDINERÍA' : '🌿 WEED';
             eventBus.emit(EVENTS.UI_NOTICE, { message: `${label} LVL ${r.new_level}!`, color: '#39FF14' });
+            this.maybeShowSpecModal(skill, r.new_level);
           }
         })
         .catch(() => undefined);
@@ -1433,6 +1450,9 @@ export class VecindadScene extends Phaser.Scene {
       // Track harvest for contracts (gardening + weed if cannabis)
       void getContractSystem().trackAction('farm_harvest', 'gardening', qr.quality);
       if (isWeed) void getContractSystem().trackAction('farm_harvest', 'weed', qr.quality);
+      // Track harvest for daily quests
+      void getQuestSystem().trackAction('farm_harvest', 'gardening');
+      if (isWeed) void getQuestSystem().trackAction('farm_harvest', 'weed');
 
       // Quality feedback
       const qualityMsg = `COSECHA [${qr.label}]`;
@@ -1448,16 +1468,21 @@ export class VecindadScene extends Phaser.Scene {
       const gardenResult = await sys.addXp('gardening', xpTotal, 'farm_harvest');
       if (gardenResult.leveled_up) {
         eventBus.emit(EVENTS.UI_NOTICE, { message: `🌿 JARDINERÍA LVL ${gardenResult.new_level}!`, color: '#39FF14' });
+        this.maybeShowSpecModal('gardening', gardenResult.new_level);
       }
       if (sys.getLevel('gardening') >= 5) void getMasterySystem().earnMp('gardening');
 
       if (isWeed) {
         // Use the weed-specific event multiplier, not the gardening one
         const weedEventMult = getEventSystem().getXpMultiplier('weed');
-        const weedXpTotal = Math.round((15 + qr.xp_bonus) * weedEventMult);
-        const weedResult = await sys.addXp('weed', weedXpTotal, 'farm_harvest');
+        // grower spec: +25% XP on cannabis harvest
+        const weedBaseXp = sys.getSpec('weed') === 'weed_grower'
+          ? Math.round((15 + qr.xp_bonus) * 1.25 * weedEventMult)
+          : Math.round((15 + qr.xp_bonus) * weedEventMult);
+        const weedResult = await sys.addXp('weed', weedBaseXp, 'farm_harvest');
         if (weedResult.leveled_up) {
           eventBus.emit(EVENTS.UI_NOTICE, { message: `🌿 WEED LVL ${weedResult.new_level}!`, color: '#39FF14' });
+          this.maybeShowSpecModal('weed', weedResult.new_level);
         }
         if (sys.getLevel('weed') >= 5) void getMasterySystem().earnMp('weed');
       }
@@ -1706,12 +1731,26 @@ export class VecindadScene extends Phaser.Scene {
 
   private grantPuestoXp() {
     if (!this.scene?.isActive('VecindadScene')) return;
-    void getSkillSystem().addXp('weed', 8, 'puesto_serve').then((r) => {
+    const sys = getSkillSystem();
+    // dealer spec doubles puesto XP (16 vs 8 per minute)
+    const xpAmount = sys.getSpec('weed') === 'weed_dealer' ? 16 : 8;
+    void sys.addXp('weed', xpAmount, 'puesto_serve').then((r) => {
       if (!this.scene?.isActive('VecindadScene')) return;
       if (r.leveled_up) {
         eventBus.emit(EVENTS.UI_NOTICE, { message: `🌿 WEED LVL ${r.new_level}!`, color: '#39FF14' });
+        this.maybeShowSpecModal('weed', r.new_level);
       }
     });
+  }
+
+  /** Shows the specialization modal if the player just hit Lv3 and hasn't chosen a spec yet. */
+  private maybeShowSpecModal(skillId: SkillId, newLevel: number): void {
+    if (newLevel !== 3) return;
+    if (!this.scene?.isActive('VecindadScene')) return;
+    const sys = getSkillSystem();
+    if (!sys.hasSpec(skillId) && this.specModal && !this.specModal.isVisible()) {
+      this.specModal.show(skillId);
+    }
   }
 
   private handleSceneShutdown() {
@@ -1755,5 +1794,9 @@ export class VecindadScene extends Phaser.Scene {
     this.skillTreePanel = undefined;
     this.contractPanel?.destroy();
     this.contractPanel = undefined;
+    this.questPanel?.destroy();
+    this.questPanel = undefined;
+    this.specModal?.destroy();
+    this.specModal = undefined;
   }
 }
