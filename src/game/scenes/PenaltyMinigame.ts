@@ -85,6 +85,16 @@ export class PenaltyMinigame extends Phaser.Scene {
     g.fillGradientStyle(0x102d12, 0x102d12, 0x061408, 0x061408, 1);
     g.fillRect(0, 0, width, height);
 
+    const crowd = this.add.graphics();
+    crowd.fillStyle(0x1a4a1a, 0.35);
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 22; col++) {
+        const cx2 = 40 + col * 34;
+        const cy2 = 24 + row * 14;
+        crowd.fillCircle(cx2, cy2, 4);
+      }
+    }
+
     g.fillStyle(0x153d18, 0.95);
     g.fillRect(70, this.goalY - 20, width - 140, height - (this.goalY - 20) - 60);
 
@@ -101,7 +111,7 @@ export class PenaltyMinigame extends Phaser.Scene {
     g.fillStyle(0x000000, 0.24);
     g.fillRect(this.goalX - this.goalW / 2, this.goalY - this.goalH / 2, this.goalW, this.goalH);
 
-    g.lineStyle(1, 0xffffff, 0.14);
+    g.lineStyle(1, 0xffffff, 0.22);
     for (let i = 1; i < 7; i++) {
       const x = this.goalX - this.goalW / 2 + (this.goalW * i) / 7;
       g.lineBetween(x, this.goalY - this.goalH / 2, x, this.goalY + this.goalH / 2);
@@ -123,6 +133,10 @@ export class PenaltyMinigame extends Phaser.Scene {
       color: '#A0A0B4',
     }).setOrigin(0.5);
 
+    const hudBg = this.add.graphics();
+    hudBg.fillStyle(0x000000, 0.5);
+    hudBg.fillRoundedRect(10, 10, 180, 64, 4);
+
     this.hud = this.add.text(18, 18, '', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
@@ -133,11 +147,12 @@ export class PenaltyMinigame extends Phaser.Scene {
     this.footer = this.add.text(width / 2, height - 30, 'SPACE O CLICK PARA PATEAR - ESC SALIR', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
-      color: '#777777',
+      color: '#9a9ab8',
       align: 'center',
     }).setOrigin(0.5);
 
     this.aimGuide = this.add.graphics();
+    this.add.circle(this.goalX, this.goalY - 18, 14, 0xF5C842, 0.18);
     this.aimMarker = this.add.circle(this.goalX, this.goalY - 18, 7, 0xF5C842, 1);
     this.aimMarker.setStrokeStyle(2, 0x000000, 0.3);
 
@@ -195,8 +210,8 @@ export class PenaltyMinigame extends Phaser.Scene {
     const cx = this.scale.width / 2;
     const y = this.scale.height - 14;
     const pipW = 18;
-    const pipH = 8;
-    const gap = 6;
+    const pipH = 10;
+    const gap = 8;
     const total = this.maxShots;
     const startX = cx - ((pipW + gap) * total - gap) / 2;
     for (let i = 0; i < total; i++) {
@@ -211,6 +226,8 @@ export class PenaltyMinigame extends Phaser.Scene {
       this.shotsBar.fillRoundedRect(px, y - pipH / 2, pipW, pipH, 3);
       this.shotsBar.lineStyle(1, 0x666688, 0.7);
       this.shotsBar.strokeRoundedRect(px, y - pipH / 2, pipW, pipH, 3);
+      this.shotsBar.lineStyle(1, 0x222233, 0.9);
+      this.shotsBar.strokeRect(px, y - pipH / 2, pipW, pipH);
     }
   }
 

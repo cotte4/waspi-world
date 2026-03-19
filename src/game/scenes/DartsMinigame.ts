@@ -58,11 +58,28 @@ export class DartsMinigame extends Phaser.Scene {
     });
 
     this.add.rectangle(0, 0, width, height, 0x0E0E14, 1).setOrigin(0);
+
+    const wall = this.add.graphics();
+    wall.lineStyle(1, 0x2a1a0a, 0.35);
+    for (let wx = this.boardX - 220; wx < this.boardX + 220; wx += 12) {
+      wall.lineBetween(wx, this.boardY - 200, wx, this.boardY + 200);
+    }
+
+    const boardGlow = this.add.graphics();
+    boardGlow.fillStyle(0xf5c842, 0.06);
+    boardGlow.fillCircle(this.boardX, this.boardY, 210);
+    boardGlow.fillStyle(0x333340, 0.18);
+    boardGlow.fillCircle(this.boardX, this.boardY, 175);
+
     this.add.text(width / 2, 48, 'DARDOS', {
       fontSize: '18px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842',
     }).setOrigin(0.5);
+
+    const hudBg = this.add.graphics();
+    hudBg.fillStyle(0x000000, 0.5);
+    hudBg.fillRoundedRect(8, 8, 160, 52, 4);
 
     this.boardG = this.add.graphics();
     this.drawBoard();
@@ -76,7 +93,7 @@ export class DartsMinigame extends Phaser.Scene {
     this.footer = this.add.text(width / 2, height - 24, 'SPACE/CLICK TIRAR - ESC SALIR', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
-      color: '#9a9ab0',
+      color: '#7a7a94',
     }).setOrigin(0.5);
     this.resultLabel = this.add.text(width / 2, height - 74, '', {
       fontSize: '12px',
@@ -133,7 +150,7 @@ export class DartsMinigame extends Phaser.Scene {
     for (let i = 0; i < 20; i += 1) {
       const a0 = -Math.PI / 2 + (i * Math.PI * 2) / 20;
       const a1 = -Math.PI / 2 + ((i + 1) * Math.PI * 2) / 20;
-      const sectionColor = i % 2 === 0 ? 0x2a2a34 : 0x202028;
+      const sectionColor = i % 2 === 0 ? 0x3a1818 : 0x182838;
       this.boardG.fillStyle(sectionColor, 1);
       this.boardG.slice(this.boardX, this.boardY, 140, a0, a1, false);
       this.boardG.fillPath();
@@ -150,9 +167,9 @@ export class DartsMinigame extends Phaser.Scene {
       }).setOrigin(0.5);
     }
 
-    this.boardG.lineStyle(10, 0xF5C842, 0.85);
+    this.boardG.lineStyle(10, 0xE83030, 0.9);
     this.boardG.strokeCircle(this.boardX, this.boardY, 150); // double
-    this.boardG.lineStyle(8, 0xF5C842, 0.85);
+    this.boardG.lineStyle(8, 0x30C030, 0.9);
     this.boardG.strokeCircle(this.boardX, this.boardY, 104); // triple
     this.boardG.fillStyle(0x39FF14, 0.95);
     this.boardG.fillCircle(this.boardX, this.boardY, 26); // bull
