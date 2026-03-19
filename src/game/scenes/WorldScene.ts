@@ -6065,13 +6065,16 @@ export class WorldScene extends Phaser.Scene {
       else if (Phaser.Input.Keyboard.JustDown(this.keyFive))  { this.emotePanel.handleNumberKey(5); }
     }
 
-    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyQ))     { this.switchWeapon(); }
-    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyOne))   { this.switchWeapon('pistol'); }
-    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyTwo))   { this.switchWeapon('shotgun'); }
-    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyThree)) { this.switchWeapon('smg'); }
-    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyFour))  { this.switchWeapon('rifle'); }
-    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyFive))  { this.switchWeapon('deagle'); }
-    if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keySix))   { this.switchWeapon('cannon'); }
+    // Weapon hotkeys — suppressed when emote panel is open (1-5 conflict)
+    if (this.gunEnabled && !this.emotePanel?.isOpen) {
+      if (Phaser.Input.Keyboard.JustDown(this.keyQ))     { this.switchWeapon(); }
+      if (Phaser.Input.Keyboard.JustDown(this.keyOne))   { this.switchWeapon('pistol'); }
+      if (Phaser.Input.Keyboard.JustDown(this.keyTwo))   { this.switchWeapon('shotgun'); }
+      if (Phaser.Input.Keyboard.JustDown(this.keyThree)) { this.switchWeapon('smg'); }
+      if (Phaser.Input.Keyboard.JustDown(this.keyFour))  { this.switchWeapon('rifle'); }
+      if (Phaser.Input.Keyboard.JustDown(this.keyFive))  { this.switchWeapon('deagle'); }
+      if (Phaser.Input.Keyboard.JustDown(this.keySix))   { this.switchWeapon('cannon'); }
+    }
 
     // Gun shoot with keyboard
     if (this.gunEnabled && this.controls.isActionDown('shoot') && !this.inputBlocked) {
@@ -6487,6 +6490,11 @@ export class WorldScene extends Phaser.Scene {
     this.interactionHighlight = undefined;
     this.interactionHint?.destroy();
     this.interactionHint = undefined;
+
+    // Barber panel cleanup
+    this.barberPanel?.destroy(true);
+    this.barberPanel = null;
+    this.barberPanelOpen = false;
 
     // Cleanup Maps to avoid memory leaks
     try {

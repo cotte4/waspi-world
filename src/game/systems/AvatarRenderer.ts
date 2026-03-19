@@ -10,7 +10,7 @@ import {
 } from './AnimationSafety';
 
 export type AvatarKind = 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha' | 'trap_a' | 'trap_b' | 'trap_c' | 'trap_d';
-export type HairStyle = 'SPI' | 'FLA' | 'MOH' | 'X';
+export type HairStyle = 'SPI' | 'FLA' | 'MOH' | 'MCH' | 'X';
 export type AvatarAction = 'shoot' | 'hurt' | 'death';
 
 export interface AvatarConfig {
@@ -52,7 +52,7 @@ const ACTION_PRIORITY: Record<AvatarAction, number> = { shoot: 1, hurt: 2, death
 
 const AVATAR_KINDS: AvatarKind[] = ['procedural', 'gengar', 'buho', 'piplup', 'chacha', 'trap_a', 'trap_b', 'trap_c', 'trap_d'];
 const ANIMATED_AVATAR_KINDS: AnimatedAvatarKind[] = ['trap_a', 'trap_b', 'trap_c', 'trap_d'];
-const HAIR_STYLES: HairStyle[] = ['SPI', 'FLA', 'MOH', 'X'];
+const HAIR_STYLES: HairStyle[] = ['SPI', 'FLA', 'MOH', 'MCH', 'X'];
 
 export function normalizeAvatarConfig(config: AvatarConfig = {}): Required<AvatarConfig> {
   const next = { ...DEFAULT_AVATAR_CONFIG, ...config };
@@ -254,6 +254,13 @@ export class AvatarRenderer {
       }
       case 'MOH': {
         this.hair.fillRoundedRect(-3, topY - 10, 6, 18, 3);
+        break;
+      }
+      case 'MCH': {
+        // Mecha — two thick side chunks + a center wedge
+        this.hair.fillRoundedRect(-bodyR * 0.8, topY - 2, bodyR * 0.55, 12, 2);
+        this.hair.fillRoundedRect(bodyR * 0.25, topY - 2, bodyR * 0.55, 12, 2);
+        this.hair.fillRoundedRect(-4, topY - 8, 8, 16, 2);
         break;
       }
       case 'X': {
