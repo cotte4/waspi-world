@@ -6,6 +6,7 @@
 import { supabase, isConfigured } from '../../lib/supabase';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { getAuthHeaders } from './authHelper';
+import { applyTenksBalanceFromServer } from './TenksSystem';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -222,6 +223,7 @@ class JukeboxSystem {
 
       eventBus.emit(EVENTS.JUKEBOX_ADD_SONG, entry);
       if (typeof data.newBalance === 'number') {
+        applyTenksBalanceFromServer(data.newBalance, 'jukebox_add');
         eventBus.emit(EVENTS.JUKEBOX_TENKS_DEDUCTED, { newBalance: data.newBalance, cost: song.cost });
       }
 
@@ -285,6 +287,7 @@ class JukeboxSystem {
       });
 
       if (typeof data.newBalance === 'number') {
+        applyTenksBalanceFromServer(data.newBalance, 'jukebox_skip');
         eventBus.emit(EVENTS.JUKEBOX_TENKS_DEDUCTED, { newBalance: data.newBalance, cost: 500 });
       }
 
@@ -384,6 +387,11 @@ class JukeboxSystem {
       this.state.hostId = newHostId;
       this.broadcastRaw('JUKEBOX_HOST_CHANGED', { hostId: newHostId });
       eventBus.emit(EVENTS.JUKEBOX_STATE_UPDATED, this.getState());
+    }
+
+    // Presence puede llegar después del addSong: sin hostId aún, checkAndAdvanceQueue no avanza.
+    if (entries.length > 0) {
+      this.checkAndAdvanceQueue();
     }
   }
 

@@ -8,6 +8,7 @@ import { ChatSystem } from '../systems/ChatSystem';
 import { DialogSystem } from '../systems/DialogSystem';
 import { SceneControls } from '../systems/SceneControls';
 import { supabase, isConfigured } from '../../lib/supabase';
+import type { AudioSettings } from '../systems/AudioSettings';
 import { startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
 import { createScrollArea } from '../systems/ScrollArea';
 
@@ -683,6 +684,21 @@ export class StoreInterior extends Phaser.Scene {
     this.keyK = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.K);
     this.keyL = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.L);
     this.sceneMusic = startSceneMusic(this, 'store_upbeat', 0.38);
+    this.cleanupFns.push(eventBus.on(EVENTS.AUDIO_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!this.scene.isActive('StoreInterior')) return;
+      if (!payload || typeof payload !== 'object') return;
+      const next = payload as Partial<AudioSettings>;
+      const musicOn = next.musicEnabled;
+      if (typeof musicOn !== 'boolean') return;
+      if (musicOn) {
+        if (!this.sceneMusic) {
+          this.sceneMusic = startSceneMusic(this, 'store_upbeat', 0.38);
+        }
+      } else {
+        stopSceneMusic(this, this.sceneMusic);
+        this.sceneMusic = null;
+      }
+    }));
     this.setupRealtime();
   }
 
@@ -746,11 +762,11 @@ export class StoreInterior extends Phaser.Scene {
     this.dialog.clear();
     this.shopOverlayOpen = false;
     eventBus.emit(EVENTS.SHOP_CLOSE);
-    this.inTransition = true;
-    transitionToScene(this, 'WorldScene', {
+    const ok = transitionToScene(this, 'WorldScene', {
       returnX: StoreInterior.RETURN_X,
       returnY: StoreInterior.RETURN_Y,
     });
+    if (ok) this.inTransition = true;
   }
 
   private tryStartVendorDialog() {

@@ -9,6 +9,13 @@ import { CATALOG, getItem as getCatalogItem, getPhysicalCatalog, type CatalogIte
 import { TENKS_PACKS } from '@/src/lib/tenksPacks';
 import { getInventory, equipItem, hasUtilityEquipped, replaceInventory } from '@/src/game/systems/InventorySystem';
 import { loadAudioSettings, saveAudioSettings, type AudioSettings } from '@/src/game/systems/AudioSettings';
+import { applyOutputSinkToSfxContext } from '@/src/game/systems/AudioManager';
+import {
+  applySinkIdToAudioContext,
+  getStoredAudioOutputDeviceId,
+  setStoredAudioOutputDeviceId,
+  supportsAudioOutputDevicePicker,
+} from '@/src/game/systems/audioOutputSink';
 import { loadHudSettings, saveHudSettings, type HudSettings } from '@/src/game/systems/HudSettings';
 import {
   assignActionBinding,
@@ -41,6 +48,8 @@ const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
 const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
 const VOICE_MIC_DEVICE_KEY = 'waspi_voice_mic_device_id';
 const MAGIC_LINK_COOLDOWN_MS = 60_000;
+
+type SettingsTab = 'audio' | 'hud' | 'controls' | 'voice';
 
 interface ChatMsg {
   id: string;
@@ -197,7 +206,12 @@ export default function PlayPage() {
   const [statsData, setStatsData] = useState<PlayerStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
+  const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedMicDeviceId, setSelectedMicDeviceId] = useState<string>(getInitialSelectedMicDeviceId);
+  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<string>(() =>
+    typeof window !== 'undefined' ? getStoredAudioOutputDeviceId() : ''
+  );
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('audio');
   const [jukeboxOpen, setJukeboxOpen] = useState(false);
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(initialAudioSettings);
   const [hudSettings, setHudSettings] = useState<HudSettings>(initialHudSettings);
@@ -229,10 +243,17 @@ export default function PlayPage() {
 
   const playUiSfx = useCallback((freq: number, duration: number, sweep?: number) => {
     try {
+      if (!loadAudioSettings().sfxEnabled) return;
+      let created = false;
       if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
         audioCtxRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+        created = true;
       }
       const ctx = audioCtxRef.current;
+      if (created) {
+        const sid = getStoredAudioOutputDeviceId();
+        if (sid) void applySinkIdToAudioContext(ctx, sid);
+      }
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
@@ -458,8 +479,15 @@ export default function PlayPage() {
       if (typeof sceneName === 'string') {
         setActiveScene(sceneName);
         track('scene_enter', { scene: sceneName });
-        if (sceneName === 'WorldScene' && !localStorage.getItem('waspi_onboarding_v1')) {
-          setShowOnboarding(true);
+        if (sceneName === 'WorldScene') {
+          // Evita overlay oscuro “pegado” al salir de interiores (shop / Stripe) si React no sincronizó.
+          setShopOpen(false);
+          setShopSource('');
+          setCheckoutRedirecting(false);
+          setJukeboxOpen(false);
+          if (!localStorage.getItem('waspi_onboarding_v1')) {
+            setShowOnboarding(true);
+          }
         }
       }
     });
@@ -745,12 +773,31 @@ export default function PlayPage() {
     navigator.mediaDevices?.enumerateDevices().then((devices) => {
       const inputs = devices.filter((d) => d.kind === 'audioinput');
       setMicDevices(inputs);
-      if (inputs.length === 0) return;
-      if (!selectedMicDeviceId || !inputs.some((d) => d.deviceId === selectedMicDeviceId)) {
-        setSelectedMicDeviceId(inputs[0].deviceId);
-      }
+      setSelectedMicDeviceId((prev) => {
+        if (inputs.length === 0) return prev;
+        if (prev && inputs.some((d) => d.deviceId === prev)) return prev;
+        return inputs[0].deviceId;
+      });
+      const outputs = devices.filter((d) => d.kind === 'audiooutput');
+      setOutputDevices(outputs);
+      setSelectedOutputDeviceId((prev) => {
+        if (!prev) return prev;
+        if (outputs.some((d) => d.deviceId === prev)) return prev;
+        return '';
+      });
     }).catch(() => {});
-  }, [selectedMicDeviceId, settingsOpen]);
+  }, [settingsOpen]);
+
+  useEffect(() => {
+    setStoredAudioOutputDeviceId(selectedOutputDeviceId);
+  }, [selectedOutputDeviceId]);
+
+  useEffect(() => {
+    eventBus.emit(EVENTS.AUDIO_OUTPUT_SINK_CHANGED, selectedOutputDeviceId);
+    void applyOutputSinkToSfxContext(selectedOutputDeviceId);
+    const ctx = audioCtxRef.current;
+    if (ctx) void applySinkIdToAudioContext(ctx, selectedOutputDeviceId);
+  }, [selectedOutputDeviceId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -2947,7 +2994,7 @@ export default function PlayPage() {
               className="ww-modal flex flex-col"
               style={{
                 width: isMobile ? '94%' : 640,
-                maxHeight: isMobile ? '88%' : 520,
+                maxHeight: isMobile ? '88%' : 580,
                 background: 'rgba(10,10,18,0.96)',
                 border: '1px solid rgba(245,200,66,0.35)',
                 boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
@@ -2973,6 +3020,42 @@ export default function PlayPage() {
 
               <div
                 style={{
+                  display: 'flex',
+                  gap: 6,
+                  padding: '10px 12px 0',
+                  flexShrink: 0,
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                }}
+              >
+                {([
+                  ['audio', 'AUDIO'],
+                  ['hud', 'HUD'],
+                  ['controls', 'CTRLS'],
+                  ['voice', 'VOZ'],
+                ] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setSettingsTab(id)}
+                    style={{
+                      flex: 1,
+                      padding: '8px 4px',
+                      fontFamily: '"Press Start 2P", monospace',
+                      fontSize: '6px',
+                      lineHeight: 1.5,
+                      border: settingsTab === id ? '1px solid rgba(245,200,66,0.65)' : '1px solid rgba(255,255,255,0.1)',
+                      background: settingsTab === id ? 'rgba(245,200,66,0.1)' : 'transparent',
+                      color: settingsTab === id ? '#F5C842' : 'rgba(255,255,255,0.55)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div
+                style={{
                   overflowY: 'auto',
                   padding: '12px 16px 16px',
                   fontFamily: '"Silkscreen", monospace',
@@ -2980,95 +3063,145 @@ export default function PlayPage() {
                   fontSize: '14px',
                 }}
               >
-                <div className="flex items-center justify-between py-2">
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>AUDIO</div>
-                    <div style={{ fontSize: '16px' }}>MUSIC</div>
-                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Arcade theme and future scene tracks</div>
-                  </div>
-                  <button
-                    onClick={() => setAudioSettings((current) => ({ ...current, musicEnabled: !current.musicEnabled }))}
-                    style={toggleButtonStyle(audioSettings.musicEnabled)}
-                  >
-                    {audioSettings.musicEnabled ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-
-                  <div className="flex items-center justify-between py-2">
-                    <div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>AUDIO</div>
-                      <div style={{ fontSize: '16px' }}>SFX</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Combat shots, hits, boss cues</div>
-                  </div>
-                  <button
-                    onClick={() => setAudioSettings((current) => ({ ...current, sfxEnabled: !current.sfxEnabled }))}
-                    style={toggleButtonStyle(audioSettings.sfxEnabled)}
-                    >
-                      {audioSettings.sfxEnabled ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
-
-                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginTop: 12, marginBottom: 4 }}>HUD</div>
-
-                  <div className="flex items-center justify-between py-2">
-                    <div>
-                      <div style={{ fontSize: '16px' }}>SOCIAL PANEL</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Connected players card on the left</div>
+                {settingsTab === 'audio' && (
+                  <>
+                    <div className="flex items-center justify-between py-2">
+                      <div>
+                        <div style={{ fontSize: '16px' }}>MÚSICA DE ESCENA</div>
+                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>
+                          Mundo, tienda, zombies, arcade. Si la volvés a activar, debería retomar sin cambiar de mapa.
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setAudioSettings((current) => ({ ...current, musicEnabled: !current.musicEnabled }))}
+                        style={toggleButtonStyle(audioSettings.musicEnabled)}
+                      >
+                        {audioSettings.musicEnabled ? 'ON' : 'OFF'}
+                      </button>
                     </div>
-                    <button
-                      onClick={() => setHudSettings((current) => ({ ...current, showSocialPanel: !current.showSocialPanel }))}
-                      style={toggleButtonStyle(hudSettings.showSocialPanel)}
-                    >
-                      {hudSettings.showSocialPanel ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
 
-                  <div className="flex items-center justify-between py-2">
-                    <div>
-                      <div style={{ fontSize: '16px' }}>PROGRESS PANEL</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Level, XP and KOs summary card</div>
+                    <div className="flex items-center justify-between py-2">
+                      <div>
+                        <div style={{ fontSize: '16px' }}>EFECTOS (SFX)</div>
+                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>
+                          Disparos, golpes, bips de UI y SFX del juego por Web Audio.
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setAudioSettings((current) => ({ ...current, sfxEnabled: !current.sfxEnabled }))}
+                        style={toggleButtonStyle(audioSettings.sfxEnabled)}
+                      >
+                        {audioSettings.sfxEnabled ? 'ON' : 'OFF'}
+                      </button>
                     </div>
-                    <button
-                      onClick={() => setHudSettings((current) => ({ ...current, showProgressPanel: !current.showProgressPanel }))}
-                      style={toggleButtonStyle(hudSettings.showProgressPanel)}
-                    >
-                      {hudSettings.showProgressPanel ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
 
-                  <div className="flex items-center justify-between py-2">
-                    <div>
-                      <div style={{ fontSize: '16px' }}>CONTROLS TIP</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Top-right gameplay hint card</div>
+                    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div style={{ fontSize: '16px', marginBottom: 6 }}>SALIDA DE AUDIO (Web Audio)</div>
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.52)', marginBottom: 10 }}>
+                        {supportsAudioOutputDevicePicker()
+                          ? 'Chrome/Edge: música Phaser, SFX y voz recibida. La jukebox del café es YouTube embebido y suele seguir la salida por defecto del navegador.'
+                          : 'Tu navegador no ofrece selector de salida para Web Audio; usá el mezclador del sistema o la salida por defecto del navegador.'}
+                      </div>
+                      {supportsAudioOutputDevicePicker() && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedOutputDeviceId('')}
+                            style={{
+                              ...optionButtonStyle(selectedOutputDeviceId === ''),
+                              textAlign: 'left',
+                              fontSize: '11px',
+                            }}
+                          >
+                            Predeterminado del sistema
+                          </button>
+                          {outputDevices.map((d, i) => (
+                            <button
+                              key={d.deviceId}
+                              type="button"
+                              onClick={() => setSelectedOutputDeviceId(d.deviceId)}
+                              style={{
+                                ...optionButtonStyle(selectedOutputDeviceId === d.deviceId),
+                                textAlign: 'left',
+                                fontSize: '11px',
+                              }}
+                            >
+                              {d.label || `Salida ${i + 1}`}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <button
-                      onClick={() => setHudSettings((current) => ({ ...current, showControlsPanel: !current.showControlsPanel }))}
-                      style={toggleButtonStyle(hudSettings.showControlsPanel)}
-                    >
-                      {hudSettings.showControlsPanel ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
+                  </>
+                )}
 
-                  <div className="flex items-center justify-between py-2">
-                    <div>
-                      <div style={{ fontSize: '16px' }}>ARENA HUD</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Training combat and progression text in-world</div>
+                {settingsTab === 'hud' && (
+                  <>
+                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', marginBottom: 10 }}>
+                      Paneles de React alrededor del canvas y HUD de combate dentro del juego.
                     </div>
-                    <button
-                      onClick={() => setHudSettings((current) => ({ ...current, showArenaHud: !current.showArenaHud }))}
-                      style={toggleButtonStyle(hudSettings.showArenaHud)}
-                    >
-                      {hudSettings.showArenaHud ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
+                    <div className="flex items-center justify-between py-2">
+                      <div>
+                        <div style={{ fontSize: '16px' }}>SOCIAL</div>
+                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Jugadores conectados (panel izquierdo)</div>
+                      </div>
+                      <button
+                        onClick={() => setHudSettings((current) => ({ ...current, showSocialPanel: !current.showSocialPanel }))}
+                        style={toggleButtonStyle(hudSettings.showSocialPanel)}
+                      >
+                        {hudSettings.showSocialPanel ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
 
-                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginTop: 12, marginBottom: 4 }}>CONTROLES</div>
+                    <div className="flex items-center justify-between py-2">
+                      <div>
+                        <div style={{ fontSize: '16px' }}>PROGRESO</div>
+                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Nivel, XP, KOs (no el texto verde del canvas)</div>
+                      </div>
+                      <button
+                        onClick={() => setHudSettings((current) => ({ ...current, showProgressPanel: !current.showProgressPanel }))}
+                        style={toggleButtonStyle(hudSettings.showProgressPanel)}
+                      >
+                        {hudSettings.showProgressPanel ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
 
+                    <div className="flex items-center justify-between py-2">
+                      <div>
+                        <div style={{ fontSize: '16px' }}>AYUDA DE CONTROLES</div>
+                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Tarjeta arriba a la derecha</div>
+                      </div>
+                      <button
+                        onClick={() => setHudSettings((current) => ({ ...current, showControlsPanel: !current.showControlsPanel }))}
+                        style={toggleButtonStyle(hudSettings.showControlsPanel)}
+                      >
+                        {hudSettings.showControlsPanel ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between py-2">
+                      <div>
+                        <div style={{ fontSize: '16px' }}>ARENA (canvas)</div>
+                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>
+                          Combate en plaza, barras, minimapa, textos training/XP
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setHudSettings((current) => ({ ...current, showArenaHud: !current.showArenaHud }))}
+                        style={toggleButtonStyle(hudSettings.showArenaHud)}
+                      >
+                        {hudSettings.showArenaHud ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {settingsTab === 'controls' && (
                   <div style={{ display: 'grid', gap: 8, marginBottom: 6 }}>
                     <div>
                       <div style={{ fontSize: '16px', marginBottom: 6 }}>MOVIMIENTO</div>
                       <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginBottom: 6 }}>
-                        Modo activo: {movementSchemeLabel(controlSettings.movementScheme)}
+                        Activo: {movementSchemeLabel(controlSettings.movementScheme)}
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
                         {([
@@ -3092,7 +3225,7 @@ export default function PlayPage() {
                     <div>
                       <div style={{ fontSize: '16px', marginBottom: 6 }}>REMAPEO</div>
                       <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginBottom: 6 }}>
-                        Elegi una direccion y apreta una tecla. `ESC` cancela.
+                        Elegí dirección y pulsá una tecla. ESC cancela.
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
                         {(['up', 'left', 'down', 'right'] as MovementDirection[]).map((direction) => (
@@ -3112,7 +3245,7 @@ export default function PlayPage() {
                     <div>
                       <div style={{ fontSize: '16px', marginBottom: 6 }}>ACCIONES</div>
                       <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginBottom: 6 }}>
-                        Remapea interaccion, disparo, inventario, chat y volver.
+                        Interacción, disparo, inventario, chat, volver.
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
                         {(['interact', 'shoot', 'inventory', 'chat', 'back'] as ActionBinding[]).map((action) => (
@@ -3132,7 +3265,7 @@ export default function PlayPage() {
                     <div className="flex items-center justify-between py-2">
                       <div>
                         <div style={{ fontSize: '16px' }}>JOYSTICK</div>
-                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Overlay virtual para moverte sin teclado</div>
+                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Toque para mover sin teclado</div>
                       </div>
                       <button
                         onClick={() => setControlSettings((current) => ({ ...current, showVirtualJoystick: !current.showVirtualJoystick }))}
@@ -3142,48 +3275,60 @@ export default function PlayPage() {
                       </button>
                     </div>
                   </div>
+                )}
 
-                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginTop: 12, marginBottom: 4 }}>VOZ</div>
-
-                  {micDevices.length > 0 && (
-                    <div style={{ marginBottom: 8 }}>
-                      <div style={{ fontSize: '16px', marginBottom: 6 }}>MICRÓFONO</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {micDevices.map((d, i) => (
-                          <button
-                            key={d.deviceId}
-                            onClick={() => {
-                              setSelectedMicDeviceId(d.deviceId);
-                              eventBus.emit(EVENTS.VOICE_MIC_CHANGED, d.deviceId);
-                            }}
-                            style={{
-                              ...optionButtonStyle(selectedMicDeviceId === d.deviceId),
-                              textAlign: 'left',
-                              fontSize: '11px',
-                            }}
-                          >
-                            {d.label || `Mic ${i + 1}`}
-                          </button>
-                        ))}
+                {settingsTab === 'voice' && (
+                  <>
+                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', marginBottom: 10 }}>
+                      Entrada: micrófono. La salida de voz de otros jugadores sigue la pestaña «AUDIO» si tu navegador lo permite.
+                    </div>
+                    {micDevices.length > 0 ? (
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontSize: '16px', marginBottom: 6 }}>MICRÓFONO</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {micDevices.map((d, i) => (
+                            <button
+                              key={d.deviceId}
+                              type="button"
+                              onClick={() => {
+                                setSelectedMicDeviceId(d.deviceId);
+                                eventBus.emit(EVENTS.VOICE_MIC_CHANGED, d.deviceId);
+                              }}
+                              style={{
+                                ...optionButtonStyle(selectedMicDeviceId === d.deviceId),
+                                textAlign: 'left',
+                                fontSize: '11px',
+                              }}
+                            >
+                              {d.label || `Mic ${i + 1}`}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    ) : (
+                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.45)', marginBottom: 12 }}>
+                        No hay micrófonos listados. Abrí ajustes otra vez tras permitir permiso de audio.
+                      </div>
+                    )}
 
-                  <div className="flex items-center justify-between py-2">
-                    <div>
-                      <div style={{ fontSize: '16px' }}>DESACTIVAR VOZ</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Desconectar mic y voz hasta la próxima sesión</div>
+                    <div className="flex items-center justify-between py-2">
+                      <div>
+                        <div style={{ fontSize: '16px' }}>DESACTIVAR VOZ</div>
+                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Corta mic y voz hasta la próxima vez que la actives</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => eventBus.emit(EVENTS.VOICE_DISABLE)}
+                        style={toggleButtonStyle(false)}
+                      >
+                        OFF
+                      </button>
                     </div>
-                    <button
-                      onClick={() => eventBus.emit(EVENTS.VOICE_DISABLE)}
-                      style={toggleButtonStyle(false)}
-                    >
-                      OFF
-                    </button>
-                  </div>
-                </div>
+                  </>
+                )}
               </div>
             </div>
+          </div>
         )}
 
         {statsOpen && (

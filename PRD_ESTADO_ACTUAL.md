@@ -1,7 +1,39 @@
 # WASPI WORLD — PRD Estado Actual
-**Fecha:** 2026-03-19
-**Nota:** Actualizado post sesión de Stripe integration, shop UI polish, env vars, y QA end-to-end.
-**Archivos fuente:** `PRD_WASPI_WORLD.md` (v1.2), código real en `src/` y `app/`.
+**Fecha:** 2026-03-20
+**Nota:** Incluye jukebox del Café (fixes), limpieza de ramas GitHub, y rol de los cuatro documentos PRD.
+**Archivos fuente:** los cuatro `PRD*.md` en la raíz (ver §0), código en `src/` y `app/`.
+
+---
+
+## 0. Por qué hay cuatro archivos PRD
+
+No son cuatro “versiones” del mismo documento: cada uno cumple un **rol distinto**. Así evitás mezclar visión comercial, checklist de producto, spec de arte y auditoría contra el código.
+
+| Archivo | Rol | Cuándo usarlo |
+|--------|-----|----------------|
+| **`PRD.md`** | PRD **original** (v1.2 Memas): visión, modelo de negocio, timeline clásico, criterios de MVP. | Referencia histórica y para explicar el producto a terceros. **No refleja** todo lo implementado después. |
+| **`PRD_WASPI_WORLD.md`** | PRD **operativo por fases**: checklist de features (world, social, avatar, economía…) alineado al código reciente. | Planificar releases y marcar fases COMPLETAS / pendientes. |
+| **`PRD_SPRITE_OVERHAUL.md`** | **Especificación vertical** solo de sprites (jugador, zombies, armas, overlays). | Generación de assets, QA visual, fases 1–3 de arte. |
+| **`PRD_ESTADO_ACTUAL.md`** (*este archivo*) | **Inventario + brecha vs código**: escenas, APIs, migraciones, gaps, notas de sesión. Fuente de verdad para “qué hay hoy en el repo”. | Onboarding, priorizar deuda técnica, actualizar post-sprint. |
+
+**Recomendación:** mantener **`PRD_ESTADO_ACTUAL.md`** al día tras cambios grandes; actualizar **`PRD_WASPI_WORLD.md`** cuando cerrás fases de producto; tocar **`PRD_SPRITE_OVERHAUL.md`** solo cuando cambia el pipeline de arte; **`PRD.md`** casi estático salvo pivot de negocio.
+
+---
+
+## Sesión 2026-03-20 — Lo que se hizo
+
+### Jukebox del Café — UX y audio
+- Overlay React (`JukeboxOverlay`): búsqueda YouTube vía `/api/jukebox/search`; al abrir el overlay Phaser **desactiva el teclado** en `CafeInterior` para que el input de búsqueda reciba teclas (antes solo funcionaba pegar).
+- **Reproducción:** todos los clientes en el café reproducen el track vía iframe YouTube; solo el “host” de presencia reporta `ENDED` para avanzar la cola una vez (evita dobles skips).
+- Intentos de **unmute** / volumen al reproducir (políticas del navegador pueden seguir exigiendo interacción previa).
+- Fix: cierre del modal por backdrop llamaba `handleClose` recursivo → corregido a `onClose()`.
+
+### GitHub — ramas
+- Eliminadas ramas remotas obsoletas o ya absorbidas por `main`: entre otras, `docs/prd-update`, `basement-map`, `creator-redesign`, `hud-store-redesign`, `characters`, `zombies`.
+- **Flujo sugerido:** `main` como tronco; features en ramas cortas + PR; borrar rama al mergear.
+
+### Documentación
+- Esta sección §0 — explicación de los 4 PRDs; contadores de API/migraciones alineados al repo.
 
 ---
 
@@ -115,10 +147,10 @@ Waspi World está significativamente más avanzado de lo que el PRD original v1.
 | Multiplayer / chat | Funcional — Supabase Realtime, chat BoomBang-style, interpolación |
 | Avatar / customización | Funcional — procedural + 4 seeds especiales + sprite overhaul iniciado |
 | Inventario / tienda | Funcional — 13 items en catálogo (6 ropa + 7 utility/armas), StoreInterior implementado |
-| Economía TENKS | Parcialmente funcional — TENKS operativos pero en localStorage, sin auth real |
+| Economía TENKS | Parcialmente funcional — sync server-side vía API cuando hay sesión; cache local |
 | Pagos Stripe | Funcional en test mode — flujo end-to-end verificado (USD temporal, pendiente MP para ARS) |
 | Auth Supabase | Funcional — magic link + Google, TENKS y skills server-side |
-| Audio | Mínimo — 1 archivo (arcade-theme.mp3), sistema preparado sin SFX |
+| Audio | BGM por escena vía `AudioManager`; SFX limitados; **jukebox Café = YouTube** (no Phaser) |
 | Tests | Ninguno implementado |
 | Tilemaps Tiled | NO existen — mundo dibujado con Phaser Graphics primitivos |
 
@@ -145,19 +177,11 @@ waspi-world/                        <- raiz del proyecto
     play/page.tsx                   <- Monta el juego Phaser
     PhaserGame.tsx                  <- Client component (dynamic import)
     components/                     <- Componentes React de UI
-    api/                            <- 8 grupos de routes = 12 endpoints
-      checkout/route.ts
-      webhooks/stripe/route.ts
-      player/route.ts
-      shop/route.ts
-      shop/buy/route.ts
-      chat/moderate/route.ts
-      chat/report/route.ts
-      pvp/match/route.ts
-      vecindad/route.ts
-      minigames/basket/start/route.ts
-      minigames/basket/reward/route.ts
-      minigames/penalty/reward/route.ts
+    api/                            <- ~38 route.ts (ver listado en §6)
+      checkout, webhooks/stripe, player (+ orders, stats, barbershop, tenks)
+      shop, shop/buy, chat/moderate, chat/report, pvp/match, vecindad
+      jukebox/add|search|skip, skills/*, guilds/*, mastery/*, contracts/*
+      quests/daily, fishing/collection, events, weed/deliver, minigames/*
   src/
     game/
       scenes/                       <- 15 escenas (no 6 como declaraba CLAUDE.md)
@@ -179,10 +203,10 @@ waspi-world/                        <- raiz del proyecto
   planning/                         <- Docs de planning (NO documentado en CLAUDE.md)
     features/stats-panel.md
     completed/
-  PRD_WASPI_WORLD.md                <- PRD detallado (estado al 2026-03-14)
-  PRD_SPRITE_OVERHAUL.md            <- PRD especifico de sprite overhaul
-  PRD.md                            <- PRD original v1.2
-  PRD_ESTADO_ACTUAL.md              <- Este archivo
+  PRD.md                            <- PRD original v1.2 (vision comercial)
+  PRD_WASPI_WORLD.md                <- PRD por fases (checklist producto)
+  PRD_SPRITE_OVERHAUL.md            <- Spec sprites / armas / zombies
+  PRD_ESTADO_ACTUAL.md              <- Este archivo (inventario vs codigo)
 ```
 
 ### 2.2 Stack real vs declarado
@@ -192,7 +216,7 @@ waspi-world/                        <- raiz del proyecto
 | Next.js version | 15 | 16.1.6 (package.json) |
 | Phaser version | 3.80+ | 3.90.0 |
 | React version | no especificado | 19.2.3 |
-| Auth | Supabase Auth (magic link + Google + Discord) | NO implementado — UUID localStorage |
+| Auth | Supabase Auth (magic link + Google + Discord) | **Funcional** con proyecto configurado — magic link + Google en `GamePage`; invitados pueden usar UUID local hasta vincular |
 | Tilemaps | JSON exports de Tiled | NO existen — Phaser Graphics primitivos |
 | Tilesets | Tilesheet PNGs | NO existen |
 | Audio | SFX, ambient | Solo arcade-theme.mp3 |
@@ -202,7 +226,7 @@ waspi-world/                        <- raiz del proyecto
 
 ---
 
-## 3. Escenas Implementadas (15 total)
+## 3. Escenas Implementadas (15 escenas)
 
 | Escena | Archivo | Estado | Notas |
 |---|---|---|---|
@@ -210,7 +234,7 @@ waspi-world/                        <- raiz del proyecto
 | WorldScene | `WorldScene.ts` | Completo | Mundo principal 3200x1800, 8 zonas, combat, PvE |
 | StoreInterior | `StoreInterior.ts` | Completo | NPC vendor, shop overlay, multiplayer |
 | ArcadeInterior | `ArcadeInterior.ts` | Completo | Acceso a minijuegos, reproduce arcade-theme.mp3 |
-| CafeInterior | `CafeInterior.ts` | Completo | Interior social |
+| CafeInterior | `CafeInterior.ts` | Completo | Interior social + **jukebox** (queue Supabase Realtime, overlay React, TENKS search/add/skip) |
 | HouseInterior | `HouseInterior.ts` | Completo | Spawn, espejo (avatar creator), armario |
 | BasketMinigame | `BasketMinigame.ts` | Completo | Tiro libre, power bar + angle needle, TENKS |
 | PenaltyMinigame | `PenaltyMinigame.ts` | Completo | Penales con gameplay implementado |
@@ -235,7 +259,7 @@ waspi-world/                        <- raiz del proyecto
 
 ---
 
-## 4. Systems Implementados (17 total)
+## 4. Systems Implementados (19+ listados; hay más utilitarios)
 
 | Sistema | Archivo | Documentado en CLAUDE.md | Descripcion |
 |---|---|---|---|
@@ -256,8 +280,10 @@ waspi-world/                        <- raiz del proyecto
 | ControlSettings | `ControlSettings.ts` | NO | Settings de controles por jugador |
 | EnemySprite | `EnemySprite.ts` | NO | State machine para sprites de zombies (del PRD Sprite Overhaul) |
 | StatsSystem | `StatsSystem.ts` | NO | Tracking de stats persistido via Supabase (tabla player_stats) |
+| JukeboxSystem | `JukeboxSystem.ts` | Parcial | Cola café, presencia host, API `/api/jukebox/*` |
+| JukeboxPlayer | `JukeboxPlayer.ts` | Parcial | YouTube IFrame API, audio fuera de Phaser |
 
-**5 sistemas no documentados en CLAUDE.md:** `AnimationSafety`, `BranchedDialog`, `ControlSettings`, `EnemySprite`, `StatsSystem`.
+**Sistemas no documentados en CLAUDE.md (ejemplos):** `AnimationSafety`, `BranchedDialog`, `ControlSettings`, `EnemySprite`, `StatsSystem`, `JukeboxSystem`, `JukeboxPlayer`.
 
 ---
 
@@ -316,39 +342,43 @@ waspi-world/                        <- raiz del proyecto
 
 ---
 
-## 6. API Routes (12 endpoints funcionales)
+## 6. API Routes (~38 handlers `route.ts`)
 
-| Endpoint | Metodo(s) | Descripcion |
-|---|---|---|
-| `/api/player` | GET, POST, PATCH | CRUD player state, TENKS |
-| `/api/shop` | GET | Catalogo de productos |
-| `/api/shop/buy` | POST | Compra con TENKS (virtual) |
-| `/api/checkout` | POST | Stripe Checkout Session (compra ARS) |
-| `/api/webhooks/stripe` | POST | Webhook Stripe — otorga item en inventario post-pago |
-| `/api/chat/moderate` | POST | Moderacion de mensajes de chat |
-| `/api/chat/report` | POST | Reporte de jugador |
-| `/api/pvp/match` | GET, POST | Matchmaking PvP server-side |
-| `/api/vecindad` | GET, POST, PATCH | CRUD parcelas de La Vecindad |
-| `/api/minigames/basket/start` | POST | Inicia sesion de minijuego basquet |
-| `/api/minigames/basket/reward` | POST | Calcula y otorga recompensa basquet |
-| `/api/minigames/penalty/reward` | POST | Calcula y otorga recompensa penales |
+Inventario **2026-03-20** (agrupado por dominio). Cada fila puede exponer GET/POST/PATCH según el archivo.
 
-**CLAUDE.md declaraba solo 5 routes**: checkout, webhooks/stripe, player, shop, chat/moderate. Existen **12 endpoints reales**.
+| Dominio | Rutas base |
+|---------|------------|
+| Player / economía | `/api/player`, `/api/player/orders`, `/api/player/stats`, `/api/player/tenks`, `/api/player/barbershop` |
+| Comercio | `/api/shop`, `/api/shop/buy`, `/api/checkout`, `/api/webhooks/stripe` |
+| Social / chat | `/api/chat/moderate`, `/api/chat/report` |
+| Juego / PvP / mundo | `/api/pvp/match`, `/api/vecindad`, `/api/events` |
+| Minijuegos | `/api/minigames/basket/start`, `.../reward`, `/api/minigames/penalty/reward` |
+| Jukebox (Café) | `/api/jukebox/search`, `/api/jukebox/add`, `/api/jukebox/skip` |
+| Progresión meta | `/api/skills`, `/api/skills/purchase`, `/api/skills/quality`, `/api/skills/milestones`, `/api/skills/specialize`, `/api/mastery`, `/api/mastery/earn`, `/api/mastery/unlock`, `/api/guilds`, `/api/guilds/join`, `/api/guilds/rep`, `/api/contracts`, `/api/contracts/claim`, `/api/contracts/progress`, `/api/quests/daily`, `/api/quests/daily/progress`, `/api/fishing/collection`, `/api/weed/deliver` |
+
+**Nota:** `CLAUDE.md` suele estar desactualizado respecto a este listado; usar `app/api/**/route.ts` como fuente.
 
 ---
 
 ## 7. Base de Datos (Supabase Migrations)
 
-6 migrations en `supabase/migrations/` — carpeta no documentada en CLAUDE.md ni en ningun PRD previo:
+**21 archivos** en `supabase/migrations/` (2026-03-20). Los primeros + ejemplos de expansion:
 
 | Archivo | Descripcion |
 |---|---|
-| `20260313_prd_schema.sql` | Schema inicial — tablas base del PRD (players, products, player_inventory, orders, etc.) |
-| `202603130101_vecindad_parcels.sql` | Tabla de parcelas de La Vecindad |
-| `202603130102_game_sessions_reward_code_unique.sql` | Constraint unique en game_sessions.reward_code |
-| `202603130103_vecindad_stage_zero.sql` | Stage 0 de construccion para Vecindad |
-| `20260314_player_stats.sql` | Tabla `player_stats` (zombie_kills, pvp_kills, deaths, tenks_earned, etc.) |
-| `20260314_vecindad_realtime.sql` | Supabase Realtime habilitado para parcelas en tiempo real |
+| `20260313_prd_schema.sql` | Schema inicial — players, products, player_inventory, orders, etc. |
+| `202603130101_vecindad_parcels.sql` | Parcelas La Vecindad |
+| `202603130102_game_sessions_reward_code_unique.sql` | Constraint unique game_sessions |
+| `202603130103_vecindad_stage_zero.sql` | Vecindad stage 0 |
+| `20260314_player_stats.sql` | `player_stats` |
+| `20260314_vecindad_realtime.sql` | Realtime parcelas |
+| `20260315_player_tenks_balance.sql` / `20260315_rls_policies.sql` | TENKS / RLS |
+| `20260317_*.sql` | Contratos, guilds, mastery, skills, especializaciones, eventos globales (+ seeds) |
+| `20260318_skill_milestones.sql` | Hitos skills |
+| `20260319_fish_collection.sql` | Colección pesca |
+| `20260319_jukebox.sql` | Tablas queue/cache jukebox café |
+
+Ver carpeta para el detalle completo.
 
 ---
 
@@ -380,20 +410,20 @@ El PRD original declaraba 6 SKUs de ropa. El catalogo real tiene 6 SKUs de ropa 
 
 ### CRITICO (blocker de lanzamiento)
 
-**1. Auth Supabase — NO implementado**
-- Estado actual: player_id es un UUID generado localmente y guardado en localStorage.
-- Impacto: TENKS y progresion no persisten entre sesiones ni entre dispositivos. Imposible vincular compras Stripe a una cuenta real. La tabla `players` en DB no tiene usuarios reales.
-- Solucion requerida: Implementar Supabase Auth (magic link + Google). Migrar player_id de localStorage a auth.users.id. Proteger todas las API routes con token JWT de Supabase.
+**1. Auth Supabase — implementado en flujo feliz; endurecer invitados**
+- Estado actual: magic link + Google en `GamePage` cuando Supabase está configurado; APIs usan `Authorization` donde corresponde. Puede coexistir UUID local para sesión sin login completo.
+- Impacto residual: jugadores no autenticados o flujos híbridos pueden desincronizar identidad con DB; hay que documentar y minimizar el modo “solo local”.
+- Siguiente paso: auditar que toda acción económica sensible exija JWT; unificar `player_id` con `auth.users.id` para cuentas reales.
 
-**2. TENKS server-side — NO validado**
-- Estado actual: TENKS se suman/restan en localStorage via TenksSystem.ts. La API `/api/player` existe pero no es la fuente de verdad.
-- Impacto: cualquier jugador puede modificar su balance de TENKS desde DevTools. Anti-cheat imposible. Viola el principio "Client untrusted" declarado en el PRD.
-- Solucion requerida: despues de implementar Auth, mover el balance de TENKS a la columna `players.tenks` en Supabase PostgreSQL. Todas las operaciones de TENKS deben ir por `/api/player` con validacion server-side.
+**2. TENKS — servidor como fuente de verdad (parcial)**
+- Estado actual: TENKS con operaciones vía `/api/player`, `/api/player/tenks`, packs y webhooks; jukebox add/skip validados server-side. Cache local en TenksSystem.
+- Impacto residual: sin sesión, manipulación client-side sigue siendo un riesgo donde el juego no sincroniza.
+- Siguiente paso: cerrar gaps auditando cada path que suma/resta TENKS; tests en rutas críticas.
 
-**3. Stripe end-to-end sin testear**
-- Estado actual: la integracion esta wired (`/api/checkout`, `/api/webhooks/stripe`) y los `stripePriceEnv` estan configurados en el catalogo, pero el flujo completo checkout → webhook → grant de inventario no ha sido ejecutado en produccion.
-- Impacto: el core de e-commerce (razon de existir del proyecto) puede fallar silenciosamente.
-- Solucion requerida: configurar variables de entorno Stripe reales. Ejecutar una compra de prueba end-to-end. Validar que el webhook otorga el item y que el email de Resend se envia.
+**3. Stripe — verificado en test; falta producción**
+- Estado actual (mar 2026): flujo checkout → webhook → TENKS/inventario probado en **test mode**; USD según cuenta; MP/ARS pendiente.
+- Impacto: keys live + webhook producción y dominio de email siguen siendo pasos de go-live.
+- Solucion: variables Vercel live, webhook URL registrado, smoke test en producción; `RESEND_API_KEY` + dominio para confirmaciones.
 
 ### MEDIO (requerido para MVP completo)
 
@@ -418,13 +448,13 @@ El PRD original declaraba 6 SKUs de ropa. El catalogo real tiene 6 SKUs de ropa 
 
 ### BAJO (post-MVP)
 
-**8. Actualizar CLAUDE.md** con estructura real del proyecto: `app/` en raiz (no en `src/`), 15 escenas, 17 sistemas, 12 API routes, sin `world.ts` ni `npcs.ts`.
+**8. Actualizar CLAUDE.md** con estructura real: `app/` en raíz, ~15 escenas, sistemas (incl. jukebox), ~38 API routes, sin `world.ts` ni `npcs.ts` si siguen ausentes.
 
 **9. Leaderboard global** — ProgressionSystem guarda XP/nivel en localStorage. StatsSystem guarda en Supabase `player_stats` pero no hay endpoint ni UI de ranking global.
 
 **10. Chat moderation** — `/api/chat/moderate` y `/api/chat/report` existen como endpoints pero la logica de moderacion (filtro de palabras configurable, ban automatico) no esta implementada.
 
-**11. Resend email** — Resend esta en las dependencias (`resend: ^6.9.3`) pero el flujo post-compra (confirmacion de pedido, email de bienvenida) no esta implementado.
+**11. Resend email** — `src/lib/resend.ts` y templates listos; falta `RESEND_API_KEY` en prod y verificar dominio para envíos reales.
 
 **12. Mercado Pago** — mencionado en el PRD original como prioritario para el mercado argentino. No hay ninguna referencia en el codigo.
 
@@ -436,17 +466,18 @@ El PRD original declaraba 6 SKUs de ropa. El catalogo real tiene 6 SKUs de ropa 
 
 ## 10. PRD Original vs Estado Real (Tabla Comparativa)
 
-| Feature | PRD Original v1.2 (Marzo 2026) | Estado Real (2026-03-15) |
+| Feature | PRD Original v1.2 (Marzo 2026) | Estado Real (2026-03-20) |
 |---|---|---|
 | Escenas totales | 6 (Boot, World, Store, Arcade, Cafe, House) | 15 escenas implementadas |
 | Dimensiones del mundo | 3200x2400px (CLAUDE.md) / 3200x1800px (PRD) | 3200x1800px — dibujado con Phaser Graphics |
 | Tilemaps | JSON exports de Tiled | NO existen. Mundo 100% programatico |
-| Auth | Supabase Auth (magic link + Google + Discord) | NO implementado |
-| TENKS persistence | Supabase PostgreSQL (players.tenks) | localStorage (TenksSystem.ts) |
+| Auth | Supabase Auth (magic link + Google + Discord) | Magic link + Google operativos con Supabase configurado |
+| TENKS persistence | Supabase PostgreSQL (players.tenks) | DB + APIs + cache local; endurecer paths sin auth |
 | Minijuegos MVP | Solo penales | Penales + basquet + Casino (4 juegos) + modo Zombies |
 | Catalogo de items | 6 SKUs de ropa | 13 items (6 ropa + 7 utility/armas) |
-| API routes | 5 endpoints | 12 endpoints funcionales |
-| Sistemas del juego | ~8 listados en CLAUDE.md | 17 implementados |
+| API routes | 5 endpoints | **~38** route handlers en `app/api` |
+| Sistemas del juego | ~8 listados en CLAUDE.md | 19+ listados en §4 (+ utilitarios) |
+| Jukebox Café | No en PRD original | Queue Realtime + YouTube + TENKS (search/add/skip server-validados) |
 | Enemigos | No en PRD original | 4 arquetipos con sprites + animaciones completas |
 | PvP | No en PRD original | PvpArenaScene con matchmaking server-side y apuestas TENKS |
 | La Vecindad | No en PRD original | 11 parcelas, 4 stages de construccion, Realtime sincronizado |
@@ -454,17 +485,17 @@ El PRD original declaraba 6 SKUs de ropa. El catalogo real tiene 6 SKUs de ropa 
 | NPC COTTENKS | No en PRD original | Sprite propio implementado |
 | Sprites de personaje | Procedural chibi (Binding of Isaac style) | Procedural + sprite overhaul en 4 variantes (trap_A–D) |
 | Sprites de enemigos | No en PRD original | 4 arquetipos con animaciones completas (idle/walk/attack/hurt/death) |
-| Audio | SFX + ambient (planificado) | 1 archivo (arcade-theme.mp3) |
+| Audio | SFX + ambient (planificado) | BGM por escena + arcade-theme; SFX incompletos; jukebox = streaming YouTube |
 | Tests | No mencionados | Ninguno |
-| DB migrations | No documentadas | 6 migrations en supabase/migrations/ |
+| DB migrations | No documentadas | **21** migrations en `supabase/migrations/` |
 | `world.ts` (config) | Declarado en CLAUDE.md | Archivo no existe |
 | `npcs.ts` (config) | Declarado en CLAUDE.md | Archivo no existe |
 | `zombies.ts` (config) | No declarado | Existe en src/game/config/ |
 | app/ location | src/app/ (CLAUDE.md) | /app/ en raiz del proyecto |
-| Next.js version | 15 (CLAUDE.md) | 16.1.6 |
-| Phaser version | 3.80+ | 3.90.0 |
+| Next.js version | 15 (CLAUDE.md) | 16.x |
+| Phaser version | 3.80+ | 3.90.x |
 | StatsSystem + player_stats | No en PRD original | Implementado, tabla en Supabase |
-| PRDs en proyecto | 0 (PRD era PDF externo) | 3 archivos MD en raiz del proyecto |
+| PRDs en proyecto | 0 (PRD era PDF externo) | **4** archivos `PRD*.md` (ver §0) |
 
 ---
 
@@ -516,10 +547,11 @@ Estimacion: continuo
 
 | Documento | Path | Descripcion |
 |---|---|---|
-| PRD actualizado | `PRD_WASPI_WORLD.md` | Estado detallado al 2026-03-14 — el mas completo antes de este archivo |
-| PRD original | `PRD.md` | Version 1.2, Marzo 2026 — vision inicial del producto |
-| PRD Sprite Overhaul | `PRD_SPRITE_OVERHAUL.md` | Spec tecnica completa para sprites de jugador, zombies y armas (3 fases) |
-| Stats Panel (WIP) | `planning/features/stats-panel.md` | Feature en progreso, no lanzado |
+| **Estado vs código (fuente operativa)** | `PRD_ESTADO_ACTUAL.md` | Este archivo — inventario, gaps, sesiones |
+| PRD por fases | `PRD_WASPI_WORLD.md` | Checklist de producto actualizado por fases |
+| PRD original | `PRD.md` | v1.2 — visión comercial y MVP clásico |
+| PRD Sprite Overhaul | `PRD_SPRITE_OVERHAUL.md` | Spec técnica sprites jugador/zombies/armas |
+| Stats Panel | `planning/completed/stats-panel.md` | Registro — overlay en GamePage + StatsSystem |
 | Schema SQL | `supabase/migrations/20260313_prd_schema.sql` | Schema base de la DB |
 | Player Stats SQL | `supabase/migrations/20260314_player_stats.sql` | Tabla player_stats |
 | Catalogo | `src/game/config/catalog.ts` | 13 items con precios TENKS y ARS + helpers getItem/getPhysicalCatalog |

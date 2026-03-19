@@ -6,6 +6,8 @@
 **Fecha:** Marzo 2026
 **Última actualización:** 2026-03-13 — Mundo jugable con creator, inventario y penales
 
+> **Nota:** este es el PRD **original v1.2** (visión y MVP). Para el estado del código hoy usá **`PRD_ESTADO_ACTUAL.md`**; el rol de cada PRD del repo está resumido ahí (§0).
+
 ---
 
 ## Índice

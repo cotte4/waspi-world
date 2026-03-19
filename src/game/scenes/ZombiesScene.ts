@@ -14,6 +14,7 @@ import {
   safeWithLiveSprite,
 } from '../systems/AnimationSafety';
 import { SceneControls } from '../systems/SceneControls';
+import type { AudioSettings } from '../systems/AudioSettings';
 import { startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
 import { getShootTargetWorld } from '../systems/shootingAim';
 import { eventBus, EVENTS } from '../config/eventBus';
@@ -543,6 +544,21 @@ export class ZombiesScene extends Phaser.Scene {
     this.cameras.main.fadeIn(240, 0, 0, 0);
 
     this.sceneMusic = startSceneMusic(this, 'zombies_dark', 0.45);
+    this.cleanupFns.push(eventBus.on(EVENTS.AUDIO_SETTINGS_CHANGED, (payload: unknown) => {
+      if (!this.scene.isActive(this.scene.key)) return;
+      if (!payload || typeof payload !== 'object') return;
+      const next = payload as Partial<AudioSettings>;
+      const musicOn = next.musicEnabled;
+      if (typeof musicOn !== 'boolean') return;
+      if (musicOn) {
+        if (!this.sceneMusic) {
+          this.sceneMusic = startSceneMusic(this, 'zombies_dark', 0.45);
+        }
+      } else {
+        stopSceneMusic(this, this.sceneMusic);
+        this.sceneMusic = null;
+      }
+    }));
     this.setupRealtime();
     this.setupChatBridge();
     this.beginRound();

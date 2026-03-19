@@ -28,9 +28,10 @@ import {
   safeSetSpriteTexture,
   safeWithLiveSprite,
 } from '../systems/AnimationSafety';
-import { announceScene, bindSafeResetToPlaza } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, transitionToScene as uiTransitionToScene } from '../systems/SceneUi';
 import { SceneControls } from '../systems/SceneControls';
 import { getVoiceChat, destroyVoiceChat } from '../systems/voiceChatInstance';
+import { applySinkIdToAudioContext } from '../systems/audioOutputSink';
 import { recordDistanceDelta, recordNpcTalk, initStatsSystem, teardownStatsSystem } from '../systems/StatsSystem';
 import type { VecindadState } from '../../lib/playerState';
 import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
@@ -797,10 +798,20 @@ export class WorldScene extends Phaser.Scene {
     this.audioSettingsCleanup = eventBus.on(EVENTS.AUDIO_SETTINGS_CHANGED, (payload: unknown) => {
       if (!payload || typeof payload !== 'object') return;
       const next = payload as Partial<AudioSettings>;
+      const wasMusic = this.audioSettings.musicEnabled;
       this.audioSettings = {
         musicEnabled: next.musicEnabled ?? this.audioSettings.musicEnabled,
         sfxEnabled: next.sfxEnabled ?? this.audioSettings.sfxEnabled,
       };
+      if (!this.scene.isActive('WorldScene')) return;
+      if (wasMusic && !this.audioSettings.musicEnabled) {
+        stopSceneMusic(this, this.sceneMusic);
+        this.sceneMusic = null;
+      } else if (!wasMusic && this.audioSettings.musicEnabled) {
+        if (!this.sceneMusic) {
+          this.sceneMusic = startSceneMusic(this, 'world_ambient', 0.35);
+        }
+      }
     });
     this.bridgeCleanupFns.push(eventBus.on(EVENTS.HUD_SETTINGS_CHANGED, (payload: unknown) => {
       if (!payload || typeof payload !== 'object') return;
@@ -849,6 +860,14 @@ export class WorldScene extends Phaser.Scene {
 
     // Scene music
     this.sceneMusic = startSceneMusic(this, 'world_ambient', 0.35);
+    this.input.once('pointerdown', () => {
+      try {
+        this.sound.unlock();
+      } catch { /* ignore */ }
+      if (this.audioSettings.musicEnabled && !this.sceneMusic) {
+        this.sceneMusic = startSceneMusic(this, 'world_ambient', 0.35);
+      }
+    });
   }
 
   private setupTrainingZone() {
@@ -1019,12 +1038,21 @@ export class WorldScene extends Phaser.Scene {
       vc.switchMic(deviceId).catch((e) => console.warn('[VoiceChat] Mic switch failed:', e));
     });
 
+    const unsubSink = eventBus.on(EVENTS.AUDIO_OUTPUT_SINK_CHANGED, (sinkId: unknown) => {
+      if (typeof sinkId !== 'string') return;
+      void getVoiceChat().applyOutputSink(sinkId);
+      const sm = this.game?.sound as Phaser.Sound.WebAudioSoundManager | undefined;
+      const ctx = sm && 'context' in sm ? sm.context : undefined;
+      if (ctx) void applySinkIdToAudioContext(ctx, sinkId);
+    });
+
     const unsubDisable = eventBus.on(EVENTS.VOICE_DISABLE, () => {
       void this.disableVoice();
     });
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       unsubMic();
+      unsubSink();
       unsubDisable();
     });
   }
@@ -6426,13 +6454,11 @@ export class WorldScene extends Phaser.Scene {
     );
   }
 
+  /** Usa SceneUi.transitionToScene — timeout de respaldo + resetFX si el fade no dispara. */
   private transitionToScene(targetKey: string) {
-    this.inTransition = true;
     clearGlobalBgm(this);
-    this.cameras.main.fadeOut(250, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start(targetKey);
-    });
+    const ok = uiTransitionToScene(this, targetKey, {});
+    if (ok) this.inTransition = true;
   }
 
   private handleSceneShutdown() {

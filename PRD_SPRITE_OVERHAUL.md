@@ -4,6 +4,8 @@
 **Status:** Ready for implementation
 **Project path:** `waspi-world/`
 
+> Ver también **`PRD_ESTADO_ACTUAL.md`** para inventario de assets en disco; §0 describe cómo encaja este doc con los otros PRD del repo.
+
 ---
 
 ## Overview & Goals

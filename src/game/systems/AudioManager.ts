@@ -5,6 +5,7 @@
  */
 
 import { loadAudioSettings } from './AudioSettings';
+import { applySinkIdToAudioContext, getStoredAudioOutputDeviceId } from './audioOutputSink';
 
 // Claves de tracks de música (los archivos pueden no existir aún — graceful fallback)
 export type MusicTrack =
@@ -51,9 +52,11 @@ let _audioCtx: AudioContext | null = null;
 
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
+  let created = false;
   if (!_audioCtx) {
     try {
       _audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      created = true;
     } catch {
       return null;
     }
@@ -61,7 +64,20 @@ function getAudioContext(): AudioContext | null {
   if (_audioCtx.state === 'suspended') {
     void _audioCtx.resume();
   }
+  if (created) {
+    const sink = getStoredAudioOutputDeviceId();
+    if (sink) {
+      void applySinkIdToAudioContext(_audioCtx, sink);
+    }
+  }
   return _audioCtx;
+}
+
+/** Llamar al cambiar dispositivo en Settings (SFX del AudioManager). */
+export function applyOutputSinkToSfxContext(sinkId: string): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  void applySinkIdToAudioContext(ctx, sinkId);
 }
 
 /**

@@ -66,6 +66,8 @@ export const EVENTS = {
   DARTS_BULLSEYE: 'darts:bullseye',
   OPEN_STATS: 'stats:open',
   VOICE_MIC_CHANGED: 'voice:mic:changed',
+  /** Dispositivo de salida Web Audio (Chrome/Edge). Payload: deviceId string (vacío = default). */
+  AUDIO_OUTPUT_SINK_CHANGED: 'audio:output:sink:changed',
   VOICE_DISABLE: 'voice:disable',
   SKILL_MILESTONE_UNLOCKED: 'skill:milestone:unlocked',
   ACTIVITY_STARTED: 'activity:started',

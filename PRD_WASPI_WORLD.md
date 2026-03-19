@@ -2,6 +2,8 @@
 **Fecha de actualización:** 2026-03-14 (sesión 2)
 **Rama activa:** main
 
+> **Documentos PRD:** este archivo es el checklist por fases. El inventario frente al código (APIs, migraciones, gaps, sesiones) está en **`PRD_ESTADO_ACTUAL.md` §0** explica los 4 `PRD*.md` del repo.
+
 ---
 
 ## Overview
@@ -131,7 +133,7 @@ E-commerce gamificado: mundo abierto 2D de vista cenital estilo Binding of Isaac
   - Integración Supabase para guardar score
 - [x] PenaltyMinigame: gameplay implementado
 - [x] ArcadeInterior: escena interior del arcade con acceso a minijuegos
-- [x] CafeInterior: escena interior del café
+- [x] CafeInterior: escena interior del café + **jukebox** (cola Realtime, búsqueda YouTube, TENKS; overlay React)
 - [x] HouseInterior: Tu Casa (spawn de jugadores)
 - [x] InteriorRoom system: helper reutilizable para dibujar interiores
 - [x] Chat bubbles en todos los interiores via InteriorRoom + ChatSystem (StoreInterior, VecindadScene, etc.)

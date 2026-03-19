@@ -297,6 +297,19 @@ export class VoiceChatManager {
     this.config.masterVolume = Math.max(0, Math.min(1, vol));
   }
 
+  /** Chrome/Edge: salida del AudioContext (voz recibida, analizadores). */
+  async applyOutputSink(sinkId: string): Promise<void> {
+    const ctx = this.audioContext;
+    if (!ctx || ctx.state === 'closed') return;
+    const c = ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+    if (typeof c.setSinkId !== 'function') return;
+    try {
+      await c.setSinkId(sinkId);
+    } catch (e) {
+      console.warn('[VoiceChat] setSinkId failed:', e);
+    }
+  }
+
   // ─── Cleanup ───────────────────────────────────────────────────────────────
 
   disconnectPeer(peerId: string): void {

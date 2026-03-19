@@ -34,6 +34,15 @@ export function spendTenks(amount: number, reason: string): boolean {
   return true;
 }
 
+/** Authoritative balance from API (jukebox, etc.) — actualiza HUD y localStorage. */
+export function applyTenksBalanceFromServer(newBalance: number, reason: string) {
+  if (typeof newBalance !== 'number' || !Number.isFinite(newBalance)) return;
+  const prev = balance;
+  balance = Math.max(0, Math.floor(newBalance));
+  persistBalance();
+  eventBus.emit(EVENTS.TENKS_CHANGED, { balance, delta: balance - prev, reason });
+}
+
 export function initTenks(initial: number, options?: { preferStored?: boolean }) {
   const preferStored = options?.preferStored ?? true;
   balance = preferStored ? (readStoredBalance() ?? initial) : initial;
