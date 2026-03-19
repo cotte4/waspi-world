@@ -35,6 +35,7 @@ import { reconcileInventoryFromDB } from '@/src/lib/commercePersistence';
 import { track } from '@/src/lib/analytics';
 
 const PhaserGame = dynamic(() => import('@/app/components/PhaserGame'), { ssr: false });
+const JukeboxOverlay = dynamic(() => import('@/app/components/JukeboxOverlay'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
 const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
@@ -197,6 +198,7 @@ export default function PlayPage() {
   const [statsLoading, setStatsLoading] = useState(false);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedMicDeviceId, setSelectedMicDeviceId] = useState<string>(getInitialSelectedMicDeviceId);
+  const [jukeboxOpen, setJukeboxOpen] = useState(false);
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(initialAudioSettings);
   const [hudSettings, setHudSettings] = useState<HudSettings>(initialHudSettings);
   const [controlSettings, setControlSettings] = useState<ControlSettings>(initialControlSettings);
@@ -484,6 +486,9 @@ export default function PlayPage() {
       setShopOpen(false);
     });
 
+    const unsubJukeboxOpen  = eventBus.on(EVENTS.JUKEBOX_OPEN,  () => setJukeboxOpen(true));
+    const unsubJukeboxClose = eventBus.on(EVENTS.JUKEBOX_CLOSE, () => setJukeboxOpen(false));
+
     const unsubPlayerActions = eventBus.on(EVENTS.PLAYER_ACTIONS_OPEN, (payload: unknown) => {
       const next = payload as PlayerActionsPayload | null;
       setPlayerActions(next);
@@ -695,6 +700,8 @@ export default function PlayPage() {
       unsubInvChanged();
       unsubShopOpen();
       unsubShopClose();
+      unsubJukeboxOpen();
+      unsubJukeboxClose();
       unsubPlayerActions();
       unsubPenalty();
       unsubParcelBuy();
@@ -3473,6 +3480,13 @@ export default function PlayPage() {
           >
             JOYSTICK = MOVER · A = INTERACTUAR
           </div>
+        )}
+
+        {jukeboxOpen && (
+          <JukeboxOverlay
+            onClose={() => { setJukeboxOpen(false); eventBus.emit(EVENTS.JUKEBOX_CLOSE); }}
+            isMobile={isMobile}
+          />
         )}
 
         {uiNotice && (

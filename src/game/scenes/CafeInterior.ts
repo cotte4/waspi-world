@@ -7,6 +7,8 @@ import { eventBus, EVENTS } from '../config/eventBus';
 import { SceneControls } from '../systems/SceneControls';
 import { safeSceneDelayedCall } from '../systems/AnimationSafety';
 import { getSkillSystem } from '../systems/SkillSystem';
+import { JukeboxSystem } from '../systems/JukeboxSystem';
+import { JukeboxPlayer } from '../systems/JukeboxPlayer';
 
 export class CafeInterior extends Phaser.Scene {
   private static readonly RETURN_X = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
@@ -35,6 +37,14 @@ export class CafeInterior extends Phaser.Scene {
   private cafeTableXpAccMs = 0;
   private static readonly CAFE_TABLE_XP_INTERVAL_MS = 30_000;
   private static readonly CAFE_TABLE_RADIUS = 70;
+  // Jukebox
+  private jukeboxSprite?: Phaser.GameObjects.Rectangle;
+  private jukeboxGlowRect?: Phaser.GameObjects.Rectangle;
+  private jukeboxGlowTween?: Phaser.Tweens.Tween;
+  private jukeboxPrompt?: Phaser.GameObjects.Text;
+  private isNearJukebox = false;
+  private jukeboxPlayer?: JukeboxPlayer;
+  private static readonly JUKEBOX_INTERACT_RADIUS = 70;
   // Plato del Día (Cooking Lv4)
   private platoPrompt?: Phaser.GameObjects.Text;
   private static readonly PLATO_BUFFS = [
@@ -355,6 +365,88 @@ export class CafeInterior extends Phaser.Scene {
       });
     } catch (e) { console.error('[CafeInterior] steam particles failed', e); }
 
+    // ── Jukebox (left wall, between bar and tables) ──────────
+    const jbX = roomX + 38;
+    const jbY = roomY + 190;
+    try {
+      // Glow halo behind jukebox
+      this.jukeboxGlowRect = this.add.rectangle(jbX, jbY, 38, 58, 0xF5C842, 0.0).setDepth(4);
+      // Main body
+      this.jukeboxSprite = this.add.rectangle(jbX, jbY, 30, 50, 0x1a0e06).setDepth(5);
+      this.add.rectangle(jbX, jbY, 30, 50, 0x000000, 0).setStrokeStyle(1, 0xF5C842, 0.7).setDepth(5);
+      // Screen
+      this.add.rectangle(jbX, jbY - 8, 18, 14, 0x0a0a1a).setDepth(6);
+      this.add.rectangle(jbX, jbY - 8, 18, 14, 0x000000, 0).setStrokeStyle(1, 0xF5C842, 0.4).setDepth(6);
+      // Buttons row
+      [-5, 0, 5].forEach((bx) => {
+        this.add.circle(jbX + bx, jbY + 8, 3, 0xF5C842, 0.6).setDepth(6);
+      });
+      // Label
+      this.add.text(jbX, jbY + 19, 'JUKEBOX', {
+        fontSize: '4px', fontFamily: '"Press Start 2P", monospace',
+        color: '#F5C842', stroke: '#000', strokeThickness: 2,
+      }).setOrigin(0.5).setDepth(6);
+
+      // Glow tween (idle: very faint)
+      this.jukeboxGlowTween = this.tweens.add({
+        targets: this.jukeboxGlowRect,
+        alpha: { from: 0.0, to: 0.12 },
+        duration: 900,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+        paused: true,
+      });
+
+      // Prompt
+      this.jukeboxPrompt = this.add.text(jbX, jbY - 42, 'SPACE — JUKEBOX', {
+        fontSize: '6px', fontFamily: '"Press Start 2P", monospace',
+        color: '#F5C842', stroke: '#000000', strokeThickness: 3,
+      }).setOrigin(0.5).setDepth(20).setVisible(false);
+
+      // Subscribe to jukebox state changes to drive the glow
+      eventBus.on(EVENTS.JUKEBOX_STATE_UPDATED, (p: unknown) => {
+        if (!this.scene?.isActive('CafeInterior')) return;
+        const s = p as { nowPlaying?: unknown } | null;
+        const playing = s?.nowPlaying != null;
+        if (playing) {
+          if (this.jukeboxGlowTween?.isPaused()) this.jukeboxGlowTween.resume();
+        } else {
+          this.jukeboxGlowTween?.pause();
+          if (this.jukeboxGlowRect?.active) this.jukeboxGlowRect.setAlpha(0.0);
+        }
+      });
+
+      // Init JukeboxSystem and JukeboxPlayer
+      const storedPlayer = (() => {
+        try { return JSON.parse(localStorage.getItem('waspi_player_info') ?? '{}') as { playerId?: string; username?: string }; }
+        catch { return {}; }
+      })();
+      const playerId = storedPlayer.playerId ?? `anon_${Math.random().toString(36).slice(2, 8)}`;
+      const username = storedPlayer.username ?? 'Anónimo';
+
+      JukeboxSystem.getInstance().join(playerId, username);
+
+      this.jukeboxPlayer = new JukeboxPlayer(() => {
+        JukeboxSystem.getInstance().onSongEnded();
+      });
+
+      // Wire host changes to JukeboxPlayer
+      eventBus.on(EVENTS.JUKEBOX_STATE_UPDATED, (p: unknown) => {
+        if (!this.scene?.isActive('CafeInterior')) return;
+        const s = p as { hostId?: string | null } | null;
+        if (typeof s?.hostId !== 'undefined') {
+          const isHost = s.hostId === playerId;
+          this.jukeboxPlayer?.setHost(isHost);
+          if (isHost && s?.nowPlaying != null) {
+            const song = s.nowPlaying as { videoId?: string };
+            if (song.videoId) this.jukeboxPlayer?.play(song.videoId);
+          }
+        }
+      });
+
+    } catch (e) { console.error('[CafeInterior] jukebox setup failed', e); }
+
     // ── Player avatar ────────────────────────────────────────
     this.px = width / 2;
     this.py = roomB - 80;
@@ -406,9 +498,23 @@ export class CafeInterior extends Phaser.Scene {
     this.handleMovement(delta);
     this.updateCafeTableXp(delta);
     this.updatePlatoDelDia();
+    this.updateJukeboxProximity();
     this.room?.update();
     if (this.controls.isActionJustDown('back')) {
       this.exitToWorld();
+    }
+  }
+
+  private updateJukeboxProximity() {
+    if (!this.jukeboxSprite?.active) return;
+    const dist = Phaser.Math.Distance.Between(this.px, this.py, this.jukeboxSprite.x, this.jukeboxSprite.y);
+    const near = dist < CafeInterior.JUKEBOX_INTERACT_RADIUS;
+    if (near !== this.isNearJukebox) {
+      this.isNearJukebox = near;
+      if (this.jukeboxPrompt?.active) this.jukeboxPrompt.setVisible(near);
+    }
+    if (near && Phaser.Input.Keyboard.JustDown(this.keySpace)) {
+      eventBus.emit(EVENTS.JUKEBOX_OPEN);
     }
   }
 
@@ -502,5 +608,13 @@ export class CafeInterior extends Phaser.Scene {
     this.cafeTableXpAccMs = 0;
     this.room?.shutdown();
     this.room = undefined;
+    this.jukeboxGlowTween?.stop();
+    this.jukeboxGlowTween = undefined;
+    this.jukeboxPlayer?.destroy();
+    this.jukeboxPlayer = undefined;
+    try {
+      const stored = JSON.parse(localStorage.getItem('waspi_player_info') ?? '{}') as { playerId?: string };
+      if (stored.playerId) JukeboxSystem.getInstance().leave(stored.playerId);
+    } catch { /* silent */ }
   }
 }
