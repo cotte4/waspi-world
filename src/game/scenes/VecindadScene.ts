@@ -1684,20 +1684,23 @@ export class VecindadScene extends Phaser.Scene {
     if (this.py < 155 && this.px > 1300 && this.px < 1500) {
       if (this.inTransition) return;
       this.inTransition = true;
-      transitionToScene(this, 'BosqueMaterialesScene', {
+      const started = transitionToScene(this, 'BosqueMaterialesScene', {
         returnX: undefined,
         returnY: undefined,
       });
+      // Si transitionToScene fue throttled o rechazado, no dejar inTransition colgado (freeze).
+      if (!started) this.inTransition = false;
     }
   }
 
   private leaveToWorld() {
     if (this.inTransition) return;
     this.inTransition = true;
-    transitionToScene(this, 'WorldScene', {
+    const started = transitionToScene(this, 'WorldScene', {
       returnX: VECINDAD_MAP.RETURN_WORLD_X,
       returnY: VECINDAD_MAP.RETURN_WORLD_Y,
     }, 240);
+    if (!started) this.inTransition = false;
   }
 
   private handleMovement(delta: number) {

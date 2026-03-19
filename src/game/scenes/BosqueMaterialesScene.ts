@@ -12,6 +12,7 @@ import { getMasterySystem } from '../systems/MasterySystem';
 import { getEventSystem } from '../systems/EventSystem';
 import { SpecializationModal } from '../systems/SpecializationModal';
 import type { SkillId } from '../systems/SkillSystem';
+import type { QualityTier } from '../config/qualityTiers';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const W = 1600;
@@ -25,6 +26,21 @@ const MATERIAL_RESPAWN_MS = 18_000;
 const CAVE_INTERACT_RANGE = 110;
 const COMMUNAL_GARDEN_GATE = { x: 190, y: 400, range: 65 };
 const COMMUNAL_GARDEN_RESPAWN_MS = 90_000; // 90s — slower than regular nodes
+
+/**
+ * Materiales por nodo según tier del roll del servidor (/api/skills/quality).
+ * Curva pedida: pesimo / medio / perfecto → 1 … 3 … 5 (con pasos intermedios por tier).
+ */
+const MINING_MATERIALS_BY_QUALITY: Record<QualityTier, number> = {
+  basic: 1,
+  normal: 2,
+  good: 3,
+  excellent: 4,
+  legendary: 5,
+};
+
+/** Materiales al cuidar una parcela del jardín comunal (Gardening Lv5+). */
+const MATERIALS_COMMUNAL_PER_TEND = 3;
 
 const ENTRY_X = 800;
 const ENTRY_Y = 1080;
@@ -111,6 +127,12 @@ type BosqueSceneData = {
   returnX?: number;
   returnY?: number;
 };
+
+function materialsFromMiningQuality(quality: string): number {
+  const q = quality as QualityTier;
+  const n = MINING_MATERIALS_BY_QUALITY[q];
+  return typeof n === 'number' ? n : MINING_MATERIALS_BY_QUALITY.normal;
+}
 
 // ─── Scene ────────────────────────────────────────────────────────────────────
 export class BosqueMaterialesScene extends Phaser.Scene {
@@ -789,7 +811,9 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     // Communal garden nodes — instant harvest, no minigame, gardening XP only
     if (nearest.communal) {
       nearest.respawnAt = this.time.now + COMMUNAL_GARDEN_RESPAWN_MS;
-      this.showPrompt('+1 MATERIAL [JARDÍN] +10 XP JARDINERÍA');
+      this.collectedTotal += MATERIALS_COMMUNAL_PER_TEND;
+      this.hudText?.setText(`MATS: ${this.collectedTotal}`);
+      this.showPrompt(`+${MATERIALS_COMMUNAL_PER_TEND} MATERIALES [JARDÍN] +10 XP JARDINERÍA`);
       void (async () => {
         const result = await getSkillSystem().addXp('gardening', 10, 'communal_tend');
         if (!this.scene?.isActive('BosqueMaterialesScene')) return;
@@ -804,8 +828,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     }
 
     nearest.respawnAt = this.time.now + MATERIAL_RESPAWN_MS;
-    this.collectedTotal++;
-    this.hudText?.setText(`MATS: ${this.collectedTotal}`);
+    // Los materiales se acreditan tras el roll de calidad (ver async).
 
     this.minigameActive = true;
     eventBus.emit(EVENTS.ACTIVITY_STARTED, { activity: 'mining' });
@@ -853,8 +876,11 @@ export class BosqueMaterialesScene extends Phaser.Scene {
         const eventMult = getEventSystem().getXpMultiplier('mining');
         const xpTotal = Math.round((10 + qr.xp_bonus + minigameBonus) * eventMult);
 
+        const matsThisNode = materialsFromMiningQuality(qr.quality);
+        this.collectedTotal += matsThisNode;
+
         // Quality + XP feedback together so player sees the difference
-        this.showPrompt(`+1 MATERIAL [${qr.label}]  +${xpTotal} XP`);
+        this.showPrompt(`+${matsThisNode} MATERIALES [${qr.label}]  +${xpTotal} XP`);
         if (this.hudText) {
           this.hudText.setText(`MATS: ${this.collectedTotal}`).setColor(qr.color);
           this.time.delayedCall(1600, () => this.hudText?.setColor('#B9FF9E'));
@@ -968,6 +994,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   // ─── Exit ─────────────────────────────────────────────────────────────────
 
   private checkExitTrigger() {
+    if (this.minigameActive) return;
     if (this.py > H - 50) this.leaveToVecindad();
   }
 
