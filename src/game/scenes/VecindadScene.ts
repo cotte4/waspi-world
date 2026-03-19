@@ -1308,6 +1308,12 @@ export class VecindadScene extends Phaser.Scene {
 
       if (!this.scene?.isActive('VecindadScene')) return;
 
+      // ── Fish Compendium: record catch server-side ─────────────────────────
+      // Pick a species weighted by zone + rarity, POST to /api/fishing/collection.
+      // XP bonus for a new species is returned by the server and shown as UI_NOTICE.
+      const caughtSpecies = pickFishForZone(deep ? 'deep' : 'pond');
+      void this._recordFishCatch(caughtSpecies.id, qr.quality, undefined);
+
       const eventMult = getEventSystem().getXpMultiplier('fishing');
       // gourmet_del_mar sinergia: +25% XP al pescar
       const gourmetMult = sys.hasSynergy('gourmet_del_mar') ? 1.25 : 1;
@@ -1328,9 +1334,50 @@ export class VecindadScene extends Phaser.Scene {
         eventBus.emit(EVENTS.UI_NOTICE, { message: '✨ PESCA LEGENDARIA!', color: '#4A9ECC' });
       }
     } finally {
-      // Always release the lock so future fishing interactions aren't blocked
+      // Always release the locks so future fishing interactions aren't blocked
       this.fishingActive = false;
+      this.playerBusy = false;
       this.activeFishingMinigame = null;
+    }
+  }
+
+  /**
+   * POST a fish catch to /api/fishing/collection.
+   * If it's a new species, the server returns xp_bonus > 0 — show it as UI_NOTICE.
+   * Guard: skip silently if the scene is no longer active when the response arrives.
+   */
+  private async _recordFishCatch(
+    fishId: string,
+    quality: string | undefined,
+    size: number | undefined,
+  ): Promise<void> {
+    try {
+      const authH = await getAuthHeaders();
+      const res = await fetch('/api/fishing/collection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authH },
+        body: JSON.stringify({ fish_id: fishId, quality: quality ?? null, size: size ?? null }),
+      });
+
+      if (!res.ok) return;
+
+      const data = (await res.json()) as {
+        is_new: boolean;
+        xp_bonus: number;
+        fish_name: string;
+      };
+
+      // Guard: scene may have been destroyed while the fetch was in-flight
+      if (!this.scene?.isActive('VecindadScene')) return;
+
+      if (data.is_new && data.xp_bonus > 0) {
+        eventBus.emit(EVENTS.UI_NOTICE, {
+          message: `🐟 NUEVO: ${data.fish_name}! +${data.xp_bonus} XP`,
+          color: '#4A9ECC',
+        });
+      }
+    } catch (err) {
+      console.warn('[VecindadScene] _recordFishCatch failed:', err);
     }
   }
 
@@ -1829,6 +1876,7 @@ export class VecindadScene extends Phaser.Scene {
       this.activeFishingMinigame = null;
     }
     this.fishingActive = false;
+    this.playerBusy = false;
 
     // Puesto cleanup — timers are Phaser-managed but remove them explicitly
     if (this.puestoOpen) {
@@ -1865,6 +1913,8 @@ export class VecindadScene extends Phaser.Scene {
     this.contractPanel = undefined;
     this.questPanel?.destroy();
     this.questPanel = undefined;
+    this.fishPanel?.destroy();
+    this.fishPanel = undefined;
     this.specModal?.destroy();
     this.specModal = undefined;
 
