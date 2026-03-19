@@ -762,6 +762,18 @@ export class WorldScene extends Phaser.Scene {
     this.cameras.main.resetFX();
     this.cameras.main.setAlpha(1);
     this.cameras.main.fadeIn(220, 0, 0, 0);
+    const mainCam = this.cameras.main;
+    const ensureWorldCameraVisible = () => {
+      if (!this.scene.isActive('WorldScene')) return;
+      try {
+        mainCam.resetFX();
+        mainCam.setAlpha(1);
+      } catch {
+        /* escena destruida */
+      }
+    };
+    mainCam.once(Phaser.Cameras.Scene2D.Events.FADE_IN_COMPLETE, ensureWorldCameraVisible);
+    this.time.delayedCall(450, ensureWorldCameraVisible);
 
     // Chat system
     this.chatSystem = new ChatSystem(this);

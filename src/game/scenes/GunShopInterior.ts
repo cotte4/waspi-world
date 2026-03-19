@@ -629,11 +629,12 @@ export class GunShopInterior extends Phaser.Scene {
   private exitToWorld() {
     if (this.inTransition) return;
     this.closeDealerPanel();
-    this.inTransition = true;
-    transitionToScene(this, 'WorldScene', {
+    eventBus.emit(EVENTS.SHOP_CLOSE);
+    const ok = transitionToScene(this, 'WorldScene', {
       returnX: GunShopInterior.RETURN_X,
       returnY: GunShopInterior.RETURN_Y,
     });
+    if (ok) this.inTransition = true;
   }
 
   private handleSceneShutdown() {
