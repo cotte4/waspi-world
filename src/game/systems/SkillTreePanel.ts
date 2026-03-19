@@ -64,6 +64,11 @@ export class SkillTreePanel {
   private xpBarFills: Phaser.GameObjects.Rectangle[] = [];
   private xpBarBacks: Phaser.GameObjects.Rectangle[] = [];
 
+  // Milestone progress row (per card)
+  private milestoneLabels: Phaser.GameObjects.Text[] = [];
+  private milestoneBarBacks: Phaser.GameObjects.Rectangle[] = [];
+  private milestoneBarFills: Phaser.GameObjects.Rectangle[] = [];
+
   // Specialization modal state
   private specModal?: Phaser.GameObjects.Container;
   private specModalVisible = false;
@@ -122,13 +127,17 @@ export class SkillTreePanel {
     const sys = getSkillSystem();
 
     ALL_SKILL_IDS.forEach((skillId, index) => {
-      const level  = sys.getLevel(skillId);
-      const xp     = sys.getXp(skillId);
-      const def    = getSkillDef(skillId);
-      const isMax  = level >= 5;
-      const texts  = this.cardTexts[index];
-      const barFill = this.xpBarFills[index];
-      const barBack = this.xpBarBacks[index];
+      const level       = sys.getLevel(skillId);
+      const xp          = sys.getXp(skillId);
+      const actionCount = sys.getActionCount(skillId);
+      const def         = getSkillDef(skillId);
+      const isMax       = level >= 5;
+      const texts       = this.cardTexts[index];
+      const barFill     = this.xpBarFills[index];
+      const barBack     = this.xpBarBacks[index];
+      const msLabel     = this.milestoneLabels[index];
+      const msBarFill   = this.milestoneBarFills[index];
+      const msBarBack   = this.milestoneBarBacks[index];
 
       if (!texts || !barFill || !barBack) return;
 
@@ -179,6 +188,32 @@ export class SkillTreePanel {
         const ratio       = Math.min(1, Math.max(0, xpIntoLevel / xpNeeded));
         const fillW       = Math.max(2, Math.floor(ratio * barW));
         barFill.setDisplaySize(fillW, barFill.height).setFillStyle(SKILL_COLORS[skillId], 1);
+      }
+
+      // Milestone progress bar
+      if (msLabel && msBarFill && msBarBack) {
+        const nextMs = def.milestones.find((m) => actionCount < m.count);
+        const msBarW = CARD_W - 44;
+        if (nextMs) {
+          const ratio = Math.min(1, actionCount / nextMs.count);
+          const fillW = Math.max(2, Math.floor(ratio * msBarW));
+          const pct = Math.floor(ratio * 100);
+          msLabel.setText(`${actionCount}/${nextMs.count} ${nextMs.name.toUpperCase()}`).setColor('#555577');
+          msBarFill.setDisplaySize(fillW, 3).setFillStyle(0x4a4a8a, 1);
+          msBarBack.setVisible(true);
+          msBarFill.setVisible(true);
+          // Flash gold when near (≥80%)
+          if (pct >= 80) {
+            msLabel.setColor('#c8a45a');
+            msBarFill.setFillStyle(0xc8a45a, 1);
+          }
+        } else {
+          // All milestones done
+          msLabel.setText('TODOS LOGROS').setColor('#F5C842');
+          msBarFill.setDisplaySize(msBarW, 3).setFillStyle(0xf5c842, 1);
+          msBarBack.setVisible(true);
+          msBarFill.setVisible(true);
+        }
       }
 
       // Redraw card border with correct color (highlight if non-zero level)
@@ -378,10 +413,29 @@ export class SkillTreePanel {
       },
     ).setOrigin(0.5, 0.5).setScrollFactor(0);
 
+    // ── Milestone progress row ──
+    const msLabelY = cy - CARD_H / 2 + 136;
+    const msLabel = this.scene.add.text(cx, msLabelY, '', {
+      fontSize: '5px',
+      fontFamily: FONT,
+      color: '#666677',
+    }).setOrigin(0.5, 0.5).setScrollFactor(0);
+
+    const msBarY = cy - CARD_H / 2 + 150;
+    const msBarW = CARD_W - 44;
+    const msBarBack = this.scene.add.rectangle(cx, msBarY, msBarW, 3, 0x1a1a28, 1)
+      .setOrigin(0.5, 0.5).setScrollFactor(0);
+    const msBarFill = this.scene.add.rectangle(cx - msBarW / 2, msBarY, 2, 3, 0x555566, 1)
+      .setOrigin(0, 0.5).setScrollFactor(0);
+
+    this.milestoneLabels[index] = msLabel;
+    this.milestoneBarBacks[index] = msBarBack;
+    this.milestoneBarFills[index] = msBarFill;
+
     // ── Next unlock preview ──
     const nextText = this.scene.add.text(
       cx,
-      cy - CARD_H / 2 + 158,
+      cy - CARD_H / 2 + 168,
       '',
       {
         fontSize: '5px',
@@ -405,6 +459,9 @@ export class SkillTreePanel {
       barBack,
       barFill,
       xpText,
+      msLabel,
+      msBarBack,
+      msBarFill,
       nextText,
     ]);
 

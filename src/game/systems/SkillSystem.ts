@@ -29,6 +29,7 @@ export type SkillState = {
   skill_id: SkillId;
   xp: number;
   level: number; // 0-5
+  action_count: number; // total actions performed for this skill
 };
 
 export type SkillBuff = {
@@ -120,6 +121,7 @@ type ApiSkillState = {
   skill_id: SkillId;
   xp: number;
   level: number;
+  action_count?: number;
 };
 
 type AddXpResponse = {
@@ -135,7 +137,7 @@ type AddXpResponse = {
 // ---------------------------------------------------------------------------
 
 function defaultState(skill_id: SkillId): SkillState {
-  return { skill_id, xp: 0, level: 0 };
+  return { skill_id, xp: 0, level: 0, action_count: 0 };
 }
 
 function clampLevel(level: unknown): number {
@@ -211,6 +213,14 @@ export class SkillSystem {
   }
 
   // -------------------------------------------------------------------------
+  // getActionCount — total actions performed for a skill (from server)
+  // -------------------------------------------------------------------------
+
+  getActionCount(skillId: SkillId): number {
+    return this.getOrDefault(skillId).action_count;
+  }
+
+  // -------------------------------------------------------------------------
   // addXp — fires POST /api/skills, updates internal state from response
   // -------------------------------------------------------------------------
 
@@ -246,6 +256,7 @@ export class SkillSystem {
         skill_id: skillId,
         xp: clampXp(data.xp),
         level: clampLevel(data.new_level),
+        action_count: (this.getOrDefault(skillId).action_count ?? 0) + 1,
       };
       this.skills.set(skillId, updatedState);
 
@@ -494,6 +505,7 @@ export class SkillSystem {
         skill_id: raw.skill_id,
         xp: clampXp(raw.xp),
         level: clampLevel(raw.level),
+        action_count: typeof raw.action_count === 'number' ? Math.max(0, raw.action_count) : 0,
       });
     }
     this.loaded = true;

@@ -387,6 +387,11 @@ export class ZombiesScene extends Phaser.Scene {
   private reticle?: Phaser.GameObjects.Graphics;
   private depthsRing?: Phaser.GameObjects.Ellipse;
   private depthsLabel?: Phaser.GameObjects.Text;
+  // Gym Lv4 — Furia ability
+  private furiaActive = false;
+  private furiaUntil = 0;
+  private furiaCooldownUntil = 0;
+  private furiaHudText?: Phaser.GameObjects.Text;
   private keyW!: Phaser.Input.Keyboard.Key;
   private keyA!: Phaser.Input.Keyboard.Key;
   private keyS!: Phaser.Input.Keyboard.Key;
@@ -397,6 +402,7 @@ export class ZombiesScene extends Phaser.Scene {
   private keyL!: Phaser.Input.Keyboard.Key;
   private keyE!: Phaser.Input.Keyboard.Key;
   private keyQ!: Phaser.Input.Keyboard.Key;
+  private keyF!: Phaser.Input.Keyboard.Key;
   private keyR!: Phaser.Input.Keyboard.Key;
   private keyOne!: Phaser.Input.Keyboard.Key;
   private keyTwo!: Phaser.Input.Keyboard.Key;
@@ -1221,6 +1227,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.keyL = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.L);
     this.keyE = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
     this.keyQ = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
+    this.keyF = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
     this.keyR = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.keyOne = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
     this.keyTwo = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
@@ -1257,6 +1264,14 @@ export class ZombiesScene extends Phaser.Scene {
       color: '#FF6A6A',
     }).setScrollFactor(0).setDepth(1000);
 
+    this.furiaHudText = this.add.text(18, 90, '', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FF4444',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setScrollFactor(0).setDepth(1000);
+
     this.ammoText = this.add.text(ZOMBIES_VIEWPORT.WIDTH - 18, ZOMBIES_VIEWPORT.HEIGHT - 48, '', {
       fontSize: '10px',
       fontFamily: '"Press Start 2P", monospace',
@@ -1277,7 +1292,7 @@ export class ZombiesScene extends Phaser.Scene {
       color: '#F5C842',
     }).setScrollFactor(0).setDepth(1000);
 
-    this.controlsText = this.add.text(ZOMBIES_VIEWPORT.WIDTH / 2, ZOMBIES_VIEWPORT.HEIGHT - 16, 'WASD MOVER  |  CLICK DISPARA  |  R RECARGA  |  Q CAMBIA  |  E INTERACTUA', {
+    this.controlsText = this.add.text(ZOMBIES_VIEWPORT.WIDTH / 2, ZOMBIES_VIEWPORT.HEIGHT - 16, 'WASD MOVER  |  CLICK DISPARA  |  R RECARGA  |  Q CAMBIA  |  F FURIA  |  E INTERACTUA', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#8594A6',
@@ -1544,6 +1559,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.playerName.setPosition(this.px, this.py - 44);
     this.chatSystem?.updatePosition('__player__', this.px, this.py);
     this.chatSystem?.update();
+    this.updateFuria();
     this.renderHud();
   }
 
@@ -1596,6 +1612,9 @@ export class ZombiesScene extends Phaser.Scene {
 
     if (Phaser.Input.Keyboard.JustDown(this.keyQ)) {
       this.cycleWeapon();
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.keyF)) {
+      this.tryActivateFuria();
     }
     if (Phaser.Input.Keyboard.JustDown(this.keyR)) {
       this.tryReload();
@@ -1682,6 +1701,53 @@ export class ZombiesScene extends Phaser.Scene {
     const next = available[(index + 1) % available.length];
     this.currentWeapon = next;
     this.showNotice(`ARMADO ${this.getWeaponStats(next).displayLabel}`, '#7CC9FF');
+  }
+
+  // ── Gym Lv4 — Furia ability ────────────────────────────────────────────────
+  private static readonly FURIA_DURATION_MS  = 10_000;
+  private static readonly FURIA_COOLDOWN_MS  = 180_000; // 3 minutes
+
+  private tryActivateFuria() {
+    if (!getSkillSystem().hasUnlocked('gym', 4)) {
+      this.showNotice('GYM LV4 REQUERIDO', '#888899');
+      return;
+    }
+    const now = this.time.now;
+    if (this.furiaActive && now < this.furiaUntil) return; // already active
+    if (now < this.furiaCooldownUntil) {
+      const secLeft = Math.ceil((this.furiaCooldownUntil - now) / 1000);
+      this.showNotice(`FURIA COOLDOWN ${secLeft}s`, '#888899');
+      return;
+    }
+    this.furiaActive = true;
+    this.furiaUntil  = now + ZombiesScene.FURIA_DURATION_MS;
+    this.furiaCooldownUntil = now + ZombiesScene.FURIA_COOLDOWN_MS;
+    this.cameras.main.flash(200, 255, 60, 60, false);
+    this.showNotice('FURIA ACTIVA — +30% DAÑO', '#FF4444');
+  }
+
+  private updateFuria() {
+    const now = this.time.now;
+    if (!this.furiaHudText) return;
+    if (this.furiaActive && now < this.furiaUntil) {
+      const secLeft = Math.ceil((this.furiaUntil - now) / 1000);
+      this.furiaHudText.setText(`🔥 FURIA ${secLeft}s`).setColor('#FF4444');
+    } else {
+      if (this.furiaActive) {
+        this.furiaActive = false;
+        this.showNotice('FURIA TERMINADA', '#888899');
+      }
+      if (!getSkillSystem().hasUnlocked('gym', 4)) {
+        this.furiaHudText.setText('');
+        return;
+      }
+      if (now < this.furiaCooldownUntil) {
+        const secLeft = Math.ceil((this.furiaCooldownUntil - now) / 1000);
+        this.furiaHudText.setText(`[F] FURIA ${secLeft}s CD`).setColor('#555566');
+      } else {
+        this.furiaHudText.setText('[F] FURIA').setColor('#FF6666');
+      }
+    }
   }
 
   private fireShotBurst(
@@ -2467,7 +2533,8 @@ export class ZombiesScene extends Phaser.Scene {
 
   private damageZombie(zombie: ZombieState, damage: number) {
     if (!zombie.alive) return;
-    const appliedDamage = this.instaKillUntil > this.time.now ? zombie.hp : damage;
+    const furiaMult = this.furiaActive && this.time.now < this.furiaUntil ? 1.3 : 1.0;
+    const appliedDamage = this.instaKillUntil > this.time.now ? zombie.hp : Math.round(damage * furiaMult);
     const pointMultiplier = this.getPointsMultiplier();
     const hitReward = zombie.hitReward * pointMultiplier;
     zombie.hp -= appliedDamage;

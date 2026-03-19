@@ -40,6 +40,7 @@ interface SkillPublic {
   skill_id: SkillId;
   xp: number;
   level: number;
+  action_count: number;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -57,7 +58,7 @@ function computeLevel(xp: number): number {
 
 /** Returns the default (zeroed) state for every skill when no DB rows exist. */
 function defaultSkills(): SkillPublic[] {
-  return VALID_SKILL_IDS.map((skill_id) => ({ skill_id, xp: 0, level: 0 }));
+  return VALID_SKILL_IDS.map((skill_id) => ({ skill_id, xp: 0, level: 0, action_count: 0 }));
 }
 
 function isValidSkillId(value: unknown): value is SkillId {
@@ -83,7 +84,7 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await admin
     .from('player_skills')
-    .select('skill_id, xp, level')
+    .select('skill_id, xp, level, action_count')
     .eq('user_id', user.id)
     .returns<SkillPublic[]>();
 
@@ -100,7 +101,7 @@ export async function GET(request: NextRequest) {
   const existingIds = new Set(data.map((r) => r.skill_id));
   const missing: SkillPublic[] = VALID_SKILL_IDS
     .filter((id) => !existingIds.has(id))
-    .map((skill_id) => ({ skill_id, xp: 0, level: 0 }));
+    .map((skill_id) => ({ skill_id, xp: 0, level: 0, action_count: 0 }));
 
   return NextResponse.json({ skills: [...data, ...missing] });
 }
