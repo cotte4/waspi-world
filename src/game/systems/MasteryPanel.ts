@@ -96,7 +96,8 @@ export class MasteryPanel {
   private selectedNodeId: string | null = null;
 
   // Keyboard cursors
-  private keyM?: Phaser.Input.Keyboard.Key;
+  // NOTE: M key is now used by WorldMapPanel — mastery panel uses N key instead.
+  private keyN?: Phaser.Input.Keyboard.Key;
   private keyLeft?: Phaser.Input.Keyboard.Key;
   private keyRight?: Phaser.Input.Keyboard.Key;
 
@@ -114,11 +115,11 @@ export class MasteryPanel {
 
     // Register keyboard shortcuts
     if (scene.input.keyboard) {
-      this.keyM     = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
+      this.keyN     = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.N);
       this.keyLeft  = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT);
       this.keyRight = scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
 
-      this.keyM.on('down', () => this.toggle());
+      this.keyN.on('down', () => this.toggle());
       this.keyLeft.on('down', () => {
         if (this.visible) {
           this.currentSkillIndex = (this.currentSkillIndex - 1 + ALL_SKILL_IDS.length) % ALL_SKILL_IDS.length;
@@ -166,7 +167,7 @@ export class MasteryPanel {
   destroy(): void {
     this.treeContainer?.destroy();
     this.container.destroy();
-    this.keyM?.destroy();
+    this.keyN?.destroy();
     this.keyLeft?.destroy();
     this.keyRight?.destroy();
   }

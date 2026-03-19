@@ -36,6 +36,8 @@ import { SpecializationModal } from '../systems/SpecializationModal';
 import type { SkillId } from '../systems/SkillSystem';
 import { getWeedDeliverySystem } from '../systems/WeedDeliverySystem';
 import type { WeedNpcId, WeedOrder } from '../systems/WeedDeliverySystem';
+import { WorldMapPanel } from '../systems/WorldMapPanel';
+import { EmotePanel, showEmoteBubble, type EmoteId } from '../systems/EmoteSystem';
 
 type ParcelVisual = {
   title: Phaser.GameObjects.Text;
@@ -154,11 +156,15 @@ export class VecindadScene extends Phaser.Scene {
   private skillShopPanel?: SkillShopPanel;
   private contractPanel?: ContractPanel;
   private questPanel?: QuestPanel;
+  private worldMapPanel?: WorldMapPanel;
   private keyT?: Phaser.Input.Keyboard.Key;
   private keyY?: Phaser.Input.Keyboard.Key;
   private keyC?: Phaser.Input.Keyboard.Key;
   private keyQ?: Phaser.Input.Keyboard.Key;
   private keyF?: Phaser.Input.Keyboard.Key;
+  private keyG?: Phaser.Input.Keyboard.Key;
+  private keyM?: Phaser.Input.Keyboard.Key;
+  private emotePanel?: EmotePanel;
   private fishPanel?: FishCompendiumPanel;
   /** True while FishingMinigame is active — used by enemy systems to suppress attacks. */
   playerBusy = false;
@@ -237,11 +243,21 @@ export class VecindadScene extends Phaser.Scene {
     this.questPanel     = new QuestPanel(this);
     this.fishPanel      = new FishCompendiumPanel(this);
     this.specModal      = new SpecializationModal(this);
+    this.worldMapPanel  = new WorldMapPanel(this);
     this.keyT = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.T);
     this.keyY = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Y);
     this.keyC = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.C);
     this.keyQ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
     this.keyF = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.F);
+    this.keyG = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.G);
+    this.keyM = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.M);
+
+    // Emote panel
+    this.emotePanel = new EmotePanel(this, (id: EmoteId | null) => {
+      if (!id) return;
+      const container = this.player.getContainer();
+      showEmoteBubble(this, container.x, container.y, id);
+    });
     this.bridgeCleanupFns.push(bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', {
         returnX: SAFE_PLAZA_RETURN.X,
@@ -306,6 +322,9 @@ export class VecindadScene extends Phaser.Scene {
     if (this.keyQ && Phaser.Input.Keyboard.JustDown(this.keyQ)) {
       this.questPanel?.toggle();
     }
+    if (this.keyM && Phaser.Input.Keyboard.JustDown(this.keyM)) {
+      this.worldMapPanel?.toggle();
+    }
     if (this.keyF && Phaser.Input.Keyboard.JustDown(this.keyF)) {
       // Only open Acuario when near the fishing dock/pond
       const fs = VecindadScene.FISHING_SPOT;
@@ -316,6 +335,11 @@ export class VecindadScene extends Phaser.Scene {
       if (nearPond || this.fishPanel?.isVisible()) {
         this.fishPanel?.toggle();
       }
+    }
+    // G → emote picker
+    if (this.keyG && Phaser.Input.Keyboard.JustDown(this.keyG)) {
+      const container = this.player.getContainer();
+      this.emotePanel?.toggle(container.x, container.y);
     }
   }
 
@@ -1911,6 +1935,8 @@ export class VecindadScene extends Phaser.Scene {
       this.bridgeCleanupFns = [];
     } catch (e) { console.error('[VecindadScene] bridgeCleanupFns failed', e); }
 
+    this.emotePanel?.destroy();
+    this.emotePanel = undefined;
     this.skillTreePanel?.destroy();
     this.skillTreePanel = undefined;
     this.contractPanel?.destroy();
@@ -1921,6 +1947,8 @@ export class VecindadScene extends Phaser.Scene {
     this.fishPanel = undefined;
     this.specModal?.destroy();
     this.specModal = undefined;
+    this.worldMapPanel?.destroy();
+    this.worldMapPanel = undefined;
 
     // Weed Delivery NPC cleanup
     this.closeWeedDeliveryDialog();

@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { AvatarRenderer, AvatarConfig, type AvatarAction, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
+import { AvatarRenderer, AvatarConfig, type AvatarAction, type HairStyle, loadStoredAvatarConfig, saveStoredAvatarConfig } from '../systems/AvatarRenderer';
+import { getAuthHeaders } from '../systems/authHelper';
 import { ChatSystem } from '../systems/ChatSystem';
 import { WORLD, PLAYER, COLORS, ZONES, BUILDINGS, CHAT, SAFE_PLAZA_RETURN } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
@@ -39,7 +40,9 @@ import { getSkillSystem } from '../systems/SkillSystem';
 import { ContractPanel } from '../systems/ContractPanel';
 import { GuildPanel } from '../systems/GuildPanel';
 import { MasteryPanel } from '../systems/MasteryPanel';
+import { WorldMapPanel } from '../systems/WorldMapPanel';
 import { EventBanner } from '../systems/EventBanner';
+import { EmotePanel, showEmoteBubble, type EmoteId } from '../systems/EmoteSystem';
 
 interface RemotePlayer {
   avatar: AvatarRenderer;
@@ -457,12 +460,16 @@ export class WorldScene extends Phaser.Scene {
   private contractPanel?: ContractPanel;
   private guildPanel?: GuildPanel;
   private masteryPanel?: MasteryPanel;
+  private worldMapPanel?: WorldMapPanel;
   private eventBanner?: EventBanner;
   private keyT?: Phaser.Input.Keyboard.Key;
   private keyY?: Phaser.Input.Keyboard.Key;
   private keyC?: Phaser.Input.Keyboard.Key;
   private keyG?: Phaser.Input.Keyboard.Key;
+  private keyH?: Phaser.Input.Keyboard.Key; // Guild panel (G freed for emotes)
   private keyM?: Phaser.Input.Keyboard.Key;
+  private keyN?: Phaser.Input.Keyboard.Key;
+  private emotePanel?: EmotePanel;
   private bullets!: Phaser.Physics.Arcade.Group;
   private enemyBullets!: Phaser.Physics.Arcade.Group;
   private playerHitbox!: HitboxArc;
@@ -542,6 +549,10 @@ export class WorldScene extends Phaser.Scene {
   // COTTENKS NPC
   private cottenksDialog: BranchedDialog | null = null;
   private cottenksQuestMarker?: Phaser.GameObjects.Text;
+
+  // BARBER NPC
+  private barberPanelOpen = false;
+  private barberPanel: Phaser.GameObjects.Container | null = null;
 
   // Sprint
   private shiftKey?: Phaser.Input.Keyboard.Key;
@@ -774,6 +785,7 @@ export class WorldScene extends Phaser.Scene {
     this.runBootStep('ambient npcs', () => this.spawnAmbientNPCs());
     // Dealer now lives inside GunShopInterior.
     this.runBootStep('cottenks npc', () => this.spawnCottenksNPC());
+    this.runBootStep('barber npc', () => this.spawnBarberNPC());
 
     // HP/Combat/Utilities
     this.runBootStep('hp hud', () => this.setupHpHud());
@@ -815,6 +827,7 @@ export class WorldScene extends Phaser.Scene {
     this.contractPanel  = new ContractPanel(this);
     this.guildPanel     = new GuildPanel(this);
     this.masteryPanel   = new MasteryPanel(this);
+    this.worldMapPanel  = new WorldMapPanel(this);
     this.eventBanner    = new EventBanner(this);
     this.eventBanner.refresh();
     this.eventBanner.startAutoRefresh();
@@ -822,7 +835,16 @@ export class WorldScene extends Phaser.Scene {
     this.keyY = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Y);
     this.keyC = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.C);
     this.keyG = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.G);
+    this.keyH = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.H);
     this.keyM = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.M);
+    this.keyN = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.N);
+
+    // Emote panel
+    this.emotePanel = new EmotePanel(this, (id: EmoteId | null) => {
+      if (!id) return;
+      showEmoteBubble(this, this.px, this.py, id);
+      this.broadcastEmote(id);
+    });
 
     // Scene music
     this.sceneMusic = startSceneMusic(this, 'world_ambient', 0.35);
@@ -4631,6 +4653,252 @@ export class WorldScene extends Phaser.Scene {
     this.inputBlocked = false;
   }
 
+  // ─── BARBER NPC ──────────────────────────────────────────────────────────────
+
+  private spawnBarberNPC() {
+    const x = 820;
+    const y = 558;
+
+    const g = this.add.graphics().setDepth(Math.floor(y / 10));
+    // Shadow
+    g.fillStyle(0x000000, 0.28);
+    g.fillEllipse(x, y + 28, 28, 10);
+    // Body
+    g.fillStyle(0x1a0a22, 1);
+    g.fillRoundedRect(x - 10, y - 14, 20, 30, 5);
+    // Apron
+    g.fillStyle(0xffffff, 0.82);
+    g.fillRoundedRect(x - 7, y - 8, 14, 22, 3);
+    // Head
+    g.fillStyle(0xD4956A, 1);
+    g.fillCircle(x, y - 24, 13);
+    // Hair
+    g.fillStyle(0x222222, 1);
+    g.fillRoundedRect(x - 10, y - 38, 20, 10, 4);
+    // Scissors
+    g.lineStyle(2, 0xCCCCCC, 1);
+    g.lineBetween(x + 14, y - 22, x + 22, y - 10);
+    g.lineBetween(x + 22, y - 22, x + 14, y - 10);
+
+    this.add.text(x, y - 56, 'BARBERIA', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#FF88CC',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(9000);
+
+    this.add.text(x, y - 44, 'ESTILOS x TENKS', {
+      fontSize: '5px',
+      fontFamily: '"Silkscreen", monospace',
+      color: '#AAAAAA',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5, 1).setDepth(9000);
+  }
+
+  private openBarberPanel() {
+    if (this.barberPanelOpen) return;
+    this.barberPanelOpen = true;
+    this.inputBlocked = true;
+
+    const STYLES: Array<{ id: HairStyle; label: string; cost: number }> = [
+      { id: 'SPI', label: 'CORTE CLASICO', cost: 50 },
+      { id: 'FLA', label: 'FADE',          cost: 80 },
+      { id: 'MOH', label: 'MOHICANO',      cost: 100 },
+      { id: 'MCH', label: 'MECHA',         cost: 150 },
+      { id: 'X',   label: 'RAPADO',        cost: 60 },
+    ];
+
+    const cam = this.cameras.main;
+    const cx = cam.width / 2;
+    const cy = cam.height / 2;
+    const pw = 420;
+    const ph = 340;
+    const px = cx - pw / 2;
+    const py = cy - ph / 2;
+
+    const container = this.add.container(0, 0).setScrollFactor(0).setDepth(11000);
+    this.barberPanel = container;
+
+    const overlay = this.add.rectangle(cx, cy, cam.width, cam.height, 0x000000, 0.68)
+      .setScrollFactor(0)
+      .setInteractive();
+    container.add(overlay);
+
+    const bg = this.add.graphics().setScrollFactor(0);
+    bg.fillStyle(0x0d0714, 0.98);
+    bg.fillRoundedRect(px, py, pw, ph, 12);
+    bg.lineStyle(2, 0xFF88CC, 1);
+    bg.strokeRoundedRect(px, py, pw, ph, 12);
+    container.add(bg);
+
+    container.add(
+      this.add.text(cx, py + 22, 'BARBERIA', {
+        fontSize: '11px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#FF88CC',
+      }).setOrigin(0.5, 0.5).setScrollFactor(0),
+    );
+
+    const balText = this.add.text(cx, py + 44, `TENKS: ${getTenksBalance().toLocaleString('es-AR')}`, {
+      fontSize: '7px',
+      fontFamily: '"Silkscreen", monospace',
+      color: '#F5C842',
+    }).setOrigin(0.5, 0.5).setScrollFactor(0);
+    container.add(balText);
+
+    const div = this.add.graphics().setScrollFactor(0);
+    div.lineStyle(1, 0xFF88CC, 0.35);
+    div.lineBetween(px + 20, py + 58, px + pw - 20, py + 58);
+    container.add(div);
+
+    const currentStyle = loadStoredAvatarConfig().hairStyle;
+    const rowStartY = py + 72;
+    const rowH = 42;
+
+    STYLES.forEach((style, i) => {
+      const rowY = rowStartY + i * rowH;
+      const isSelected = currentStyle === style.id;
+
+      const rowBg = this.add.graphics().setScrollFactor(0);
+      if (isSelected) {
+        rowBg.fillStyle(0xFF88CC, 0.15);
+        rowBg.fillRoundedRect(px + 16, rowY, pw - 32, rowH - 6, 6);
+        rowBg.lineStyle(1, 0xFF88CC, 0.6);
+        rowBg.strokeRoundedRect(px + 16, rowY, pw - 32, rowH - 6, 6);
+      }
+      container.add(rowBg);
+
+      container.add(
+        this.add.text(px + 36, rowY + (rowH - 6) / 2, style.label, {
+          fontSize: '8px',
+          fontFamily: '"Press Start 2P", monospace',
+          color: isSelected ? '#FF88CC' : '#FFFFFF',
+        }).setOrigin(0, 0.5).setScrollFactor(0),
+      );
+
+      container.add(
+        this.add.text(px + pw - 36, rowY + (rowH - 6) / 2, isSelected ? 'ACTUAL' : `${style.cost} T`, {
+          fontSize: '7px',
+          fontFamily: '"Silkscreen", monospace',
+          color: isSelected ? '#FF88CC' : '#F5C842',
+        }).setOrigin(1, 0.5).setScrollFactor(0),
+      );
+
+      if (!isSelected) {
+        const hitZone = this.add.rectangle(cx, rowY + (rowH - 6) / 2, pw - 32, rowH - 6, 0xffffff, 0)
+          .setScrollFactor(0)
+          .setInteractive({ cursor: 'pointer' });
+        container.add(hitZone);
+
+        hitZone.on('pointerover', () => {
+          if (!rowBg.active) return;
+          rowBg.clear();
+          rowBg.fillStyle(0xFF88CC, 0.08);
+          rowBg.fillRoundedRect(px + 16, rowY, pw - 32, rowH - 6, 6);
+        });
+        hitZone.on('pointerout', () => {
+          if (!rowBg.active) return;
+          rowBg.clear();
+        });
+        hitZone.on('pointerdown', () => {
+          void this.applyBarberStyle(style.id, style.cost, balText);
+        });
+      }
+    });
+
+    const closeBtn = this.add.text(px + pw - 20, py + 14, 'X', {
+      fontSize: '10px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#888888',
+    }).setOrigin(1, 0.5).setScrollFactor(0).setInteractive({ cursor: 'pointer' });
+    closeBtn.on('pointerdown', () => this.closeBarberPanel());
+    container.add(closeBtn);
+
+    container.add(
+      this.add.text(cx, py + ph - 16, 'SPACE / X PARA CERRAR', {
+        fontSize: '5px',
+        fontFamily: '"Silkscreen", monospace',
+        color: '#555566',
+      }).setOrigin(0.5, 1).setScrollFactor(0),
+    );
+  }
+
+  private closeBarberPanel() {
+    if (!this.barberPanelOpen) return;
+    this.barberPanel?.destroy(true);
+    this.barberPanel = null;
+    this.barberPanelOpen = false;
+    this.inputBlocked = false;
+  }
+
+  private async applyBarberStyle(
+    styleId: HairStyle,
+    cost: number,
+    balText: Phaser.GameObjects.Text,
+  ): Promise<void> {
+    const prevConfig = loadStoredAvatarConfig();
+    if (prevConfig.hairStyle === styleId) return;
+
+    if (getTenksBalance() < cost) {
+      eventBus.emit(EVENTS.UI_NOTICE, `Necesitas ${cost} TENKS para este estilo.`);
+      return;
+    }
+
+    // Close panel for snappy UX, then apply optimistically
+    this.closeBarberPanel();
+
+    const nextConfig = { ...prevConfig, hairStyle: styleId };
+    saveStoredAvatarConfig(nextConfig);
+    this.rebuildLocalAvatar(nextConfig);
+    addTenks(-cost, 'barbershop');
+
+    // Server-side charge
+    try {
+      const authH = await getAuthHeaders();
+      const res = await fetch('/api/player/barbershop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authH },
+        body: JSON.stringify({ style_id: styleId }),
+      });
+
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({ error: 'Error desconocido' })) as { error?: string };
+        const msg = errBody.error ?? `HTTP ${res.status}`;
+        console.error('[Waspi][Barbershop] Server charge failed:', msg);
+        saveStoredAvatarConfig(prevConfig);
+        if (this.scene?.isActive('WorldScene')) {
+          this.rebuildLocalAvatar(prevConfig);
+          addTenks(cost, 'barbershop_rollback');
+          eventBus.emit(EVENTS.UI_NOTICE, `Error en barberia: ${msg}`);
+        }
+        return;
+      }
+
+      const data = await res.json() as { new_balance?: number; notice?: string };
+      if (typeof data.new_balance === 'number') {
+        const diff = data.new_balance - getTenksBalance();
+        if (diff !== 0) addTenks(diff, 'barbershop_reconcile');
+      }
+      if (!this.scene?.isActive('WorldScene')) return;
+      if (data.notice) eventBus.emit(EVENTS.UI_NOTICE, data.notice);
+      // balText may be destroyed if panel was already closed — guard it
+      if (balText.active) {
+        balText.setText(`TENKS: ${getTenksBalance().toLocaleString('es-AR')}`);
+      }
+      eventBus.emit(EVENTS.UI_NOTICE, '¡Nuevo look aplicado!');
+    } catch (err) {
+      console.error('[Waspi][Barbershop] fetch error:', err);
+      saveStoredAvatarConfig(prevConfig);
+      if (this.scene?.isActive('WorldScene')) {
+        this.rebuildLocalAvatar(prevConfig);
+        addTenks(cost, 'barbershop_rollback');
+        eventBus.emit(EVENTS.UI_NOTICE, 'Error de red en barberia. Intenta de nuevo.');
+      }
+    }
+  }
+
   private async buyGunItem(itemId: string, priceTenks: number): Promise<{ success: boolean; message: string }> {
     const item = getItem(itemId);
     if (item?.comingSoon) {
@@ -4975,6 +5243,9 @@ export class WorldScene extends Phaser.Scene {
       })
       .on('broadcast', { event: 'player:hit' }, ({ payload }) => {
         this.handleHit(payload);
+      })
+      .on('broadcast', { event: 'player:emote' }, ({ payload }) => {
+        this.handleRemoteEmote(payload);
       })
       // Voice chat — Presence: auto-cleans on disconnect, late-joiner safe
       .on('presence', { event: 'sync' }, () => {
@@ -5472,6 +5743,42 @@ export class WorldScene extends Phaser.Scene {
     }));
   }
 
+  // ─── Emote Broadcast ─────────────────────────────────────────────────────
+
+  private broadcastEmote(emoteId: EmoteId): void {
+    if (!this.channel) return;
+    this.channel.send({
+      type: 'broadcast',
+      event: 'player:emote',
+      payload: {
+        player_id: this.playerId,
+        emote_id: emoteId,
+        x: Math.round(this.px),
+        y: Math.round(this.py),
+      },
+    });
+  }
+
+  private handleRemoteEmote(payload: unknown): void {
+    if (!payload || typeof payload !== 'object') return;
+    const p = payload as Record<string, unknown>;
+    const playerId = typeof p.player_id === 'string' ? p.player_id : '';
+    const emoteId  = typeof p.emote_id  === 'string' ? p.emote_id  : '';
+    const x        = typeof p.x         === 'number' ? p.x         : 0;
+    const y        = typeof p.y         === 'number' ? p.y         : 0;
+    if (!playerId || !emoteId) return;
+
+    const EMOTE_KEYS = ['wave', 'dance', 'laugh', 'thumbsup', 'heart'] as const;
+    if (!(EMOTE_KEYS as readonly string[]).includes(emoteId)) return;
+
+    // Show bubble at last known remote position (prefer that over payload x/y)
+    const rp   = this.remotePlayers.get(playerId);
+    const bubX = rp ? rp.x : x;
+    const bubY = rp ? rp.y : y;
+
+    showEmoteBubble(this, bubX, bubY, emoteId as EmoteId);
+  }
+
   private async moderateChat(message: string) {
     if (!supabase || !isConfigured) return message;
     const { data } = await supabase.auth.getSession();
@@ -5742,8 +6049,21 @@ export class WorldScene extends Phaser.Scene {
     if (this.keyT && Phaser.Input.Keyboard.JustDown(this.keyT)) { this.skillTreePanel?.toggle(); }
     if (this.keyY && Phaser.Input.Keyboard.JustDown(this.keyY)) { this.skillShopPanel?.toggle(); }
     if (this.keyC && Phaser.Input.Keyboard.JustDown(this.keyC)) { this.contractPanel?.toggle(); }
-    if (this.keyG && Phaser.Input.Keyboard.JustDown(this.keyG)) { this.guildPanel?.toggle(); }
-    if (this.keyM && Phaser.Input.Keyboard.JustDown(this.keyM)) { this.masteryPanel?.toggle(); }
+    if (this.keyH && Phaser.Input.Keyboard.JustDown(this.keyH)) { this.guildPanel?.toggle(); }
+    if (this.keyM && Phaser.Input.Keyboard.JustDown(this.keyM)) { this.worldMapPanel?.toggle(); }
+    if (this.keyN && Phaser.Input.Keyboard.JustDown(this.keyN)) { this.masteryPanel?.toggle(); }
+
+    // G → emote picker; number keys 1-5 select emote when panel is open
+    if (this.keyG && Phaser.Input.Keyboard.JustDown(this.keyG) && !this.inputBlocked) {
+      this.emotePanel?.toggle(this.px, this.py);
+    }
+    if (this.emotePanel?.isOpen) {
+      if      (Phaser.Input.Keyboard.JustDown(this.keyOne))   { this.emotePanel.handleNumberKey(1); }
+      else if (Phaser.Input.Keyboard.JustDown(this.keyTwo))   { this.emotePanel.handleNumberKey(2); }
+      else if (Phaser.Input.Keyboard.JustDown(this.keyThree)) { this.emotePanel.handleNumberKey(3); }
+      else if (Phaser.Input.Keyboard.JustDown(this.keyFour))  { this.emotePanel.handleNumberKey(4); }
+      else if (Phaser.Input.Keyboard.JustDown(this.keyFive))  { this.emotePanel.handleNumberKey(5); }
+    }
 
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyQ))     { this.switchWeapon(); }
     if (this.gunEnabled && Phaser.Input.Keyboard.JustDown(this.keyOne))   { this.switchWeapon('pistol'); }
@@ -5953,6 +6273,13 @@ export class WorldScene extends Phaser.Scene {
       return { x: COTTENKS_X, y: COTTENKS_Y - 36, w: 180, h: 70, label: 'SPACE HABLAR CON COTTENKS', color: 0xF5C842, npcKey: 'cottenks' };
     }
 
+    const BARBER_X = 820;
+    const BARBER_Y = 558;
+    const nearBarber = Math.abs(this.px - BARBER_X) < 90 && Math.abs(this.py - BARBER_Y) < 90;
+    if (nearBarber && !this.barberPanelOpen) {
+      return { x: BARBER_X, y: BARBER_Y - 36, w: 160, h: 70, label: 'SPACE BARBERÍA', color: 0xFF88CC, npcKey: 'barber' };
+    }
+
     return null;
   }
 
@@ -6009,6 +6336,16 @@ export class WorldScene extends Phaser.Scene {
     }
     if (target?.npcKey === 'cottenks') {
       this.openCottenksDialog();
+      return;
+    }
+    if (target?.npcKey === 'barber') {
+      this.openBarberPanel();
+      return;
+    }
+
+    // Close barber panel on SPACE if open
+    if (this.barberPanelOpen) {
+      this.closeBarberPanel();
       return;
     }
 
@@ -6123,12 +6460,16 @@ export class WorldScene extends Phaser.Scene {
       this.channel = null;
     }
     this.chatSystem?.destroy();
+    this.emotePanel?.destroy();
+    this.emotePanel = undefined;
     this.skillTreePanel?.destroy();
     this.skillTreePanel = undefined;
     this.contractPanel?.destroy();
     this.contractPanel = undefined;
     this.masteryPanel?.destroy();
     this.masteryPanel = undefined;
+    this.worldMapPanel?.destroy();
+    this.worldMapPanel = undefined;
     this.eventBanner?.destroy();
     this.eventBanner = undefined;
     this.bridgeCleanupFns.forEach((cleanup) => cleanup());
