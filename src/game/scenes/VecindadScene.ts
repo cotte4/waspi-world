@@ -1246,7 +1246,9 @@ export class VecindadScene extends Phaser.Scene {
       if (!this.scene?.isActive('VecindadScene')) return;
 
       const eventMult = getEventSystem().getXpMultiplier('fishing');
-      const xpTotal = Math.round((12 + qr.xp_bonus + minigameBonus + deepBonus) * eventMult);
+      // gourmet_del_mar sinergia: +25% XP al pescar
+      const gourmetMult = sys.hasSynergy('gourmet_del_mar') ? 1.25 : 1;
+      const xpTotal = Math.round((12 + qr.xp_bonus + minigameBonus + deepBonus) * eventMult * gourmetMult);
       const xpResult = await sys.addXp('fishing', xpTotal, source);
       if (xpResult.leveled_up) {
         eventBus.emit(EVENTS.UI_NOTICE, { message: `🎣 PESCA LVL ${xpResult.new_level}!`, color: '#4A9ECC' });
@@ -1463,8 +1465,10 @@ export class VecindadScene extends Phaser.Scene {
       }
 
       // XP: base 15 + quality bonus × event multiplier; gardening always, weed only if cannabis
+      // huerto_propio sinergia: +30% XP de jardinería al cosechar
       const gardenEventMult = getEventSystem().getXpMultiplier('gardening');
-      const xpTotal = Math.round((15 + qr.xp_bonus) * gardenEventMult);
+      const huertoMult = sys.hasSynergy('huerto_propio') ? 1.3 : 1;
+      const xpTotal = Math.round((15 + qr.xp_bonus) * gardenEventMult * huertoMult);
       const gardenResult = await sys.addXp('gardening', xpTotal, 'farm_harvest');
       if (gardenResult.leveled_up) {
         eventBus.emit(EVENTS.UI_NOTICE, { message: `🌿 JARDINERÍA LVL ${gardenResult.new_level}!`, color: '#39FF14' });
@@ -1732,8 +1736,10 @@ export class VecindadScene extends Phaser.Scene {
   private grantPuestoXp() {
     if (!this.scene?.isActive('VecindadScene')) return;
     const sys = getSkillSystem();
-    // dealer spec doubles puesto XP (16 vs 8 per minute)
-    const xpAmount = sys.getSpec('weed') === 'weed_dealer' ? 16 : 8;
+    // cepa_cruzada sinergia: base XP 8→12 (dealer: 16→20)
+    const hasCepa = sys.hasSynergy('cepa_cruzada');
+    const isDealer = sys.getSpec('weed') === 'weed_dealer';
+    const xpAmount = isDealer ? (hasCepa ? 20 : 16) : (hasCepa ? 12 : 8);
     void sys.addXp('weed', xpAmount, 'puesto_serve').then((r) => {
       if (!this.scene?.isActive('VecindadScene')) return;
       if (r.leveled_up) {

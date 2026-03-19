@@ -757,8 +757,10 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     }
 
     // Nearest material node
+    // minero_atletico sinergia: +15% rango de recolección
+    const collectRange = MATERIAL_COLLECT_RANGE * (getSkillSystem().hasSynergy('minero_atletico') ? 1.15 : 1);
     let nearest: MaterialNode | null = null;
-    let nearestDist = MATERIAL_COLLECT_RANGE;
+    let nearestDist = collectRange;
     for (const node of this.materialNodes) {
       if (!node.available) continue;
       const d = Phaser.Math.Distance.Between(this.px, this.py, node.x, node.y);
@@ -882,10 +884,12 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     } else if (dist2cave < CAVE_INTERACT_RANGE) {
       hint = '[E] EXAMINAR CUEVA';
     } else {
+      // minero_atletico sinergia: +15% rango de recolección
+      const promptRange = MATERIAL_COLLECT_RANGE * (getSkillSystem().hasSynergy('minero_atletico') ? 1.15 : 1);
       for (const node of this.materialNodes) {
         if (!node.available) continue;
         const d = Phaser.Math.Distance.Between(this.px, this.py, node.x, node.y);
-        if (d < MATERIAL_COLLECT_RANGE) {
+        if (d < promptRange) {
           hint = node.communal ? '[E] CUIDAR PLANTA COMUNAL' : '[E] RECOLECTAR MATERIAL';
           break;
         }

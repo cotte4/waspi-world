@@ -89,6 +89,9 @@ export class SkillTreePanel {
   private synergyRows: Phaser.GameObjects.Text[] = [];
   private synergyContainer?: Phaser.GameObjects.Container;
 
+  // Per-card synergy active badges (index matches ALL_SKILL_IDS order)
+  private synBadges: (Phaser.GameObjects.Text | null)[] = [];
+
   // Tab state
   private activeTab: 'skills' | 'logros' = 'skills';
   private tabSkillsBtn?: Phaser.GameObjects.Text;
@@ -268,6 +271,16 @@ export class SkillTreePanel {
         const hasSpec = !!getSkillSystem().getSpec(skillId);
         const isLv3 = level >= 3;
         badge.setVisible(isLv3 && !hasSpec);
+      }
+
+      // Synergy badge — show when this skill participates in at least one active synergy
+      const synBadge = this.synBadges[index];
+      if (synBadge) {
+        const activeSynergies = getSkillSystem().getActiveSynergies();
+        const inActiveSynergy = activeSynergies.some((syn) =>
+          syn.requires.some((req) => req.skillId === skillId),
+        );
+        synBadge.setVisible(inActiveSynergy);
       }
     });
 
@@ -885,6 +898,18 @@ export class SkillTreePanel {
     this.specBadges[index] = specBadge;
     this.skillsView?.add(specBadge);
     this.container.add(specBadge);
+
+    // Synergy badge — shown below title when this skill participates in an active synergy
+    const synBadge = this.scene.add.text(
+      cx,
+      cy - CARD_H / 2 + 30,
+      '⚡ SIN',
+      { fontSize: '5px', fontFamily: FONT, color: '#39FF14', backgroundColor: '#0a1a0a', padding: { x: 3, y: 1 } },
+    ).setOrigin(0.5, 0.5).setScrollFactor(0).setVisible(false);
+
+    this.synBadges[index] = synBadge;
+    this.skillsView?.add(synBadge);
+    this.container.add(synBadge);
 
     // Transparent hit area for spec selection
     const hitArea = this.scene.add.rectangle(cx, cy, CARD_W, CARD_H, 0x000000, 0)

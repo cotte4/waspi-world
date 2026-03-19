@@ -1725,7 +1725,9 @@ export class ZombiesScene extends Phaser.Scene {
       return;
     }
     this.furiaActive = true;
-    this.furiaUntil  = now + ZombiesScene.FURIA_DURATION_MS;
+    // cuerpo_maquina sinergia: Furia dura +3s (10s→13s)
+    const furiaDuration = ZombiesScene.FURIA_DURATION_MS + (getSkillSystem().hasSynergy('cuerpo_maquina') ? 3000 : 0);
+    this.furiaUntil  = now + furiaDuration;
     this.furiaCooldownUntil = now + ZombiesScene.FURIA_COOLDOWN_MS;
     this.cameras.main.flash(200, 255, 60, 60, false);
     const furiaLabel = getSkillSystem().getSpec('gym') === 'gym_fighter'

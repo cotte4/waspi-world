@@ -9,6 +9,13 @@ import type { SkillId } from '../systems/SkillSystem';
 // Types
 // ---------------------------------------------------------------------------
 
+export type SynergyId =
+  | 'minero_atletico'
+  | 'huerto_propio'
+  | 'gourmet_del_mar'
+  | 'cepa_cruzada'
+  | 'cuerpo_maquina';
+
 export type SynergyEffectType = 'speed_bonus' | 'xp_bonus' | 'quality_bonus' | 'access';
 
 export type SynergyEffect = {
@@ -24,7 +31,7 @@ export type SynergyRequirement = {
 };
 
 export type SynergyDef = {
-  id: string;
+  id: SynergyId;
   name: string;
   tagline: string;
   emoji: string;
@@ -34,12 +41,12 @@ export type SynergyDef = {
 };
 
 // ---------------------------------------------------------------------------
-// Synergy catalog — 5 initial synergies
+// Synergy catalog — 5 passive synergies
 // ---------------------------------------------------------------------------
 
 export const SYNERGY_DEFS: SynergyDef[] = [
   {
-    id: 'athletic_miner',
+    id: 'minero_atletico',
     name: 'MINERO ATLETICO',
     tagline: 'Fuerza y resistencia al picar',
     emoji: '⛏️',
@@ -51,14 +58,14 @@ export const SYNERGY_DEFS: SynergyDef[] = [
     effects: [
       {
         type: 'speed_bonus',
-        stat: 'speed',
+        stat: 'collect_range',
         value: 15,
-        description: '+15% velocidad en Bosque de Materiales',
+        description: '+15% rango de recolección en Bosque',
       },
     ],
   },
   {
-    id: 'home_garden',
+    id: 'huerto_propio',
     name: 'HUERTO PROPIO',
     tagline: 'La mejor cocina empieza en tu parcela',
     emoji: '🌿',
@@ -70,19 +77,14 @@ export const SYNERGY_DEFS: SynergyDef[] = [
     effects: [
       {
         type: 'xp_bonus',
-        stat: 'cooking',
-        value: 10,
-        description: '+10 XP extra al cocinar con cosecha propia',
-      },
-      {
-        type: 'access',
-        value: 0,
-        description: 'Buffs de comida casera duran +30%',
+        stat: 'gardening',
+        value: 30,
+        description: '+30% XP de jardinería al cosechar',
       },
     ],
   },
   {
-    id: 'sea_gourmet',
+    id: 'gourmet_del_mar',
     name: 'GOURMET DEL MAR',
     tagline: 'Del agua al plato sin intermediarios',
     emoji: '🎣',
@@ -94,19 +96,14 @@ export const SYNERGY_DEFS: SynergyDef[] = [
     effects: [
       {
         type: 'xp_bonus',
-        stat: 'cooking',
-        value: 15,
-        description: '+15 XP al cocinar con pescado propio',
-      },
-      {
-        type: 'access',
-        value: 0,
-        description: 'Recetas exclusivas de mar disponibles',
+        stat: 'fishing',
+        value: 25,
+        description: '+25% XP al pescar',
       },
     ],
   },
   {
-    id: 'hybrid_strain',
+    id: 'cepa_cruzada',
     name: 'CEPA CRUZADA',
     tagline: 'Lo mejor de dos mundos botanicos',
     emoji: '🌱',
@@ -117,20 +114,15 @@ export const SYNERGY_DEFS: SynergyDef[] = [
     ],
     effects: [
       {
-        type: 'access',
-        value: 0,
-        description: 'Cepas hibridas disponibles en el farm',
-      },
-      {
         type: 'xp_bonus',
         stat: 'weed',
-        value: 10,
-        description: '+10 XP al cultivar cepa cruzada',
+        value: 0,
+        description: 'XP base del puesto: 8→12 (16→20 con dealer)',
       },
     ],
   },
   {
-    id: 'machine_body',
+    id: 'cuerpo_maquina',
     name: 'CUERPO MAQUINA',
     tagline: 'El gym potencia todo lo que comes',
     emoji: '💪',
@@ -141,15 +133,9 @@ export const SYNERGY_DEFS: SynergyDef[] = [
     ],
     effects: [
       {
-        type: 'speed_bonus',
-        stat: 'speed',
-        value: 8,
-        description: '+8% velocidad global por dieta de atleta',
-      },
-      {
         type: 'access',
-        value: 0,
-        description: 'Buffs de comida aplican a stats de combate',
+        value: 3,
+        description: 'Furia dura +3s (10s→13s)',
       },
     ],
   },

@@ -6,7 +6,7 @@
 import type { QualityTier } from '../config/qualityTiers';
 import type { SpecId } from '../config/specializations';
 import type { MilestoneDef } from '../config/skillTrees';
-import { SYNERGY_DEFS, type SynergyDef } from '../config/synergies';
+import { SYNERGY_DEFS, type SynergyDef, type SynergyId } from '../config/synergies';
 import { getAuthHeaders } from './authHelper';
 import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 import { eventBus, EVENTS } from '../config/eventBus';
@@ -329,6 +329,14 @@ export class SkillSystem {
     return SYNERGY_DEFS.filter((syn) =>
       syn.requires.every((req) => this.getLevel(req.skillId) >= req.minLevel),
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // hasSynergy — returns true if the given synergy is currently active
+  // -------------------------------------------------------------------------
+
+  hasSynergy(id: SynergyId): boolean {
+    return this.getActiveSynergies().some((s) => s.id === id);
   }
 
   // -------------------------------------------------------------------------
