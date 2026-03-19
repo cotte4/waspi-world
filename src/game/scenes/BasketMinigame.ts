@@ -1,832 +1,745 @@
 import Phaser from 'phaser';
-import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { initTenks } from '../systems/TenksSystem';
 import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
-import { calculateBasketReward, calculateBasketShotReward } from '../../lib/basketRewards';
-import { SceneControls } from '../systems/SceneControls';
 import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 
 type BasketPhase = 'aiming' | 'flying' | 'result' | 'done' | 'exiting';
 
-const ROUND_MS = 30000;
-const SHOT_COOLDOWN_MS = 420;
+const TOTAL_SHOTS = 10;
+const HOOP_X = 530;
+const HOOP_Y = 190;
+const BALL_START_X = 180;
+const BALL_START_Y = 430;
+const GRAVITY = 900;
+const MAX_FORCE = 150; // max drag distance (px)
+const VEL_FACTOR = 5.5;
+const MAX_VEL_X = 600;
+const MIN_VEL_Y = -650; // most upward allowed
 
 export class BasketMinigame extends Phaser.Scene {
+  // Game state
   private phase: BasketPhase = 'aiming';
   private isFinished = false;
-  private roundTimerMs = ROUND_MS;
-  private resultTimerMs = 0;
-  private cooldownMs = 0;
-  private score = 0;
-  private shotsTaken = 0;
+  private totalScore = 0;
+  private shotsTaken = 0; // 0-indexed current shot (0 = first shot in progress)
+  private makesCount = 0; // how many goals scored
   private streak = 0;
-  private currentPower = 0.5;
-  private powerDir = 1;
-  private hoopOffset = 0;
-  private hoopDir = 1;
-  private lastResult = '';
-  private lastResultColor = '#FFFFFF';
+  private goalScoredThisShot = false;
+  private touchedRimThisShot = false;
+
+  // Drag state
+  private isDragging = false;
+  private dragStartX = 0;
+  private dragStartY = 0;
+
+  // Reward
   private grantedRewardTenks = 0;
   private rewardPending = false;
   private rewardResolved = false;
   private rewardStatus: 'granted' | 'pending' | 'local' = 'local';
   private rewardRunId = '';
   private rewardRunPromise: Promise<void> | null = null;
-  private countdownActive = false;
 
-  private hud!: Phaser.GameObjects.Text;
-  private footer!: Phaser.GameObjects.Text;
-  private resultLabel!: Phaser.GameObjects.Text;
-  private powerBar!: Phaser.GameObjects.Rectangle;
-  private arcGuide!: Phaser.GameObjects.Graphics;
-  private hoop!: Phaser.GameObjects.Container;
-  private hoopRim!: Phaser.GameObjects.Rectangle;
-  private hoopNet!: Phaser.GameObjects.Graphics;
-  private hoopBoard!: Phaser.GameObjects.Rectangle;
+  // Timers
+  private resultTimerMs = 0;
+  private postGameTimerMs = 0;
+
+  // Physics objects
   private ball!: Phaser.GameObjects.Arc;
-  private shadow!: Phaser.GameObjects.Ellipse;
-  private scoreText!: Phaser.GameObjects.Text;
-  private timerBarBg!: Phaser.GameObjects.Rectangle;
-  private timerBar!: Phaser.GameObjects.Rectangle;
-  private controls!: SceneControls;
-  private shooterAvatar?: AvatarRenderer;
+  private rimLeft!: Phaser.GameObjects.Arc;
+  private rimRight!: Phaser.GameObjects.Arc;
+  private backboard!: Phaser.GameObjects.Rectangle;
+  private netSensor!: Phaser.GameObjects.Rectangle;
 
-  private hoopBaseX = 0;
-  private readonly hoopY = 212;
-  private ballStartX = 0;
-  private ballStartY = 0;
-  private shooterX = 0;
-  private shooterY = 0;
+  // Visual objects
+  private shadow!: Phaser.GameObjects.Ellipse;
+  private aimGuide!: Phaser.GameObjects.Graphics;
+  private netGraphics!: Phaser.GameObjects.Graphics;
+  private shotText!: Phaser.GameObjects.Text;
+  private streakText!: Phaser.GameObjects.Text;
+  private scoreText!: Phaser.GameObjects.Text;
+  private hintText!: Phaser.GameObjects.Text;
+  private resultLabel!: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'BasketMinigame' });
   }
 
-  private resetSceneState() {
-    this.phase = 'aiming';
+  init() {
     this.isFinished = false;
-    this.countdownActive = false;
-    this.roundTimerMs = ROUND_MS;
-    this.resultTimerMs = 0;
-    this.cooldownMs = 0;
-    this.score = 0;
+    this.phase = 'aiming';
+    this.totalScore = 0;
     this.shotsTaken = 0;
+    this.makesCount = 0;
     this.streak = 0;
-    this.currentPower = 0.5;
-    this.powerDir = 1;
-    this.hoopOffset = 0;
-    this.hoopDir = 1;
-    this.lastResult = '';
-    this.lastResultColor = '#FFFFFF';
+    this.goalScoredThisShot = false;
+    this.touchedRimThisShot = false;
+    this.isDragging = false;
     this.grantedRewardTenks = 0;
     this.rewardPending = false;
     this.rewardResolved = false;
     this.rewardStatus = 'local';
     this.rewardRunId = '';
     this.rewardRunPromise = null;
-  }
-
-  init() {
-    this.isFinished = false;
-    this.phase = 'aiming';
-    this.countdownActive = false;
+    this.resultTimerMs = 0;
+    this.postGameTimerMs = 0;
   }
 
   create() {
-    const { width, height } = this.scale;
-    this.resetSceneState();
     this.input.enabled = true;
-    this.controls = new SceneControls(this);
     announceScene(this);
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
 
-    // Anti-freeze: reset if scene is woken instead of started fresh
+    // Set arcade gravity
+    this.physics.world.gravity.y = GRAVITY;
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
       this.isFinished = false;
       this.input.enabled = true;
       if (this.input.keyboard) this.input.keyboard.enabled = true;
     });
 
-    const hoopBaseX = width / 2 + 150;
-    this.hoopBaseX = hoopBaseX;
-    this.shooterX = width / 2 - 206;
-    this.shooterY = height - 106;
-    this.ballStartX = this.shooterX + 14;
-    this.ballStartY = this.shooterY - 8;
+    this.buildBackground();
+    this.buildHoop();
+    this.buildBall();
+    this.buildHud();
+    this.buildInputListeners();
 
-    this.cameras.main.setBackgroundColor('#0d1020');
+    this.cameras.main.resetFX();
+    this.cameras.main.setAlpha(1);
+    this.cameras.main.fadeIn(200, 0, 0, 0);
 
-    const g = this.add.graphics();
-    g.fillGradientStyle(0x16203f, 0x16203f, 0x0a0d18, 0x0a0d18, 1);
-    g.fillRect(0, 0, width, height);
+    void this.prepareRewardRun();
+    this.refreshHud();
+  }
 
-    g.fillStyle(0x4f2a14, 1);
-    g.fillRect(0, height - 160, width, 160);
-    g.fillStyle(0x6f3d1f, 0.45);
-    for (let i = 0; i < 10; i++) {
-      g.fillRect(i * 80, height - 160, 4, 160);
+  // ── Background & court ──────────────────────────────────────────────────
+
+  private buildBackground() {
+    const { width, height } = this.scale;
+
+    // Dark BG gradient
+    const bg = this.add.graphics();
+    bg.fillGradientStyle(0x0e0e14, 0x0e0e14, 0x141420, 0x141420, 1);
+    bg.fillRect(0, 0, width, height);
+
+    // Court floor
+    bg.fillStyle(0x4f2a14, 1);
+    bg.fillRect(0, height - 140, width, 140);
+    bg.fillStyle(0x6f3d1f, 0.3);
+    for (let i = 0; i < 12; i++) {
+      bg.fillRect(i * 70, height - 140, 3, 140);
     }
 
-    g.lineStyle(4, 0xf3d49b, 0.38);
-    g.strokeCircle(width / 2 - 60, height - 60, 58);
-    g.lineBetween(width / 2 - 60, height - 118, width / 2 - 60, height - 2);
+    // Court line — three-point arc approximation
+    bg.lineStyle(3, 0xf3d49b, 0.25);
+    bg.strokeCircle(BALL_START_X, height - 20, 130);
 
-    // Court spotlight — radial glow at center court
-    const spotlight = this.add.graphics();
-    spotlight.fillStyle(0xffffff, 0.04);
-    spotlight.fillEllipse(width / 2 - 60, height - 80, 280, 100);
+    // Floor line
+    bg.lineStyle(2, 0xf3d49b, 0.18);
+    bg.lineBetween(0, height - 140, width, height - 140);
 
-    this.add.text(width / 2, 54, 'BASKET', {
-      fontSize: '18px',
+    // Spotlight glow
+    const glow = this.add.graphics();
+    glow.fillStyle(0xffffff, 0.03);
+    glow.fillEllipse(BALL_START_X, height - 80, 300, 120);
+
+    // Title
+    this.add.text(width / 2, 30, 'BASKET', {
+      fontSize: '16px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842',
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setDepth(10);
+  }
 
-    this.add.text(width / 2, 86, 'CALCULA LA TRAYECTORIA Y EL MOMENTO', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#A0A0B4',
-    }).setOrigin(0.5);
+  // ── Hoop construction ───────────────────────────────────────────────────
 
-    this.hud = this.add.text(18, 18, '', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FFFFFF',
-      lineSpacing: 6,
+  private buildHoop() {
+    // Backboard (static physics)
+    this.backboard = this.add.rectangle(HOOP_X + 80, HOOP_Y - 50, 14, 80, 0xdbe7ff, 1)
+      .setStrokeStyle(2, 0x0d1530, 1)
+      .setDepth(5);
+    this.physics.add.existing(this.backboard, true);
+
+    // Left rim (static physics)
+    this.rimLeft = this.add.circle(HOOP_X - 38, HOOP_Y, 7, 0xff6b00, 1)
+      .setStrokeStyle(2, 0x3a1a00, 1)
+      .setDepth(5);
+    this.physics.add.existing(this.rimLeft, true);
+
+    // Right rim (static physics)
+    this.rimRight = this.add.circle(HOOP_X + 38, HOOP_Y, 7, 0xff6b00, 1)
+      .setStrokeStyle(2, 0x3a1a00, 1)
+      .setDepth(5);
+    this.physics.add.existing(this.rimRight, true);
+
+    // Rim connector (visual only)
+    const rimBar = this.add.graphics().setDepth(4);
+    rimBar.lineStyle(5, 0xff6b00, 1);
+    rimBar.lineBetween(HOOP_X - 38, HOOP_Y, HOOP_X + 38, HOOP_Y);
+
+    // Net sensor — overlap only (no isSensor in Arcade, use overlap instead of collider)
+    this.netSensor = this.add.rectangle(HOOP_X, HOOP_Y + 8, 68, 12, 0x000000, 0)
+      .setDepth(6);
+    this.physics.add.existing(this.netSensor, true);
+
+    // Net graphic (decorative)
+    this.netGraphics = this.add.graphics().setDepth(4);
+    this.drawNet(0);
+
+    // Backboard border glow
+    const boardGlow = this.add.graphics().setDepth(3);
+    boardGlow.lineStyle(1, 0xdbe7ff, 0.15);
+    boardGlow.strokeRect(HOOP_X + 73, HOOP_Y - 90, 28, 90);
+  }
+
+  private drawNet(drop: number) {
+    this.netGraphics.clear();
+    this.netGraphics.lineStyle(1, 0xdce6ff, 0.7);
+    const left = HOOP_X - 34;
+    const right = HOOP_X + 34;
+    const top = HOOP_Y + 4;
+    const segments = 5;
+    const step = (right - left) / segments;
+    for (let i = 0; i <= segments; i++) {
+      const nx = left + i * step;
+      this.netGraphics.lineBetween(nx, top, nx * 0.3 + HOOP_X * 0.7, top + 28 + drop);
+    }
+    for (let y = 0; y <= 2; y++) {
+      const ty = top + y * 12 + drop * (y / 2);
+      const shrink = y * 4;
+      this.netGraphics.lineBetween(left + shrink, ty, right - shrink, ty);
+    }
+  }
+
+  // ── Ball construction ───────────────────────────────────────────────────
+
+  private buildBall() {
+    this.shadow = this.add.ellipse(BALL_START_X, BALL_START_Y + 18, 26, 10, 0x000000, 0.28)
+      .setDepth(7);
+
+    this.ball = this.add.circle(BALL_START_X, BALL_START_Y, 11, 0xf2872f, 1)
+      .setStrokeStyle(2, 0x5b2e0a, 1)
+      .setDepth(20);
+
+    // Add arcade physics to the ball
+    this.physics.add.existing(this.ball);
+    const ballBody = this.ball.body as Phaser.Physics.Arcade.Body;
+    ballBody.setBounce(0.45, 0.35);
+    ballBody.setCircle(11);
+    ballBody.setCollideWorldBounds(false);
+    // Disable gravity until shot
+    ballBody.setAllowGravity(false);
+    ballBody.setVelocity(0, 0);
+
+    // Ball vs rims (with sound)
+    this.physics.add.collider(this.ball, this.rimLeft, () => {
+      this.touchedRimThisShot = true;
+      this.cameras.main.shake(60, 0.003);
+      console.log('SFX: rim_bounce');
+    });
+    this.physics.add.collider(this.ball, this.rimRight, () => {
+      this.touchedRimThisShot = true;
+      this.cameras.main.shake(60, 0.003);
+      console.log('SFX: rim_bounce');
+    });
+    this.physics.add.collider(this.ball, this.backboard, () => {
+      console.log('SFX: rim_bounce');
     });
 
-    this.footer = this.add.text(width / 2, height - 28, 'SPACE O CLICK PARA TIRAR  |  ESC SALIR', {
-      fontSize: '8px',
+    // Goal overlap
+    this.physics.add.overlap(this.ball, this.netSensor, () => {
+      this.onGoal();
+    }, undefined, this);
+
+    // Aim guide
+    this.aimGuide = this.add.graphics().setDepth(15);
+  }
+
+  // ── HUD ─────────────────────────────────────────────────────────────────
+
+  private buildHud() {
+    const { width, height } = this.scale;
+
+    // Top-left panel
+    const hudBg = this.add.graphics().setDepth(99);
+    hudBg.fillStyle(0x000000, 0.5);
+    hudBg.fillRoundedRect(10, 10, 160, 60, 4);
+
+    this.shotText = this.add.text(20, 20, 'TIRO 0/10', {
+      fontSize: '9px',
       fontFamily: '"Press Start 2P", monospace',
-      color: '#777777',
-    }).setOrigin(0.5);
+      color: '#FFFFFF',
+    }).setDepth(100);
 
-    // ── Power meter ──────────────────────────────────────────────────────
-    this.add.text(120, 128, 'POTENCIA', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#bbbbbb',
-    }).setOrigin(0.5);
-
-    // Bar background
-    this.add.rectangle(120, 158, 120, 18, 0x0e1428, 1).setStrokeStyle(1, 0x3a4a6a, 1);
-
-    // Fill bar (green/yellow/red based on power)
-    this.powerBar = this.add.rectangle(62, 158, 0, 12, 0x39ff14, 1).setOrigin(0, 0.5);
-
-    // Segmented overlay: 10 divider lines across the power bar
-    const powerSegOverlay = this.add.graphics();
-    for (let s = 1; s < 10; s++) {
-      const sx = 62 + s * 12; // 120px wide / 10 segments = 12px each, starting at x=62
-      powerSegOverlay.lineStyle(1, 0x0d1020, 0.8);
-      powerSegOverlay.lineBetween(sx, 151, sx, 165); // 158 ± 7px (barH/2)
-    }
-
-    this.arcGuide = this.add.graphics();
-
-    // ── Hoop ─────────────────────────────────────────────────────────────
-    this.hoop = this.add.container(hoopBaseX, this.hoopY);
-    this.hoopBoard = this.add.rectangle(34, -62, 14, 88, 0xdbe7ff, 1).setStrokeStyle(2, 0x0d1530, 1);
-    this.hoopRim = this.add.rectangle(0, 0, 74, 7, 0xff6b00, 1).setStrokeStyle(2, 0x000000, 0.35);
-    this.hoopNet = this.add.graphics();
-    this.redrawNet(0);
-    const boardGlow = this.add.rectangle(34, -62, 24, 98, 0xdbe7ff, 0.08);
-    this.hoop.add([boardGlow, this.hoopBoard, this.hoopRim, this.hoopNet]);
-
-    this.shooterAvatar = new AvatarRenderer(this, this.shooterX, this.shooterY, loadStoredAvatarConfig());
-    this.shooterAvatar.setDepth(50);
-
-    this.shadow = this.add.ellipse(this.ballStartX, this.ballStartY + 16, 26, 10, 0x000000, 0.28);
-    this.ball = this.add.circle(this.ballStartX, this.ballStartY, 11, 0xf2872f, 1).setStrokeStyle(2, 0x5b2e0a, 1);
-
-    // ── Score panel ───────────────────────────────────────────────────────
-    const scoreBg = this.add.graphics();
-    scoreBg.fillStyle(0x000000, 0.52);
-    scoreBg.fillRoundedRect(width - 132, 10, 120, 62, 4);
-
-    this.scoreText = this.add.text(width - 16, 16, '', {
-      fontSize: '14px',
+    this.streakText = this.add.text(20, 40, 'RACHA 0', {
+      fontSize: '9px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842',
-      stroke: '#46B3FF',
-      strokeThickness: 3,
+    }).setDepth(100);
+
+    // Top-right score panel
+    const scoreBg = this.add.graphics().setDepth(99);
+    scoreBg.fillStyle(0x000000, 0.5);
+    scoreBg.fillRoundedRect(width - 150, 10, 140, 60, 4);
+
+    this.scoreText = this.add.text(width - 20, 20, 'SCORE: 0', {
+      fontSize: '9px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
       align: 'right',
-      lineSpacing: 8,
-    }).setOrigin(1, 0);
+    }).setOrigin(1, 0).setDepth(100);
 
-    // ── Timer bar ─────────────────────────────────────────────────────────
-    const timerBarW = width - 36;
-    this.timerBarBg = this.add.rectangle(18, height - 16, timerBarW, 8, 0x111111, 1)
-      .setStrokeStyle(1, 0x333344, 1)
-      .setOrigin(0, 0.5);
-    this.timerBar = this.add.rectangle(18, height - 16, timerBarW, 8, 0x46B3FF, 1)
-      .setOrigin(0, 0.5);
-    this.timerBar.setStrokeStyle(1, 0x8CE0FF, 0.4);
+    // Bottom hint
+    this.hintText = this.add.text(width / 2, height - 22, 'ARROJA - DRAG & SUELTA  |  ESC SALIR', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#555566',
+    }).setOrigin(0.5).setDepth(100);
 
-    this.resultLabel = this.add.text(width / 2, 334, '', {
-      fontSize: '14px',
+    // Result label (center screen)
+    this.resultLabel = this.add.text(width / 2, 300, '', {
+      fontSize: '18px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#FFFFFF',
       stroke: '#000000',
       strokeThickness: 4,
-    }).setOrigin(0.5).setAlpha(0);
-
-    this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-    this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
-    this.input.on('pointerdown', this.handleShootInput, this);
-
-    this.refreshHud();
-    this.refreshScorePanel();
-    this.redrawAimGuide();
-    this.cameras.main.resetFX();
-    this.cameras.main.setAlpha(1);
-    this.cameras.main.fadeIn(220, 0, 0, 0);
-    void this.prepareRewardRun();
-    this.runCountdown();
+    }).setOrigin(0.5).setAlpha(0).setDepth(200);
   }
 
-  private runCountdown() {
-    this.countdownActive = true;
-    const cx = this.scale.width / 2;
-    const cy = this.scale.height / 2;
-    const steps = ['3', '2', '1', 'GO!'];
-    const colors = ['#F5C842', '#F5C842', '#39FF14', '#46B3FF'];
-    let idx = 0;
-
-    const showNext = () => {
-      if (idx >= steps.length) {
-        this.countdownActive = false;
-        return;
-      }
-      const label = this.add.text(cx, cy, steps[idx], {
-        fontSize: idx === steps.length - 1 ? '28px' : '36px',
-        fontFamily: '"Press Start 2P", monospace',
-        color: colors[idx],
-        stroke: '#000000',
-        strokeThickness: 5,
-      }).setOrigin(0.5).setAlpha(0).setDepth(14000).setScrollFactor(0);
-
-      this.tweens.add({
-        targets: label,
-        alpha: { from: 0, to: 1 },
-        scaleX: { from: 1.6, to: 1 },
-        scaleY: { from: 1.6, to: 1 },
-        duration: 180,
-        ease: 'Back.easeOut',
-        onComplete: () => {
-          this.time.delayedCall(idx === steps.length - 1 ? 320 : 600, () => {
-            this.tweens.add({
-              targets: label,
-              alpha: 0,
-              scaleX: 0.7,
-              scaleY: 0.7,
-              duration: 180,
-              ease: 'Sine.easeIn',
-              onComplete: () => {
-                label.destroy();
-                idx += 1;
-                showNext();
-              },
-            });
-          });
-        },
-      });
-    };
-
-    showNext();
+  private refreshHud() {
+    const currentShot = Math.min(this.shotsTaken + 1, TOTAL_SHOTS);
+    this.shotText.setText(`TIRO ${currentShot}/10`);
+    this.streakText.setText(`RACHA ${this.streak}`);
+    this.scoreText.setText(`SCORE: ${this.totalScore}`);
   }
 
-  update(_time: number, delta: number) {
-    if (this.isFinished) return;
-    if (this.countdownActive) return;
+  // ── Input ───────────────────────────────────────────────────────────────
 
-    if (this.controls.isActionJustDown('back')) {
-      this.rewardPending = false; // allow ESC to force-exit even while saving
+  private buildInputListeners() {
+    this.input.on('pointerdown', this.onPointerDown, this);
+    this.input.on('pointermove', this.onPointerMove, this);
+    this.input.on('pointerup', this.onPointerUp, this);
+
+    const escKey = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    escKey?.on('down', () => {
+      this.rewardPending = false;
       this.finishAndExit();
+    });
+  }
+
+  private onPointerDown(pointer: Phaser.Input.Pointer) {
+    if (this.phase !== 'aiming' || this.isFinished) return;
+
+    const dx = pointer.x - this.ball.x;
+    const dy = pointer.y - this.ball.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist <= 40) {
+      this.isDragging = true;
+      this.dragStartX = pointer.x;
+      this.dragStartY = pointer.y;
+    }
+  }
+
+  private onPointerMove(pointer: Phaser.Input.Pointer) {
+    if (!this.isDragging || this.phase !== 'aiming') return;
+    this.drawAimGuide(pointer.x, pointer.y);
+  }
+
+  private onPointerUp(pointer: Phaser.Input.Pointer) {
+    if (!this.isDragging || this.phase !== 'aiming' || this.isFinished) return;
+    this.isDragging = false;
+    this.aimGuide.clear();
+
+    const rawDx = this.dragStartX - pointer.x;
+    const rawDy = this.dragStartY - pointer.y;
+    const dragDist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
+
+    // Must be mostly upward (rawDy > 0 means drag was downward which launches upward)
+    if (rawDy < 20) {
+      // Not an upward shot — ignore
       return;
     }
 
-    if (this.phase !== 'done' && this.phase !== 'exiting') {
-      this.roundTimerMs = Math.max(0, this.roundTimerMs - delta);
-      const timerBarW = this.scale.width - 36;
-      this.timerBar.width = timerBarW * (this.roundTimerMs / ROUND_MS);
-      const pct = this.roundTimerMs / ROUND_MS;
-      if (pct < 0.25) {
-        this.timerBar.fillColor = 0xFF006E;
-      } else if (pct < 0.5) {
-        this.timerBar.fillColor = 0xF5C842;
-      } else {
-        this.timerBar.fillColor = 0x46B3FF;
-      }
-      if (this.roundTimerMs === 0 && this.phase !== 'flying' && this.phase !== 'result') {
-        this.enterDoneState();
-        return;
-      }
-    }
+    // Cap drag distance
+    const clampedDist = Math.min(dragDist, MAX_FORCE);
+    const scale = dragDist > 0 ? clampedDist / dragDist : 1;
 
-    if (this.controls.isActionJustDown('interact')) {
-      this.handleShootInput();
-    }
+    const vx = Phaser.Math.Clamp(rawDx * VEL_FACTOR * scale, -MAX_VEL_X, MAX_VEL_X);
+    // vy: drag downward (rawDy > 0) launches ball upward (negative vy)
+    const vy = Math.max(-(rawDy * VEL_FACTOR * scale), MIN_VEL_Y);
 
-    this.cooldownMs = Math.max(0, this.cooldownMs - delta);
-    if (this.phase !== 'flying') {
-      this.updateHoopMotion(delta);
-    }
-
-    if (this.phase === 'aiming') {
-      this.updateMeters(delta);
-      this.redrawAimGuide();
-      return;
-    }
-
-    if (this.phase === 'result') {
-      this.resultTimerMs -= delta;
-      if (this.resultTimerMs <= 0) {
-        if (this.roundTimerMs <= 0) {
-          this.enterDoneState();
-        } else {
-          this.resetForNextShot();
-        }
-      }
-      return;
-    }
-
-    if (this.phase === 'done') {
-      if (this.rewardPending) return;
-      this.resultTimerMs -= delta;
-      if (this.resultTimerMs <= 0) {
-        this.finishAndExit();
-      }
-    }
-  }
-
-  private updateMeters(delta: number) {
-    // Oscillate power bar
-    this.currentPower += this.powerDir * (delta * 0.00095);
-    if (this.currentPower >= 1) {
-      this.currentPower = 1;
-      this.powerDir = -1;
-    }
-    if (this.currentPower <= 0.22) {
-      this.currentPower = 0.22;
-      this.powerDir = 1;
-    }
-
-    this.powerBar.width = 116 * this.currentPower;
-    this.powerBar.fillColor = this.currentPower > 0.82 ? 0xff6b00 : this.currentPower > 0.55 ? 0xf5c842 : 0x39ff14;
-  }
-
-  private updateHoopMotion(delta: number) {
-    const swingRange = this.score >= 6 ? 84 : this.score >= 3 ? 58 : 36;
-    this.hoopOffset += this.hoopDir * (delta * 0.06);
-    if (this.hoopOffset >= swingRange) {
-      this.hoopOffset = swingRange;
-      this.hoopDir = -1;
-    }
-    if (this.hoopOffset <= -swingRange) {
-      this.hoopOffset = -swingRange;
-      this.hoopDir = 1;
-    }
-    this.hoop.setX(this.hoopBaseX + this.hoopOffset);
-  }
-
-  // ── Sweet spot logic ────────────────────────────────────────────────────
-
-  /** Ideal power based on hoop horizontal offset — closer = less power needed */
-  private getSweetSpotCenter(): number {
-    const swingRange = this.score >= 6 ? 84 : this.score >= 3 ? 58 : 36;
-    return Phaser.Math.Clamp(0.58 + (this.hoopOffset / swingRange) * 0.12, 0.44, 0.76);
-  }
-
-  /**
-   * Fully deterministic shot evaluation — same inputs always produce the same outcome.
-   * Outcome depends entirely on where the arc points relative to the rim at shoot time.
-   *
-   *  dist = targetX - rimX  (positive = toward backboard)
-   *  |dist| ≤ 20            → direct make ("de chas")
-   *  dist  20–38            → bank make (sweet board zone)
-   *  dist  38–54            → rim off board (too much overshoot)
-   *  dist -20 to -30        → rim (undershoot)
-   *  everything else        → miss
-   */
-  private evaluateShot(): { isMake: boolean; isRim: boolean; isBankShot: boolean } {
-    const center = this.getSweetSpotCenter();
-    const xError = (this.currentPower - center) * 150;
-    const rimX = this.hoop.x;
-    const targetX = Phaser.Math.Clamp(rimX + xError, rimX - 60, rimX + 60);
-    const dist = targetX - rimX; // signed: positive = toward backboard
-
-    // Direct make — arc lands through the hoop center
-    if (Math.abs(dist) <= 20) {
-      return { isMake: true, isRim: false, isBankShot: false };
-    }
-
-    // Bank make — slight overshoot into the board sweet zone
-    if (dist > 20 && dist <= 38) {
-      return { isMake: true, isRim: false, isBankShot: true };
-    }
-
-    // Rim off board — too much overshoot
-    if (dist > 38 && dist <= 54) {
-      return { isMake: false, isRim: true, isBankShot: true };
-    }
-
-    // Rim — undershoot (near miss left side)
-    if (dist < -20 && dist >= -30) {
-      return { isMake: false, isRim: true, isBankShot: false };
-    }
-
-    return { isMake: false, isRim: false, isBankShot: false };
+    this.launchBall(vx, vy);
   }
 
   // ── Aim guide ───────────────────────────────────────────────────────────
 
-  private redrawAimGuide() {
-    this.arcGuide.clear();
+  private drawAimGuide(pointerX: number, pointerY: number) {
+    this.aimGuide.clear();
     if (this.phase !== 'aiming') return;
 
-    const color = 0x46b3ff;
-    const alpha = 0.55;
+    const rawDx = this.dragStartX - pointerX;
+    const rawDy = this.dragStartY - pointerY;
+    const dragDist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
 
-    // Overshoot shifts arc endpoint right (toward backboard)
-    const center = this.getSweetSpotCenter();
-    const xError = (this.currentPower - center) * 150;
-    const targetX = Phaser.Math.Clamp(this.hoop.x + xError, this.hoop.x - 60, this.hoop.x + 60);
+    if (rawDy < 10 || dragDist < 5) return; // not upward, skip
 
-    const start = new Phaser.Math.Vector2(this.ballStartX, this.ballStartY);
-    const end = new Phaser.Math.Vector2(targetX, this.hoopY);
-    const apex = new Phaser.Math.Vector2(
-      (start.x + end.x) / 2,
-      start.y - (140 + this.currentPower * 120),
-    );
+    const clampedDist = Math.min(dragDist, MAX_FORCE);
+    const scale = dragDist > 0 ? clampedDist / dragDist : 1;
 
-    this.arcGuide.lineStyle(2, color, alpha);
-    for (let i = 0; i < 18; i++) {
-      if (i % 2 === 1) continue;
-      const t0 = i / 18;
-      const t1 = (i + 1) / 18;
-      const p0 = this.getQuadraticPoint(t0, start, apex, end);
-      const p1 = this.getQuadraticPoint(t1, start, apex, end);
-      this.arcGuide.lineBetween(p0.x, p0.y, p1.x, p1.y);
+    const vx = rawDx * VEL_FACTOR * scale;
+    const rawVy = -(rawDy * VEL_FACTOR * scale);
+    const vy = Math.max(rawVy, MIN_VEL_Y);
+
+    const bx = this.ball.x;
+    const by = this.ball.y;
+
+    this.aimGuide.fillStyle(0x46B3FF, 0.7);
+    for (let i = 1; i <= 8; i++) {
+      const t = i * 0.05;
+      const px = bx + vx * t;
+      const py = by + vy * t + 0.5 * GRAVITY * t * t;
+      const alpha = 1 - (i / 9) * 0.7;
+      const radius = 3 - (i / 9) * 1.5;
+      this.aimGuide.fillStyle(0x46B3FF, alpha);
+      this.aimGuide.fillCircle(px, py, radius);
     }
   }
 
-  private getQuadraticPoint(
-    t: number,
-    start: Phaser.Math.Vector2,
-    control: Phaser.Math.Vector2,
-    end: Phaser.Math.Vector2,
-  ) {
-    const inv = 1 - t;
-    return new Phaser.Math.Vector2(
-      inv * inv * start.x + 2 * inv * t * control.x + t * t * end.x,
-      inv * inv * start.y + 2 * inv * t * control.y + t * t * end.y,
-    );
-  }
+  // ── Ball launch ─────────────────────────────────────────────────────────
 
-  // ── Shot mechanics ──────────────────────────────────────────────────────
-
-  private handleShootInput() {
-    if (this.phase !== 'aiming' || this.cooldownMs > 0 || this.isFinished) return;
-    this.takeShot();
-  }
-
-  private takeShot() {
+  private launchBall(vx: number, vy: number) {
+    if (this.phase !== 'aiming') return;
     this.phase = 'flying';
-    this.cooldownMs = SHOT_COOLDOWN_MS;
-    this.shooterAvatar?.playShoot();
-    this.shotsTaken += 1;
+    this.goalScoredThisShot = false;
+    this.touchedRimThisShot = false;
+
+    const ballBody = this.ball.body as Phaser.Physics.Arcade.Body;
+    ballBody.setAllowGravity(true);
+    ballBody.setVelocity(vx, vy);
+
     this.refreshHud();
-    this.resultLabel.setAlpha(0);
-    this.arcGuide.clear();
-
-    const rimX = this.hoop.x;
-    const { isMake, isRim, isBankShot } = this.evaluateShot();
-
-    if (isBankShot) {
-      this.animateBankShot(rimX, isMake);
-    } else {
-      this.animateDirectShot(rimX, isMake, isRim);
-    }
   }
 
-  private animateDirectShot(rimX: number, isMake: boolean, isRim: boolean) {
-    const apexY = this.ballStartY - (150 + this.currentPower * 170);
-    const endX = isMake
-      ? rimX + Phaser.Math.Between(-7, 7)
-      : rimX + Phaser.Math.Between(isRim ? -26 : -64, isRim ? 26 : 64);
-    const endY = isMake
-      ? this.hoopY + Phaser.Math.Between(34, 56)
-      : this.hoopY + Phaser.Math.Between(8, 74);
+  // ── Goal detection ──────────────────────────────────────────────────────
 
-    const curve = new Phaser.Curves.QuadraticBezier(
-      new Phaser.Math.Vector2(this.ballStartX, this.ballStartY),
-      new Phaser.Math.Vector2(Phaser.Math.Linear(this.ballStartX, endX, 0.48), apexY),
-      new Phaser.Math.Vector2(endX, endY),
-    );
-    const follower = { t: 0 };
+  private onGoal() {
+    if (this.phase !== 'flying') return;
+    if (this.goalScoredThisShot) return;
 
-    this.tweens.add({
-      targets: follower,
-      t: 1,
-      duration: 520,
-      ease: 'Sine.easeInOut',
-      onUpdate: () => {
-        const point = curve.getPoint(follower.t);
-        this.ball.setPosition(point.x, point.y);
-        this.ball.setScale(1 - follower.t * 0.28);
-        this.shadow.setPosition(
-          Phaser.Math.Linear(this.ballStartX, rimX, follower.t),
-          this.ballStartY + 16 - follower.t * 8,
-        );
-        this.shadow.setScale(1 - follower.t * 0.18, 1 - follower.t * 0.18);
-      },
-      onComplete: () => this.resolveShot(isMake, isRim, false),
-    });
+    const ballBody = this.ball.body as Phaser.Physics.Arcade.Body;
+    // Ball must be moving downward (falling through hoop)
+    if (ballBody.velocity.y < 30) return;
+
+    this.goalScoredThisShot = true;
+    const isSwish = !this.touchedRimThisShot;
+    this.scoreGoal(isSwish);
   }
 
-  /** Two-arc shot: ball goes to backboard, bounces toward hoop */
-  private animateBankShot(rimX: number, isMake: boolean) {
-    const boardX = rimX + 30;
-    const boardY = this.hoopY - 48 + Phaser.Math.Between(-8, 8);
-    const apexY1 = this.ballStartY - (120 + this.currentPower * 140);
+  private scoreGoal(isSwish: boolean) {
+    this.streak += 1;
+    this.makesCount += 1;
 
-    const curve1 = new Phaser.Curves.QuadraticBezier(
-      new Phaser.Math.Vector2(this.ballStartX, this.ballStartY),
-      new Phaser.Math.Vector2(Phaser.Math.Linear(this.ballStartX, boardX, 0.5), apexY1),
-      new Phaser.Math.Vector2(boardX, boardY),
-    );
+    const basePoints = isSwish ? 150 : 100;
+    let multiplier = 1.0;
+    let label = isSwish ? 'SWISH! +150' : '+100';
 
-    const endX = isMake
-      ? rimX + Phaser.Math.Between(-8, 8)
-      : rimX + Phaser.Math.Between(-32, 32);
-    const endY = isMake
-      ? this.hoopY + Phaser.Math.Between(34, 56)
-      : this.hoopY + Phaser.Math.Between(10, 60);
-
-    const curve2 = new Phaser.Curves.QuadraticBezier(
-      new Phaser.Math.Vector2(boardX, boardY),
-      new Phaser.Math.Vector2(rimX, boardY - 22),
-      new Phaser.Math.Vector2(endX, endY),
-    );
-
-    const follower = { t: 0 };
-
-    this.tweens.add({
-      targets: follower,
-      t: 1,
-      duration: 300,
-      ease: 'Sine.easeIn',
-      onUpdate: () => {
-        const point = curve1.getPoint(follower.t);
-        this.ball.setPosition(point.x, point.y);
-        this.ball.setScale(1 - follower.t * 0.08);
-        this.shadow.setPosition(
-          Phaser.Math.Linear(this.ballStartX, rimX, follower.t * 0.65),
-          this.ballStartY + 16 - follower.t * 4,
-        );
-      },
-      onComplete: () => {
-        this.spawnBoardImpact(boardX, boardY);
-        follower.t = 0;
-        this.tweens.add({
-          targets: follower,
-          t: 1,
-          duration: 260,
-          ease: 'Sine.easeOut',
-          onUpdate: () => {
-            const point = curve2.getPoint(follower.t);
-            this.ball.setPosition(point.x, point.y);
-            this.ball.setScale(0.92 - follower.t * 0.2);
-            this.shadow.setPosition(
-              Phaser.Math.Linear(boardX, endX, follower.t),
-              this.ballStartY + 8,
-            );
-            this.shadow.setScale(0.82 - follower.t * 0.18, 0.82 - follower.t * 0.18);
-          },
-          onComplete: () => this.resolveShot(isMake, !isMake, true),
-        });
-      },
-    });
-  }
-
-  private spawnBoardImpact(x: number, y: number) {
-    try {
-      const flash = this.add.rectangle(x, y, 22, 18, 0xFFFFDD, 0.85).setDepth(200);
-      this.tweens.add({
-        targets: flash,
-        alpha: 0,
-        scaleX: 2.5,
-        scaleY: 2,
-        duration: 130,
-        ease: 'Sine.easeOut',
-        onComplete: () => flash.destroy(),
-      });
-      this.cameras.main.shake(80, 0.003, false);
-    } catch { /* scene may be shutting down */ }
-  }
-
-  // ── Shot resolution ─────────────────────────────────────────────────────
-
-  private resolveShot(isMake: boolean, isRim: boolean, isBankShot: boolean) {
-    if (isMake) {
-      this.score += 1;
-      this.streak += 1;
-      const shotReward = calculateBasketShotReward(this.streak);
-      this.grantedRewardTenks += shotReward;
-      if (isBankShot) {
-        this.lastResult = 'BANCO!';
-      } else if (this.streak >= 3) {
-        this.lastResult = 'HEAT CHECK!';
-      } else {
-        this.lastResult = 'SWISH!';
-      }
-      this.lastResultColor = '#39FF14';
-      this.animateNet(true);
-      this.spawnScoreFlash();
-      this.tweens.add({
-        targets: this.scoreText,
-        scaleX: 1.4,
-        scaleY: 1.4,
-        duration: 80,
-        ease: 'Sine.easeOut',
-        yoyo: true,
-        onComplete: () => {
-          this.tweens.add({
-            targets: this.scoreText,
-            scaleX: 1,
-            scaleY: 1,
-            duration: 120,
-            ease: 'Back.easeOut',
-          });
-        },
-      });
-      this.showFloatingLabel(`+${shotReward} TENKS`, '#F5C842');
-    } else if (isRim) {
-      this.streak = 0;
-      this.lastResult = isBankShot ? 'TABLERO!' : 'ARO!';
-      this.lastResultColor = '#F5C842';
-      this.animateNet(false);
-    } else {
-      this.streak = 0;
-      this.lastResult = 'MISS!';
-      this.lastResultColor = '#FF6B6B';
-      this.animateNet(false);
+    if (this.streak === 2) {
+      multiplier = 1.5;
+      label = isSwish ? 'SWISH x1.5!' : 'RACHA x1.5!';
+    } else if (this.streak === 3) {
+      multiplier = 2.0;
+      label = isSwish ? 'SWISH x2!' : 'RACHA x2!';
+    } else if (this.streak >= 4) {
+      multiplier = 3.0;
+      label = 'ON FIRE 🔥';
     }
 
-    this.refreshScorePanel();
-    this.resultLabel.setText(this.lastResult);
-    this.resultLabel.setColor(this.lastResultColor);
-    this.resultLabel.setAlpha(1);
-    this.resultLabel.setY(334);
-    this.tweens.add({
-      targets: this.resultLabel,
-      y: 320,
-      alpha: { from: 1, to: 0.2 },
-      duration: 680,
-      ease: 'Sine.easeOut',
-    });
+    const points = Math.round(basePoints * multiplier);
+    this.totalScore += points;
 
+    // Visual effects
+    this.cameras.main.shake(100, 0.005);
+
+    // Slow motion
+    this.time.timeScale = 0.3;
+    this.tweens.timeScale = 0.3;
+    this.physics.world.timeScale = 1 / 0.3; // physics runs at normal speed
+    window.setTimeout(() => {
+      if (!this.scene.isActive('BasketMinigame')) return;
+      this.time.timeScale = 1;
+      this.tweens.timeScale = 1;
+      this.physics.world.timeScale = 1;
+    }, 200);
+
+    // Gold particle burst at hoop
+    this.spawnGoalBurst();
+
+    // Animate net
+    this.animateNet(true);
+
+    // Floating label
+    this.showFloatingText(label, '#F5C842', HOOP_X, HOOP_Y - 30);
+    this.showFloatingText(`+${points}pts`, '#39FF14', HOOP_X, HOOP_Y - 10);
+
+    console.log('SFX: basket_score');
+
+    this.refreshHud();
+    this.showResultLabel(label, '#39FF14');
+
+    // After slow-mo resolves, set result phase
+    this.resultTimerMs = 900;
     this.phase = 'result';
-    this.resultTimerMs = 460;
+  }
+
+  private onMiss() {
+    this.streak = 0;
+    console.log('SFX: miss');
+    this.animateNet(false);
     this.refreshHud();
+    this.showResultLabel('MISS!', '#FF006E');
+    this.resultTimerMs = 600;
+    this.phase = 'result';
   }
 
-  private spawnScoreFlash() {
-    const flash = this.add.rectangle(this.hoop.x, this.hoopY + 10, 86, 66, 0xF5C842, 0.25)
-      .setDepth(12000)
-      .setBlendMode(Phaser.BlendModes.ADD);
-    this.tweens.add({
-      targets: flash,
-      alpha: 0,
-      scaleX: 1.5,
-      scaleY: 1.3,
-      duration: 180,
-      ease: 'Sine.easeOut',
-      onComplete: () => flash.destroy(),
-    });
+  // ── Visual helpers ──────────────────────────────────────────────────────
+
+  private spawnGoalBurst() {
+    for (let i = 0; i < 10; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 40 + Math.random() * 80;
+      const px = HOOP_X + (Math.random() - 0.5) * 60;
+      const py = HOOP_Y + 10;
+      const particle = this.add.circle(px, py, 3 + Math.random() * 3, 0xF5C842, 1)
+        .setDepth(300)
+        .setBlendMode(Phaser.BlendModes.ADD);
+      this.tweens.add({
+        targets: particle,
+        x: px + Math.cos(angle) * speed,
+        y: py + Math.sin(angle) * speed,
+        alpha: 0,
+        scaleX: 0.2,
+        scaleY: 0.2,
+        duration: 400 + Math.random() * 200,
+        ease: 'Sine.easeOut',
+        onComplete: () => { if (particle.active) particle.destroy(); },
+      });
+    }
   }
 
-  private showFloatingLabel(text: string, color: string) {
-    const cx = this.scale.width / 2;
-    const label = this.add.text(cx, 290, text, {
-      fontSize: '16px',
+  private showFloatingText(text: string, color: string, x: number, startY: number) {
+    const label = this.add.text(x, startY, text, {
+      fontSize: '13px',
       fontFamily: '"Press Start 2P", monospace',
       color,
       stroke: '#000000',
-      strokeThickness: 4,
-    }).setOrigin(0.5).setAlpha(0).setDepth(13000).setScrollFactor(0);
+      strokeThickness: 3,
+    }).setOrigin(0.5).setAlpha(0).setDepth(400).setScrollFactor(0);
 
     this.tweens.add({
       targets: label,
       alpha: 1,
-      y: 270,
-      duration: 180,
+      y: startY - 20,
+      duration: 200,
       ease: 'Sine.easeOut',
       onComplete: () => {
-        // window.setTimeout so this fires even if Phaser timer is busy
         window.setTimeout(() => {
-          if (!label.active) return; // already destroyed by scene shutdown
-          if (!this.scene.isActive('BasketMinigame')) {
-            label.destroy();
-            return;
-          }
+          if (!this.scene.isActive('BasketMinigame')) return;
+          if (!label.active) return;
           this.tweens.add({
             targets: label,
             alpha: 0,
-            y: 250,
+            y: startY - 50,
             duration: 380,
             ease: 'Sine.easeIn',
             onComplete: () => { if (label.active) label.destroy(); },
           });
-        }, 240);
+        }, 300);
       },
+    });
+  }
+
+  private showResultLabel(text: string, color: string) {
+    const { width } = this.scale;
+    this.resultLabel.setText(text).setColor(color).setAlpha(1).setX(width / 2).setY(310);
+    this.tweens.add({
+      targets: this.resultLabel,
+      y: 295,
+      alpha: 0,
+      duration: 700,
+      ease: 'Sine.easeOut',
     });
   }
 
   private animateNet(made: boolean) {
-    this.redrawNet(made ? 8 : 3);
+    const drop = made ? 10 : 4;
+    this.drawNet(drop);
     this.tweens.addCounter({
-      from: made ? 8 : 3,
+      from: drop,
       to: 0,
-      duration: made ? 320 : 180,
+      duration: made ? 350 : 180,
       ease: 'Sine.easeOut',
       onUpdate: tween => {
-        this.redrawNet(tween.getValue() ?? 0);
+        this.drawNet(tween.getValue() ?? 0);
       },
     });
   }
 
-  private redrawNet(drop: number) {
-    this.hoopNet.clear();
-    this.hoopNet.lineStyle(2, 0xdce6ff, 0.75);
-    for (let i = -30; i <= 30; i += 15) {
-      this.hoopNet.lineBetween(i, 2, i * 0.6, 32 + drop);
-    }
-    for (let y = 10; y <= 30; y += 10) {
-      this.hoopNet.lineBetween(-28 + y * 0.12, y + drop * 0.35, 28 - y * 0.12, y + drop * 0.35);
-    }
-  }
+  // ── Shot flow ───────────────────────────────────────────────────────────
 
   private resetForNextShot() {
-    this.phase = 'aiming';
-    this.ball.setPosition(this.ballStartX, this.ballStartY);
+    // Mark shot as completed
+    this.shotsTaken += 1;
+
+    if (this.shotsTaken >= TOTAL_SHOTS) {
+      this.enterDoneState();
+      return;
+    }
+
+    // Reset ball for next shot
+    const ballBody = this.ball.body as Phaser.Physics.Arcade.Body;
+    ballBody.setAllowGravity(false);
+    ballBody.setVelocity(0, 0);
+    ballBody.setAcceleration(0, 0);
+
+    const jitter = Phaser.Math.Between(-50, 50);
+    const newX = Phaser.Math.Clamp(BALL_START_X + jitter, 80, 280);
+    this.ball.setPosition(newX, BALL_START_Y);
     this.ball.setScale(1);
-    this.shadow.setPosition(this.ballStartX, this.ballStartY + 16);
+
+    this.shadow.setPosition(newX, BALL_START_Y + 18);
     this.shadow.setScale(1, 1);
-    this.currentPower = Phaser.Math.FloatBetween(0.28, 0.48);
-    this.redrawAimGuide();
+
+    this.goalScoredThisShot = false;
+    this.touchedRimThisShot = false;
+    this.isDragging = false;
+
+    this.phase = 'aiming';
+    this.refreshHud();
   }
 
   private enterDoneState() {
     if (this.phase === 'done' || this.phase === 'exiting') return;
     this.phase = 'done';
-    this.grantedRewardTenks = Math.max(this.grantedRewardTenks, calculateBasketReward(this.score));
-    eventBus.emit(EVENTS.STATS_BASKET_GAME, {
-      score: this.score,
-      shots: this.shotsTaken,
-      makes: this.score,
-    });
-    this.resultLabel.setAlpha(1);
-    this.resultLabel.setY(322);
-    this.resultLabel.setText(this.grantedRewardTenks > 0 ? `+${this.grantedRewardTenks} TENKS` : 'SIN PREMIO');
-    this.resultLabel.setColor(this.grantedRewardTenks > 0 ? '#39FF14' : '#F5C842');
-    this.footer.setText(this.grantedRewardTenks > 0 ? 'GUARDANDO PREMIO...' : 'VOLVIENDO AL ARCADE...');
-    this.footer.setColor(this.grantedRewardTenks > 0 ? '#46B3FF' : '#888888');
-    this.rewardPending = this.grantedRewardTenks > 0;
-    void this.resolveReward();
-    this.resultTimerMs = 1650;
 
-    // Hard safety: if reward resolution hangs (auth timeout, network error),
-    // clear the block after 10s so the player is never permanently frozen.
+    // Stop ball
+    const ballBody = this.ball.body as Phaser.Physics.Arcade.Body;
+    ballBody.setAllowGravity(false);
+    ballBody.setVelocity(0, 0);
+
+    // Calculate TENKS reward
+    const makes = this.makesCount;
+    let tenksReward = this.calculateTenksReward();
+    if (makes === TOTAL_SHOTS) {
+      tenksReward += 1000; // perfect game bonus
+    }
+    this.grantedRewardTenks = tenksReward;
+
+    eventBus.emit(EVENTS.STATS_BASKET_GAME, {
+      score: this.totalScore,
+      shots: this.shotsTaken,
+      makes,
+    });
+
+    const { width } = this.scale;
+    this.showFloatingText(`+${tenksReward} TENKS`, '#F5C842', width / 2, 250);
+
+    const finalLabel = this.add.text(width / 2, 200, [
+      `FINAL: ${this.totalScore} PTS`,
+      makes === TOTAL_SHOTS ? 'PARTIDA PERFECTA!' : `${makes}/${TOTAL_SHOTS} CANASTAS`,
+    ], {
+      fontSize: '13px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 4,
+      align: 'center',
+      lineSpacing: 10,
+    }).setOrigin(0.5).setAlpha(0).setDepth(300);
+
+    this.tweens.add({
+      targets: finalLabel,
+      alpha: 1,
+      y: 195,
+      duration: 300,
+      ease: 'Back.easeOut',
+    });
+
+    this.hintText.setText('GUARDANDO RESULTADO...');
+    this.hintText.setColor('#46B3FF');
+
+    this.rewardPending = tenksReward > 0;
+    void this.resolveReward();
+    this.postGameTimerMs = 2000;
+
+    // Safety: unblock after 10s if reward hangs
     if (this.rewardPending) {
       window.setTimeout(() => {
         if (!this.rewardPending || this.isFinished) return;
         if (!this.scene.isActive('BasketMinigame')) return;
-        if (!this.footer.active) return;
+        if (!this.hintText.active) return;
         this.rewardPending = false;
-        this.footer.setText('NO SE PUDO GUARDAR. VOLVIENDO...');
-        this.footer.setColor('#FF006E');
+        this.hintText.setText('NO SE PUDO GUARDAR. VOLVIENDO...');
+        this.hintText.setColor('#FF006E');
       }, 10000);
     }
   }
 
-  private refreshHud() {
-    const remaining = Math.ceil(this.roundTimerMs / 1000);
-    this.hud.setText([
-      `TIEMPO ${remaining}s`,
-      `TIROS ${this.shotsTaken}`,
-      `PUNTAJE ${this.score}`,
-    ]);
+  private calculateTenksReward(): number {
+    const pts = this.totalScore;
+    if (pts <= 300) return 75;
+    if (pts <= 600) return 150;
+    if (pts <= 900) return 250;
+    if (pts <= 1200) return 400;
+    return 600;
   }
 
-  private refreshScorePanel() {
-    this.scoreText.setText([
-      `ANOTADOS ${this.score}`,
-      `RACHA ${this.streak}`,
-    ]);
+  // ── Update loop ─────────────────────────────────────────────────────────
+
+  update(_time: number, delta: number) {
+    if (this.isFinished) return;
+
+    // Shadow follows ball horizontally on court
+    if (this.phase === 'flying') {
+      const shadowY = BALL_START_Y + 18;
+      const ballX = this.ball.x;
+      const heightRatio = Phaser.Math.Clamp(1 - (BALL_START_Y - this.ball.y) / 300, 0.2, 1);
+      this.shadow.setPosition(ballX, shadowY);
+      this.shadow.setScale(heightRatio, heightRatio * 0.4);
+
+      // Check out of bounds
+      if (
+        this.ball.y > 640 ||
+        this.ball.x < -60 ||
+        this.ball.x > 860
+      ) {
+        if (!this.goalScoredThisShot) {
+          this.onMiss();
+        }
+      }
+    }
+
+    // Result phase: wait then go next
+    if (this.phase === 'result') {
+      this.resultTimerMs -= delta;
+      if (this.resultTimerMs <= 0) {
+        this.resetForNextShot();
+      }
+      return;
+    }
+
+    // Done phase: wait then exit
+    if (this.phase === 'done') {
+      if (this.rewardPending) return;
+      this.postGameTimerMs -= delta;
+      if (this.postGameTimerMs <= 0) {
+        this.finishAndExit();
+      }
+      return;
+    }
   }
 
   private finishAndExit() {
@@ -837,7 +750,7 @@ export class BasketMinigame extends Phaser.Scene {
     transitionToScene(this, 'ArcadeInterior', {
       basketCooldownMs: 1200,
       basketReward: {
-        score: this.score,
+        score: this.totalScore,
         shots: this.shotsTaken,
         tenksEarned: this.grantedRewardTenks,
         status: this.rewardStatus,
@@ -845,15 +758,15 @@ export class BasketMinigame extends Phaser.Scene {
     });
   }
 
-  // ── Reward ─────────────────────────────────────────────────────────────
+  // ── Server reward ───────────────────────────────────────────────────────
 
-  private async getAuthToken() {
+  private async getAuthToken(): Promise<string | null> {
     if (!supabase || !isConfigured) return null;
     const { data } = await supabase.auth.getSession();
     return data.session?.access_token ?? null;
   }
 
-  private async prepareRewardRun() {
+  private async prepareRewardRun(): Promise<void> {
     if (this.rewardRunId) return;
     if (this.rewardRunPromise) {
       await this.rewardRunPromise;
@@ -884,14 +797,17 @@ export class BasketMinigame extends Phaser.Scene {
     }
   }
 
-  private async resolveReward() {
+  private async resolveReward(): Promise<void> {
     if (this.rewardResolved) return;
+
     if (this.grantedRewardTenks <= 0) {
       this.rewardResolved = true;
       this.rewardPending = false;
       this.rewardStatus = 'granted';
-      this.footer.setText('VOLVIENDO AL ARCADE...');
-      this.footer.setColor('#888888');
+      if (this.hintText.active) {
+        this.hintText.setText('VOLVIENDO AL ARCADE...');
+        this.hintText.setColor('#888888');
+      }
       return;
     }
 
@@ -901,10 +817,10 @@ export class BasketMinigame extends Phaser.Scene {
       this.rewardResolved = true;
       this.rewardPending = false;
       this.grantedRewardTenks = 0;
-      this.resultLabel.setText('PREMIO PENDIENTE');
-      this.resultLabel.setColor('#FFB36A');
-      this.footer.setText('INICIA SESION PARA ACREDITAR EL PREMIO.');
-      this.footer.setColor('#FFB36A');
+      if (this.hintText.active) {
+        this.hintText.setText('INICIA SESION PARA ACREDITAR EL PREMIO.');
+        this.hintText.setColor('#FFB36A');
+      }
       return;
     }
 
@@ -914,14 +830,13 @@ export class BasketMinigame extends Phaser.Scene {
       this.rewardResolved = true;
       this.rewardPending = false;
       this.grantedRewardTenks = 0;
-      this.resultLabel.setText('PREMIO PENDIENTE');
-      this.resultLabel.setColor('#FFB36A');
-      this.footer.setText('NO PUDIMOS RESERVAR LA PARTIDA. PROBA OTRA VEZ.');
-      this.footer.setColor('#FFB36A');
+      if (this.hintText.active) {
+        this.hintText.setText('NO PUDIMOS RESERVAR LA PARTIDA. PROBA OTRA VEZ.');
+        this.hintText.setColor('#FFB36A');
+      }
       return;
     }
 
-    // 8s timeout: if network hangs, never block finishAndExit
     const res = await fetchWithTimeout(
       '/api/minigames/basket/reward',
       {
@@ -931,7 +846,7 @@ export class BasketMinigame extends Phaser.Scene {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          score: this.score,
+          score: this.totalScore,
           shots: this.shotsTaken,
           runId: this.rewardRunId,
         }),
@@ -944,29 +859,41 @@ export class BasketMinigame extends Phaser.Scene {
       this.rewardResolved = true;
       this.rewardPending = false;
       this.grantedRewardTenks = 0;
-      this.resultLabel.setText('PREMIO PENDIENTE');
-      this.resultLabel.setColor('#FFB36A');
-      this.footer.setText('VOLVE A ENTRAR LUEGO. EL PREMIO NO SE CERRO.');
-      this.footer.setColor('#FFB36A');
+      if (this.hintText.active) {
+        this.hintText.setText('VOLVE A ENTRAR LUEGO. EL PREMIO NO SE CERRO.');
+        this.hintText.setColor('#FFB36A');
+      }
       return;
     }
 
-    const json = await res.json().catch(() => null) as { tenksEarned?: number; player?: { tenks?: number } } | null;
+    const json = await res.json().catch(() => null) as {
+      tenksEarned?: number;
+      player?: { tenks?: number };
+    } | null;
+
     if (typeof json?.player?.tenks === 'number') {
       initTenks(json.player.tenks, { preferStored: false });
     }
-    this.grantedRewardTenks = typeof json?.tenksEarned === 'number' ? json.tenksEarned : this.grantedRewardTenks;
+    if (typeof json?.tenksEarned === 'number') {
+      this.grantedRewardTenks = json.tenksEarned;
+    }
+
     eventBus.emit(EVENTS.UI_NOTICE, `Basket +${this.grantedRewardTenks} TENKS`);
     this.rewardStatus = 'granted';
     this.rewardResolved = true;
     this.rewardPending = false;
-    this.footer.setText('VOLVIENDO AL ARCADE CON PREMIO...');
-    this.footer.setColor('#39FF14');
+
+    if (this.hintText.active) {
+      this.hintText.setText('VOLVIENDO AL ARCADE CON PREMIO...');
+      this.hintText.setColor('#39FF14');
+    }
   }
 
+  // ── Cleanup ─────────────────────────────────────────────────────────────
+
   private handleShutdown() {
-    this.input.off('pointerdown', this.handleShootInput, this);
-    this.shooterAvatar?.destroy();
-    this.shooterAvatar = undefined;
+    this.input.off('pointerdown', this.onPointerDown, this);
+    this.input.off('pointermove', this.onPointerMove, this);
+    this.input.off('pointerup', this.onPointerUp, this);
   }
 }

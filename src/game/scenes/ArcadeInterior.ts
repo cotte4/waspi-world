@@ -56,9 +56,13 @@ export class ArcadeInterior extends Phaser.Scene {
   private basketMachineZone = new Phaser.Geom.Rectangle();
   private penaltyMachineZone = new Phaser.Geom.Rectangle();
   private dartsMachineZone = new Phaser.Geom.Rectangle();
+  private flappyMachineZone = new Phaser.Geom.Rectangle();
+  private dinoMachineZone = new Phaser.Geom.Rectangle();
   private wasInsideBasketZone = false;
   private wasInsidePenaltyZone = false;
   private wasInsideDartsZone = false;
+  private wasInsideFlappyZone = false;
+  private wasInsideDinoZone = false;
   private basketCooldownMs = 0;
   private penaltyCooldownMs = 0;
   private dartsCooldownMs = 0;
@@ -69,6 +73,8 @@ export class ArcadeInterior extends Phaser.Scene {
   private machineHint?: Phaser.GameObjects.Text;
   private basketGlowPad?: Phaser.GameObjects.Ellipse;
   private glowPad?: Phaser.GameObjects.Ellipse;
+  private flappyGlowPad?: Phaser.GameObjects.Ellipse;
+  private dinoGlowPad?: Phaser.GameObjects.Ellipse;
   private arcadeMusic?: Phaser.Sound.BaseSound;
   private unlockMusicHandler?: () => void;
   private audioSettings: AudioSettings = loadAudioSettings();
@@ -88,6 +94,8 @@ export class ArcadeInterior extends Phaser.Scene {
     this.wasInsideBasketZone = false;
     this.wasInsidePenaltyZone = false;
     this.wasInsideDartsZone = false;
+    this.wasInsideFlappyZone = false;
+    this.wasInsideDinoZone = false;
     this.lastMoveDx = 0;
     this.lastMoveDy = 0;
     this.lastIsMoving = false;
@@ -235,21 +243,24 @@ export class ArcadeInterior extends Phaser.Scene {
     g.strokeRoundedRect(roomX + 22, roomY + roomH - 110, roomW - 44, 70, 18);
 
     const machinePositions = [roomX + 92, roomX + 226, roomX + 350, roomX + 474, roomX + 608];
-    const machineLabels = ['RACER', 'BASKET', 'PENALES', 'DARDOS', 'ZOMBIS'];
+    const machineLabels = ['FLAPPY', 'BASKET', 'PENALES', 'DARDOS', 'DINO'];
 
     machinePositions.forEach((mx, index) => {
       const isPenaltyMachine = index === 2;
-      const accent = isPenaltyMachine ? COLORS.GOLD : COLORS.NEON_BLUE;
+      const isFlappyMachine = index === 0;
+      const isDinoMachine = index === 4;
+      const accent = isPenaltyMachine ? COLORS.GOLD : isFlappyMachine ? 0xF5C842 : isDinoMachine ? 0x39FF14 : COLORS.NEON_BLUE;
 
       g.fillStyle(0x07071a, 1);
       g.fillRoundedRect(mx - 28, roomY + 64, 56, 112, 10);
-      g.lineStyle(2, accent, isPenaltyMachine ? 0.75 : 0.32);
+      const isSpecialMachine = isPenaltyMachine || isFlappyMachine || isDinoMachine;
+      g.lineStyle(2, accent, isSpecialMachine ? 0.75 : 0.32);
       g.strokeRoundedRect(mx - 28, roomY + 64, 56, 112, 10);
 
-      g.fillStyle(isPenaltyMachine ? 0x2d2410 : 0x0d1238, 1);
+      g.fillStyle(isPenaltyMachine ? 0x2d2410 : isFlappyMachine ? 0x2d2a10 : isDinoMachine ? 0x0d2410 : 0x0d1238, 1);
       g.fillRoundedRect(mx - 21, roomY + 76, 42, 36, 6);
 
-      g.fillStyle(accent, isPenaltyMachine ? 0.88 : 0.62);
+      g.fillStyle(accent, isSpecialMachine ? 0.88 : 0.62);
       g.fillRect(mx - 17, roomY + 82, 34, 22);
 
       g.fillStyle(0x16172c, 1);
@@ -257,13 +268,20 @@ export class ArcadeInterior extends Phaser.Scene {
       g.fillStyle(0x050505, 1);
       g.fillRect(mx - 14, roomY + 142, 28, 14);
 
+      const labelColor = isPenaltyMachine || isFlappyMachine ? '#F5C842' : isDinoMachine ? '#39FF14' : '#6A8BFF';
       this.add.text(mx, roomY + 48, machineLabels[index], {
         fontSize: '7px',
         fontFamily: '"Press Start 2P", monospace',
-        color: isPenaltyMachine ? '#F5C842' : '#6A8BFF',
+        color: labelColor,
       }).setOrigin(0.5);
 
-      if (index === 1) {
+      if (index === 0) {
+        // FLAPPY WASPI machine
+        this.flappyMachineZone = new Phaser.Geom.Rectangle(mx - 36, roomY + 56, 72, 122);
+        this.flappyGlowPad = this.add.ellipse(mx, roomY + 192, 94, 24, 0xF5C842, 0.12)
+          .setStrokeStyle(1, 0xF5C842, 0.35)
+          .setDepth(1);
+      } else if (index === 1) {
         this.basketMachineZone = new Phaser.Geom.Rectangle(mx - 36, roomY + 56, 72, 122);
         this.basketGlowPad = this.add.ellipse(mx, roomY + 192, 94, 24, 0x46b3ff, 0.12)
           .setStrokeStyle(1, 0x46b3ff, 0.35)
@@ -278,12 +296,12 @@ export class ArcadeInterior extends Phaser.Scene {
         this.add.ellipse(mx, roomY + 192, 94, 24, 0xFF006E, 0.12)
           .setStrokeStyle(1, 0xFF006E, 0.35)
           .setDepth(1);
-      } else {
-        this.add.text(mx, roomY + 190, 'SOON', {
-          fontSize: '6px',
-          fontFamily: '"Press Start 2P", monospace',
-          color: '#585C78',
-        }).setOrigin(0.5);
+      } else if (index === 4) {
+        // DINO RUN machine
+        this.dinoMachineZone = new Phaser.Geom.Rectangle(mx - 36, roomY + 56, 72, 122);
+        this.dinoGlowPad = this.add.ellipse(mx, roomY + 192, 94, 24, 0x39FF14, 0.12)
+          .setStrokeStyle(1, 0x39FF14, 0.35)
+          .setDepth(1);
       }
     });
 
@@ -405,12 +423,14 @@ export class ArcadeInterior extends Phaser.Scene {
     // ── Cartel de juegos disponibles ──────────────────────────────
     try {
       const signData = [
+        { label: 'FLAPPY', color: 0xF5C842 },
         { label: 'BASKET', color: 0x46B3FF },
         { label: 'PENALES', color: 0xF5C842 },
         { label: 'DARDOS', color: 0xFF006E },
+        { label: 'DINO', color: 0x39FF14 },
       ];
       signData.forEach(({ label, color }, si) => {
-        const sx = roomX + 80 + si * 160;
+        const sx = roomX + 70 + si * 126;
         const sy = roomY + 26;
         const sw = 96; const sh = 18;
         const sgnG = this.add.graphics().setDepth(3);
@@ -443,7 +463,7 @@ export class ArcadeInterior extends Phaser.Scene {
       color: '#FF006E',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, roomY + 54, 'PISA BASKET, PENALES O DARDOS PARA JUGAR', {
+    this.add.text(width / 2, roomY + 54, 'PISA UNA MAQUINA PARA JUGAR', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#A0A0B4',
@@ -520,6 +540,8 @@ export class ArcadeInterior extends Phaser.Scene {
     const inBasketZone = this.basketMachineZone.contains(this.px, this.py);
     const inPenaltyZone = this.penaltyMachineZone.contains(this.px, this.py);
     const inDartsZone = this.dartsMachineZone.contains(this.px, this.py);
+    const inFlappyZone = this.flappyMachineZone.contains(this.px, this.py);
+    const inDinoZone = this.dinoMachineZone.contains(this.px, this.py);
 
     if (this.basketGlowPad) {
       const pulse = 0.1 + Math.abs(Math.sin(this.time.now / 320)) * 0.08;
@@ -529,6 +551,16 @@ export class ArcadeInterior extends Phaser.Scene {
     if (this.glowPad) {
       const pulse = 0.1 + Math.abs(Math.sin(this.time.now / 280)) * 0.08;
       this.glowPad.setAlpha(inPenaltyZone ? 0.28 : pulse);
+    }
+
+    if (this.flappyGlowPad) {
+      const pulse = 0.1 + Math.abs(Math.sin(this.time.now / 360)) * 0.08;
+      this.flappyGlowPad.setAlpha(inFlappyZone ? 0.28 : pulse);
+    }
+
+    if (this.dinoGlowPad) {
+      const pulse = 0.1 + Math.abs(Math.sin(this.time.now / 400)) * 0.08;
+      this.dinoGlowPad.setAlpha(inDinoZone ? 0.28 : pulse);
     }
 
     if (this.machineHint) {
@@ -550,6 +582,12 @@ export class ArcadeInterior extends Phaser.Scene {
       } else if (inDartsZone) {
         this.machineHint.setText('DARDOS LISTO');
         this.machineHint.setColor('#FF006E');
+      } else if (inFlappyZone) {
+        this.machineHint.setText('FLAPPY WASPI LISTO');
+        this.machineHint.setColor('#F5C842');
+      } else if (inDinoZone) {
+        this.machineHint.setText('DINO RUN LISTO');
+        this.machineHint.setColor('#39FF14');
       } else {
         this.machineHint.setText('ESC SALIR DEL ARCADE');
         this.machineHint.setColor('#666666');
@@ -568,9 +606,19 @@ export class ArcadeInterior extends Phaser.Scene {
       this.startDarts();
     }
 
+    if (inFlappyZone && !this.wasInsideFlappyZone) {
+      this.startFlappy();
+    }
+
+    if (inDinoZone && !this.wasInsideDinoZone) {
+      this.startDino();
+    }
+
     this.wasInsideBasketZone = inBasketZone;
     this.wasInsidePenaltyZone = inPenaltyZone;
     this.wasInsideDartsZone = inDartsZone;
+    this.wasInsideFlappyZone = inFlappyZone;
+    this.wasInsideDinoZone = inDinoZone;
   }
 
   private startBasket() {
@@ -600,6 +648,26 @@ export class ArcadeInterior extends Phaser.Scene {
     this.cameras.main.fadeOut(250, 0, 0, 0);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
       this.scene.start('DartsMinigame');
+    });
+  }
+
+  private startFlappy() {
+    if (this.inTransition) return;
+    this.inTransition = true;
+    this.flashMessage(this.scale.width / 2, this.scale.height / 2 + 52, 'ENTRANDO A FLAPPY WASPI', '#F5C842');
+    this.cameras.main.fadeOut(250, 0, 0, 0);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      this.scene.start('FlappyWaspiScene');
+    });
+  }
+
+  private startDino() {
+    if (this.inTransition) return;
+    this.inTransition = true;
+    this.flashMessage(this.scale.width / 2, this.scale.height / 2 + 52, 'ENTRANDO A DINO RUN', '#39FF14');
+    this.cameras.main.fadeOut(250, 0, 0, 0);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
+      this.scene.start('DinoRunScene');
     });
   }
 
