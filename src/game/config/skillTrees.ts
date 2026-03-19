@@ -19,12 +19,21 @@ export type SkillUnlock = {
   buffs?: SkillBuff[];
 };
 
+export type MilestoneDef = {
+  id: string;        // unique, e.g. 'mining_10'
+  count: number;     // action_count threshold to unlock
+  name: string;      // short display name
+  reward: string;    // human-readable reward description
+  rewardType: 'title' | 'stat' | 'cosmetic';
+};
+
 export type SkillTreeDef = {
   id: SkillId;
   label: string;
   emoji: string;
   description: string;
   levels: SkillUnlock[];
+  milestones: MilestoneDef[];
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -41,6 +50,11 @@ const miningTree: SkillTreeDef = {
   label: 'Mining',
   emoji: '⛏️',
   description: 'Extrae recursos del mundo — piedra, metales y cristales legendarios.',
+  milestones: [
+    { id: 'mining_10',  count: 10,  name: 'Minero Veterano',     reward: 'Título desbloqueado',          rewardType: 'title'    },
+    { id: 'mining_50',  count: 50,  name: 'Veta de Hierro',      reward: '+3 XP extra por golpe',        rewardType: 'stat'     },
+    { id: 'mining_200', count: 200, name: 'Cristal Waspi',       reward: 'Aura de cristal (cosmético)',  rewardType: 'cosmetic' },
+  ],
   levels: [
     {
       level: 1,
@@ -94,6 +108,11 @@ const fishingTree: SkillTreeDef = {
   label: 'Fishing',
   emoji: '🎣',
   description: 'Pesca desde zonas comunes hasta los mares legendarios de Waspi.',
+  milestones: [
+    { id: 'fishing_10',  count: 10,  name: 'Pescador Regular',  reward: 'Título desbloqueado',                rewardType: 'title'    },
+    { id: 'fishing_50',  count: 50,  name: 'Caña de Plata',     reward: '+10% suerte de pesca extra',         rewardType: 'stat'     },
+    { id: 'fishing_200', count: 200, name: 'Maestro del Anzuelo', reward: 'Traje de pescador (cosmético)',   rewardType: 'cosmetic' },
+  ],
   levels: [
     {
       level: 1,
@@ -147,6 +166,11 @@ const gardeningTree: SkillTreeDef = {
   label: 'Gardening',
   emoji: '🌱',
   description: 'Cultivá tu parcela, desde tomates hasta cultivos con efectos místicos.',
+  milestones: [
+    { id: 'gardening_5',  count: 5,  name: 'Amante del Bosque',  reward: 'Título desbloqueado',             rewardType: 'title'    },
+    { id: 'gardening_20', count: 20, name: 'Manos Verdes',       reward: '+5% velocidad de cosecha extra',  rewardType: 'stat'     },
+    { id: 'gardening_50', count: 50, name: 'Árbol de la Vida',   reward: 'Sombrero de botánico (cosmético)', rewardType: 'cosmetic' },
+  ],
   levels: [
     {
       level: 1,
@@ -200,6 +224,11 @@ const cookingTree: SkillTreeDef = {
   label: 'Cooking',
   emoji: '🍳',
   description: 'Preparate recetas que buffean a tu personaje y a jugadores cercanos.',
+  milestones: [
+    { id: 'cooking_5',  count: 5,  name: 'Amante del Café',  reward: 'Título desbloqueado',           rewardType: 'title'    },
+    { id: 'cooking_20', count: 20, name: 'Receta Secreta',   reward: '+5 HP extra al consumir comida', rewardType: 'stat'     },
+    { id: 'cooking_50', count: 50, name: 'Chef del Barrio',  reward: 'Delantal dorado (cosmético)',    rewardType: 'cosmetic' },
+  ],
   levels: [
     {
       level: 1,
@@ -254,6 +283,11 @@ const gymTree: SkillTreeDef = {
   label: 'Gym',
   emoji: '🏋️',
   description: 'Entrenamiento físico que mejora HP, velocidad, daño y resistencia.',
+  milestones: [
+    { id: 'gym_10',  count: 10,  name: 'Primera Sangre',   reward: 'Título desbloqueado',        rewardType: 'title'    },
+    { id: 'gym_50',  count: 50,  name: 'Ironclad',         reward: '+5 HP máximo permanente',    rewardType: 'stat'     },
+    { id: 'gym_200', count: 200, name: 'Modo Berserker',   reward: 'Aura de combate (cosmético)', rewardType: 'cosmetic' },
+  ],
   levels: [
     {
       level: 1,
@@ -313,6 +347,11 @@ const weedTree: SkillTreeDef = {
   label: 'Weed',
   emoji: '🌿',
   description: 'Del consumo casual al control del mercado negro de Waspi.',
+  milestones: [
+    { id: 'weed_10',  count: 10,  name: 'Fumón Regular',   reward: 'Título desbloqueado',             rewardType: 'title'    },
+    { id: 'weed_50',  count: 50,  name: 'Proveedor',       reward: 'Slot extra de trade',             rewardType: 'stat'     },
+    { id: 'weed_200', count: 200, name: 'Cartel de Waspi', reward: 'Lentes de sol dorados (cosmético)', rewardType: 'cosmetic' },
+  ],
   levels: [
     {
       level: 1,

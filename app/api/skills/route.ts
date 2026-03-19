@@ -4,6 +4,8 @@ import {
   getAuthenticatedUser,
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
+import { getSkillDef } from '@/src/game/config/skillTrees';
+import type { MilestoneDef } from '@/src/game/config/skillTrees';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -30,6 +32,7 @@ interface SkillRow {
   skill_id: SkillId;
   xp: number;
   level: number;
+  action_count: number;
   updated_at: string;
 }
 
@@ -161,21 +164,23 @@ export async function POST(request: NextRequest) {
 
   const { data: existing, error: fetchError } = await admin
     .from('player_skills')
-    .select('xp, level')
+    .select('xp, level, action_count')
     .eq('user_id', user.id)
     .eq('skill_id', skill_id)
-    .maybeSingle<Pick<SkillRow, 'xp' | 'level'>>();
+    .maybeSingle<Pick<SkillRow, 'xp' | 'level' | 'action_count'>>();
 
   if (fetchError) {
     return NextResponse.json({ error: fetchError.message }, { status: 500 });
   }
 
-  // ── Compute new XP and level ──────────────────────────────────────────────
+  // ── Compute new XP, level, and action count ───────────────────────────────
   const currentXp = existing?.xp ?? 0;
   const newXp = currentXp + xp_gain;
   const oldLevel = existing?.level ?? 0;
   const newLevel = computeLevel(newXp);
   const leveled_up = newLevel > oldLevel;
+  const oldActionCount = existing?.action_count ?? 0;
+  const newActionCount = oldActionCount + 1;
 
   // ── Upsert ────────────────────────────────────────────────────────────────
   const { data: upserted, error: upsertError } = await admin
@@ -186,6 +191,7 @@ export async function POST(request: NextRequest) {
         skill_id,
         xp: newXp,
         level: newLevel,
+        action_count: newActionCount,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'user_id,skill_id' },
@@ -197,10 +203,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: upsertError.message }, { status: 500 });
   }
 
+  // ── Check for newly unlocked milestones ───────────────────────────────────
+  let milestone_unlocked: MilestoneDef | null = null;
+  try {
+    const skillDef = getSkillDef(skill_id);
+    const crossed = skillDef.milestones.filter(
+      (m) => oldActionCount < m.count && newActionCount >= m.count,
+    );
+    if (crossed.length > 0) {
+      const milestone = crossed[0];
+      await admin.from('player_skill_milestones').upsert(
+        { user_id: user.id, skill_id, milestone_id: milestone.id, reached_at: new Date().toISOString() },
+        { onConflict: 'user_id,skill_id,milestone_id', ignoreDuplicates: true },
+      );
+      milestone_unlocked = milestone;
+    }
+  } catch {
+    // Milestone check failures are non-critical — never block the XP response
+  }
+
   return NextResponse.json({
     skill_id: upserted.skill_id,
     xp: upserted.xp,
     level: upserted.level,
     leveled_up,
+    ...(milestone_unlocked ? { milestone_unlocked } : {}),
   });
 }

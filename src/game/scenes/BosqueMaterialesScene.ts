@@ -128,6 +128,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   private minigameActive = false;
   private activeMiningMinigame: MiningMinigame | null = null;
   private bridgeCleanupFns: Array<() => void> = [];
+  private gardeningXpTimer?: Phaser.Time.TimerEvent;
 
   constructor() {
     super({ key: 'BosqueMaterialesScene' });
@@ -177,6 +178,14 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     this.cameras.main.startFollow(this.player.getContainer(), true, 0.1, 0.1);
     this.cameras.main.resetFX();
     this.cameras.main.fadeIn(300, 0, 0, 0);
+
+    // Gardening XP: being in the forest rewards exploration — 5 XP per minute
+    this.gardeningXpTimer = this.time.addEvent({
+      delay: 60_000,
+      loop: true,
+      callback: this.grantForestXp,
+      callbackScope: this,
+    });
   }
 
   update(_time: number, delta: number) {
@@ -784,7 +793,14 @@ export class BosqueMaterialesScene extends Phaser.Scene {
 
   // ─── Shutdown ─────────────────────────────────────────────────────────────
 
+  private grantForestXp() {
+    if (!this.scene?.isActive('BosqueMaterialesScene')) return;
+    void getSkillSystem().addXp('gardening', 5, 'forest_time');
+  }
+
   private onShutdown() {
+    this.gardeningXpTimer?.remove();
+    this.gardeningXpTimer = undefined;
     // Destroy any active minigame so its SPACE key listener doesn't leak
     if (this.activeMiningMinigame) {
       this.activeMiningMinigame.destroy();

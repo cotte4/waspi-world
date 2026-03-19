@@ -5,9 +5,11 @@
 
 import type { QualityTier } from '../config/qualityTiers';
 import type { SpecId } from '../config/specializations';
+import type { MilestoneDef } from '../config/skillTrees';
 import { SYNERGY_DEFS, type SynergyDef } from '../config/synergies';
 import { getAuthHeaders } from './authHelper';
 import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
+import { eventBus, EVENTS } from '../config/eventBus';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -125,6 +127,7 @@ type AddXpResponse = {
   new_level: number;
   xp: number;
   skill_id: string;
+  milestone_unlocked?: MilestoneDef;
 };
 
 // ---------------------------------------------------------------------------
@@ -248,6 +251,15 @@ export class SkillSystem {
 
       const leveled_up = typeof data.leveled_up === 'boolean' ? data.leveled_up : false;
       const new_level = clampLevel(data.new_level);
+
+      if (data.milestone_unlocked && typeof data.milestone_unlocked.id === 'string') {
+        eventBus.emit(EVENTS.SKILL_MILESTONE_UNLOCKED, data.milestone_unlocked);
+        eventBus.emit(EVENTS.UI_NOTICE, {
+          message: `🏆 LOGRO: ${data.milestone_unlocked.name}!`,
+          color: '#F5C842',
+        });
+      }
+
       return { leveled_up, new_level };
     } catch {
       // Fail silently — never crash the game

@@ -6,6 +6,7 @@ import { InteriorRoom } from '../systems/InteriorRoom';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { SceneControls } from '../systems/SceneControls';
 import { safeSceneDelayedCall } from '../systems/AnimationSafety';
+import { getSkillSystem } from '../systems/SkillSystem';
 
 export class CafeInterior extends Phaser.Scene {
   private static readonly RETURN_X = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
@@ -30,6 +31,10 @@ export class CafeInterior extends Phaser.Scene {
   private lastMoveDy = 0;
   private lastIsMoving = false;
   private controls!: SceneControls;
+  // Cooking XP: accumulated ms near a table
+  private cafeTableXpAccMs = 0;
+  private static readonly CAFE_TABLE_XP_INTERVAL_MS = 30_000;
+  private static readonly CAFE_TABLE_RADIUS = 70;
 
   constructor() {
     super({ key: 'CafeInterior' });
@@ -386,6 +391,7 @@ export class CafeInterior extends Phaser.Scene {
   update(_time?: number, delta = 16.6) {
     if (this.inTransition) return;
     this.handleMovement(delta);
+    this.updateCafeTableXp(delta);
     this.room?.update();
     if (this.controls.isActionJustDown('back')) {
       this.exitToWorld();
@@ -421,7 +427,30 @@ export class CafeInterior extends Phaser.Scene {
     this.lastIsMoving = dx !== 0 || dy !== 0;
   }
 
+  private updateCafeTableXp(delta: number) {
+    const { width, height } = this.scale;
+    const roomX = (width - 640) / 2;
+    const roomY = (height - 360) / 2;
+    const tables = [
+      { x: roomX + 148, y: roomY + 210 },
+      { x: roomX + 340, y: roomY + 232 },
+    ];
+    const nearTable = tables.some(
+      (t) => Phaser.Math.Distance.Between(this.px, this.py, t.x, t.y) <= CafeInterior.CAFE_TABLE_RADIUS,
+    );
+    if (nearTable) {
+      this.cafeTableXpAccMs += delta;
+      if (this.cafeTableXpAccMs >= CafeInterior.CAFE_TABLE_XP_INTERVAL_MS) {
+        this.cafeTableXpAccMs = 0;
+        void getSkillSystem().addXp('cooking', 5, 'cafe_sit');
+      }
+    } else {
+      this.cafeTableXpAccMs = 0;
+    }
+  }
+
   private handleSceneShutdown() {
+    this.cafeTableXpAccMs = 0;
     this.room?.shutdown();
     this.room = undefined;
   }

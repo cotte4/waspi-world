@@ -19,6 +19,7 @@ import { eventBus, EVENTS } from '../config/eventBus';
 import { getInventory } from '../systems/InventorySystem';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
 import { recordDistanceDelta } from '../systems/StatsSystem';
+import { getSkillSystem } from '../systems/SkillSystem';
 import { supabase, isConfigured } from '../../lib/supabase';
 import {
   ZOMBIES_PLAYER,
@@ -1804,6 +1805,7 @@ export class ZombiesScene extends Phaser.Scene {
     if (aliveZombies === 0 && !this.bossAlive && this.zombieProjectiles.size === 0 && this.roundBreakUntil === 0) {
       this.roundBreakUntil = this.time.now + ZOMBIES_POINTS.roundBreakMs;
       this.showNotice(`LIMPIASTE LA RONDA ${this.round}`, '#9EFFB7');
+      void getSkillSystem().addXp('gym', 10, 'wave_clear');
     }
 
     if (this.roundBreakUntil !== 0 && this.time.now >= this.roundBreakUntil) {
@@ -2485,6 +2487,7 @@ export class ZombiesScene extends Phaser.Scene {
     const killReward = zombie.killReward * pointMultiplier;
     this.points += killReward;
     eventBus.emit(EVENTS.STATS_ZOMBIE_KILL);
+    void getSkillSystem().addXp('gym', zombie.isBoss ? 10 : 3, 'zombie_kill');
     if (zombie.shadow?.scene && zombie.shadow.active !== false) {
       zombie.shadow.setAlpha(0.18);
     }

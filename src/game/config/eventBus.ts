@@ -67,4 +67,5 @@ export const EVENTS = {
   OPEN_STATS: 'stats:open',
   VOICE_MIC_CHANGED: 'voice:mic:changed',
   VOICE_DISABLE: 'voice:disable',
+  SKILL_MILESTONE_UNLOCKED: 'skill:milestone:unlocked',
 } as const;
