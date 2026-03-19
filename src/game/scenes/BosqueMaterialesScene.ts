@@ -20,6 +20,8 @@ const MOB_DAMAGE_COOLDOWN_MS = 900;
 const MATERIAL_COLLECT_RANGE = 52;
 const MATERIAL_RESPAWN_MS = 18_000;
 const CAVE_INTERACT_RANGE = 110;
+const COMMUNAL_GARDEN_GATE = { x: 190, y: 400, range: 65 };
+const COMMUNAL_GARDEN_RESPAWN_MS = 90_000; // 90s — slower than regular nodes
 
 const ENTRY_X = 800;
 const ENTRY_Y = 1080;
@@ -48,6 +50,13 @@ const TREES: Array<{ x: number; y: number; r: number }> = [
   // Upper-right (away from cave clearing)
   { x: 1200, y: 200, r: 28 }, { x: 1130, y: 350, r: 30 }, { x: 1260, y: 500, r: 28 },
   { x: 1150, y: 650, r: 30 }, { x: 1300, y: 750, r: 26 }, { x: 1200, y: 900, r: 28 },
+];
+
+// ─── Communal garden plot positions (top-left, unlocked at Gardening Lv5) ────
+const COMMUNAL_GARDEN_DEFS: Array<{ x: number; y: number }> = [
+  { x: 166, y: 460 },
+  { x: 210, y: 440 },
+  { x: 185, y: 500 },
 ];
 
 // ─── Material node positions ───────────────────────────────────────────────────
@@ -82,6 +91,7 @@ type MaterialNode = {
   label: Phaser.GameObjects.Text;
   qualityRing: Phaser.GameObjects.Arc; // Mining Lv3: quality hint ring
   qualityColor: number;                // assigned per-node deterministically
+  communal?: boolean;                  // Gardening Lv5: communal garden plots
 };
 
 type Mob = {
@@ -131,6 +141,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   private activeMiningMinigame: MiningMinigame | null = null;
   private bridgeCleanupFns: Array<() => void> = [];
   private gardeningXpTimer?: Phaser.Time.TimerEvent;
+  private gardenGateText?: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'BosqueMaterialesScene' });
@@ -158,6 +169,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     this.drawPaths();
     this.drawTrees();
     this.drawCave();
+    this.drawCommunalGarden();
     this.drawLighting();
     this.drawEntryMarker();
     this.setupMaterialNodes();
@@ -195,6 +207,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     this.handleMovement(delta);
     this.updateMobs(delta);
     this.updateMaterialNodes();
+    this.updateCommunalGarden();
     this.updatePrompt();
     this.checkExitTrigger();
     if (Phaser.Input.Keyboard.JustDown(this.keyE)) this.handleInteract();
@@ -511,6 +524,42 @@ export class BosqueMaterialesScene extends Phaser.Scene {
         body, glow, label, qualityRing, qualityColor: qColor,
       });
     });
+
+    // Communal garden plots — deeper green, available only at Gardening Lv5
+    COMMUNAL_GARDEN_DEFS.forEach((def, i) => {
+      const glow = this.add.rectangle(def.x, def.y, 24, 24, 0x39FF14, 0.15).setDepth(2);
+      const body = this.add.rectangle(def.x, def.y, 14, 14, 0x2a8a2a, 0.9).setDepth(2.1);
+      const label = this.add.text(def.x, def.y - 16, 'PLANTA', {
+        fontSize: '5px', fontFamily: '"Press Start 2P", monospace',
+        color: '#39FF14', stroke: '#000', strokeThickness: 3,
+      }).setOrigin(0.5).setDepth(2.2);
+      const qualityRing = this.add.arc(def.x, def.y, 18, 0, 360, false, 0x39FF14, 0)
+        .setStrokeStyle(2, 0x39FF14, 0.6)
+        .setDepth(1.9)
+        .setVisible(false);
+      // Start hidden — shown only at Gardening Lv5
+      glow.setVisible(false);
+      body.setVisible(false);
+      label.setVisible(false);
+      this.tweens.add({
+        targets: [glow, body],
+        scaleX: { from: 0.8, to: 1.15 },
+        scaleY: { from: 0.8, to: 1.15 },
+        alpha: { from: 0.6, to: 1 },
+        duration: 1100 + i * 200,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+      this.materialNodes.push({
+        id: `garden_${i}`,
+        x: def.x, y: def.y,
+        available: true,
+        respawnAt: 0,
+        body, glow, label, qualityRing, qualityColor: 0x39FF14,
+        communal: true,
+      });
+    });
   }
 
   // ─── Mobs ─────────────────────────────────────────────────────────────────
@@ -658,7 +707,27 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   private updateMaterialNodes() {
     const now = this.time.now;
     const showRings = getSkillSystem().getLevel('mining') >= 3;
+    const gardeningLv = getSkillSystem().getLevel('gardening');
     for (const node of this.materialNodes) {
+      // Communal garden nodes locked below Gardening Lv5
+      if (node.communal) {
+        const unlocked = gardeningLv >= 5;
+        if (!unlocked) {
+          node.body.setVisible(false);
+          node.glow.setVisible(false);
+          node.label.setVisible(false);
+          node.qualityRing.setVisible(false);
+          continue;
+        }
+        if (!node.available && now >= node.respawnAt) {
+          node.available = true;
+          node.body.setVisible(true);
+          node.glow.setVisible(true);
+          node.label.setVisible(true);
+        }
+        continue;
+      }
+      // Regular nodes
       if (!node.available && now >= node.respawnAt) {
         node.available = true;
         node.body.setVisible(true);
@@ -693,11 +762,27 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     if (!nearest) return;
 
     nearest.available = false;
-    nearest.respawnAt = this.time.now + MATERIAL_RESPAWN_MS;
     nearest.body.setVisible(false);
     nearest.glow.setVisible(false);
     nearest.label.setVisible(false);
     nearest.qualityRing.setVisible(false);
+
+    // Communal garden nodes — instant harvest, no minigame, gardening XP only
+    if (nearest.communal) {
+      nearest.respawnAt = this.time.now + COMMUNAL_GARDEN_RESPAWN_MS;
+      this.showPrompt('+1 MATERIAL [JARDÍN] +10 XP JARDINERÍA');
+      void (async () => {
+        const result = await getSkillSystem().addXp('gardening', 10, 'communal_tend');
+        if (!this.scene?.isActive('BosqueMaterialesScene')) return;
+        if (result.leveled_up) {
+          eventBus.emit(EVENTS.UI_NOTICE, { message: `🌱 JARDINERÍA LVL ${result.new_level}!`, color: '#39FF14' });
+        }
+        if (getSkillSystem().getLevel('gardening') >= 5) void getMasterySystem().earnMp('gardening');
+      })();
+      return;
+    }
+
+    nearest.respawnAt = this.time.now + MATERIAL_RESPAWN_MS;
     this.collectedTotal++;
     this.hudText?.setText(`MATS: ${this.collectedTotal}`);
 
@@ -778,13 +863,22 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   private updatePrompt() {
     let hint = '';
     const dist2cave = Phaser.Math.Distance.Between(this.px, this.py, 1430, 175);
-    if (dist2cave < CAVE_INTERACT_RANGE) {
+    const dist2gate = Phaser.Math.Distance.Between(this.px, this.py, COMMUNAL_GARDEN_GATE.x, COMMUNAL_GARDEN_GATE.y);
+    if (dist2gate < COMMUNAL_GARDEN_GATE.range) {
+      const gLv = getSkillSystem().getLevel('gardening');
+      hint = gLv >= 5
+        ? '[E] CUIDAR PLANTAS DEL JARDÍN +10 XP'
+        : `🌱 JARDÍN COMUNAL [REQUIERE JARDINERÍA LV5 — LV ACTUAL: ${gLv}]`;
+    } else if (dist2cave < CAVE_INTERACT_RANGE) {
       hint = '[E] EXAMINAR CUEVA';
     } else {
       for (const node of this.materialNodes) {
         if (!node.available) continue;
         const d = Phaser.Math.Distance.Between(this.px, this.py, node.x, node.y);
-        if (d < MATERIAL_COLLECT_RANGE) { hint = '[E] RECOLECTAR MATERIAL'; break; }
+        if (d < MATERIAL_COLLECT_RANGE) {
+          hint = node.communal ? '[E] CUIDAR PLANTA COMUNAL' : '[E] RECOLECTAR MATERIAL';
+          break;
+        }
       }
     }
     if (this.py > 1100) hint = hint || '↓ SALIR AL VECINDAD';
@@ -794,6 +888,49 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   private showPrompt(msg: string) {
     this.promptText?.setText(msg);
     this.time.delayedCall(1800, () => this.promptText?.setText(''));
+  }
+
+  // ─── Communal Garden ──────────────────────────────────────────────────────
+
+  private drawCommunalGarden() {
+    const { x: gx, y: gy } = COMMUNAL_GARDEN_GATE;
+    const g = this.add.graphics().setName('garden-layer').setDepth(0.8);
+
+    // Fence border around plot area
+    g.lineStyle(2, 0x3a5a3a, 0.7);
+    g.strokeRoundedRect(gx - 56, gy - 20, 120, 130, 6);
+    // Fence posts
+    [gx - 56, gx - 16, gx + 24, gx + 64].forEach((px) => {
+      g.fillStyle(0x4a6a3a, 1);
+      g.fillRect(px - 3, gy - 22, 6, 134);
+    });
+    // Gate gap at top-center
+    g.fillStyle(0x101810, 1);
+    g.fillRect(gx - 12, gy - 24, 24, 8); // gate opening
+
+    // Gate icon (padlock or arrow)
+    this.gardenGateText = this.add.text(gx, gy - 10, '🔒 LV5', {
+      fontSize: '6px', fontFamily: '"Press Start 2P", monospace',
+      color: '#3a4a3a', stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+
+    // Inner soil patches
+    g.fillStyle(0x1e3314, 0.7);
+    COMMUNAL_GARDEN_DEFS.forEach((def) => {
+      g.fillRoundedRect(def.x - 14, def.y - 10, 28, 20, 4);
+    });
+  }
+
+  private updateCommunalGarden() {
+    if (!this.gardenGateText) return;
+    const gLv = getSkillSystem().getLevel('gardening');
+    if (gLv >= 5) {
+      this.gardenGateText.setText('🌱 JARDÍN');
+      this.gardenGateText.setColor('#39FF14');
+    } else {
+      this.gardenGateText.setText(`🔒 LV5`);
+      this.gardenGateText.setColor('#3a4a3a');
+    }
   }
 
   // ─── Exit ─────────────────────────────────────────────────────────────────

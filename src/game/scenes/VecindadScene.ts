@@ -83,6 +83,10 @@ export class VecindadScene extends Phaser.Scene {
   private static readonly FISHING_SPOT      = { x: 2440, y: 1540, range: 80 };
   // Deep spot — unlocked at Fishing Lv3; better quality odds
   private static readonly FISHING_SPOT_DEEP = { x: 2440, y: 1568, range: 50 };
+  // Weed Lv4 — pop-up trade stall near central plaza
+  private static readonly PUESTO_SPOT = { x: 1400, y: 820, range: 72 };
+  private static readonly PUESTO_DURATION_MS = 5 * 60 * 1000; // 5 min
+  private static readonly PUESTO_XP_INTERVAL_MS = 60_000;     // XP/min
   private player!: AvatarRenderer;
   private room?: InteriorRoom;
   private keySpace!: Phaser.Input.Keyboard.Key;
@@ -99,6 +103,11 @@ export class VecindadScene extends Phaser.Scene {
   private shiftKey?: Phaser.Input.Keyboard.Key;
   private inTransition = false;
   private fishingActive = false;
+  private puestoOpen = false;
+  private puestoXpTimer?: Phaser.Time.TimerEvent;
+  private puestoAutoCloseTimer?: Phaser.Time.TimerEvent;
+  private puestoGlow?: Phaser.GameObjects.Graphics;
+  private puestoTimeText?: Phaser.GameObjects.Text;
   private pendingMaterials = 0;
   private activeFishingMinigame: FishingMinigame | null = null;
   private px: number = VECINDAD_MAP.SPAWN_X;
@@ -318,6 +327,7 @@ export class VecindadScene extends Phaser.Scene {
     this.drawDistrictProps(g);
     this.drawAmbientOverlays();
     this.drawFishingPond(g);
+    this.drawPuestoSpot(g);
 
     this.add.text(155, 822, 'LA VECINDAD', {
       fontSize: '10px',
@@ -867,6 +877,21 @@ export class VecindadScene extends Phaser.Scene {
       return;
     }
 
+    if (this.isNearPuestoSpot()) {
+      const weedLv = getSkillSystem().getLevel('weed');
+      if (weedLv < 4) {
+        this.promptText.setText('🌿 PUESTO [REQUIERE WEED LV4]');
+        this.promptText.setColor('#3a4a3a');
+      } else if (this.puestoOpen) {
+        this.promptText.setText('E CERRAR PUESTO | SERVIENDO CLIENTES...');
+        this.promptText.setColor('#39FF14');
+      } else {
+        this.promptText.setText('E ABRIR PUESTO (5 MIN) +XP WEED');
+        this.promptText.setColor('#7bff7b');
+      }
+      return;
+    }
+
     if (this.isNearOwnedFarmSpot()) {
       if (!this.vecindadState.cannabisFarmUnlocked) {
         this.promptText.setText(`E DESBLOQUEAR CANNABIS FARM ${FARM_UNLOCK_COST} TENKS`);
@@ -949,6 +974,11 @@ export class VecindadScene extends Phaser.Scene {
     const fs = VecindadScene.FISHING_SPOT;
     if (Phaser.Math.Distance.Between(this.px, this.py, fs.x, fs.y) < fs.range) {
       void this.handleFishing(false);
+      return;
+    }
+
+    if (this.isNearPuestoSpot()) {
+      this.handlePuestoAction();
       return;
     }
 
@@ -1562,6 +1592,128 @@ export class VecindadScene extends Phaser.Scene {
     }
   }
 
+  // ─── Weed Lv4 Puesto ──────────────────────────────────────────────────────
+
+  private drawPuestoSpot(g: Phaser.GameObjects.Graphics) {
+    const { x, y } = VecindadScene.PUESTO_SPOT;
+    // Stall frame — always visible
+    g.fillStyle(0x1b2a1b, 0.92);
+    g.fillRoundedRect(x - 64, y - 36, 128, 56, 8);
+    g.lineStyle(2, 0x2a4a2a, 0.7);
+    g.strokeRoundedRect(x - 64, y - 36, 128, 56, 8);
+    g.fillStyle(0x2e3e2e, 0.6);
+    g.fillRect(x - 58, y - 30, 116, 10); // awning strip
+    g.lineStyle(1, 0x3a5a3a, 0.5);
+    g.lineBetween(x - 58, y - 20, x + 58, y - 20);
+
+    this.add.text(x, y - 16, '🌿 PUESTO', {
+      fontSize: '6px', fontFamily: '"Press Start 2P", monospace',
+      color: '#2a3e2a', stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+    this.add.text(x, y + 4, 'WEED LV4', {
+      fontSize: '5px', fontFamily: '"Press Start 2P", monospace',
+      color: '#223022', stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(2);
+
+    // Dynamic glow layer (hidden until open)
+    this.puestoGlow = this.add.graphics().setDepth(1.8);
+    this.puestoTimeText = this.add.text(x, y - 52, '', {
+      fontSize: '6px', fontFamily: '"Press Start 2P", monospace',
+      color: '#39FF14', stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(3).setScrollFactor(1);
+  }
+
+  private isNearPuestoSpot() {
+    const { x, y, range } = VecindadScene.PUESTO_SPOT;
+    return Phaser.Math.Distance.Between(this.px, this.py, x, y) < range;
+  }
+
+  private handlePuestoAction() {
+    const weedLv = getSkillSystem().getLevel('weed');
+    if (weedLv < 4) {
+      eventBus.emit(EVENTS.UI_NOTICE, { message: '🌿 REQUIERE WEED LV4', color: '#2a4a2a' });
+      return;
+    }
+    if (this.puestoOpen) {
+      this.closePuesto();
+    } else {
+      this.openPuesto();
+    }
+  }
+
+  private openPuesto() {
+    this.puestoOpen = true;
+    const { x, y } = VecindadScene.PUESTO_SPOT;
+    // Animated glow
+    this.puestoGlow?.clear();
+    this.puestoGlow?.fillStyle(0x39FF14, 0.12);
+    this.puestoGlow?.fillRoundedRect(x - 68, y - 40, 136, 64, 10);
+    this.puestoGlow?.lineStyle(2, 0x39FF14, 0.5);
+    this.puestoGlow?.strokeRoundedRect(x - 68, y - 40, 136, 64, 10);
+    this.tweens.add({
+      targets: this.puestoGlow,
+      alpha: { from: 0.7, to: 1 },
+      duration: 900,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    // Passive XP every 60s
+    this.puestoXpTimer = this.time.addEvent({
+      delay: VecindadScene.PUESTO_XP_INTERVAL_MS,
+      loop: true,
+      callback: this.grantPuestoXp,
+      callbackScope: this,
+    });
+
+    // Auto-close after 5 min; track start time for countdown display
+    const openedAt = Date.now();
+    this.puestoAutoCloseTimer = this.time.addEvent({
+      delay: VecindadScene.PUESTO_DURATION_MS,
+      callback: () => this.closePuesto(),
+      callbackScope: this,
+    });
+
+    // Update countdown every second
+    const countdownTimer = this.time.addEvent({
+      delay: 1000,
+      loop: true,
+      callback: () => {
+        if (!this.puestoOpen) { countdownTimer.remove(); return; }
+        const remaining = Math.max(0, VecindadScene.PUESTO_DURATION_MS - (Date.now() - openedAt));
+        const mins = Math.floor(remaining / 60_000);
+        const secs = Math.floor((remaining % 60_000) / 1000);
+        this.puestoTimeText?.setText(`⏱ ${mins}:${secs.toString().padStart(2, '0')}`);
+      },
+    });
+    this.puestoTimeText?.setText(`⏱ 5:00`);
+
+    eventBus.emit(EVENTS.UI_NOTICE, { message: '🌿 PUESTO ABIERTO! +XP POR MINUTO', color: '#39FF14' });
+  }
+
+  private closePuesto() {
+    this.puestoOpen = false;
+    this.tweens.killTweensOf(this.puestoGlow);
+    this.puestoGlow?.clear();
+    this.puestoXpTimer?.remove();
+    this.puestoXpTimer = undefined;
+    this.puestoAutoCloseTimer?.remove();
+    this.puestoAutoCloseTimer = undefined;
+    this.puestoTimeText?.setText('');
+    eventBus.emit(EVENTS.UI_NOTICE, { message: '🌿 PUESTO CERRADO', color: '#3a5a3a' });
+  }
+
+  private grantPuestoXp() {
+    if (!this.scene?.isActive('VecindadScene')) return;
+    void getSkillSystem().addXp('weed', 8, 'puesto_serve').then((r) => {
+      if (!this.scene?.isActive('VecindadScene')) return;
+      if (r.leveled_up) {
+        eventBus.emit(EVENTS.UI_NOTICE, { message: `🌿 WEED LVL ${r.new_level}!`, color: '#39FF14' });
+      }
+    });
+  }
+
   private handleSceneShutdown() {
     // Destroy any active fishing minigame so its SPACE key listener doesn't leak
     if (this.activeFishingMinigame) {
@@ -1569,6 +1721,15 @@ export class VecindadScene extends Phaser.Scene {
       this.activeFishingMinigame = null;
     }
     this.fishingActive = false;
+
+    // Puesto cleanup — timers are Phaser-managed but remove them explicitly
+    if (this.puestoOpen) {
+      this.puestoXpTimer?.remove();
+      this.puestoXpTimer = undefined;
+      this.puestoAutoCloseTimer?.remove();
+      this.puestoAutoCloseTimer = undefined;
+      this.puestoOpen = false;
+    }
 
     if (this.parcelRefreshTimeout) {
       clearTimeout(this.parcelRefreshTimeout);
