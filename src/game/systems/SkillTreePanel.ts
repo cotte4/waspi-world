@@ -98,6 +98,8 @@ export class SkillTreePanel {
   private tabLogrosBtn?: Phaser.GameObjects.Text;
   private tabSkillsBg?: Phaser.GameObjects.Rectangle;
   private tabLogrosBg?: Phaser.GameObjects.Rectangle;
+  private tabSkillsLine?: Phaser.GameObjects.Graphics;
+  private tabLogrosLine?: Phaser.GameObjects.Graphics;
   private logrosBadge?: Phaser.GameObjects.Text;
 
   // Skills view container (card grid + synergy strip)
@@ -364,7 +366,12 @@ export class SkillTreePanel {
       },
     ).setOrigin(1, 1).setScrollFactor(0);
 
-    this.container.add([overlay, panelBg, borderGfx, titleText, subtitleText, closeHint]);
+    // Gold separator line below the title / subtitle block
+    const sep = this.scene.add.graphics().setScrollFactor(0);
+    sep.lineStyle(1, 0xf5c842, 0.25);
+    sep.lineBetween(cx - PANEL_W / 2 + 24, cy - PANEL_H / 2 + 38, cx + PANEL_W / 2 - 24, cy - PANEL_H / 2 + 38);
+
+    this.container.add([overlay, panelBg, borderGfx, titleText, subtitleText, sep, closeHint]);
 
     // Build tab toggle row
     this.buildTabRow();
@@ -396,9 +403,9 @@ export class SkillTreePanel {
     const tabH = 20;
     const gap = 6;
 
-    // SKILLS tab
+    // SKILLS tab (active by default)
     const skillsTabX = cx - tabW - gap / 2;
-    const skillsBg = this.scene.add.rectangle(skillsTabX, tabY, tabW, tabH, 0x1a1a2e, 1)
+    const skillsBg = this.scene.add.rectangle(skillsTabX, tabY, tabW, tabH, 0x1e1e30, 1)
       .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
     skillsBg.setStrokeStyle(1, 0xf5c842, 1);
@@ -408,12 +415,25 @@ export class SkillTreePanel {
       color: '#F5C842',
     }).setOrigin(0.5, 0.5).setScrollFactor(0);
 
+    // Active bottom border line for SKILLS tab
+    const skillsLine = this.scene.add.graphics().setScrollFactor(0);
+    skillsLine.lineStyle(2, 0xf5c842, 1);
+    skillsLine.lineBetween(skillsTabX - tabW / 2, tabY + tabH / 2, skillsTabX + tabW / 2, tabY + tabH / 2);
+    this.tabSkillsLine = skillsLine;
+
     // LOGROS tab
     const logrosTabX = cx + tabW / 2 + gap / 2;
     const logrosBg = this.scene.add.rectangle(logrosTabX, tabY, tabW, tabH, 0x0d0d14, 1)
       .setScrollFactor(0)
       .setInteractive({ useHandCursor: true });
     logrosBg.setStrokeStyle(1, 0x444455, 0.8);
+
+    // Inactive bottom border line for LOGROS tab (hidden by default)
+    const logrosLine = this.scene.add.graphics().setScrollFactor(0);
+    logrosLine.lineStyle(2, 0xf5c842, 1);
+    logrosLine.lineBetween(logrosTabX - tabW / 2, tabY + tabH / 2, logrosTabX + tabW / 2, tabY + tabH / 2);
+    logrosLine.setAlpha(0);
+    this.tabLogrosLine = logrosLine;
     const logrosLabel = this.scene.add.text(logrosTabX, tabY, '[LOGROS]', {
       fontSize: '7px',
       fontFamily: FONT,
@@ -439,7 +459,7 @@ export class SkillTreePanel {
     skillsBg.on('pointerdown', () => this.switchTab('skills'));
     logrosBg.on('pointerdown', () => this.switchTab('logros'));
 
-    this.container.add([skillsBg, skillsLabel, logrosBg, logrosLabel, badge]);
+    this.container.add([skillsBg, skillsLabel, skillsLine, logrosBg, logrosLabel, logrosLine, badge]);
   }
 
   private switchTab(tab: 'skills' | 'logros'): void {
@@ -448,22 +468,26 @@ export class SkillTreePanel {
     if (tab === 'skills') {
       this.skillsView?.setVisible(true);
       this.logrosView?.setVisible(false);
-      // Update tab visuals
-      this.tabSkillsBg?.setFillStyle(0x1a1a2e, 1);
+      // Update tab visuals — subtler fill + gold bottom border for active
+      this.tabSkillsBg?.setFillStyle(0x1e1e30, 1);
       this.tabSkillsBg?.setStrokeStyle(1, 0xf5c842, 1);
       this.tabSkillsBtn?.setColor('#F5C842');
+      this.tabSkillsLine?.setAlpha(1);
       this.tabLogrosBg?.setFillStyle(0x0d0d14, 1);
       this.tabLogrosBg?.setStrokeStyle(1, 0x444455, 0.8);
       this.tabLogrosBtn?.setColor('#888899');
+      this.tabLogrosLine?.setAlpha(0);
     } else {
       this.skillsView?.setVisible(false);
-      // Update tab visuals
+      // Update tab visuals — subtler fill + gold bottom border for active
       this.tabSkillsBg?.setFillStyle(0x0d0d14, 1);
       this.tabSkillsBg?.setStrokeStyle(1, 0x444455, 0.8);
       this.tabSkillsBtn?.setColor('#888899');
-      this.tabLogrosBg?.setFillStyle(0x1a1a2e, 1);
+      this.tabSkillsLine?.setAlpha(0);
+      this.tabLogrosBg?.setFillStyle(0x1e1e30, 1);
       this.tabLogrosBg?.setStrokeStyle(1, 0xf5c842, 1);
       this.tabLogrosBtn?.setColor('#F5C842');
+      this.tabLogrosLine?.setAlpha(1);
 
       // Load milestones if not yet loaded, then render
       if (!this.milestonesLoaded && !this.milestonesLoading) {
@@ -759,6 +783,11 @@ export class SkillTreePanel {
     gfx.strokeRoundedRect(cx - CARD_W / 2, cy - CARD_H / 2, CARD_W, CARD_H, 8);
     this.cardGraphics[index] = gfx;
 
+    // ── Colored top accent strip (4px, skill color at 0.6 alpha) ──
+    const accentStrip = this.scene.add.graphics().setScrollFactor(0);
+    accentStrip.fillStyle(SKILL_COLORS[skillId], 0.6);
+    accentStrip.fillRect(cx - CARD_W / 2 + 2, cy - CARD_H / 2 + 2, CARD_W - 4, 4);
+
     // ── Emoji + label row ──
     const emojiLabel = this.scene.add.text(
       cx,
@@ -807,6 +836,15 @@ export class SkillTreePanel {
       0x222233,
       1,
     ).setOrigin(0.5, 0.5).setScrollFactor(0);
+
+    // ── XP bar segment overlay — 1px dividers every 10% ──
+    const segGfx = this.scene.add.graphics().setScrollFactor(0);
+    segGfx.lineStyle(1, 0x0d0d14, 0.55);
+    const segLeft = cx - barW / 2;
+    for (let s = 1; s < 10; s++) {
+      const sx = segLeft + Math.floor((s / 10) * barW);
+      segGfx.lineBetween(sx, barY - 3, sx, barY + 3);
+    }
 
     // ── XP bar fill (starts at left edge) ──
     const barFill = this.scene.add.rectangle(
@@ -870,11 +908,13 @@ export class SkillTreePanel {
 
     const cardObjects: Phaser.GameObjects.GameObject[] = [
       gfx,
+      accentStrip,
       emojiLabel,
       levelText,
       titleText,
       barBack,
       barFill,
+      segGfx,
       xpText,
       msLabel,
       msBarBack,
