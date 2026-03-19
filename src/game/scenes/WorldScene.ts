@@ -5910,6 +5910,10 @@ export class WorldScene extends Phaser.Scene {
     const nearGunShop = Math.abs(this.px - gunDealerX) < 92
       && this.py >= gunShopBounds.y + gunShopBounds.h - 108
       && this.py <= gunShopBounds.y + gunShopBounds.h + 52;
+    const gymDoorX = BUILDINGS.GYM.x + BUILDINGS.GYM.w / 2;
+    const nearGym = Math.abs(this.px - gymDoorX) < 70
+      && this.py >= BUILDINGS.GYM.y + BUILDINGS.GYM.h - 80
+      && this.py <= BUILDINGS.GYM.y + BUILDINGS.GYM.h + 60;
 
     if (nearVecindad) {
       return { x: 120, y: ZONES.PLAZA_Y + 40, w: 140, h: 80, label: 'SPACE ENTRAR VECINDAD', color: 0xF5C842, sceneKey: 'VecindadScene' };
@@ -5937,6 +5941,9 @@ export class WorldScene extends Phaser.Scene {
     }
     if (nearGunShop) {
       return { x: gunDealerX, y: gunDealerY, w: 164, h: 76, label: 'SPACE ENTRAR GUN SHOP', color: 0x46B3FF, sceneKey: 'GunShopInterior' };
+    }
+    if (nearGym) {
+      return { x: gymDoorX, y: BUILDINGS.GYM.y + BUILDINGS.GYM.h - 28, w: 110, h: 76, label: 'SPACE ENTRAR GYM', color: 0xFF2222, sceneKey: 'GymInterior' };
     }
 
     const COTTENKS_X = 1615;

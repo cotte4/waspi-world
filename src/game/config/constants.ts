@@ -108,6 +108,12 @@ export const BUILDINGS = {
     w: 360,
     h: 220,
   },
+  GYM: {
+    x: 1480,
+    y: 960,
+    w: 300,
+    h: 180,
+  },
 } as const;
 
 export const CHAT = {
