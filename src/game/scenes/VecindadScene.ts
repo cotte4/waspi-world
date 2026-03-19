@@ -1036,17 +1036,13 @@ export class VecindadScene extends Phaser.Scene {
     if (stage <= 0) return;
 
     const ownerName = mine ? 'TU CASA' : `CASA DE ${shared?.ownerUsername?.toUpperCase() ?? 'VECINO'}`;
-    this.inTransition = true;
-    this.cameras.main.fadeOut(240, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('HouseInterior', {
-        returnScene: 'VecindadScene',
-        roomKey: `waspi-room-house-${parcel.id}`,
-        houseLabel: ownerName,
-        buildStage: getHouseInteriorStage(stage),
-        returnX: parcel.x + parcel.w / 2,
-        returnY: parcel.y + parcel.h - 28,
-      });
+    transitionToScene(this, 'HouseInterior', {
+      returnScene: 'VecindadScene',
+      roomKey: `waspi-room-house-${parcel.id}`,
+      houseLabel: ownerName,
+      buildStage: getHouseInteriorStage(stage),
+      returnX: parcel.x + parcel.w / 2,
+      returnY: parcel.y + parcel.h - 28,
     });
   }
 

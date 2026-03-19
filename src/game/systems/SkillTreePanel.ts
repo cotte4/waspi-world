@@ -922,10 +922,7 @@ export class SkillTreePanel {
       nextText,
     ];
 
-    cardObjects.forEach((obj) => {
-      this.skillsView?.add(obj);
-      this.container.add(obj);
-    });
+    this.skillsView?.add(cardObjects);
 
     // Spec badge — visible when Lv3+ and no spec chosen yet
     const specBadge = this.scene.add.text(
@@ -937,7 +934,6 @@ export class SkillTreePanel {
 
     this.specBadges[index] = specBadge;
     this.skillsView?.add(specBadge);
-    this.container.add(specBadge);
 
     // Synergy badge — shown below title when this skill participates in an active synergy
     const synBadge = this.scene.add.text(
@@ -949,7 +945,6 @@ export class SkillTreePanel {
 
     this.synBadges[index] = synBadge;
     this.skillsView?.add(synBadge);
-    this.container.add(synBadge);
 
     // Transparent hit area for spec selection
     const hitArea = this.scene.add.rectangle(cx, cy, CARD_W, CARD_H, 0x000000, 0)
@@ -963,7 +958,6 @@ export class SkillTreePanel {
       }
     });
     this.skillsView?.add(hitArea);
-    this.container.add(hitArea);
   }
 
   // ---------------------------------------------------------------------------
@@ -1150,11 +1144,7 @@ export class SkillTreePanel {
     this.synergyRows = [row1, row2, row3, row4];
 
     // Synergy strip is always part of skillsView (only visible on skills tab)
-    const stripObjects: Phaser.GameObjects.GameObject[] = [stripGfx, synergyLabel, row1, row2, row3, row4];
-    stripObjects.forEach((obj) => {
-      this.skillsView?.add(obj);
-      this.container.add(obj);
-    });
+    this.skillsView?.add([stripGfx, synergyLabel, row1, row2, row3, row4]);
   }
 
   private refreshSynergies(): void {
