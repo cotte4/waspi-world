@@ -1745,6 +1745,51 @@ export default function PlayPage() {
           background: rgba(255,255,255,0.07);
           margin: 1px 0;
         }
+        /* ── Stripe redirect spinner ── */
+        @keyframes wwSpin {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
+        }
+        @keyframes wwStripeSlide {
+          from { opacity: 0; transform: translate3d(-50%, -16px, 0); }
+          to   { opacity: 1; transform: translate3d(-50%, 0, 0); }
+        }
+        .ww-stripe-spinner {
+          width: 28px;
+          height: 28px;
+          border: 2px solid rgba(245,200,66,0.18);
+          border-top-color: #F5C842;
+          border-radius: 50%;
+          animation: wwSpin 0.7s linear infinite;
+        }
+        /* ── Shop status banner ── */
+        @keyframes wwStatusIn {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .ww-shop-status {
+          animation: wwStatusIn 220ms ease-out both;
+        }
+        /* ── TENKS pack cards ── */
+        .ww-pack-card {
+          transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+        }
+        .ww-pack-card:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 12px 28px rgba(0,0,0,0.32);
+        }
+        .ww-pack-card:hover .ww-pack-popular {
+          border-color: rgba(245,200,66,0.9);
+        }
+        /* ── Tab bar ── */
+        .ww-tab-bar {
+          display: flex;
+          border-bottom: 1px solid rgba(255,255,255,0.08);
+          margin-bottom: 14px;
+          overflow-x: auto;
+          scrollbar-width: none;
+        }
+        .ww-tab-bar::-webkit-scrollbar { display: none; }
         /* ── Controls hint ── */
         .ww-ctrl-wrap {
           position: relative;
@@ -2164,6 +2209,15 @@ export default function PlayPage() {
         </div>
         )}
 
+        {checkoutRedirecting && (
+          <div className="ww-overlay absolute inset-0 flex flex-col items-center justify-center pointer-events-none" style={{ background: 'rgba(0,0,0,0.78)', zIndex: 70 }}>
+            <div className="ww-stripe-spinner" style={{ marginBottom: 18 }} />
+            <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: '#F5C842', letterSpacing: '0.06em', textAlign: 'center', lineHeight: 2 }}>
+              CONECTANDO<br />CON STRIPE...
+            </div>
+          </div>
+        )}
+
         {shopOpen && (
           <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
             <div
@@ -2193,9 +2247,9 @@ export default function PlayPage() {
                 </button>
               </div>
 
-              <div className="flex gap-1 mb-3">
+              <div className="ww-tab-bar">
                 <button onClick={() => setShopTab('tenks_virtual')} style={tabButtonStyle(shopTab === 'tenks_virtual')}>
-                  ROPA TENKS
+                  ROPA VIRTUAL
                 </button>
                 <button onClick={() => setShopTab('physical')} style={tabButtonStyle(shopTab === 'physical')}>
                   ROPA FÍSICA
@@ -2288,7 +2342,6 @@ export default function PlayPage() {
                   </div>
                   <div className="space-y-2">
                     {getPhysicalCatalog().map((item) => {
-                      const isSelected = selectedSize !== '' && checkoutRedirecting;
                       return (
                         <div
                           key={item.id}
@@ -2341,20 +2394,22 @@ export default function PlayPage() {
                             </div>
                           )}
                           <div style={{ marginBottom: 8 }}>
+                            <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '6px', color: 'rgba(255,255,255,0.35)', marginBottom: 4, letterSpacing: '0.06em' }}>CUPÓN (OPCIONAL)</div>
                             <input
                               type="text"
-                              placeholder="Código de descuento (opcional)"
+                              placeholder="WASPI2026"
                               value={discountCodeInput}
-                              onChange={(e) => setDiscountCodeInput(e.target.value)}
+                              onChange={(e) => setDiscountCodeInput(e.target.value.toUpperCase())}
                               style={{
                                 width: '100%',
-                                background: 'rgba(255,255,255,0.05)',
-                                border: '1px solid rgba(255,255,255,0.12)',
-                                color: '#FFFFFF',
-                                fontFamily: '"Silkscreen", monospace',
-                                fontSize: '12px',
-                                padding: '6px 8px',
+                                background: 'rgba(255,255,255,0.04)',
+                                border: '1px solid rgba(245,200,66,0.2)',
+                                color: '#F5C842',
+                                fontFamily: '"Press Start 2P", monospace',
+                                fontSize: '8px',
+                                padding: '7px 8px',
                                 outline: 'none',
+                                letterSpacing: '0.08em',
                               }}
                             />
                           </div>
@@ -2373,13 +2428,11 @@ export default function PlayPage() {
                               !selectedSize || checkoutRedirecting || !isAuthenticated
                             )}
                           >
-                            {checkoutRedirecting && isSelected
-                              ? 'REDIRIGIENDO...'
-                              : !isAuthenticated
-                                ? 'INICIÁ SESIÓN'
-                                : !selectedSize
-                                  ? 'ELEGÍ UN TALLE'
-                                  : `COMPRAR $${(item.priceArs ?? 0).toLocaleString('es-AR')} ARS`}
+                            {!isAuthenticated
+                              ? 'INICIÁ SESIÓN'
+                              : !selectedSize
+                                ? 'ELEGÍ UN TALLE'
+                                : `COMPRAR $${(item.priceArs ?? 0).toLocaleString('es-AR')} ARS`}
                           </button>
                         </div>
                       );
@@ -2393,54 +2446,76 @@ export default function PlayPage() {
 
               {shopTab === 'tenks_packs' && (
                 <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
-                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: 10 }}>
+                  <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginBottom: 14 }}>
                     Comprá TENKS con ARS y gastálos en ropa virtual, armas y más.
                   </div>
-                  <div className="space-y-2">
-                    {TENKS_PACKS.map((pack) => (
-                      <div
-                        key={pack.id}
-                        className="ww-panel"
-                        style={{
-                          padding: '12px',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          background: 'rgba(255,255,255,0.04)',
-                        }}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div style={{ fontSize: '15px', color: '#F5C842', marginBottom: 4 }}>{pack.name}</div>
-                            <div style={{ fontSize: '13px', color: '#FFFFFF', marginBottom: 4 }}>
-                              {pack.tenks.toLocaleString('es-AR')} TENKS
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                    {TENKS_PACKS.map((pack, idx) => {
+                      const isPopular = idx === 1;
+                      return (
+                        <div
+                          key={pack.id}
+                          className="ww-pack-card"
+                          style={{
+                            flex: 1,
+                            padding: '16px 10px 12px',
+                            border: isPopular ? '1px solid rgba(245,200,66,0.55)' : '1px solid rgba(255,255,255,0.1)',
+                            background: isPopular ? 'rgba(245,200,66,0.06)' : 'rgba(255,255,255,0.03)',
+                            position: 'relative',
+                            textAlign: 'center',
+                            display: 'flex',
+                            flexDirection: 'column',
+                          }}
+                        >
+                          {isPopular && (
+                            <div style={{
+                              position: 'absolute',
+                              top: -9,
+                              left: '50%',
+                              transform: 'translateX(-50%)',
+                              fontFamily: '"Press Start 2P", monospace',
+                              fontSize: '6px',
+                              background: '#F5C842',
+                              color: '#0E0E14',
+                              padding: '3px 7px',
+                              whiteSpace: 'nowrap',
+                              letterSpacing: '0.04em',
+                            }}>
+                              MÁS POPULAR
                             </div>
-                            <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.58)', marginBottom: 4 }}>{pack.description}</div>
-                            <div style={{ fontSize: '13px', color: '#F5C842' }}>
-                              ${pack.priceArs.toLocaleString('es-AR')} ARS
-                            </div>
+                          )}
+                          <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '11px', color: '#F5C842', marginBottom: 2 }}>
+                            {pack.tenks.toLocaleString('es-AR')}
+                          </div>
+                          <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '6px', color: 'rgba(245,200,66,0.6)', marginBottom: 10, letterSpacing: '0.06em' }}>TENKS</div>
+                          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.45)', marginBottom: 4, lineHeight: 1.5 }}>{pack.description}</div>
+                          <div style={{ fontSize: '13px', color: '#FFFFFF', marginBottom: 12, marginTop: 'auto', paddingTop: 8 }}>
+                            ${pack.priceArs.toLocaleString('es-AR')} ARS
                           </div>
                           <button
-                            onClick={() => {
-                              void startStripeCheckout('tenks_pack', { packId: pack.id });
-                            }}
+                            onClick={() => { void startStripeCheckout('tenks_pack', { packId: pack.id }); }}
                             disabled={checkoutRedirecting || !isAuthenticated}
-                            style={authButtonStyle(
-                              '#F5C842',
-                              '#0E0E14',
-                              checkoutRedirecting || !isAuthenticated
-                            )}
+                            style={{
+                              width: '100%',
+                              fontFamily: '"Press Start 2P", monospace',
+                              fontSize: '7px',
+                              padding: '9px 4px',
+                              background: isPopular ? '#F5C842' : 'rgba(245,200,66,0.14)',
+                              color: isPopular ? '#0E0E14' : '#F5C842',
+                              border: isPopular ? 'none' : '1px solid rgba(245,200,66,0.3)',
+                              cursor: checkoutRedirecting || !isAuthenticated ? 'default' : 'pointer',
+                              opacity: checkoutRedirecting || !isAuthenticated ? 0.65 : 1,
+                              letterSpacing: '0.04em',
+                            }}
                           >
-                            {checkoutRedirecting
-                              ? 'REDIRIGIENDO...'
-                              : !isAuthenticated
-                                ? 'INICIÁ SESIÓN'
-                                : 'COMPRAR'}
+                            {!isAuthenticated ? 'SESIÓN' : 'COMPRAR'}
                           </button>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
-                  <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: 10 }}>
-                    Los TENKS se acreditan automáticamente tras el pago.
+                  <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginTop: 12, fontFamily: '"Press Start 2P", monospace', letterSpacing: '0.04em', lineHeight: 1.8 }}>
+                    TENKS se acreditan automáticamente tras el pago · Pago seguro via Stripe
                   </div>
                 </div>
               )}
@@ -2448,33 +2523,58 @@ export default function PlayPage() {
               {shopTab === 'orders' && (
                 <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
                   {!isAuthenticated ? (
-                    <p style={{ color: '#888', fontSize: '11px' }}>Iniciá sesión para ver tus pedidos.</p>
+                    <div style={{ textAlign: 'center', padding: '24px 0', fontFamily: '"Press Start 2P", monospace', fontSize: '8px', color: 'rgba(255,255,255,0.3)', lineHeight: 2 }}>
+                      ☠<br />Iniciá sesión para ver tus pedidos.
+                    </div>
                   ) : ordersLoading ? (
-                    <p style={{ color: '#888', fontSize: '11px' }}>CARGANDO...</p>
+                    <div style={{ textAlign: 'center', padding: '24px 0', fontFamily: '"Press Start 2P", monospace', fontSize: '8px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em' }}>
+                      CARGANDO...
+                    </div>
                   ) : orders.length === 0 ? (
-                    <p style={{ color: '#888', fontSize: '11px' }}>Todavía no compraste nada físico.</p>
+                    <div style={{ textAlign: 'center', padding: '24px 0', fontFamily: '"Press Start 2P", monospace', fontSize: '8px', color: 'rgba(255,255,255,0.25)', lineHeight: 2.2, letterSpacing: '0.04em' }}>
+                      <div style={{ fontSize: 24, marginBottom: 8 }}>☠</div>
+                      Todavía no compraste<br />nada físico.
+                    </div>
                   ) : (
                     <div className="space-y-2">
                       {orders.map((order) => {
                         const item = order.items[0];
                         const catalogItem = item ? getCatalogItem(item.product_id) : null;
-                        const dateStr = new Date(order.created_at).toLocaleDateString('es-AR');
+                        const d = new Date(order.created_at);
+                        const dateStr = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
                         const totalArs = Math.round(order.total / 100);
+                        const statusColors: Record<string, string> = { paid: '#39FF14', shipped: '#46B3FF', delivered: '#F5C842' };
+                        const statusLabels: Record<string, string> = { paid: 'PAGADO', shipped: 'ENVIADO', delivered: 'ENTREGADO' };
+                        const sColor = statusColors[order.status] ?? 'rgba(255,255,255,0.4)';
+                        const sLabel = statusLabels[order.status] ?? order.status.toUpperCase();
                         return (
-                          <div key={order.id} className="ww-panel" style={{ padding: '10px 12px', border: '1px solid rgba(255,255,255,0.1)' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                              <div>
-                                <div style={{ fontSize: '13px', color: '#fff' }}>{catalogItem?.name ?? item?.product_id}</div>
-                                <div style={{ fontSize: '11px', color: '#888', marginTop: 2 }}>
-                                  Talle {item?.size} · {dateStr}
+                          <div key={order.id} className="ww-panel" style={{ padding: '10px 12px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: '13px', color: '#fff', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {catalogItem?.name ?? item?.product_id}
+                                </div>
+                                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', fontFamily: '"Press Start 2P", monospace', letterSpacing: '0.04em' }}>
+                                  {item?.size ? `T. ${item.size}` : ''}{item?.size ? ' · ' : ''}{dateStr}
                                 </div>
                                 {order.discount_code && (
-                                  <div style={{ fontSize: '10px', color: '#39FF14', marginTop: 2 }}>Descuento: {order.discount_code}</div>
+                                  <div style={{ fontSize: '10px', color: '#39FF14', marginTop: 3 }}>↳ {order.discount_code}</div>
                                 )}
                               </div>
-                              <div style={{ textAlign: 'right' }}>
-                                <div style={{ fontSize: '12px', color: '#F5C842' }}>${totalArs.toLocaleString('es-AR')}</div>
-                                <div style={{ fontSize: '10px', color: '#555', marginTop: 2, textTransform: 'uppercase' }}>{order.status}</div>
+                              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                                <div style={{ fontSize: '12px', color: '#F5C842', marginBottom: 5 }}>${totalArs.toLocaleString('es-AR')}</div>
+                                <div style={{
+                                  display: 'inline-block',
+                                  fontFamily: '"Press Start 2P", monospace',
+                                  fontSize: '6px',
+                                  color: sColor,
+                                  border: `1px solid ${sColor}55`,
+                                  background: `${sColor}12`,
+                                  padding: '3px 5px',
+                                  letterSpacing: '0.04em',
+                                }}>
+                                  {sLabel}
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -2485,9 +2585,25 @@ export default function PlayPage() {
                 </div>
               )}
 
-              <div style={{ fontSize: '12px', color: shopStatus ? '#BBBBBB' : 'rgba(255,255,255,0.35)', marginTop: 10, minHeight: 16 }}>
-                {shopStatus || (shopTab === 'tenks_virtual' ? 'Toda la ropa de la tienda se compra con TENKS y se equipa al instante.' : '')}
-              </div>
+              {shopStatus ? (
+                <div className="ww-shop-status" style={{
+                  marginTop: 12,
+                  padding: '8px 10px',
+                  background: shopStatus.startsWith('¡') ? 'rgba(57,255,20,0.07)' : 'rgba(245,200,66,0.07)',
+                  border: shopStatus.startsWith('¡') ? '1px solid rgba(57,255,20,0.28)' : '1px solid rgba(245,200,66,0.28)',
+                  fontFamily: '"Press Start 2P", monospace',
+                  fontSize: '7px',
+                  color: shopStatus.startsWith('¡') ? '#39FF14' : '#F5C842',
+                  lineHeight: 1.9,
+                  letterSpacing: '0.03em',
+                }}>
+                  {shopStatus}
+                </div>
+              ) : (
+                <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: '11px', color: 'rgba(255,255,255,0.22)', marginTop: 10, minHeight: 16 }}>
+                  {shopTab === 'tenks_virtual' ? 'Ropa virtual: comprala con TENKS, equipala al instante.' : ''}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -3476,12 +3592,16 @@ function authButtonStyle(background: string, color: string, disabled: boolean, b
 function tabButtonStyle(active: boolean) {
   return {
     fontFamily: '"Press Start 2P", monospace',
-    fontSize: '8px',
-    padding: '10px 12px',
-    background: active ? '#F5C842' : 'rgba(255,255,255,0.08)',
-    color: active ? '#0E0E14' : '#FFFFFF',
-    border: active ? 'none' : '1px solid rgba(255,255,255,0.15)',
+    fontSize: '7px',
+    padding: '9px 10px',
+    background: active ? 'rgba(245,200,66,0.1)' : 'transparent',
+    color: active ? '#F5C842' : 'rgba(255,255,255,0.38)',
+    border: 'none',
+    borderBottom: active ? '2px solid #F5C842' : '2px solid transparent',
     cursor: 'pointer',
+    letterSpacing: '0.04em',
+    whiteSpace: 'nowrap' as const,
+    flexShrink: 0,
   } as const;
 }
 
