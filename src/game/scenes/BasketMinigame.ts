@@ -133,6 +133,11 @@ export class BasketMinigame extends Phaser.Scene {
     g.strokeCircle(width / 2 - 60, height - 60, 58);
     g.lineBetween(width / 2 - 60, height - 118, width / 2 - 60, height - 2);
 
+    // Court spotlight — radial glow at center court
+    const spotlight = this.add.graphics();
+    spotlight.fillStyle(0xffffff, 0.04);
+    spotlight.fillEllipse(width / 2 - 60, height - 80, 280, 100);
+
     this.add.text(width / 2, 54, 'BASKET', {
       fontSize: '18px',
       fontFamily: '"Press Start 2P", monospace',
@@ -166,11 +171,18 @@ export class BasketMinigame extends Phaser.Scene {
     }).setOrigin(0.5);
 
     // Bar background
-    this.add.rectangle(120, 158, 120, 18, 0x121212, 1).setStrokeStyle(1, 0x4a4a4a, 1);
+    this.add.rectangle(120, 158, 120, 18, 0x0e1428, 1).setStrokeStyle(1, 0x3a4a6a, 1);
 
     // Fill bar (green/yellow/red based on power)
     this.powerBar = this.add.rectangle(62, 158, 0, 12, 0x39ff14, 1).setOrigin(0, 0.5);
 
+    // Segmented overlay: 10 divider lines across the power bar
+    const powerSegOverlay = this.add.graphics();
+    for (let s = 1; s < 10; s++) {
+      const sx = 62 + s * 12; // 120px wide / 10 segments = 12px each, starting at x=62
+      powerSegOverlay.lineStyle(1, 0x0d1020, 0.8);
+      powerSegOverlay.lineBetween(sx, 151, sx, 165); // 158 ± 7px (barH/2)
+    }
 
     this.arcGuide = this.add.graphics();
 
@@ -180,7 +192,8 @@ export class BasketMinigame extends Phaser.Scene {
     this.hoopRim = this.add.rectangle(0, 0, 74, 7, 0xff6b00, 1).setStrokeStyle(2, 0x000000, 0.35);
     this.hoopNet = this.add.graphics();
     this.redrawNet(0);
-    this.hoop.add([this.hoopBoard, this.hoopRim, this.hoopNet]);
+    const boardGlow = this.add.rectangle(34, -62, 24, 98, 0xdbe7ff, 0.08);
+    this.hoop.add([boardGlow, this.hoopBoard, this.hoopRim, this.hoopNet]);
 
     this.shooterAvatar = new AvatarRenderer(this, this.shooterX, this.shooterY, loadStoredAvatarConfig());
     this.shooterAvatar.setDepth(50);
@@ -189,6 +202,10 @@ export class BasketMinigame extends Phaser.Scene {
     this.ball = this.add.circle(this.ballStartX, this.ballStartY, 11, 0xf2872f, 1).setStrokeStyle(2, 0x5b2e0a, 1);
 
     // ── Score panel ───────────────────────────────────────────────────────
+    const scoreBg = this.add.graphics();
+    scoreBg.fillStyle(0x000000, 0.52);
+    scoreBg.fillRoundedRect(width - 132, 10, 120, 62, 4);
+
     this.scoreText = this.add.text(width - 16, 16, '', {
       fontSize: '14px',
       fontFamily: '"Press Start 2P", monospace',
@@ -206,6 +223,7 @@ export class BasketMinigame extends Phaser.Scene {
       .setOrigin(0, 0.5);
     this.timerBar = this.add.rectangle(18, height - 16, timerBarW, 8, 0x46B3FF, 1)
       .setOrigin(0, 0.5);
+    this.timerBar.setStrokeStyle(1, 0x8CE0FF, 0.4);
 
     this.resultLabel = this.add.text(width / 2, 334, '', {
       fontSize: '14px',

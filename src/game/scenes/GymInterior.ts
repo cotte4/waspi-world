@@ -140,7 +140,7 @@ export class GymInterior extends Phaser.Scene {
 
     this.bagSeqText = this.add.text(220, 232, '', {
       fontSize: '8px', fontFamily: '"Press Start 2P", monospace',
-      color: '#FFFFFF', stroke: '#000', strokeThickness: 3,
+      color: '#F5C842', stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5).setDepth(20);
 
     this.promptBench = this.add.text(560, 390, '', {
@@ -150,7 +150,7 @@ export class GymInterior extends Phaser.Scene {
 
     this.feedbackText = this.add.text(cx, 180, '', {
       fontSize: '9px', fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842', stroke: '#000', strokeThickness: 4,
+      color: '#F5C842', stroke: '#000', strokeThickness: 5,
     }).setOrigin(0.5).setDepth(22);
 
     // ── Player avatar ───────────────────────────────────────────────────────────
@@ -169,7 +169,7 @@ export class GymInterior extends Phaser.Scene {
 
     // ── Exit UI ──────────────────────────────────────────────────────────────────
     this.add.text(cx, H - 18, 'ESC  ·  SALIR', {
-      fontSize: '7px', fontFamily: '"Silkscreen", monospace', color: '#330011',
+      fontSize: '7px', fontFamily: '"Silkscreen", monospace', color: '#554455',
     }).setOrigin(0.5);
     createBackButton(this, () => this.exitToWorld());
 
@@ -477,6 +477,12 @@ export class GymInterior extends Phaser.Scene {
       this.benchBarGfx.fillStyle(fillColor, 0.9);
       this.benchBarGfx.fillRect(bx + 1, by + 1, Math.floor((bw - 2) * progress), bh - 2);
     }
+    // Segment dividers at 25%, 50%, 75%
+    this.benchBarGfx.lineStyle(1, 0x0d1020, 0.7);
+    for (let seg = 1; seg <= 3; seg++) {
+      const sx = bx + Math.floor(bw * seg * 0.25);
+      this.benchBarGfx.lineBetween(sx, by + 1, sx, by + bh - 1);
+    }
     // Label
     if (this.benchPhase === 'active') {
       this.promptBench.setText(`MANTÉN [E]  ${Math.floor(progress * 100)}%`).setVisible(true);
@@ -517,6 +523,13 @@ export class GymInterior extends Phaser.Scene {
     vig.fillRect(W - 55, 0, 55, H);
     vig.fillRect(0, 0, W, 38);
     vig.fillRect(0, H - 38, W, 38);
+
+    // Ambient glow around boxing bag station
+    bg.fillStyle(0xff2222, 0.05);
+    bg.fillCircle(220, 280, 90);
+    // Ambient glow around bench station
+    bg.fillStyle(0x2244ff, 0.04);
+    bg.fillCircle(560, 340, 80);
 
     // Motivational wall text
     const wallTexts = ['NO PAIN', 'NO GAIN', 'WASPI FIT'];
