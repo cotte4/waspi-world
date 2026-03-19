@@ -190,7 +190,7 @@ export class QuestPanel {
     // Separator below title
     const sepY = pcy - PANEL_H / 2 + 44;
     const sepGfx = this.scene.add.graphics().setScrollFactor(0);
-    sepGfx.lineStyle(1, GOLD, 0.3);
+    sepGfx.lineStyle(1, GOLD, 0.4);
     sepGfx.lineBetween(
       pcx - PANEL_W / 2 + 16,
       sepY,
@@ -276,19 +276,27 @@ export class QuestPanel {
     cardBg.strokeRoundedRect(cardX, topY, CARD_W, CARD_H, 6);
     elements.push(cardBg);
 
+    // Left accent stripe
+    const accentStripe = this.scene.add
+      .rectangle(cardX + 1, topY + 1, 4, CARD_H - 2, accentColor)
+      .setAlpha(0.8)
+      .setOrigin(0, 0)
+      .setScrollFactor(0);
+    elements.push(accentStripe);
+
     // Icon + skill badge
     const badgeX = cardX + 8;
     const badgeY = topY + 7;
     const badgeGfx = this.scene.add.graphics().setScrollFactor(0);
-    badgeGfx.fillStyle(accentColor, 0.15);
-    badgeGfx.fillRoundedRect(badgeX, badgeY, 76, 14, 3);
+    badgeGfx.fillStyle(accentColor, 0.22);
+    badgeGfx.fillRoundedRect(badgeX, badgeY, 90, 16, 3);
     badgeGfx.lineStyle(1, accentColor, 0.5);
-    badgeGfx.strokeRoundedRect(badgeX, badgeY, 76, 14, 3);
+    badgeGfx.strokeRoundedRect(badgeX, badgeY, 90, 16, 3);
     elements.push(badgeGfx);
 
     const badgeLabel = this.scene.add
-      .text(badgeX + 38, badgeY + 7, `${quest.icon} ${quest.skill_id.toUpperCase()}`, {
-        fontSize: '4px',
+      .text(badgeX + 45, badgeY + 8, `${quest.icon} ${quest.skill_id.toUpperCase()}`, {
+        fontSize: '5px',
         fontFamily: FONT,
         color: accentColorHex,
       })
@@ -303,20 +311,21 @@ export class QuestPanel {
         ? quest.label.slice(0, maxLen - 1) + '…'
         : quest.label;
     const questLabel = this.scene.add
-      .text(cardX + 94, topY + 14, labelText, {
-        fontSize: '6px',
+      .text(cardX + 104, topY + 14, labelText, {
+        fontSize: '7px',
         fontFamily: FONT,
         color: quest.completed ? '#555566' : '#E8E8F0',
       })
       .setOrigin(0, 0.5)
       .setScrollFactor(0);
+    if (quest.completed) questLabel.setAlpha(0.5);
     elements.push(questLabel);
 
     // Progress bar
     const barX = cardX + 10;
     const barY = topY + 42;
     const barW = 220;
-    const barH = 8;
+    const barH = 10;
     const ratio = Math.min(1, quest.progress / Math.max(1, quest.target));
     const fillW = Math.max(0, Math.floor(ratio * barW));
     const fillColor = quest.completed ? 0x39ff14 : accentColor;
@@ -333,6 +342,15 @@ export class QuestPanel {
       elements.push(barFill);
     }
 
+    // Segmented overlay — 9 dividers every 10%
+    const segOverlay = this.scene.add.graphics().setScrollFactor(0);
+    for (let s = 1; s < 10; s++) {
+      const sx = barX + Math.floor((s * barW) / 10);
+      segOverlay.lineStyle(1, 0x0a0a18, 0.6);
+      segOverlay.lineBetween(sx, barY, sx, barY + barH);
+    }
+    elements.push(segOverlay);
+
     // Progress counter
     const progressLabel = this.scene.add
       .text(barX + barW + 8, barY + barH / 2, `${quest.progress}/${quest.target}`, {
@@ -348,7 +366,7 @@ export class QuestPanel {
     const rewardStr = `${quest.reward_tenks.toLocaleString('es-AR')}T  ${quest.reward_xp}XP`;
     const rewardText = this.scene.add
       .text(cardX + 10, cardCY + 20, rewardStr, {
-        fontSize: '5px',
+        fontSize: '6px',
         fontFamily: FONT,
         color: quest.completed ? '#444455' : GOLD_HEX,
       })
