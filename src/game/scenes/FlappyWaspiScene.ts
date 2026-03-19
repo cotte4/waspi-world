@@ -635,12 +635,15 @@ export class FlappyWaspiScene extends Phaser.Scene {
       color: bestColor,
     }).setOrigin(0.5).setDepth(110);
 
-    // TENKS count-up
-    const tenksLabel = this.add.text(W / 2, 308, '+0 TENKS', {
+    // TENKS count-up (coin icon + text)
+    const coinIcon = this.textures.exists('icon_coin')
+      ? this.add.image(W / 2 - 52, 308, 'icon_coin').setDisplaySize(18, 18).setOrigin(0.5).setDepth(110)
+      : null;
+    const tenksLabel = this.add.text(coinIcon ? W / 2 - 34 : W / 2, 308, '+0', {
       fontSize: '12px',
       fontFamily: FONT,
       color: COL_GOLD,
-    }).setOrigin(0.5).setDepth(110);
+    }).setOrigin(0, 0.5).setDepth(110);
 
     // Count-up animation
     let displayed = 0;
@@ -652,7 +655,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
         if (!this.scene.isActive('FlappyWaspiScene')) return;
         displayed = Math.min(tenksTotal, displayed + countStep);
         if (tenksLabel.active) {
-          tenksLabel.setText(`+${displayed} TENKS`);
+          tenksLabel.setText(`+${displayed}`);
         }
       },
     });

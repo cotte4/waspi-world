@@ -94,6 +94,7 @@ export class BootScene extends Phaser.Scene {
     // Seed sprites (drop files into public/assets/seeds/)
     // If they don't exist, CreatorScene will fall back to procedural preview.
     this.load.image('cottenks', '/assets/sprites/cottenks.png');
+    this.load.image('icon_coin', '/assets/sprites/icon_coin_64.png');
     this.load.image('seed_gengar', '/assets/seeds/gengar.png');
     this.load.image('seed_buho', '/assets/seeds/buho.png');
     this.load.image('seed_piplup', '/assets/seeds/piplup.png');

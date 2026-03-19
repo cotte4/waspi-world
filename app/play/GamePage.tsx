@@ -1794,6 +1794,17 @@ export default function PlayPage() {
           line-height: 1;
           color: rgba(255,255,255,0.45);
         }
+        .ww-toolbar-btn img {
+          width: 22px;
+          height: 22px;
+          object-fit: contain;
+          display: block;
+          pointer-events: none;
+          opacity: 0.9;
+        }
+        .ww-toolbar-btn:hover:not(:disabled) img {
+          opacity: 1;
+        }
         .ww-toolbar-btn:hover:not(:disabled) {
           background: rgba(255,255,255,0.07) !important;
           border-color: rgba(255,255,255,0.14) !important;
@@ -1949,7 +1960,7 @@ export default function PlayPage() {
           )}
           {tenks !== null && (
             <div
-              className="ww-chip px-2 py-1 text-xs"
+              className="ww-chip px-2 py-1 text-xs flex items-center gap-1"
               style={{
                 ...hudBadge('#F5C842', 'rgba(245,200,66,0.4)'),
                 transform: tenksAnimating ? 'scale(1.15)' : 'scale(1)',
@@ -1957,7 +1968,9 @@ export default function PlayPage() {
                 color: tenksAnimating ? '#FFFFFF' : '#F5C842',
               }}
             >
-              TENKS {tenks}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/assets/sprites/icon_coin_64.png" alt="T" width={14} height={14} style={{ imageRendering: 'auto', display: 'inline-block' }} />
+              {tenks}
             </div>
           )}
           <div className="ww-chip px-2 py-1 text-xs" style={hudBadge('#46B3FF', 'rgba(70,179,255,0.35)')}>
@@ -2156,7 +2169,9 @@ export default function PlayPage() {
           <div className="ww-toolbar-divider" />
 
           {/* Settings */}
-          <button onClick={openSettings} className="ww-toolbar-btn" title="Ajustes">⚙</button>
+          <button type="button" onClick={openSettings} className="ww-toolbar-btn" title="Ajustes" aria-label="Ajustes">
+            <img src="/assets/ui/icon_settings_gear.png" alt="" width={22} height={22} decoding="async" />
+          </button>
 
           {/* Stats */}
           <button onClick={() => void openStats()} className="ww-toolbar-btn" title="Estadísticas">📊</button>
@@ -2751,12 +2766,22 @@ export default function PlayPage() {
                 </div>
 
                 <div className="mt-2 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>UTIL</div>
-                      <div style={{ fontSize: '16px' }}>GUN</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Click o F para disparar</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)' }}>1 pistol / 2 shotgun en training</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-3" style={{ minWidth: 0 }}>
+                      <img
+                        src="/assets/ui/icon_sword.png"
+                        alt=""
+                        width={32}
+                        height={32}
+                        decoding="async"
+                        style={{ objectFit: 'contain', flexShrink: 0, opacity: 0.95 }}
+                      />
+                      <div>
+                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>UTIL</div>
+                        <div style={{ fontSize: '16px' }}>GUN</div>
+                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Click o F para disparar</div>
+                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)' }}>1 pistol / 2 shotgun en training</div>
+                      </div>
                     </div>
                   <button
                     onClick={() => {

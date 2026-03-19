@@ -562,6 +562,47 @@ export class BasketMinigame extends Phaser.Scene {
     });
   }
 
+  private showFloatingTenks(amount: number, x: number, startY: number) {
+    const hasCoin = this.textures.exists('icon_coin');
+    const textStr = `+${amount}`;
+    const label = this.add.text(hasCoin ? x + 12 : x, startY, textStr, {
+      fontSize: '13px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(hasCoin ? 0 : 0.5, 0.5).setAlpha(0).setDepth(401).setScrollFactor(0);
+    const coin = hasCoin
+      ? this.add.image(x - label.width / 2, startY, 'icon_coin').setDisplaySize(16, 16).setOrigin(0.5).setAlpha(0).setDepth(401).setScrollFactor(0)
+      : null;
+
+    const targets: Phaser.GameObjects.GameObject[] = coin ? [label, coin] : [label];
+    this.tweens.add({
+      targets,
+      alpha: 1,
+      y: startY - 20,
+      duration: 200,
+      ease: 'Sine.easeOut',
+      onComplete: () => {
+        window.setTimeout(() => {
+          if (!this.scene.isActive('BasketMinigame')) return;
+          if (!label.active) return;
+          this.tweens.add({
+            targets,
+            alpha: 0,
+            y: startY - 50,
+            duration: 380,
+            ease: 'Sine.easeIn',
+            onComplete: () => {
+              if (label.active) label.destroy();
+              if (coin?.active) coin.destroy();
+            },
+          });
+        }, 300);
+      },
+    });
+  }
+
   private showResultLabel(text: string, color: string) {
     const { width } = this.scale;
     this.resultLabel.setText(text).setColor(color).setAlpha(1).setX(width / 2).setY(310);
@@ -645,7 +686,7 @@ export class BasketMinigame extends Phaser.Scene {
     });
 
     const { width } = this.scale;
-    this.showFloatingText(`+${tenksReward} TENKS`, '#F5C842', width / 2, 250);
+    this.showFloatingTenks(tenksReward, width / 2, 250);
 
     const finalLabel = this.add.text(width / 2, 200, [
       `FINAL: ${this.totalScore} PTS`,

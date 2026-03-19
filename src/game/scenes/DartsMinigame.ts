@@ -217,8 +217,14 @@ export class DartsMinigame extends Phaser.Scene {
     if (this.thrown >= TOTAL_DARTS) {
       this.phase = 'done';
       const reward = this.computeReward();
-      this.resultLabel.setText(`FINAL ${this.score} / +${reward} TENKS`);
+      this.resultLabel.setText(`FINAL ${this.score} / +${reward}`);
       this.resultLabel.setColor('#39FF14');
+      if (this.textures.exists('icon_coin')) {
+        const coinX = this.scale.width / 2 + this.resultLabel.width / 2 + 12;
+        const coinImg = this.add.image(coinX, this.scale.height - 74, 'icon_coin')
+          .setDisplaySize(14, 14).setDepth(200).setAlpha(0);
+        this.tweens.add({ targets: coinImg, alpha: 1, duration: 200 });
+      }
       this.resultTimerMs = 1600;
       this.footer.setText('CLICK / SPACE PARA SALIR');
       this.footer.setColor('#F5C842');

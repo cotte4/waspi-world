@@ -52,6 +52,7 @@ export default class DinoRunScene extends Phaser.Scene {
   private gameOverScoreText!: Phaser.GameObjects.Text;
   private newRecordText!: Phaser.GameObjects.Text;
   private tenksText!: Phaser.GameObjects.Text;
+  private tenksCoinIcon?: Phaser.GameObjects.Image;
   private retryText!: Phaser.GameObjects.Text;
   private exitBtn!: Phaser.GameObjects.Rectangle;
   private exitBtnText!: Phaser.GameObjects.Text;
@@ -342,11 +343,15 @@ export default class DinoRunScene extends Phaser.Scene {
       color: '#F5C842',
     }).setOrigin(0.5).setVisible(false);
 
-    this.tenksText = this.add.text(0, 20, '+0 TENKS', {
+    // Coin icon + TENKS amount side by side
+    if (this.textures.exists('icon_coin')) {
+      this.tenksCoinIcon = this.add.image(-38, 20, 'icon_coin').setDisplaySize(18, 18).setOrigin(0.5);
+    }
+    this.tenksText = this.add.text(this.tenksCoinIcon ? -26 : 0, 20, '+0', {
       fontFamily: '"Press Start 2P"',
       fontSize: '12px',
       color: '#46B3FF',
-    }).setOrigin(0.5);
+    }).setOrigin(this.tenksCoinIcon ? 0 : 0.5, 0.5);
 
     this.retryText = this.add.text(0, 70, 'PRESS SPACE TO RETRY', {
       fontFamily: '"Press Start 2P"',
@@ -366,7 +371,7 @@ export default class DinoRunScene extends Phaser.Scene {
     this.exitBtn.on('pointerout', () => this.exitBtn.setFillStyle(0x1a1a2e));
     this.exitBtn.on('pointerdown', () => this.exitScene());
 
-    this.gameOverContainer.add([
+    const containerItems: Phaser.GameObjects.GameObject[] = [
       goBackground,
       this.gameOverText,
       this.gameOverScoreText,
@@ -375,7 +380,9 @@ export default class DinoRunScene extends Phaser.Scene {
       this.retryText,
       this.exitBtn,
       this.exitBtnText,
-    ]);
+    ];
+    if (this.tenksCoinIcon) containerItems.push(this.tenksCoinIcon);
+    this.gameOverContainer.add(containerItems);
   }
 
   private createInputs(): void {
@@ -672,7 +679,7 @@ export default class DinoRunScene extends Phaser.Scene {
     // Setup game over screen
     this.gameOverScoreText.setText(String(this.score).padStart(5, '0'));
     this.newRecordText.setVisible(isNewBest);
-    this.tenksText.setText(`+${this.tenksEarned} TENKS`);
+    this.tenksText.setText(`+${this.tenksEarned}`);
     this.gameOverContainer.setVisible(true);
 
     // Count-up animation for TENKS
@@ -687,7 +694,7 @@ export default class DinoRunScene extends Phaser.Scene {
           return;
         }
         displayed = Math.min(target, displayed + Math.ceil(target / 30));
-        this.tenksText.setText(`+${displayed} TENKS`);
+        this.tenksText.setText(`+${displayed}`);
       },
     });
 
