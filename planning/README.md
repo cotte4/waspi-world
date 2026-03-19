@@ -4,6 +4,7 @@
 
 | Plan | Status | Priority |
 |------|--------|----------|
+| [Jukebox del Café](./features/jukebox-cafe.md) | 🟡 In Progress | High |
 | [Stats Panel](./features/stats-panel.md) | 🟡 In Progress | High |
 | [Skill Trees](./features/skill-trees.md) | 🟡 In Progress | High |
 | [Skill Trees v2](./features/skill-trees-v2.md) | 🟡 In Progress | High |
