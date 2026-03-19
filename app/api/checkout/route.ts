@@ -73,6 +73,12 @@ export async function POST(request: NextRequest) {
       mode: 'payment',
       success_url: `${baseUrl}/play?checkout=product_success`,
       cancel_url: `${baseUrl}/play?checkout=cancelled`,
+      shipping_address_collection: {
+        allowed_countries: ['AR'],
+      },
+      phone_number_collection: {
+        enabled: true,
+      },
       line_items: [
         {
           quantity: 1,
