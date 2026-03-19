@@ -1723,7 +1723,7 @@ export class VecindadScene extends Phaser.Scene {
 
   private closePuesto() {
     this.puestoOpen = false;
-    this.tweens.killTweensOf(this.puestoGlow);
+    if (this.puestoGlow) this.tweens.killTweensOf(this.puestoGlow);
     this.puestoGlow?.clear();
     this.puestoXpTimer?.remove();
     this.puestoXpTimer = undefined;
