@@ -186,6 +186,7 @@ export default function PlayPage() {
   const [bindingCaptureAction, setBindingCaptureAction] = useState<ActionBinding | null>(null);
   const [joystickUi, setJoystickUi] = useState({ active: false, dx: 0, dy: 0 });
   const [rescueArmed, setRescueArmed] = useState(false);
+  const [activeActivities, setActiveActivities] = useState<ReadonlySet<string>>(new Set());
   const audioCtxRef = useRef<AudioContext | null>(null);
   const tokenRef = useRef<string | null>(null);
   const playerStateRef = useRef<PlayerState | null>(null);
@@ -1330,6 +1331,35 @@ export default function PlayPage() {
     };
   }, [activeScene, playerInfo]);
 
+  // ── Combo HUD: track simultaneous active skills ────────────────────────────
+  useEffect(() => {
+    const onStart = (payload: unknown) => {
+      const p = payload as { activity?: string };
+      if (typeof p?.activity === 'string') {
+        setActiveActivities((prev) => new Set([...prev, p.activity as string]));
+      }
+    };
+    const onStop = (payload: unknown) => {
+      const p = payload as { activity?: string };
+      if (typeof p?.activity === 'string') {
+        setActiveActivities((prev) => {
+          const next = new Set(prev);
+          next.delete(p.activity as string);
+          return next;
+        });
+      }
+    };
+    const offStart = eventBus.on(EVENTS.ACTIVITY_STARTED, onStart);
+    const offStop  = eventBus.on(EVENTS.ACTIVITY_STOPPED,  onStop);
+    // Clear all activities when the scene changes (scene exit clears stale state)
+    const offScene = eventBus.on(EVENTS.SCENE_CHANGED, () => setActiveActivities(new Set()));
+    return () => {
+      offStart();
+      offStop();
+      offScene();
+    };
+  }, []);
+
   const sendMessage = useCallback(() => {
     const now = Date.now();
     const trimmed = input.trim().slice(0, CHAT.MAX_CHARS);
@@ -1352,6 +1382,8 @@ export default function PlayPage() {
     ? 1
     : Math.max(0, Math.min(1, (progression.xp - currentLevelFloorXp) / levelSpanXp));
   const joystickVisible = controlSettings.showVirtualJoystick && JOYSTICK_SCENES.has(activeScene);
+  const comboCount = activeActivities.size;
+  const comboMultiplier = comboCount >= 3 ? '2.0' : comboCount === 2 ? '1.5' : null;
   const armSafeReset = useCallback(() => {
     setRescueArmed(true);
     setUiNotice({ msg: 'Volver a plaza armado. Toca de nuevo para confirmar.', color: '#46B3FF' });
@@ -1589,6 +1621,18 @@ export default function PlayPage() {
             transition: none !important;
           }
         }
+        @keyframes wwComboIn {
+          from { opacity: 0; transform: translate3d(-50%, 0, 0) scale(0.7); }
+          to   { opacity: 1; transform: translate3d(-50%, 0, 0) scale(1); }
+        }
+        @keyframes wwComboPulse {
+          0%, 100% { box-shadow: 0 0 6px rgba(245,200,66,0.3); }
+          50%       { box-shadow: 0 0 18px rgba(245,200,66,0.75); }
+        }
+        .ww-combo-badge {
+          animation: wwComboIn 280ms cubic-bezier(0.22, 1, 0.36, 1) both,
+                     wwComboPulse 1.6s ease-in-out 280ms infinite;
+        }
         /* ── Right toolbar ── */
         .ww-toolbar {
           display: flex;
@@ -1738,6 +1782,28 @@ export default function PlayPage() {
             LVL {progression.level}
           </div>
         </div>
+
+        {comboMultiplier !== null && (
+          <div
+            className="ww-combo-badge pointer-events-none"
+            style={{
+              position: 'absolute',
+              bottom: 48,
+              left: '50%',
+              transform: 'translate3d(-50%, 0, 0)',
+              fontFamily: '"Press Start 2P", monospace',
+              fontSize: '10px',
+              color: '#F5C842',
+              background: 'rgba(14,14,20,0.88)',
+              border: '1px solid rgba(245,200,66,0.55)',
+              padding: '5px 12px',
+              letterSpacing: '0.08em',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            COMBO x{comboMultiplier}
+          </div>
+        )}
 
         <div className="absolute top-12 left-2 flex flex-col gap-2">
           {hudSettings.showSocialPanel && (

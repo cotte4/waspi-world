@@ -808,12 +808,14 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     this.hudText?.setText(`MATS: ${this.collectedTotal}`);
 
     this.minigameActive = true;
+    eventBus.emit(EVENTS.ACTIVITY_STARTED, { activity: 'mining' });
 
     // Hard safety: if any API call hangs (auth, rollQuality, addXp),
     // unblock movement after 12s so the player is never permanently stuck.
     const safetyTimer = window.setTimeout(() => {
       this.minigameActive = false;
       this.activeMiningMinigame = null;
+      eventBus.emit(EVENTS.ACTIVITY_STOPPED, { activity: 'mining' });
     }, 12000);
 
     void (async () => {
@@ -878,6 +880,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
         window.clearTimeout(safetyTimer);
         this.minigameActive = false;
         this.activeMiningMinigame = null;
+        eventBus.emit(EVENTS.ACTIVITY_STOPPED, { activity: 'mining' });
       }
     })();
   }

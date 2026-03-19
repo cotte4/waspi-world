@@ -1272,6 +1272,7 @@ export class VecindadScene extends Phaser.Scene {
     this.fishingActive = true;
     // Signal to enemy systems that the player is occupied (suppress attacks)
     this.playerBusy = true;
+    eventBus.emit(EVENTS.ACTIVITY_STARTED, { activity: 'fishing' });
 
     try {
       const sys = getSkillSystem();
@@ -1338,6 +1339,7 @@ export class VecindadScene extends Phaser.Scene {
       this.fishingActive = false;
       this.playerBusy = false;
       this.activeFishingMinigame = null;
+      eventBus.emit(EVENTS.ACTIVITY_STOPPED, { activity: 'fishing' });
     }
   }
 
@@ -1829,6 +1831,7 @@ export class VecindadScene extends Phaser.Scene {
     this.puestoTimeText?.setText(`⏱ 5:00`);
 
     eventBus.emit(EVENTS.UI_NOTICE, { message: '🌿 PUESTO ABIERTO! +XP POR MINUTO', color: '#39FF14' });
+    eventBus.emit(EVENTS.ACTIVITY_STARTED, { activity: 'weed_puesto' });
   }
 
   private closePuesto() {
@@ -1841,6 +1844,7 @@ export class VecindadScene extends Phaser.Scene {
     this.puestoAutoCloseTimer = undefined;
     this.puestoTimeText?.setText('');
     eventBus.emit(EVENTS.UI_NOTICE, { message: '🌿 PUESTO CERRADO', color: '#3a5a3a' });
+    eventBus.emit(EVENTS.ACTIVITY_STOPPED, { activity: 'weed_puesto' });
   }
 
   private grantPuestoXp() {
