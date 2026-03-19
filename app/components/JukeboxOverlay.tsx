@@ -169,6 +169,7 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
   const [actionBusy, setActionBusy]     = useState(false);
   const [actionMsg, setActionMsg]       = useState('');
   const searchTimerRef                  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchInputRef                  = useRef<HTMLInputElement>(null);
 
   // --- Subscribe to jukebox state updates ---
   useEffect(() => {
@@ -215,6 +216,13 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
   }, [runSearch]);
 
   useEffect(() => () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); }, []);
+
+  // Foco en el buscador: si no, el canvas de Phaser suele quedarse con el foco y las teclas no entran al input.
+  useEffect(() => {
+    if (searchTab !== 'open') return;
+    const t = window.setTimeout(() => searchInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(t);
+  }, [searchTab]);
 
   // --- Add song ---
   const handleAddSong = useCallback(async (result: SearchResult, cost: 100 | 150) => {
@@ -265,7 +273,7 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 400,
+    zIndex: 6500,
   };
 
   const modalStyle: React.CSSProperties = {
@@ -359,10 +367,15 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
         {searchTab === 'open' && (
           <div>
             <input
+              ref={searchInputRef}
               style={searchInputStyle}
               placeholder="🔍 Buscar canción en YouTube..."
               value={searchQuery}
               onChange={(e) => handleQueryChange(e.target.value)}
+              onKeyDown={(e) => { e.stopPropagation(); }}
+              onKeyUp={(e) => { e.stopPropagation(); }}
+              autoComplete="off"
+              autoFocus
             />
             {searching && (
               <div style={{ fontFamily: SILKSCREEN, fontSize: px(11), color: 'rgba(255,255,255,0.4)', padding: '6px 0' }}>buscando...</div>

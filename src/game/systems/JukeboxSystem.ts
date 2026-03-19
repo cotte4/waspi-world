@@ -400,6 +400,8 @@ class JukeboxSystem {
   // -------------------------------------------------------------------------
 
   private checkAndAdvanceQueue() {
+    // Presence a veces llega después del primer addSong: sin esto hostId queda null y la cola nunca arranca.
+    this.resolveHost();
     if (!this.isLocalHost()) return;
     if (this.state.nowPlaying) return;
 
@@ -444,10 +446,12 @@ class JukeboxSystem {
         if (!this.state.queue.find((s) => s.videoId === msg.payload.videoId)) {
           this.state.queue.push(msg.payload);
         }
+        this.checkAndAdvanceQueue();
         break;
 
       case 'JUKEBOX_QUEUE_UPDATED':
         this.state.queue = msg.payload.queue;
+        this.checkAndAdvanceQueue();
         break;
 
       case 'JUKEBOX_NOW_PLAYING':
@@ -481,6 +485,7 @@ class JukeboxSystem {
 
       case 'JUKEBOX_HOST_CHANGED':
         this.state.hostId = msg.payload.hostId;
+        this.checkAndAdvanceQueue();
         break;
 
       case 'JUKEBOX_FALLBACK_ON':
