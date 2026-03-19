@@ -27,10 +27,15 @@ import { ContractPanel } from '../systems/ContractPanel';
 import { getQuestSystem } from '../systems/QuestSystem';
 import { QuestPanel } from '../systems/QuestPanel';
 import { FishingMinigame } from '../systems/FishingMinigame';
+import { FishCompendiumPanel } from '../systems/FishCompendiumPanel';
+import { pickFishForZone } from '../config/fishSpecies';
+import { getAuthHeaders } from '../systems/authHelper';
 import { getMasterySystem } from '../systems/MasterySystem';
 import { getEventSystem } from '../systems/EventSystem';
 import { SpecializationModal } from '../systems/SpecializationModal';
 import type { SkillId } from '../systems/SkillSystem';
+import { getWeedDeliverySystem } from '../systems/WeedDeliverySystem';
+import type { WeedNpcId, WeedOrder } from '../systems/WeedDeliverySystem';
 
 type ParcelVisual = {
   title: Phaser.GameObjects.Text;
@@ -153,7 +158,19 @@ export class VecindadScene extends Phaser.Scene {
   private keyY?: Phaser.Input.Keyboard.Key;
   private keyC?: Phaser.Input.Keyboard.Key;
   private keyQ?: Phaser.Input.Keyboard.Key;
+  private keyF?: Phaser.Input.Keyboard.Key;
+  private fishPanel?: FishCompendiumPanel;
+  /** True while FishingMinigame is active — used by enemy systems to suppress attacks. */
+  playerBusy = false;
   private specModal?: SpecializationModal;
+
+  // ── Weed Delivery NPCs ────────────────────────────────────────────────────
+  private weedNpcBubbles: Map<WeedNpcId, Phaser.GameObjects.Container> = new Map();
+  private weedDeliveryDialogOpen = false;
+  private weedDeliveryDialogNpcId: WeedNpcId | null = null;
+  private weedDeliveryDialogBg?: Phaser.GameObjects.Rectangle;
+  private weedDeliveryDialogText?: Phaser.GameObjects.Text;
+  private weedDeliveryDialogHint?: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'VecindadScene' });
@@ -197,6 +214,7 @@ export class VecindadScene extends Phaser.Scene {
     this.createPlayer();
     this.setupUi();
     this.createFarmOverlay();
+    this.createWeedDeliveryNpcs();
     this.setupBridge();
     void this.loadSharedParcels();
     this.subscribeToParcelChanges();
@@ -217,11 +235,13 @@ export class VecindadScene extends Phaser.Scene {
     this.skillShopPanel = new SkillShopPanel(this);
     this.contractPanel  = new ContractPanel(this);
     this.questPanel     = new QuestPanel(this);
+    this.fishPanel      = new FishCompendiumPanel(this);
     this.specModal      = new SpecializationModal(this);
     this.keyT = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.T);
     this.keyY = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Y);
     this.keyC = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.C);
     this.keyQ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
+    this.keyF = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.F);
     this.bridgeCleanupFns.push(bindSafeResetToPlaza(this, () => {
       transitionToScene(this, 'WorldScene', {
         returnX: SAFE_PLAZA_RETURN.X,
@@ -246,12 +266,29 @@ export class VecindadScene extends Phaser.Scene {
       if (Phaser.Input.Keyboard.JustDown(this.keyE)) this.handleFarmPrimaryAction();
       return;
     }
+    // Weed delivery dialog swallows E and Space while open
+    if (this.weedDeliveryDialogOpen) {
+      if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
+        void this.confirmWeedDelivery();
+      }
+      if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
+        this.closeWeedDeliveryDialog();
+      }
+      return;
+    }
+
     this.handleMovement(delta);
     this.room?.update();
     this.updatePrompt();
     this.checkForestEntry();
+    this.updateWeedNpcBubbles();
 
     if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
+      const nearNpc = this.getNearbyWeedNpc();
+      if (nearNpc) {
+        this.handleWeedNpcInteract(nearNpc);
+        return;
+      }
       this.handlePrimaryAction();
     }
     if (Phaser.Input.Keyboard.JustDown(this.keySpace)) {
@@ -268,6 +305,17 @@ export class VecindadScene extends Phaser.Scene {
     }
     if (this.keyQ && Phaser.Input.Keyboard.JustDown(this.keyQ)) {
       this.questPanel?.toggle();
+    }
+    if (this.keyF && Phaser.Input.Keyboard.JustDown(this.keyF)) {
+      // Only open Acuario when near the fishing dock/pond
+      const fs = VecindadScene.FISHING_SPOT;
+      const ds = VecindadScene.FISHING_SPOT_DEEP;
+      const nearPond =
+        Phaser.Math.Distance.Between(this.px, this.py, fs.x, fs.y) < fs.range ||
+        Phaser.Math.Distance.Between(this.px, this.py, ds.x, ds.y) < ds.range + 30;
+      if (nearPond || this.fishPanel?.isVisible()) {
+        this.fishPanel?.toggle();
+      }
     }
   }
 
@@ -890,6 +938,23 @@ export class VecindadScene extends Phaser.Scene {
       return;
     }
 
+    const nearNpc = this.getNearbyWeedNpc();
+    if (nearNpc) {
+      const weedLv = getSkillSystem().getLevel('weed');
+      const sys = getWeedDeliverySystem();
+      if (!sys.canInteract(weedLv)) {
+        this.promptText.setText('🌿 DEALER [WEED LV3 REQUERIDO]');
+        this.promptText.setColor('#3a4a3a');
+      } else if (sys.isOnCooldown(nearNpc)) {
+        this.promptText.setText('🌿 DEALER | YA ENTREGASTE HOY');
+        this.promptText.setColor('#556655');
+      } else {
+        this.promptText.setText('E HABLAR CON DEALER');
+        this.promptText.setColor('#39FF14');
+      }
+      return;
+    }
+
     if (this.isNearPuestoSpot()) {
       const weedLv = getSkillSystem().getLevel('weed');
       if (weedLv < 4) {
@@ -1205,6 +1270,8 @@ export class VecindadScene extends Phaser.Scene {
 
   private async handleFishing(deep = false): Promise<void> {
     this.fishingActive = true;
+    // Signal to enemy systems that the player is occupied (suppress attacks)
+    this.playerBusy = true;
 
     try {
       const sys = getSkillSystem();
@@ -1800,5 +1867,250 @@ export class VecindadScene extends Phaser.Scene {
     this.questPanel = undefined;
     this.specModal?.destroy();
     this.specModal = undefined;
+
+    // Weed Delivery NPC cleanup
+    this.closeWeedDeliveryDialog();
+    this.weedNpcBubbles.forEach((container) => {
+      if (container.active) container.destroy();
+    });
+    this.weedNpcBubbles.clear();
+  }
+
+  // ─── Weed Delivery NPCs ──────────────────────────────────────────────────
+
+  /** NPC world positions — chosen to spread across the vecindad map. */
+  private static readonly WEED_NPCS: Array<{ id: WeedNpcId; x: number; y: number; name: string }> = [
+    { id: 'dealer_1', x: 490,  y: 650,  name: 'FLACO' },
+    { id: 'dealer_2', x: 2080, y: 500,  name: 'TOTO' },
+    { id: 'dealer_3', x: 1100, y: 1460, name: 'BETO' },
+  ];
+
+  private static readonly NPC_INTERACT_RANGE = 80;
+
+  private createWeedDeliveryNpcs() {
+    const g = this.add.graphics().setDepth(10);
+    for (const npc of VecindadScene.WEED_NPCS) {
+      // Draw a simple NPC body (pixel-art style)
+      // Shadow
+      g.fillStyle(0x000000, 0.25);
+      g.fillEllipse(npc.x, npc.y + 14, 24, 8);
+      // Legs
+      g.fillStyle(0x1a1a24, 1);
+      g.fillRect(npc.x - 7, npc.y + 2, 6, 12);
+      g.fillRect(npc.x + 1, npc.y + 2, 6, 12);
+      // Body
+      g.fillStyle(0x1f3b5b, 1);
+      g.fillRect(npc.x - 9, npc.y - 10, 18, 14);
+      // Head
+      g.fillStyle(0xf5d5a4, 1);
+      g.fillCircle(npc.x, npc.y - 18, 9);
+      // Eyes
+      g.fillStyle(0x000000, 1);
+      g.fillRect(npc.x - 4, npc.y - 20, 2, 2);
+      g.fillRect(npc.x + 2, npc.y - 20, 2, 2);
+      // Cap
+      g.fillStyle(0x2a1400, 1);
+      g.fillRect(npc.x - 10, npc.y - 26, 20, 5);
+      g.fillRect(npc.x - 8, npc.y - 31, 16, 6);
+
+      // Name label
+      this.add.text(npc.x, npc.y - 40, npc.name, {
+        fontSize: '6px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#39FF14',
+        stroke: '#000000',
+        strokeThickness: 3,
+      }).setOrigin(0.5).setDepth(11);
+
+      // Exclamation bubble (shown when NPC has an active order)
+      const bubble = this.add.container(npc.x, npc.y - 56).setDepth(15);
+      const circle = this.add.graphics();
+      circle.fillStyle(0xF5C842, 1);
+      circle.fillCircle(0, 0, 11);
+      circle.lineStyle(2, 0x000000, 0.8);
+      circle.strokeCircle(0, 0, 11);
+      const excl = this.add.text(0, 0, '!', {
+        fontSize: '11px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#000000',
+      }).setOrigin(0.5, 0.5);
+      bubble.add([circle, excl]);
+      this.weedNpcBubbles.set(npc.id, bubble);
+
+      // Animate bubble float
+      this.tweens.add({
+        targets: bubble,
+        y: npc.y - 62,
+        duration: 800,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+    }
+
+    // Initial visibility pass
+    this.updateWeedNpcBubbles();
+  }
+
+  private updateWeedNpcBubbles() {
+    const sys = getWeedDeliverySystem();
+    for (const npc of VecindadScene.WEED_NPCS) {
+      const bubble = this.weedNpcBubbles.get(npc.id);
+      if (!bubble || !bubble.active) continue;
+      const hasOrder = !sys.isOnCooldown(npc.id);
+      bubble.setVisible(hasOrder);
+    }
+  }
+
+  private getNearbyWeedNpc(): WeedNpcId | null {
+    for (const npc of VecindadScene.WEED_NPCS) {
+      if (
+        Phaser.Math.Distance.Between(this.px, this.py, npc.x, npc.y) <
+        VecindadScene.NPC_INTERACT_RANGE
+      ) {
+        return npc.id;
+      }
+    }
+    return null;
+  }
+
+  private handleWeedNpcInteract(npcId: WeedNpcId) {
+    const sys = getWeedDeliverySystem();
+    const weedLv = getSkillSystem().getLevel('weed');
+
+    if (!sys.canInteract(weedLv)) {
+      eventBus.emit(EVENTS.UI_NOTICE, {
+        message: '🌿 NECESITAS WEED LV3 PARA HABLAR CON DEALERS',
+        color: '#3a4a3a',
+      });
+      return;
+    }
+
+    if (sys.isOnCooldown(npcId)) {
+      this.openWeedDeliveryDialog(npcId, null);
+      return;
+    }
+
+    const order = sys.getOrder(npcId);
+    if (!order) return; // shouldn't happen since not on cooldown
+
+    this.openWeedDeliveryDialog(npcId, order);
+  }
+
+  private openWeedDeliveryDialog(npcId: WeedNpcId, order: WeedOrder | null) {
+    if (this.weedDeliveryDialogOpen) return;
+    this.weedDeliveryDialogOpen = true;
+    this.weedDeliveryDialogNpcId = npcId;
+
+    const npcConfig = VecindadScene.WEED_NPCS.find((n) => n.id === npcId);
+    const npcName = npcConfig?.name ?? npcId.toUpperCase();
+    const { width, height } = this.scale;
+    const cx = width / 2;
+    const cy = height - 110;
+
+    const sys = getWeedDeliverySystem();
+
+    let bodyLines: string[];
+    let hintLines: string[];
+
+    if (!order) {
+      bodyLines = [
+        `${npcName}: Ya me diste hoy, flaco.`,
+        'Volvé mañana con más material.',
+      ];
+      hintLines = ['[SPACE] CERRAR'];
+    } else {
+      bodyLines = [
+        `${npcName}: Che, conseguime`,
+        `${order.strainName} de calidad`,
+        `${sys.qualityLabel(order.minQuality)} o mejor.`,
+        `Te pago ${order.rewardBase} TENKS.`,
+      ];
+      hintLines = ['[E] ENTREGAR   [SPACE] SALIR'];
+    }
+
+    this.weedDeliveryDialogBg = this.add
+      .rectangle(cx, cy, 480, 120, 0x111318, 0.96)
+      .setStrokeStyle(2, 0x39FF14, 0.8)
+      .setScrollFactor(0)
+      .setDepth(2000);
+
+    this.weedDeliveryDialogText = this.add
+      .text(cx, cy - 22, bodyLines.join('\n'), {
+        fontSize: '7px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#B9FF9E',
+        align: 'center',
+        lineSpacing: 6,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2001);
+
+    this.weedDeliveryDialogHint = this.add
+      .text(cx, cy + 44, hintLines.join('\n'), {
+        fontSize: '6px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#F5C842',
+        align: 'center',
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2001);
+  }
+
+  private closeWeedDeliveryDialog() {
+    this.weedDeliveryDialogOpen = false;
+    this.weedDeliveryDialogNpcId = null;
+    if (this.weedDeliveryDialogBg?.active) this.weedDeliveryDialogBg.destroy();
+    if (this.weedDeliveryDialogText?.active) this.weedDeliveryDialogText.destroy();
+    if (this.weedDeliveryDialogHint?.active) this.weedDeliveryDialogHint.destroy();
+    this.weedDeliveryDialogBg = undefined;
+    this.weedDeliveryDialogText = undefined;
+    this.weedDeliveryDialogHint = undefined;
+  }
+
+  private async confirmWeedDelivery(): Promise<void> {
+    const npcId = this.weedDeliveryDialogNpcId;
+    if (!npcId) { this.closeWeedDeliveryDialog(); return; }
+
+    const sys = getWeedDeliverySystem();
+    const order = sys.getOrder(npcId);
+    if (!order) {
+      // On cooldown — just close
+      this.closeWeedDeliveryDialog();
+      return;
+    }
+
+    this.closeWeedDeliveryDialog();
+
+    // Verify scene still active before API call
+    if (!this.scene?.isActive('VecindadScene')) return;
+
+    try {
+      const result = await sys.deliver(npcId, order.strainName, order.minQuality);
+
+      if (!this.scene?.isActive('VecindadScene')) return;
+
+      // Mark delivered client-side so cooldown applies immediately
+      sys.markDelivered(npcId);
+
+      // Update bubble visibility
+      const bubble = this.weedNpcBubbles.get(npcId);
+      if (bubble?.active) bubble.setVisible(false);
+
+      // Flash camera green
+      this.cameras.main.flash(300, 57, 255, 20, false);
+
+      // Emit XP notice separately so both messages appear
+      eventBus.emit(EVENTS.UI_NOTICE, {
+        message: `🌿 +${result.tenks_earned} TENKS +${result.xp_earned} XP WEED`,
+        color: '#39FF14',
+      });
+    } catch (err: unknown) {
+      if (!this.scene?.isActive('VecindadScene')) return;
+      const msg = err instanceof Error ? err.message : 'Error de red';
+      eventBus.emit(EVENTS.UI_NOTICE, { message: `🌿 ERROR: ${msg}`, color: '#FF006E' });
+    }
   }
 }
