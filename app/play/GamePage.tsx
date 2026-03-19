@@ -1589,6 +1589,78 @@ export default function PlayPage() {
             transition: none !important;
           }
         }
+        /* ── Right toolbar ── */
+        .ww-toolbar {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+          background: rgba(0,0,0,0.72);
+          border: 1px solid rgba(245,200,66,0.14);
+          padding: 5px;
+          backdrop-filter: blur(8px);
+          animation: wwFadeUp 540ms cubic-bezier(0.22,1,0.36,1) both;
+        }
+        .ww-toolbar-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 34px;
+          height: 28px;
+          cursor: pointer;
+          border: 1px solid transparent;
+          background: transparent;
+          font-size: 13px;
+          line-height: 1;
+          color: rgba(255,255,255,0.45);
+        }
+        .ww-toolbar-btn:hover:not(:disabled) {
+          background: rgba(255,255,255,0.07) !important;
+          border-color: rgba(255,255,255,0.14) !important;
+          color: rgba(255,255,255,0.9) !important;
+          transform: translateY(0) !important;
+        }
+        .ww-toolbar-divider {
+          height: 1px;
+          background: rgba(255,255,255,0.07);
+          margin: 1px 0;
+        }
+        /* ── Controls hint ── */
+        .ww-ctrl-wrap {
+          position: relative;
+          display: inline-block;
+        }
+        .ww-ctrl-toggle {
+          width: 26px;
+          height: 26px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: default;
+          border: 1px solid rgba(255,255,255,0.1);
+          background: rgba(0,0,0,0.55);
+          color: rgba(255,255,255,0.28);
+          font-family: "Press Start 2P", monospace;
+          font-size: 7px;
+          backdrop-filter: blur(6px);
+        }
+        .ww-ctrl-panel {
+          display: none;
+          position: absolute;
+          top: 0;
+          right: 30px;
+          white-space: nowrap;
+          background: rgba(0,0,0,0.82);
+          border: 1px solid rgba(255,255,255,0.09);
+          padding: 6px 8px;
+          font-family: "Press Start 2P", monospace;
+          color: rgba(255,255,255,0.32);
+          font-size: 7px;
+          line-height: 1.9;
+          backdrop-filter: blur(8px);
+        }
+        .ww-ctrl-wrap:hover .ww-ctrl-panel {
+          display: block;
+        }
       `}</style>
       {isMobile && isPortrait && (
         <div
@@ -1674,7 +1746,7 @@ export default function PlayPage() {
               style={{
                 width: 182,
                 background: 'rgba(0,0,0,0.7)',
-                border: '1px solid rgba(57,255,20,0.22)',
+                border: '1px solid rgba(57,255,20,0.14)',
                 padding: '6px 8px',
                 boxShadow: '0 10px 24px rgba(0,0,0,0.28)',
               }}
@@ -1713,7 +1785,7 @@ export default function PlayPage() {
                         animationDelay: `${index * 45}ms`,
                       }}
                     >
-                      {player.playerId === playerInfo?.playerId ? 'TU ' : '+ '} {player.username}
+                      {player.playerId === playerInfo?.playerId ? '→ ' : '· '}{player.username}
                     </div>
                   ))}
                   {presencePlayers.length === 0 && (
@@ -1776,15 +1848,22 @@ export default function PlayPage() {
                       <span>KOs {progression.kills}</span>
                     </div>
                   </div>
-                  <div style={{ marginTop: 6, height: 8, border: '1px solid rgba(70,179,255,0.28)', background: 'rgba(255,255,255,0.05)' }}>
+                  <div style={{ position: 'relative', marginTop: 6, height: 8, border: '1px solid rgba(70,179,255,0.28)', background: 'rgba(255,255,255,0.05)' }}>
                     <div
                       style={{
                         width: `${progressPct * 100}%`,
                         height: '100%',
-                        background: 'linear-gradient(90deg, #46B3FF 0%, #8CE0FF 100%)',
+                        background: '#46B3FF',
                         transition: 'width 0.6s ease-out',
                       }}
                     />
+                    {/* Pixel segment dividers */}
+                    <div style={{
+                      position: 'absolute',
+                      inset: 0,
+                      backgroundImage: 'repeating-linear-gradient(90deg, transparent 0, transparent calc(10% - 1px), rgba(5,5,10,0.65) calc(10% - 1px), rgba(5,5,10,0.65) 10%)',
+                      pointerEvents: 'none',
+                    }} />
                   </div>
                 </>
               )}
@@ -1793,94 +1872,72 @@ export default function PlayPage() {
         </div>
 
         {hudSettings.showControlsPanel && !isMobile && (
-          <div
-            className="ww-panel absolute top-2 right-2 pointer-events-none"
-            style={{
-              background: 'rgba(0,0,0,0.6)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              padding: '4px 8px',
-              fontFamily: '"Press Start 2P", monospace',
-              color: 'rgba(255,255,255,0.3)',
-              fontSize: '7px',
-              lineHeight: '1.8',
-            }}
-          >
-            WASD / FLECHAS MOVER<br />
-          {chatVisible ? 'ENTER CHATEAR' : 'ENTER CHAT OFF'}<br />
-          {CHAT_SCENES.has(activeScene) ? (chatEnabled ? 'T CHAT OFF' : 'T CHAT ON') : ''}<br />
-            I INVENTARIO
+          <div className="ww-ctrl-wrap absolute top-2 right-2 pointer-events-auto">
+            <div className="ww-ctrl-toggle">[?]</div>
+            <div className="ww-ctrl-panel">
+              WASD / FLECHAS MOVER<br />
+              {chatVisible ? 'ENTER CHATEAR' : 'ENTER CHAT OFF'}<br />
+              {CHAT_SCENES.has(activeScene) ? (chatEnabled ? 'T CHAT OFF' : 'T CHAT ON') : ''}<br />
+              I INVENTARIO
+            </div>
           </div>
         )}
 
-        <button
-          onClick={() => {
-            setShopSource('hud');
-            setShopOpen(true);
-          }}
-          className="absolute right-2 top-16"
-          style={{
-            fontFamily: '"Press Start 2P", monospace',
-            fontSize: '8px',
-            padding: '8px 10px',
-            background: '#F5C842',
-            color: '#0E0E14',
-            border: 'none',
-            cursor: 'pointer',
-          }}
-        >
-          SHOP
-        </button>
+        {/* ── Right toolbar ── */}
+        <div className="ww-toolbar absolute right-2 top-12">
+          {/* SHOP — primary action */}
+          <button
+            onClick={() => { setShopSource('hud'); setShopOpen(true); }}
+            title="Tienda"
+            style={{
+              width: 34,
+              fontFamily: '"Press Start 2P", monospace',
+              fontSize: '7px',
+              padding: '7px 4px',
+              background: '#F5C842',
+              color: '#0E0E14',
+              border: 'none',
+              cursor: 'pointer',
+              letterSpacing: '0.02em',
+              lineHeight: 1.4,
+            }}
+          >
+            🛍️<br />SHOP
+          </button>
 
-        <button
-          onClick={openSettings}
-          className="absolute right-2 top-28"
-          style={{
-            fontFamily: '"Press Start 2P", monospace',
-            fontSize: '13px',
-            padding: '6px 9px',
-            background: 'rgba(255,255,255,0.08)',
-            color: '#FFFFFF',
-            border: '1px solid rgba(255,255,255,0.15)',
-            cursor: 'pointer',
-            lineHeight: 1,
-          }}
-        >
-          ⚙
-        </button>
+          <div className="ww-toolbar-divider" />
 
-        <button
-          onClick={() => void openStats()}
-          className="absolute right-2 top-40"
-          style={{
-            fontFamily: '"Press Start 2P", monospace',
-            fontSize: '11px',
-            padding: '6px 9px',
-            background: 'rgba(70,179,255,0.1)',
-            color: '#46B3FF',
-            border: '1px solid rgba(70,179,255,0.25)',
-            cursor: 'pointer',
-            lineHeight: 1,
-          }}
-        >
-          📊
-        </button>
+          {/* Settings */}
+          <button onClick={openSettings} className="ww-toolbar-btn" title="Ajustes">⚙</button>
 
-        <button
-          onClick={handleSafeReset}
-          className="absolute right-2 top-52"
-          style={{
-            fontFamily: '"Press Start 2P", monospace',
-            fontSize: '8px',
-            padding: '8px 10px',
-            background: rescueArmed ? '#FF6A6A' : 'rgba(255,106,106,0.12)',
-            color: rescueArmed ? '#0E0E14' : '#FF9EA6',
-            border: '1px solid rgba(255,106,106,0.28)',
-            cursor: 'pointer',
-            boxShadow: rescueArmed ? '0 0 18px rgba(255,106,106,0.35)' : 'none',
-          }}
-        >
-          {rescueArmed ? 'CONFIRMAR PLAZA' : 'VOLVER A PLAZA'}
-        </button>
+          {/* Stats */}
+          <button onClick={() => void openStats()} className="ww-toolbar-btn" title="Estadísticas">📊</button>
+
+          <div className="ww-toolbar-divider" />
+
+          {/* Rescue — dormant strip, activates on arm */}
+          <button
+            onClick={handleSafeReset}
+            title={rescueArmed ? 'Confirmar vuelta a plaza' : 'Volver a plaza'}
+            style={{
+              width: 34,
+              height: rescueArmed ? 28 : 8,
+              cursor: 'pointer',
+              border: 'none',
+              background: rescueArmed ? '#FF6A6A' : 'rgba(255,106,106,0.2)',
+              color: rescueArmed ? '#0E0E14' : 'transparent',
+              fontFamily: '"Press Start 2P", monospace',
+              fontSize: '6px',
+              overflow: 'hidden',
+              transition: 'height 220ms ease, background 220ms ease, color 220ms ease, box-shadow 220ms ease',
+              boxShadow: rescueArmed ? '0 0 16px rgba(255,106,106,0.45)' : 'none',
+              whiteSpace: 'nowrap',
+              letterSpacing: '0.01em',
+            }}
+          >
+            {rescueArmed ? '✓ PLAZA' : ''}
+          </button>
+        </div>
 
         {activeScene !== 'CreatorScene' && !isAuthenticated && (
         <div
