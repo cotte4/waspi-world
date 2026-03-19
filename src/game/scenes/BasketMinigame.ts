@@ -786,6 +786,8 @@ export class BasketMinigame extends Phaser.Scene {
     if (this.rewardPending) {
       window.setTimeout(() => {
         if (!this.rewardPending || this.isFinished) return;
+        if (!this.scene.isActive('BasketMinigame')) return;
+        if (!this.footer.active) return;
         this.rewardPending = false;
         this.footer.setText('NO SE PUDO GUARDAR. VOLVIENDO...');
         this.footer.setColor('#FF006E');

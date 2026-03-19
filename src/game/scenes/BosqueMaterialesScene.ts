@@ -702,6 +702,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
 
         // Roll quality server-side
         const qr = await sys.rollQuality('mining', 'node_collect', isAuto);
+        if (!this.scene?.isActive('BosqueMaterialesScene')) return;
 
         // Track for contracts
         void getContractSystem().trackAction('node_collect', 'mining', qr.quality);
@@ -717,6 +718,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
           this.time.delayedCall(1600, () => this.hudText?.setColor('#B9FF9E'));
         }
         const xpResult = await sys.addXp('mining', xpTotal, 'node_collect');
+        if (!this.scene?.isActive('BosqueMaterialesScene')) return;
         if (xpResult.leveled_up) {
           eventBus.emit(EVENTS.UI_NOTICE, { message: `⛏️ MINERÍA LVL ${xpResult.new_level}!`, color: '#F5C842' });
           this.autoHud?.setVisible(sys.getLevel('mining') >= 4);

@@ -85,7 +85,8 @@ export class BootScene extends Phaser.Scene {
     });
 
     this.load.on('loaderror', (file: unknown) => {
-      console.log('[Waspi] Asset load error', file);
+      const key = (file as { key?: string })?.key ?? '(unknown)';
+      console.warn('[Waspi] Asset load error:', key);
     });
 
     // Seed sprites (drop files into public/assets/seeds/)

@@ -576,8 +576,10 @@ export class VecindadScene extends Phaser.Scene {
 
   private async loadSharedParcels() {
     const res = await fetch('/api/vecindad').catch(() => null);
+    if (!this.scene?.isActive('VecindadScene')) return;
     if (!res?.ok) return;
     const json = await res.json().catch(() => null) as { parcels?: SharedParcelState[] } | null;
+    if (!this.scene?.isActive('VecindadScene')) return;
     if (!json?.parcels) return;
     this.applySharedParcels(json.parcels);
     eventBus.emit(EVENTS.VECINDAD_SHARED_STATE_CHANGED, { parcels: json.parcels });

@@ -715,6 +715,8 @@ export class ArcadeInterior extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
+    try { this.tweens.killAll(); } catch (_e) { /* already destroyed */ }
+
     try {
       this.room?.shutdown();
       this.room = undefined;
