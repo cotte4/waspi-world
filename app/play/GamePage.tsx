@@ -47,6 +47,11 @@ const GameHUD = dynamic(() => import('@/app/components/GameHUD'), { ssr: false }
 const CharacterCreatorOverlay = dynamic(() => import('@/app/components/CharacterCreatorOverlay'), { ssr: false });
 const ShopOverlay = dynamic(() => import('@/app/components/ShopOverlay'), { ssr: false });
 const InventoryOverlay = dynamic(() => import('@/app/components/InventoryOverlay'), { ssr: false });
+const UINotice = dynamic(() => import('@/app/components/UINotice'), { ssr: false });
+const PlayerActionsOverlay = dynamic(() => import('@/app/components/PlayerActionsOverlay'), { ssr: false });
+const StatsOverlay = dynamic(() => import('@/app/components/StatsOverlay'), { ssr: false });
+const SettingsOverlay = dynamic(() => import('@/app/components/SettingsOverlay'), { ssr: false });
+const LoginCard = dynamic(() => import('@/app/components/LoginCard'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
 const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
@@ -2210,85 +2215,14 @@ export default function PlayPage() {
         </div>
 
         {activeScene !== 'CreatorScene' && !isAuthenticated && (
-        <div
-          className="ww-auth-card absolute"
-          style={{
-            bottom: 8,
-            right: 8,
-            width: 228,
-            background: 'rgba(0,0,0,0.72)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            padding: '8px',
-            borderRadius: 4,
-            boxShadow: '0 4px 16px rgba(0,0,0,0.45)',
-            zIndex: 12,
-          }}
-        >
-          <>
-            <div
-              style={{
-                fontFamily: '"Press Start 2P", monospace',
-                fontSize: '7px',
-                color: '#F5C842',
-                marginBottom: 8,
-              }}
-            >
-              LOGIN OPCIONAL
-            </div>
-            <div className="flex flex-col gap-2">
-            <input
-              value={emailInput}
-              onChange={(e) => setEmailInput(e.target.value)}
-              placeholder="email@waspi.world"
-              autoComplete="email"
-              id="account-email"
-              name="email"
-              style={textInputStyle}
-            />
-              <button onClick={() => void sendMagicLink()} disabled={authBusy} style={authButtonStyle('#F5C842', '#0E0E14', authBusy)}>
-                {authBusy ? 'ENVIANDO...' : 'MAGIC LINK ✉'}
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0' }}>
-              <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.1)' }} />
-              <span style={{ fontFamily: '"Silkscreen", monospace', fontSize: '9px', color: 'rgba(255,255,255,0.3)' }}>O</span>
-              <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.1)' }} />
-            </div>
-
-            <button
-              onClick={() => void signInWithGoogle()}
-              disabled={authBusy}
-              style={{
-                ...authButtonStyle('rgba(255,255,255,0.08)', '#FFFFFF', authBusy, true),
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
-                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-              </svg>
-              ENTRAR CON GOOGLE
-            </button>
-
-            <div
-              style={{
-                fontFamily: '"Silkscreen", monospace',
-                fontSize: '11px',
-                color: authStatus ? '#BBBBBB' : 'rgba(255,255,255,0.35)',
-                marginTop: 8,
-                minHeight: 14,
-              }}
-            >
-              {authStatus || 'Guarda TENKS, inventario y avatar en tu cuenta.'}
-            </div>
-          </>
-        </div>
+          <LoginCard
+            emailInput={emailInput}
+            onEmailChange={setEmailInput}
+            authBusy={authBusy}
+            authStatus={authStatus}
+            onMagicLink={() => void sendMagicLink()}
+            onGoogle={() => void signInWithGoogle()}
+          />
         )}
 
         {checkoutRedirecting && (
@@ -2339,41 +2273,12 @@ export default function PlayPage() {
         )}
 
 
-        {playerActions && (
-          <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
-            <div
-              className="ww-modal"
-              style={{
-                width: 320,
-                background: 'rgba(10,10,18,0.97)',
-                border: '1px solid rgba(245,200,66,0.28)',
-                boxShadow: '0 10px 40px rgba(0,0,0,0.55)',
-                padding: 16,
-              }}
-            >
-              <div style={{ fontFamily: '"Press Start 2P", monospace', color: '#F5C842', fontSize: '10px', marginBottom: 12 }}>
-                ACCIONES DE JUGADOR
-              </div>
-              <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: '16px', color: '#FFFFFF', marginBottom: 6 }}>
-                {playerActions.username}
-              </div>
-              <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: '12px', color: 'rgba(255,255,255,0.58)', marginBottom: 14 }}>
-                Elige una accion de moderacion rapida.
-              </div>
-              <div className="flex flex-col gap-2">
-                <button onClick={handleMutePlayer} style={authButtonStyle('#F5C842', '#0E0E14', false)}>
-                  SILENCIAR
-                </button>
-                <button onClick={handleReportPlayer} style={authButtonStyle('rgba(255,255,255,0.08)', '#FFFFFF', false, true)}>
-                  REPORTAR
-                </button>
-                <button onClick={() => setPlayerActions(null)} style={authButtonStyle('rgba(255,255,255,0.08)', '#FFFFFF', false, true)}>
-                  CANCELAR
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        <PlayerActionsOverlay
+          player={playerActions}
+          onMute={handleMutePlayer}
+          onReport={handleReportPlayer}
+          onClose={() => setPlayerActions(null)}
+        />
 
         {inventoryOpen && (
           <InventoryOverlay
@@ -2461,487 +2366,38 @@ export default function PlayPage() {
         )}
 
         {settingsOpen && (
-          <div
-            className="ww-overlay absolute inset-0 flex items-center justify-center"
-            style={{ background: 'rgba(0,0,0,0.55)' }}
-            onClick={(e) => { if (e.target === e.currentTarget) closeSettings(); }}
-          >
-            <div
-              className="ww-modal flex flex-col"
-              style={{
-                width: isMobile ? '94%' : 640,
-                maxHeight: isMobile ? '88%' : 580,
-                background: 'rgba(10,10,18,0.96)',
-                border: '1px solid rgba(245,200,66,0.35)',
-                boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                className="flex items-center justify-between"
-                style={{
-                  padding: '16px 16px 10px',
-                  borderBottom: '1px solid rgba(255,255,255,0.06)',
-                  fontFamily: '"Press Start 2P", monospace',
-                  color: '#F5C842',
-                  fontSize: '10px',
-                  flexShrink: 0,
-                }}
-              >
-                <span>SETTINGS</span>
-                <button onClick={closeSettings} style={modalCloseButtonStyle()}>
-                  CERRAR
-                </button>
-              </div>
-
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 6,
-                  padding: '10px 12px 0',
-                  flexShrink: 0,
-                  borderBottom: '1px solid rgba(255,255,255,0.06)',
-                }}
-              >
-                {([
-                  ['audio', 'AUDIO'],
-                  ['hud', 'HUD'],
-                  ['controls', 'CTRLS'],
-                  ['voice', 'VOZ'],
-                ] as const).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setSettingsTab(id)}
-                    style={{
-                      flex: 1,
-                      padding: '8px 4px',
-                      fontFamily: '"Press Start 2P", monospace',
-                      fontSize: '6px',
-                      lineHeight: 1.5,
-                      border: settingsTab === id ? '1px solid rgba(245,200,66,0.65)' : '1px solid rgba(255,255,255,0.1)',
-                      background: settingsTab === id ? 'rgba(245,200,66,0.1)' : 'transparent',
-                      color: settingsTab === id ? '#F5C842' : 'rgba(255,255,255,0.55)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              <div
-                style={{
-                  overflowY: 'auto',
-                  padding: '12px 16px 16px',
-                  fontFamily: '"Silkscreen", monospace',
-                  color: 'rgba(255,255,255,0.9)',
-                  fontSize: '14px',
-                }}
-              >
-                {settingsTab === 'audio' && (
-                  <>
-                    <div className="flex items-center justify-between py-2">
-                      <div>
-                        <div style={{ fontSize: '16px' }}>MÚSICA DE ESCENA</div>
-                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>
-                          Mundo, tienda, zombies, arcade. Si la volvés a activar, debería retomar sin cambiar de mapa.
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setAudioSettings((current) => ({ ...current, musicEnabled: !current.musicEnabled }))}
-                        style={toggleButtonStyle(audioSettings.musicEnabled)}
-                      >
-                        {audioSettings.musicEnabled ? 'ON' : 'OFF'}
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between py-2">
-                      <div>
-                        <div style={{ fontSize: '16px' }}>EFECTOS (SFX)</div>
-                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>
-                          Disparos, golpes, bips de UI y SFX del juego por Web Audio.
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setAudioSettings((current) => ({ ...current, sfxEnabled: !current.sfxEnabled }))}
-                        style={toggleButtonStyle(audioSettings.sfxEnabled)}
-                      >
-                        {audioSettings.sfxEnabled ? 'ON' : 'OFF'}
-                      </button>
-                    </div>
-
-                    <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                      <div style={{ fontSize: '16px', marginBottom: 6 }}>SALIDA DE AUDIO (Web Audio)</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.52)', marginBottom: 10 }}>
-                        {supportsAudioOutputDevicePicker()
-                          ? 'Chrome/Edge: música Phaser, SFX y voz recibida. La jukebox del café es YouTube embebido y suele seguir la salida por defecto del navegador.'
-                          : 'Tu navegador no ofrece selector de salida para Web Audio; usá el mezclador del sistema o la salida por defecto del navegador.'}
-                      </div>
-                      {supportsAudioOutputDevicePicker() && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedOutputDeviceId('')}
-                            style={{
-                              ...optionButtonStyle(selectedOutputDeviceId === ''),
-                              textAlign: 'left',
-                              fontSize: '11px',
-                            }}
-                          >
-                            Predeterminado del sistema
-                          </button>
-                          {outputDevices.map((d, i) => (
-                            <button
-                              key={d.deviceId}
-                              type="button"
-                              onClick={() => setSelectedOutputDeviceId(d.deviceId)}
-                              style={{
-                                ...optionButtonStyle(selectedOutputDeviceId === d.deviceId),
-                                textAlign: 'left',
-                                fontSize: '11px',
-                              }}
-                            >
-                              {d.label || `Salida ${i + 1}`}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-
-                {settingsTab === 'hud' && (
-                  <>
-                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', marginBottom: 10 }}>
-                      Paneles de React alrededor del canvas y HUD de combate dentro del juego.
-                    </div>
-                    <div className="flex items-center justify-between py-2">
-                      <div>
-                        <div style={{ fontSize: '16px' }}>SOCIAL</div>
-                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Jugadores conectados (panel izquierdo)</div>
-                      </div>
-                      <button
-                        onClick={() => setHudSettings((current) => ({ ...current, showSocialPanel: !current.showSocialPanel }))}
-                        style={toggleButtonStyle(hudSettings.showSocialPanel)}
-                      >
-                        {hudSettings.showSocialPanel ? 'ON' : 'OFF'}
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between py-2">
-                      <div>
-                        <div style={{ fontSize: '16px' }}>PROGRESO</div>
-                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Nivel, XP, KOs (no el texto verde del canvas)</div>
-                      </div>
-                      <button
-                        onClick={() => setHudSettings((current) => ({ ...current, showProgressPanel: !current.showProgressPanel }))}
-                        style={toggleButtonStyle(hudSettings.showProgressPanel)}
-                      >
-                        {hudSettings.showProgressPanel ? 'ON' : 'OFF'}
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between py-2">
-                      <div>
-                        <div style={{ fontSize: '16px' }}>AYUDA DE CONTROLES</div>
-                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Tarjeta arriba a la derecha</div>
-                      </div>
-                      <button
-                        onClick={() => setHudSettings((current) => ({ ...current, showControlsPanel: !current.showControlsPanel }))}
-                        style={toggleButtonStyle(hudSettings.showControlsPanel)}
-                      >
-                        {hudSettings.showControlsPanel ? 'ON' : 'OFF'}
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between py-2">
-                      <div>
-                        <div style={{ fontSize: '16px' }}>ARENA (canvas)</div>
-                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>
-                          Combate en plaza, barras, minimapa, textos training/XP
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => setHudSettings((current) => ({ ...current, showArenaHud: !current.showArenaHud }))}
-                        style={toggleButtonStyle(hudSettings.showArenaHud)}
-                      >
-                        {hudSettings.showArenaHud ? 'ON' : 'OFF'}
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                {settingsTab === 'controls' && (
-                  <div style={{ display: 'grid', gap: 8, marginBottom: 6 }}>
-                    <div>
-                      <div style={{ fontSize: '16px', marginBottom: 6 }}>MOVIMIENTO</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginBottom: 6 }}>
-                        Activo: {movementSchemeLabel(controlSettings.movementScheme)}
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
-                        {([
-                          ['both', 'WASD + FLECHAS'],
-                          ['wasd', 'SOLO WASD'],
-                          ['arrows', 'SOLO FLECHAS'],
-                          ['ijkl', 'IJKL'],
-                          ['custom', 'CUSTOM'],
-                        ] as Array<[MovementScheme, string]>).map(([scheme, label]) => (
-                          <button
-                            key={scheme}
-                            onClick={() => setControlSettings((current) => ({ ...current, movementScheme: scheme }))}
-                            style={optionButtonStyle(controlSettings.movementScheme === scheme)}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <div style={{ fontSize: '16px', marginBottom: 6 }}>REMAPEO</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginBottom: 6 }}>
-                        Elegí dirección y pulsá una tecla. ESC cancela.
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
-                        {(['up', 'left', 'down', 'right'] as MovementDirection[]).map((direction) => (
-                          <button
-                            key={direction}
-                            onClick={() => setBindingCaptureDirection(direction)}
-                            style={optionButtonStyle(bindingCaptureDirection === direction)}
-                          >
-                            {bindingCaptureDirection === direction
-                              ? `${directionLabel(direction)}: ...`
-                              : `${directionLabel(direction)}: ${formatMovementBindingLabel(controlSettings.movementBindings[direction])}`}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <div style={{ fontSize: '16px', marginBottom: 6 }}>ACCIONES</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginBottom: 6 }}>
-                        Interacción, disparo, inventario, chat, volver.
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
-                        {(['interact', 'shoot', 'inventory', 'chat', 'back'] as ActionBinding[]).map((action) => (
-                          <button
-                            key={action}
-                            onClick={() => setBindingCaptureAction(action)}
-                            style={optionButtonStyle(bindingCaptureAction === action)}
-                          >
-                            {bindingCaptureAction === action
-                              ? `${actionLabel(action)}: ...`
-                              : `${actionLabel(action)}: ${formatMovementBindingLabel(controlSettings.actionBindings[action])}`}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between py-2">
-                      <div>
-                        <div style={{ fontSize: '16px' }}>JOYSTICK</div>
-                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Toque para mover sin teclado</div>
-                      </div>
-                      <button
-                        onClick={() => setControlSettings((current) => ({ ...current, showVirtualJoystick: !current.showVirtualJoystick }))}
-                        style={toggleButtonStyle(controlSettings.showVirtualJoystick)}
-                      >
-                        {controlSettings.showVirtualJoystick ? 'ON' : 'OFF'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {settingsTab === 'voice' && (
-                  <>
-                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', marginBottom: 10 }}>
-                      Entrada: micrófono. La salida de voz de otros jugadores sigue la pestaña «AUDIO» si tu navegador lo permite.
-                    </div>
-                    {micDevices.length > 0 ? (
-                      <div style={{ marginBottom: 12 }}>
-                        <div style={{ fontSize: '16px', marginBottom: 6 }}>MICRÓFONO</div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                          {micDevices.map((d, i) => (
-                            <button
-                              key={d.deviceId}
-                              type="button"
-                              onClick={() => {
-                                setSelectedMicDeviceId(d.deviceId);
-                                eventBus.emit(EVENTS.VOICE_MIC_CHANGED, d.deviceId);
-                              }}
-                              style={{
-                                ...optionButtonStyle(selectedMicDeviceId === d.deviceId),
-                                textAlign: 'left',
-                                fontSize: '11px',
-                              }}
-                            >
-                              {d.label || `Mic ${i + 1}`}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.45)', marginBottom: 12 }}>
-                        No hay micrófonos listados. Abrí ajustes otra vez tras permitir permiso de audio.
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between py-2">
-                      <div>
-                        <div style={{ fontSize: '16px' }}>DESACTIVAR VOZ</div>
-                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Corta mic y voz hasta la próxima vez que la actives</div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => eventBus.emit(EVENTS.VOICE_DISABLE)}
-                        style={toggleButtonStyle(false)}
-                      >
-                        OFF
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
+          <SettingsOverlay
+            isMobile={isMobile}
+            settingsTab={settingsTab}
+            onTabChange={setSettingsTab}
+            onClose={closeSettings}
+            audioSettings={audioSettings}
+            onAudioChange={(patch) => setAudioSettings((current) => ({ ...current, ...patch }))}
+            outputDevices={outputDevices}
+            selectedOutputDeviceId={selectedOutputDeviceId}
+            onOutputDeviceChange={setSelectedOutputDeviceId}
+            hudSettings={hudSettings}
+            onHudChange={(patch) => setHudSettings((current) => ({ ...current, ...patch }))}
+            controlSettings={controlSettings}
+            onControlChange={(patch) => setControlSettings((current) => ({ ...current, ...patch }))}
+            bindingCaptureDirection={bindingCaptureDirection}
+            onCaptureDirection={setBindingCaptureDirection}
+            bindingCaptureAction={bindingCaptureAction}
+            onCaptureAction={setBindingCaptureAction}
+            micDevices={micDevices}
+            selectedMicDeviceId={selectedMicDeviceId}
+            onMicDeviceChange={setSelectedMicDeviceId}
+          />
         )}
 
         {statsOpen && (
-          <div
-            className="ww-overlay absolute inset-0 flex items-center justify-center"
-            style={{ background: 'rgba(0,0,0,0.6)', zIndex: 20 }}
-            onClick={(e) => { if (e.target === e.currentTarget) closeStats(); }}
-          >
-            <div
-              className="ww-modal flex flex-col"
-              style={{
-                width: isMobile ? '94%' : 560,
-                maxHeight: isMobile ? '88%' : 520,
-                background: 'rgba(10,10,18,0.97)',
-                border: '1px solid rgba(70,179,255,0.35)',
-                boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                className="flex items-center justify-between"
-                style={{
-                  padding: '14px 16px 10px',
-                  borderBottom: '1px solid rgba(255,255,255,0.06)',
-                  fontFamily: '"Press Start 2P", monospace',
-                  color: '#46B3FF',
-                  fontSize: '10px',
-                  flexShrink: 0,
-                }}
-              >
-                <span>ESTADÍSTICAS</span>
-                <button onClick={closeStats} style={modalCloseButtonStyle()}>CERRAR</button>
-              </div>
-
-              <div style={{ overflowY: 'auto', padding: '14px 16px 18px', fontFamily: '"Silkscreen", monospace' }}>
-                {statsLoading ? (
-                  <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '13px', textAlign: 'center', paddingTop: 24 }}>
-                    cargando...
-                  </div>
-                ) : !statsData ? (
-                  <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', textAlign: 'center', paddingTop: 24 }}>
-                    {isAuthenticated
-                      ? 'No se pudieron cargar tus stats historicas. Reintenta en unos segundos.'
-                      : 'Inicia sesion para guardar y ver tus stats historicas.'}
-                  </div>
-                ) : (() => {
-                  const s = statsData;
-                  const kd = s.deaths > 0 ? (s.zombie_kills / s.deaths).toFixed(2) : s.zombie_kills.toString();
-                  const basketPct = s.basket_shots > 0 ? Math.round((s.basket_makes / s.basket_shots) * 100) : 0;
-                  const hrsPlayed = (s.time_played_seconds / 3600).toFixed(1);
-                  const kmWalked = (s.distance_walked / 50000).toFixed(2);
-                  return (
-                    <div style={{ display: 'grid', gap: 18 }}>
-                      {/* Combat */}
-                      <div>
-                        <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '7px', color: '#FF6B6B', marginBottom: 10 }}>
-                          ⚔ COMBATE
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-                          {[
-                            ['Zombies eliminados', s.zombie_kills],
-                            ['Muertes', s.deaths],
-                            ['Mejor racha', s.kill_streak_best],
-                            ['K/D ratio', kd],
-                          ].map(([label, val]) => (
-                            <div key={String(label)} style={{ background: 'rgba(255,107,107,0.08)', border: '1px solid rgba(255,107,107,0.18)', padding: '8px 10px', borderRadius: 4 }}>
-                              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.45)', marginBottom: 4 }}>{label}</div>
-                              <div style={{ fontSize: '18px', color: '#FF6B6B' }}>{val}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Economy */}
-                      <div>
-                        <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '7px', color: '#F5C842', marginBottom: 10 }}>
-                          ◆ ECONOMÍA
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                          {[
-                            ['TENKS ganados', s.tenks_earned],
-                            ['TENKS gastados', s.tenks_spent],
-                            ['Balance', s.tenks_earned - s.tenks_spent],
-                          ].map(([label, val]) => (
-                            <div key={String(label)} style={{ background: 'rgba(245,200,66,0.08)', border: '1px solid rgba(245,200,66,0.18)', padding: '8px 10px', borderRadius: 4 }}>
-                              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.45)', marginBottom: 4 }}>{label}</div>
-                              <div style={{ fontSize: '16px', color: '#F5C842' }}>{val}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Exploration */}
-                      <div>
-                        <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '7px', color: '#39FF14', marginBottom: 10 }}>
-                          ◉ EXPLORACIÓN
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-                          {[
-                            ['Horas jugadas', hrsPlayed],
-                            ['KM caminados', kmWalked],
-                            ['NPCs hablados', s.npcs_talked_to],
-                            ['Zonas visitadas', s.zones_visited.length],
-                          ].map(([label, val]) => (
-                            <div key={String(label)} style={{ background: 'rgba(57,255,20,0.07)', border: '1px solid rgba(57,255,20,0.15)', padding: '8px 10px', borderRadius: 4 }}>
-                              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.45)', marginBottom: 4 }}>{label}</div>
-                              <div style={{ fontSize: '16px', color: '#39FF14' }}>{val}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Minigames */}
-                      <div>
-                        <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '7px', color: '#9B59F5', marginBottom: 10 }}>
-                          🎮 MINIJUEGOS
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-                          {[
-                            ['Basket — mejor score', s.basket_best_score],
-                            [`Basket — encestes ${basketPct}%`, `${s.basket_makes}/${s.basket_shots}`],
-                            ['Penalty — goles', s.penalty_goals],
-                            [`Penales W/L`, `${s.penalty_wins}/${s.penalty_losses}`],
-                          ].map(([label, val]) => (
-                            <div key={String(label)} style={{ background: 'rgba(155,89,245,0.08)', border: '1px solid rgba(155,89,245,0.18)', padding: '8px 10px', borderRadius: 4 }}>
-                              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.45)', marginBottom: 4 }}>{label}</div>
-                              <div style={{ fontSize: '16px', color: '#9B59F5' }}>{val}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-          </div>
+          <StatsOverlay
+            isMobile={isMobile}
+            statsLoading={statsLoading}
+            statsData={statsData}
+            isAuthenticated={isAuthenticated}
+            onClose={closeStats}
+          />
         )}
 
         {joystickVisible && (
@@ -3114,24 +2570,7 @@ export default function PlayPage() {
           />
         )}
 
-        {uiNotice && (
-          <div
-            className="ww-notice absolute top-14 left-1/2 -translate-x-1/2 px-3 py-2"
-            style={{
-              background: 'rgba(0,0,0,0.82)',
-              border: `1px solid ${(uiNotice.color ?? '#39FF14')}55`,
-              fontFamily: '"Press Start 2P", monospace',
-              fontSize: '8px',
-              color: uiNotice.color ?? '#39FF14',
-              boxShadow: '0 10px 24px rgba(0,0,0,0.35)',
-              zIndex: 30,
-              maxWidth: isMobile ? '92%' : 420,
-              textAlign: 'center',
-            }}
-          >
-            {uiNotice.msg}
-          </div>
-        )}
+        <UINotice notice={uiNotice} isMobile={isMobile} />
       </div>
     </div>
     </>

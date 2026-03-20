@@ -8,12 +8,13 @@ Planes con trabajo pendiente **en el código o en configuración externa**.
 |------|--------|----------|
 | [Mercado Pago — ARS](./features/mercadopago-integration.md) | 🟡 En progreso (no mergeado) | High |
 | [Resend — emails confirmación](./features/resend-emails.md) | 🟡 Pendiente `RESEND_API_KEY` / dominio | Low |
+| [UI React Features](./features/ui-react-features.md) — Minimap, Quest Tracker, Skill Tree, Leaderboard, Mobile Joystick | 🟡 Pendiente | Medium |
 
 ## Fixes (`fixes/`)
 
-| Plan | Status |
-|------|--------|
-| — | *Nada activo* |
+| Plan | Status | Priority |
+|------|--------|----------|
+| [UI React Migration](./fixes/ui-react-migration.md) — extraer Settings, Stats, PlayerActions, UINotice, Login de GamePage.tsx | 🟡 Pendiente | High |
 
 Ver [fixes/README.md](./fixes/README.md).
 
