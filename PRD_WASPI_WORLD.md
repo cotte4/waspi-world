@@ -1,5 +1,5 @@
 # WASPI WORLD — PRD (Estado Actualizado)
-**Fecha de actualización:** 2026-03-14 (sesión 2)
+**Fecha de actualización:** 2026-03-20 (sesión HUD React Overhaul)
 **Rama activa:** main
 
 > **Documentos PRD:** este archivo es el checklist por fases. El inventario frente al código (APIs, migraciones, gaps, sesiones) está en **`PRD_ESTADO_ACTUAL.md` §0** explica los 4 `PRD*.md` del repo.
@@ -134,11 +134,12 @@ E-commerce gamificado: mundo abierto 2D de vista cenital estilo Binding of Isaac
 - [x] PenaltyMinigame: gameplay implementado
 - [x] ArcadeInterior: escena interior del arcade con acceso a minijuegos
 - [x] CafeInterior: escena interior del café + **jukebox** (cola Realtime, búsqueda YouTube, TENKS; overlay React)
-- [x] HouseInterior: Tu Casa (spawn de jugadores)
+al - [x] HouseInterior: Tu Casa (spawn de jugadores)
 - [x] InteriorRoom system: helper reutilizable para dibujar interiores
 - [x] Chat bubbles en todos los interiores via InteriorRoom + ChatSystem (StoreInterior, VecindadScene, etc.)
 
 ### Fase 9: Casino + Zombies (COMPLETA — sesión 2026-03-14)
+
 
 - [x] CasinoInterior: escena interior del casino con ruleta y mesas de poker
 - [x] ZombiesScene + BasementZombiesScene: modo PvE de oleadas
@@ -146,6 +147,27 @@ E-commerce gamificado: mundo abierto 2D de vista cenital estilo Binding of Isaac
 - [x] Migración `20260314_player_stats.sql` (zombie_kills, pvp_kills, deaths, tenks_earned, etc.)
 - [x] PvP Pit match start handshake fix
 - [x] Casino entrance collision fix
+
+### Fase 10: HUD React Overhaul (COMPLETA — sesión 2026-03-20)
+
+**Migración GamePage.tsx → componentes React independientes (-1200 líneas total):**
+- [x] ShopOverlay — tienda virtual/física/TENKS/órdenes con tabs
+- [x] InventoryOverlay — loadout slots + grid ropa + utilidades
+- [x] SettingsOverlay — 4 tabs: audio, HUD, controles, voice
+- [x] StatsOverlay — 4 secciones: combate, economía, exploración, minijuegos
+- [x] PlayerActionsOverlay — mute / reportar jugador
+- [x] UINotice — toasts con animación slide-in y corner decorations
+- [x] LoginCard — WASPI ID branding, magic link + Google
+- [x] LeaderboardOverlay — top 10 en 3 tabs (zombies/K:D/nivel), refresh 30s
+- [x] QuestTracker — panel colapsable derecha, misiones diarias + barras progreso
+- [x] VirtualJoystick — D-pad táctil con indicadores N/S/E/W para mobile
+- [x] SkillTreeOverlay — 6 árboles (mining/fishing/gardening/cooking/gym/weed), XP bars, niveles locked/unlocked, milestones
+
+**EventBus — nuevos eventos:**
+- [x] `LEADERBOARD_OPEN`, `QUEST_TRACKER_REFRESH`, `SKILL_TREE_OPEN`
+
+**API nuevas:**
+- [x] `GET /api/leaderboard?tab=zombies|kd|level` — top 10 sin auth
 
 ### Infraestructura de Soporte (COMPLETA)
 
@@ -210,7 +232,7 @@ E-commerce gamificado: mundo abierto 2D de vista cenital estilo Binding of Isaac
 
 ### Alta Prioridad
 
-1. **Auth Supabase** — login con magic link/Google/Discord. Actualmente el player_id es generado localmente (localStorage uuid). TENKS y progresión no persisten entre sesiones/dispositivos.
+1. **Auth Supabase** ✅ parcial — login con magic link/Google implementado (LoginCard, Supabase Auth). TENKS y progresión server-side via `/api/player`, `/api/skills`. Falta: vincular TENKS de localStorage con server al autenticar.
 2. **Server-side TENKS validation** — actualmente TENKS viven en cliente (localStorage). La API `/api/player` existe pero no valida server-side. Crítico antes de lanzamiento.
 3. **Stripe Checkout end-to-end** — precios ARS y `stripePriceEnv` configurados en catálogo pero el flujo completo (checkout → webhook → inventory grant) no ha sido testeado.
 4. **Tilemaps reales** — exportar de Tiled, reemplazar Graphics primitivos. Impacta visual y rendimiento.
@@ -221,7 +243,7 @@ E-commerce gamificado: mundo abierto 2D de vista cenital estilo Binding of Isaac
 6. **Enemigos con sprites** — actualmente son arcos de colores. Los arquetipos están definidos con perfiles completos listos para recibir sprites.
 7. **Audio** — AudioSettings completo, AudioContext listo en WorldScene, pero sin archivos de audio. Necesita SFX de disparo, pasos, hits, y ambient.
 8. **PenaltyMinigame** — escena existe, verificar si gameplay está implementado.
-9. **Leaderboard** — no hay ranking global. ProgressionSystem guarda localmente.
+9. **Leaderboard** ✅ — `/api/leaderboard` implementado, LeaderboardOverlay activo con top-10 real.
 10. **Chat moderation** — endpoint `/api/chat/moderate` planificado, no implementado.
 
 ### Baja Prioridad / Post-MVP
