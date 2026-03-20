@@ -4,6 +4,22 @@ import { clearGlobalBgm } from './AudioManager';
 import { clearVirtualJoystickState } from './ControlSettings';
 
 const transitioningScenes = new WeakSet<Phaser.Scene>();
+const TRANSITION_UI_CLOSE_EVENTS = [
+  EVENTS.SHOP_CLOSE,
+  EVENTS.GUN_SHOP_CLOSE,
+  EVENTS.CASINO_CLOSE,
+  EVENTS.JUKEBOX_CLOSE,
+] as const;
+
+function closeTransitionUiOverlays(): void {
+  for (const evt of TRANSITION_UI_CLOSE_EVENTS) {
+    try {
+      eventBus.emit(evt);
+    } catch {
+      // Overlay close emissions are best-effort; transitions must keep going.
+    }
+  }
+}
 
 export function announceScene(scene: Phaser.Scene) {
   // transitionToScene() disables input during fade-out; ensure each new scene
@@ -106,9 +122,9 @@ export function transitionToScene(
   if (transitioningScenes.has(scene)) return false;
   transitioningScenes.add(scene);
 
-  if (targetKey === 'WorldScene') {
-    eventBus.emit(EVENTS.SHOP_CLOSE);
-  }
+  // Ensure any React/DOM overlays are closed before scene swap.
+  // This keeps input ownership consistent across all interiors/modes.
+  closeTransitionUiOverlays();
 
   const camera = scene.cameras.main;
   let finished = false;
