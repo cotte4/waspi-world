@@ -281,3 +281,17 @@ this.tweens.add({
 10. ¿Nuevos fetch en sistemas singleton incluyen `getAuthHeaders()`?
 11. ¿`window.setTimeout` con objetos Phaser tiene doble guard (scene + obj.active)?
 12. ¿Promise `.then()` con objetos Phaser tiene guard de `.active`?
+
+---
+
+## Skills de referencia
+
+Leer el archivo correspondiente antes de trabajar en cada dominio:
+
+- **Phaser scenes** (`src/game/scenes/**`): `.claude/skills/phaser-scenes.md`
+- **Game systems** (`src/game/systems/**`): `.claude/skills/game-systems.md`
+- **Supabase / API routes** (`lib/**`, `app/api/**`): `.claude/skills/supabase-backend.md`
+- **Stripe / commerce** (`checkout`, `webhook`, `shop`): `.claude/skills/stripe-commerce.md`
+- **Testing** (`*.test.ts`, `*.spec.ts`, `e2e/**`): `.claude/skills/testing.md`
+- **UI / React overlays** (`src/components/**`, `*.tsx`): `.claude/skills/ui-react-overlay.md`
+- **Multiplayer / Realtime** (`pvp`, `realtime`, `multiplayer`): `.claude/skills/multiplayer-realtime.md`
