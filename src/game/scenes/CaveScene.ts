@@ -4,7 +4,7 @@
 // All drawn in code — no external tilesets.
 
 import Phaser from 'phaser';
-import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene, transitionToWorldScene } from '../systems/SceneUi';
 import { getSkillSystem } from '../systems/SkillSystem';
 import { MiningMinigame } from '../systems/MiningMinigame';
 import { eventBus, EVENTS } from '../config/eventBus';
@@ -137,10 +137,7 @@ export class CaveScene extends Phaser.Scene {
 
     // Safe-reset binding
     bindSafeResetToPlaza(this, () => {
-      transitionToScene(this, 'WorldScene', {
-        returnX: SAFE_PLAZA_RETURN.X,
-        returnY: SAFE_PLAZA_RETURN.Y,
-      });
+      transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
     });
 
     // Build world

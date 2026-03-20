@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
-import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToWorldScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { SceneControls } from '../systems/SceneControls';
 import { safeSceneDelayedCall } from '../systems/AnimationSafety';
@@ -113,10 +113,7 @@ export class GymInterior extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
 
     bindSafeResetToPlaza(this, () => {
-      transitionToScene(this, 'WorldScene', {
-        returnX: SAFE_PLAZA_RETURN.X,
-        returnY: SAFE_PLAZA_RETURN.Y,
-      });
+      transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
     });
 
     // ── Draw room ───────────────────────────────────────────────────────────────
@@ -195,11 +192,8 @@ export class GymInterior extends Phaser.Scene {
 
   private exitToWorld() {
     if (this.inTransition) return;
-    this.inTransition = true;
-    transitionToScene(this, 'WorldScene', {
-      returnX: GYM_RETURN_X,
-      returnY: GYM_RETURN_Y,
-    });
+    const ok = transitionToWorldScene(this, GYM_RETURN_X, GYM_RETURN_Y);
+    if (ok) this.inTransition = true;
   }
 
   // ── Movement ──────────────────────────────────────────────────────────────────

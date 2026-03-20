@@ -6,8 +6,8 @@ import {
   loadStoredAvatarConfig,
   saveStoredAvatarConfig,
 } from '../systems/AvatarRenderer';
-import { COLORS } from '../config/constants';
-import { announceScene, transitionToScene } from '../systems/SceneUi';
+import { COLORS, PLAYER } from '../config/constants';
+import { announceScene, transitionToWorldScene } from '../systems/SceneUi';
 import { SceneControls } from '../systems/SceneControls';
 
 const USERNAME_KEY = 'waspi_username';
@@ -654,7 +654,7 @@ export class CreatorScene extends Phaser.Scene {
       if (name) window.localStorage.setItem(USERNAME_KEY, name);
       saveStoredAvatarConfig({ ...this.config, avatarKind: this.selectedSeed });
     }
-    transitionToScene(this, 'WorldScene');
+    transitionToWorldScene(this, PLAYER.SPAWN_X, PLAYER.SPAWN_Y);
   }
 
   private cycleInList<T>(values: T[], current: T, direction: -1 | 1) {

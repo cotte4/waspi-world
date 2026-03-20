@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { SAFE_PLAZA_RETURN, WORLD } from '../config/constants';
-import { announceScene, bindSafeResetToPlaza, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, transitionToScene, transitionToWorldScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { SceneControls } from '../systems/SceneControls';
@@ -157,10 +157,7 @@ export class HouseInterior extends Phaser.Scene {
     this.cameras.main.fadeIn(250, 0, 0, 0);
     this.controls = new SceneControls(this);
     bindSafeResetToPlaza(this, () => {
-      transitionToScene(this, 'WorldScene', {
-        returnX: SAFE_PLAZA_RETURN.X,
-        returnY: SAFE_PLAZA_RETURN.Y,
-      });
+      transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
     });
   }
 
@@ -173,11 +170,7 @@ export class HouseInterior extends Phaser.Scene {
       return;
     }
     if (this.controls.isActionJustDown('back')) {
-      this.inTransition = true;
-      transitionToScene(this, this.returnScene, {
-        returnX: this.returnX,
-        returnY: this.returnY,
-      });
+      this.requestLeaveInterior();
     }
   }
 
@@ -213,12 +206,24 @@ export class HouseInterior extends Phaser.Scene {
     }
 
     if (nearDoor) {
-      this.inTransition = true;
-      transitionToScene(this, this.returnScene, {
-        returnX: this.returnX,
-        returnY: this.returnY,
-      });
+      this.requestLeaveInterior();
     }
+  }
+
+  private requestLeaveInterior() {
+    if (this.inTransition) return;
+    if (this.returnScene === 'WorldScene') {
+      const x = this.returnX ?? SAFE_PLAZA_RETURN.X;
+      const y = this.returnY ?? SAFE_PLAZA_RETURN.Y;
+      const ok = transitionToWorldScene(this, x, y);
+      if (ok) this.inTransition = true;
+      return;
+    }
+    const ok = transitionToScene(this, this.returnScene, {
+      returnX: this.returnX,
+      returnY: this.returnY,
+    });
+    if (ok) this.inTransition = true;
   }
 
   private drawInterior() {

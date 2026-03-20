@@ -4,7 +4,7 @@ import { BUILDINGS, COLORS, SAFE_PLAZA_RETURN, WORLD, ZONES } from '../config/co
 import { eventBus, EVENTS } from '../config/eventBus';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
 import { attachGlobalBgm, clearGlobalBgm, detachGlobalBgmIfMatch } from '../systems/AudioManager';
-import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToWorldScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { SceneControls } from '../systems/SceneControls';
 
@@ -161,10 +161,7 @@ export class ArcadeInterior extends Phaser.Scene {
       if (this.input.keyboard) this.input.keyboard.enabled = true;
     });
     bindSafeResetToPlaza(this, () => {
-      transitionToScene(this, 'WorldScene', {
-        returnX: SAFE_PLAZA_RETURN.X,
-        returnY: SAFE_PLAZA_RETURN.Y,
-      });
+      transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
     });
     this.audioSettingsCleanup = eventBus.on(EVENTS.AUDIO_SETTINGS_CHANGED, (payload: unknown) => {
       if (!payload || typeof payload !== 'object') return;
@@ -673,12 +670,9 @@ export class ArcadeInterior extends Phaser.Scene {
 
   private exitToWorld() {
     if (this.inTransition) return;
-    this.inTransition = true;
     this.stopArcadeMusic();
-    transitionToScene(this, 'WorldScene', {
-      returnX: ArcadeInterior.RETURN_X,
-      returnY: ArcadeInterior.RETURN_Y,
-    });
+    const ok = transitionToWorldScene(this, ArcadeInterior.RETURN_X, ArcadeInterior.RETURN_Y);
+    if (ok) this.inTransition = true;
   }
 
   private handleMovement(delta: number) {

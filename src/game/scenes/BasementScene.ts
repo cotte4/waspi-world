@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { BUILDINGS, SAFE_PLAZA_RETURN } from '../config/constants';
-import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene, transitionToWorldScene } from '../systems/SceneUi';
 import { SceneControls } from '../systems/SceneControls';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 
@@ -110,10 +110,7 @@ export class BasementScene extends Phaser.Scene {
     this.input.enabled = true;
     this.controls = new SceneControls(this);
     bindSafeResetToPlaza(this, () => {
-      transitionToScene(this, 'WorldScene', {
-        returnX: SAFE_PLAZA_RETURN.X,
-        returnY: SAFE_PLAZA_RETURN.Y,
-      });
+      transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
     });
     this.cameras.main.setBackgroundColor('#0E0E14');
     this.cameras.main.setBounds(0, 0, SCENE_W, SCENE_H);
@@ -187,23 +184,20 @@ export class BasementScene extends Phaser.Scene {
 
   private exitToWorld() {
     if (this.inTransition) return;
-    this.inTransition = true;
-    transitionToScene(this, 'WorldScene', {
-      returnX: BASEMENT_RETURN.x,
-      returnY: BASEMENT_RETURN.y,
-    });
+    const ok = transitionToWorldScene(this, BASEMENT_RETURN.x, BASEMENT_RETURN.y);
+    if (ok) this.inTransition = true;
   }
 
   private enterZombiesMode() {
     if (this.inTransition) return;
-    this.inTransition = true;
-    transitionToScene(this, 'ZombiesScene', {
+    const ok = transitionToScene(this, 'ZombiesScene', {
       returnScene: 'WorldScene',
       returnX: BASEMENT_RETURN.x,
       returnY: BASEMENT_RETURN.y,
       entryLabel: 'BASEMENT',
       allowDepthsGate: true,
     });
+    if (ok) this.inTransition = true;
   }
 
   private isNearZombieAccess() {

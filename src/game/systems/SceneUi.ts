@@ -152,6 +152,23 @@ export function transitionToScene(
 }
 
 /**
+ * Vuelta al WorldScene desde interiores / tiendas: emite SHOP_CLOSE (React overlay)
+ * y usa el mismo fade + timeout que transitionToScene. Devuelve false si fue throttled.
+ */
+export function transitionToWorldScene(
+  scene: Phaser.Scene,
+  returnX: number,
+  returnY: number,
+  duration = 250,
+): boolean {
+  const started = transitionToScene(scene, 'WorldScene', { returnX, returnY }, duration);
+  if (started) {
+    eventBus.emit(EVENTS.SHOP_CLOSE);
+  }
+  return started;
+}
+
+/**
  * showSceneTitle — shows a large centered title overlay on scene fade-in.
  * Fade in 200ms → hold 800ms → fade out 400ms, then self-destructs.
  * Depth 15000, scrollFactor 0 (always on screen).

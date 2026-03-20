@@ -2,7 +2,7 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { ChatSystem } from '../systems/ChatSystem';
-import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene, transitionToWorldScene } from '../systems/SceneUi';
 import {
   ensureFallbackRectTexture,
   getSafeAnimationDurationMs,
@@ -530,10 +530,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.setupDoors();
     this.setupMysteryBox();
     bindSafeResetToPlaza(this, () => {
-      transitionToScene(this, 'WorldScene', {
-        returnX: SAFE_PLAZA_RETURN.X,
-        returnY: SAFE_PLAZA_RETURN.Y,
-      });
+      transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
     });
 
     createBackButton(this, () => this.requestExit(), 'SALIR');
@@ -3288,10 +3285,7 @@ export class ZombiesScene extends Phaser.Scene {
     // UX: exiting the main ZombiesScene should always take the player
     // back to the plaza in WorldScene, not bounce through BasementScene.
     if (this.scene.key === 'ZombiesScene') {
-      transitionToScene(this, 'WorldScene', {
-        returnX: SAFE_PLAZA_RETURN.X,
-        returnY: SAFE_PLAZA_RETURN.Y,
-      });
+      transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
       return;
     }
 

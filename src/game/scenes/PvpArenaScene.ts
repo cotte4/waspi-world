@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarAction, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { COLORS, SAFE_PLAZA_RETURN } from '../config/constants';
 import { getTenksBalance, initTenks } from '../systems/TenksSystem';
-import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToWorldScene } from '../systems/SceneUi';
 import { SceneControls } from '../systems/SceneControls';
 import { formatMovementBindingLabel } from '../systems/ControlSettings';
 import { supabase, isConfigured } from '../../lib/supabase';
@@ -241,10 +241,7 @@ export class PvpArenaScene extends Phaser.Scene {
 
     this.setupChannel();
     bindSafeResetToPlaza(this, () => {
-      transitionToScene(this, 'WorldScene', {
-        returnX: SAFE_PLAZA_RETURN.X,
-        returnY: SAFE_PLAZA_RETURN.Y,
-      });
+      transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
     });
     void this.syncAuthenticatedIdentity();
     this.refreshUi();
@@ -1353,8 +1350,8 @@ export class PvpArenaScene extends Phaser.Scene {
 
   private exitToWorld() {
     if (this.inTransition) return;
-    this.inTransition = true;
-    transitionToScene(this, 'WorldScene', { returnX: RETURN_WORLD_X, returnY: RETURN_WORLD_Y }, 220);
+    const ok = transitionToWorldScene(this, RETURN_WORLD_X, RETURN_WORLD_Y, 220);
+    if (ok) this.inTransition = true;
   }
 
   private handleShutdown() {

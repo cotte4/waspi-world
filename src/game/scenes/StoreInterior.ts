@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { AvatarRenderer, AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { BUILDINGS, SAFE_PLAZA_RETURN, ZONES } from '../config/constants';
 import { CATALOG } from '../config/catalog';
-import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToWorldScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { ChatSystem } from '../systems/ChatSystem';
 import { DialogSystem } from '../systems/DialogSystem';
@@ -103,10 +103,7 @@ export class StoreInterior extends Phaser.Scene {
       this.chatSystem?.showBubble(playerId, message, remote.x, remote.y, false);
     }));
     this.cleanupFns.push(bindSafeResetToPlaza(this, () => {
-      transitionToScene(this, 'WorldScene', {
-        returnX: SAFE_PLAZA_RETURN.X,
-        returnY: SAFE_PLAZA_RETURN.Y,
-      });
+      transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
     }));
 
     // ── Room dimensions ────────────────────────────────────────────
@@ -761,11 +758,7 @@ export class StoreInterior extends Phaser.Scene {
     if (this.inTransition) return;
     this.dialog.clear();
     this.shopOverlayOpen = false;
-    eventBus.emit(EVENTS.SHOP_CLOSE);
-    const ok = transitionToScene(this, 'WorldScene', {
-      returnX: StoreInterior.RETURN_X,
-      returnY: StoreInterior.RETURN_Y,
-    });
+    const ok = transitionToWorldScene(this, StoreInterior.RETURN_X, StoreInterior.RETURN_Y);
     if (ok) this.inTransition = true;
   }
 

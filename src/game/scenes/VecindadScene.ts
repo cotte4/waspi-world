@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene, transitionToWorldScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { SceneControls } from '../systems/SceneControls';
@@ -259,10 +259,7 @@ export class VecindadScene extends Phaser.Scene {
       showEmoteBubble(this, container.x, container.y, id);
     });
     this.bridgeCleanupFns.push(bindSafeResetToPlaza(this, () => {
-      transitionToScene(this, 'WorldScene', {
-        returnX: SAFE_PLAZA_RETURN.X,
-        returnY: SAFE_PLAZA_RETURN.Y,
-      });
+      transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
     }));
 
     createBackButton(this, () => this.leaveToWorld(), 'PLAZA');
@@ -1695,12 +1692,13 @@ export class VecindadScene extends Phaser.Scene {
 
   private leaveToWorld() {
     if (this.inTransition) return;
-    this.inTransition = true;
-    const started = transitionToScene(this, 'WorldScene', {
-      returnX: VECINDAD_MAP.RETURN_WORLD_X,
-      returnY: VECINDAD_MAP.RETURN_WORLD_Y,
-    }, 240);
-    if (!started) this.inTransition = false;
+    const started = transitionToWorldScene(
+      this,
+      VECINDAD_MAP.RETURN_WORLD_X,
+      VECINDAD_MAP.RETURN_WORLD_Y,
+      240,
+    );
+    if (started) this.inTransition = true;
   }
 
   private handleMovement(delta: number) {

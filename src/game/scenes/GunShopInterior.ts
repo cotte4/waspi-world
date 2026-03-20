@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { SAFE_PLAZA_RETURN, ZONES } from '../config/constants';
 import { CATALOG, getItem } from '../config/catalog';
-import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToWorldScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { addTenks, getTenksBalance, initTenks } from '../systems/TenksSystem';
 import { ensureItemEquipped, getInventory, ownItem, replaceInventory } from '../systems/InventorySystem';
@@ -56,7 +56,7 @@ export class GunShopInterior extends Phaser.Scene {
       if (this.input.keyboard) this.input.keyboard.enabled = true;
     });
     bindSafeResetToPlaza(this, () => {
-      transitionToScene(this, 'WorldScene', { returnX: SAFE_PLAZA_RETURN.X, returnY: SAFE_PLAZA_RETURN.Y });
+      transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
     });
 
     this.roomW = 640;
@@ -629,11 +629,7 @@ export class GunShopInterior extends Phaser.Scene {
   private exitToWorld() {
     if (this.inTransition) return;
     this.closeDealerPanel();
-    eventBus.emit(EVENTS.SHOP_CLOSE);
-    const ok = transitionToScene(this, 'WorldScene', {
-      returnX: GunShopInterior.RETURN_X,
-      returnY: GunShopInterior.RETURN_Y,
-    });
+    const ok = transitionToWorldScene(this, GunShopInterior.RETURN_X, GunShopInterior.RETURN_Y);
     if (ok) this.inTransition = true;
   }
 

@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { announceScene, createBackButton, transitionToScene } from '../systems/SceneUi';
+import { announceScene, createBackButton, transitionToScene, transitionToWorldScene } from '../systems/SceneUi';
 import { SceneControls } from '../systems/SceneControls';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
@@ -208,10 +208,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     createBackButton(this, () => this.leaveToVecindad(), 'VECINDAD');
     this.bridgeCleanupFns.push(
       eventBus.on(EVENTS.SAFE_RESET_TO_PLAZA, () => {
-        transitionToScene(this, 'WorldScene', {
-          returnX: SAFE_PLAZA_RETURN.X,
-          returnY: SAFE_PLAZA_RETURN.Y,
-        });
+        transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
       }),
     );
 
