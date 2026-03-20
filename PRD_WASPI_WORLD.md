@@ -1,8 +1,8 @@
 # WASPI WORLD — PRD (Estado Actualizado)
-**Fecha de actualización:** 2026-03-20 (sesión HUD React Overhaul)
+**Fecha de actualización:** 2026-03-20 (sesión React UI Migration completa + Auth/TENKS server-side)
 **Rama activa:** main
 
-> **Documentos PRD:** este archivo es el checklist por fases. El inventario frente al código (APIs, migraciones, gaps, sesiones) está en **`PRD_ESTADO_ACTUAL.md` §0** explica los 4 `PRD*.md` del repo.
+> **Documentos PRD:** este archivo es el checklist por fases. El inventario frente al código (APIs, migraciones, gaps, sesiones) está en **`PRD_ESTADO_ACTUAL.md`**. §0 de ese doc explica los 4 `PRD*.md` del repo. El subsistema de **voz espacial WebRTC/PeerJS** tiene su propio doc: **`PRD_VOICE_WEBRTC_ESTADO.md`**.
 
 ---
 
@@ -22,10 +22,10 @@ E-commerce gamificado: mundo abierto 2D de vista cenital estilo Binding of Isaac
 
 | Capa | Tecnología |
 |------|-----------|
-| Game engine | Phaser 3.80+ |
-| Frontend shell | Next.js 15 (App Router) + TypeScript + Tailwind |
+| Game engine | Phaser 3.90.x |
+| Frontend shell | Next.js 16.x (App Router) + TypeScript + Tailwind |
 | Real-time / DB | Supabase Realtime (WebSockets), Supabase PostgreSQL |
-| Auth | Supabase Auth (magic link + Google + Discord) |
+| Auth | Supabase Auth (magic link + Google) — Discord NO implementado |
 | Pagos | Stripe Checkout hosted + Coupons API |
 | Email | Resend |
 | Hosting | Vercel |
@@ -73,10 +73,10 @@ E-commerce gamificado: mundo abierto 2D de vista cenital estilo Binding of Isaac
 ### Fase 4: Inventario y Tienda (COMPLETA)
 
 - [x] InventorySystem: owned[], equipped {top, bottom, utility[]}
-- [x] Catálogo MVP con 9 items:
-  - Utilidades: UTIL-GUN-01 (5k TENKS), UTIL-BALL-01 (5k TENKS), UTIL-DEED-01 (Escritura Vecindad)
+- [x] Catálogo con **13 items**:
+  - Utilidades/armas: UTIL-GUN-01 (5k), UTIL-GUN-SHOT-01 (11k), UTIL-GUN-SMG-01 (14k), UTIL-GUN-RIFL-01 (21k), UTIL-GUN-GOLD-01 / RAY-X (42k), UTIL-BALL-01 (5k), UTIL-DEED-01 (gratis con parcela)
   - Ropa física: TEE-BLK-01, TEE-WHT-01, TEE-RED-01, CRG-BLK-01, CRG-OLV-01, HOD-GRY-01
-- [x] Precios TENKS (800–1600) + precios ARS (15k–45k) con Stripe price envs
+- [x] Precios TENKS (800–42.000) + precios ARS (15k–45k) con Stripe price envs
 - [x] StoreInterior: NPC vendor, dialog system, shop overlay, multiplayer remoto
 - [x] TenksSystem: balance local con initTenks / addTenks / getTenksBalance
 - [x] Stripe integration en `lib/stripe.ts`
@@ -134,7 +134,7 @@ E-commerce gamificado: mundo abierto 2D de vista cenital estilo Binding of Isaac
 - [x] PenaltyMinigame: gameplay implementado
 - [x] ArcadeInterior: escena interior del arcade con acceso a minijuegos
 - [x] CafeInterior: escena interior del café + **jukebox** (cola Realtime, búsqueda YouTube, TENKS; overlay React)
-al - [x] HouseInterior: Tu Casa (spawn de jugadores)
+- [x] HouseInterior: Tu Casa (spawn de jugadores)
 - [x] InteriorRoom system: helper reutilizable para dibujar interiores
 - [x] Chat bubbles en todos los interiores via InteriorRoom + ChatSystem (StoreInterior, VecindadScene, etc.)
 
@@ -147,6 +147,24 @@ al - [x] HouseInterior: Tu Casa (spawn de jugadores)
 - [x] Migración `20260314_player_stats.sql` (zombie_kills, pvp_kills, deaths, tenks_earned, etc.)
 - [x] PvP Pit match start handshake fix
 - [x] Casino entrance collision fix
+
+### Fase 11: React UI Migration Total (COMPLETA — sesión 2026-03-20)
+
+**14 componentes React nuevos — toda la UI funcional fuera de Phaser:**
+- [x] `CasinoOverlay` — 4 juegos (slots, roulette, blackjack, poker) portados a TS puro
+- [x] `ZombiesHUD` — wave, score, HP, countdown, game over
+- [x] `GunShopOverlay` — compra de armas via `/api/shop/buy`
+- [x] `VecindadHUD` — materiales, stage, farm status, prompt contextual
+- [x] `BasketHUD`, `PenaltyHUD`, `DartsHUD` — HUDs de minijuegos
+- [x] `BosqueHUD` — resource counter + prompt
+- [x] `GymHUD` — bag prompt, combo, bench progress, XP flash
+- [x] `ArcadeHUD` — machine hint dinámico
+- [x] `FlappyHUD`, `DinoHUD` — score, high score, game over
+- [x] `WorldHUD` — interaction prompt con animación bob (único UI funcional en WorldScene)
+- [x] `PvpHUD` — bet, roster, live board, HP, vidas, notices, countdown
+- [x] StoreInterior delegado a ShopOverlay React existente (~150 líneas Phaser eliminadas)
+
+**Lo que queda en Phaser (correcto):** sprites, física, decorativos del mundo, elementos en world-space.
 
 ### Fase 10: HUD React Overhaul (COMPLETA — sesión 2026-03-20)
 
@@ -199,6 +217,14 @@ al - [x] HouseInterior: Tu Casa (spawn de jugadores)
 | CombatStats | `systems/CombatStats.ts` | K/D ratio, localStorage |
 | InteriorRoom | `systems/InteriorRoom.ts` | Helper para renderizar interiores reutilizables |
 | SceneUi | `systems/SceneUi.ts` | Back button, transiciones, announceScene |
+| SceneControls | `systems/SceneControls.ts` | Manejo unificado de controles por escena |
+| AnimationSafety | `systems/AnimationSafety.ts` | Guards para evitar errores en animaciones Phaser |
+| BranchedDialog | `systems/BranchedDialog.ts` | Diálogos con branching (árbol de respuestas) |
+| ControlSettings | `systems/ControlSettings.ts` | Settings de controles por jugador |
+| EnemySprite | `systems/EnemySprite.ts` | State machine para sprites de zombies |
+| StatsSystem | `systems/StatsSystem.ts` | Tracking de stats persistido via Supabase (`player_stats`) |
+| JukeboxSystem | `systems/JukeboxSystem.ts` | Cola café, presencia host, API `/api/jukebox/*` |
+| JukeboxPlayer | `systems/JukeboxPlayer.ts` | YouTube IFrame API, audio fuera de Phaser |
 | EventBus | `config/eventBus.ts` | Bridge Phaser↔React, 30+ eventos tipados |
 
 ---
@@ -232,42 +258,45 @@ al - [x] HouseInterior: Tu Casa (spawn de jugadores)
 
 ### Alta Prioridad
 
-1. **Auth Supabase** ✅ parcial — login con magic link/Google implementado (LoginCard, Supabase Auth). TENKS y progresión server-side via `/api/player`, `/api/skills`. Falta: vincular TENKS de localStorage con server al autenticar.
-2. **Server-side TENKS validation** — actualmente TENKS viven en cliente (localStorage). La API `/api/player` existe pero no valida server-side. Crítico antes de lanzamiento.
-3. **Stripe Checkout end-to-end** — precios ARS y `stripePriceEnv` configurados en catálogo pero el flujo completo (checkout → webhook → inventory grant) no ha sido testeado.
-4. **Tilemaps reales** — exportar de Tiled, reemplazar Graphics primitivos. Impacta visual y rendimiento.
+1. **Auth Supabase + TENKS server-side** ✅ — `initTenksFromServer()` llamado en `hydratePlayerState` al autenticar; `applyPlayerState` usa `preferStored: false` para que el server siempre gane. Balance sincronizado desde `player_tenks_balance` en cada login. (sesión 2026-03-20)
+2. **Server-side TENKS validation** ✅ — `/api/shop/buy` valida contra `player_tenks_balance` con deducción atómica y refund compensatorio. Jukebox add/skip validados. Falta cerrar path de TENKS earned en zombies/minijuegos sin auth.
+3. **Stripe Checkout end-to-end** ✅ — flujo checkout → webhook → TENKS/inventario verificado en **test mode** (sesión 2026-03-19). Pendiente: live keys en Vercel, webhook URL registrado en Stripe Dashboard, smoke test en producción.
+4. **Tilemaps reales** — exportar de Tiled, reemplazar Graphics primitivos. Impacta visual y rendimiento. Decisión: **diferida** (ver Known Limitations).
 5. **Armas adicionales** — assets de uzi, blaster, deagle, cannon existen pero sin `WeaponMode` ni lógica de gameplay.
 
 ### Media Prioridad
 
-6. **Enemigos con sprites** — actualmente son arcos de colores. Los arquetipos están definidos con perfiles completos listos para recibir sprites.
-7. **Audio** — AudioSettings completo, AudioContext listo en WorldScene, pero sin archivos de audio. Necesita SFX de disparo, pasos, hits, y ambient.
-8. **PenaltyMinigame** — escena existe, verificar si gameplay está implementado.
+6. **Enemigos con sprites** — sprites generados para 4 arquetipos (rusher/shooter/tank/boss), sistema `EnemySprite.ts` implementado. Falta wiring completo con `ZombiesScene`.
+7. **Audio** — AudioSettings completo, AudioContext listo en WorldScene. Solo existe `arcade-theme.mp3`. Necesita SFX de disparo, pasos, hits, muerte enemigo, y ambient por escena.
+8. **PenaltyMinigame** ✅ — gameplay implementado.
 9. **Leaderboard** ✅ — `/api/leaderboard` implementado, LeaderboardOverlay activo con top-10 real.
-10. **Chat moderation** — endpoint `/api/chat/moderate` planificado, no implementado.
+10. **Chat moderation** — endpoint `/api/chat/moderate` existe. Falta: lógica de filtro de palabras, ban automático por reportes, logs en DB.
+11. **Voice chat (WebRTC)** — `VoiceChatManager` implementado con PeerJS + STUN. Falta: servidor TURN para NAT traversal, PeerJS server propio, `/api/voice/ice`, vincular con `auth.users.id`. Ver `PRD_VOICE_WEBRTC_ESTADO.md`.
 
 ### Baja Prioridad / Post-MVP
 
-11. **Supabase Auth integrado con Vecindad** — parcelas y builds deberían persistir server-side con el user_id real.
-12. **Resend email** — flujo post-compra (confirmación de pedido).
-13. **UI frames / HUD art** — todo el HUD usa fuentes pixel art sin assets gráficos propios.
-14. **Coupons Stripe** — API preparada, no implementada en UI.
-15. **Admin panel / moderación** — `supabaseAdmin.ts` existe pero sin interfaz.
+12. **Supabase Auth integrado con Vecindad** — parcelas y builds deberían persistir server-side con el user_id real.
+13. **Resend email** — `lib/resend.ts` y templates listos. Falta `RESEND_API_KEY` en prod y verificar dominio.
+14. **UI frames / HUD art** — todo el HUD usa fuentes pixel art sin assets gráficos propios.
+15. **Coupons Stripe** — API preparada, no implementada en UI.
+16. **Admin panel / moderación** — `supabaseAdmin.ts` existe pero sin interfaz.
+17. **Daily login streak + TENKS diarios** — 100 TENKS/día + 50 por día consecutivo (PRD original). Sin implementar.
+18. **Mercado Pago** — cobros en ARS. Plan en `planning/features/mercadopago-integration.md`.
 
 ---
 
 ## Known Limitations / Issues
 
-- **TENKS no persisten** entre sesiones (localStorage local, sin auth).
-- **Progresión no persiste** entre dispositivos.
-- **Parcelas Vecindad** sincronizadas via Realtime pero sin persistencia garantizada server-side post-reload.
-- **Mundo sin tilemaps**: colisiones de edificios son aproximadas (rectángulos), no hay pathfinding.
-- **Enemigos visuales primitivos**: placeholder con arcos de colores, no sprites.
-- **Sin audio**: sistema completo pero sin archivos cargados.
-- **Gun sprites**: solo glock y shotgun activos. 4 armas con assets pero sin implementar.
-- **Touch controls**: implementados pero calidad no validada en dispositivos reales.
+- **TENKS parcialmente server-side**: APIs existen (`/api/player`, `/api/player/tenks`), pero sin sesión activa el balance sigue siendo local. Vincular con `auth.users.id` es blocker de lanzamiento.
+- **Progresión no persiste** entre dispositivos (localStorage). `StatsSystem` sí persiste en Supabase `player_stats`.
+- **Parcelas Vecindad** sincronizadas via Realtime pero sin persistencia garantizada server-side post-reload para invitados sin auth.
+- **Mundo sin tilemaps**: colisiones de edificios son aproximadas (rectángulos), no hay pathfinding. Decisión de migrar a Tiled **diferida**.
+- **Enemigos con sprites disponibles** (4 arquetipos) pero wiring con ZombiesScene pendiente — siguen renderizando como arcos de colores en runtime.
+- **Sin audio SFX**: sistema completo pero solo existe `arcade-theme.mp3`. SFX de disparo, pasos, hits, y ambient faltan.
+- **Gun sprites**: solo glock y shotgun activos. 4 armas (uzi, blaster, deagle, cannon) con assets pero sin `WeaponMode`.
+- **Touch controls**: implementados (VirtualJoystick React) pero calidad no validada en dispositivos reales.
 - **MVP target 30 players**: no hay stress test de Supabase Realtime con carga real.
-- **Vecindad buy bug (parcialmente resuelto)**: `ensureCatalogSeeded` + error reporting real agregados a `api/vecindad/route.ts`. Si persiste el error, el mensaje real del DB aparecerá en el toast.
+- **Voice chat**: WebRTC/PeerJS funciona en LAN/mismo ISP. En internet real sin TURN puede fallar conexión P2P.
 
 ---
 
