@@ -226,6 +226,8 @@ export default function PlayPage() {
   const tokenRef = useRef<string | null>(null);
   const playerStateRef = useRef<PlayerState | null>(null);
   const activeSceneRef = useRef('');
+  /** Escena Phaser anterior (para no re-abrir onboarding al volver del interior con ESC). */
+  const previousPhaserSceneRef = useRef('');
   const suppressSyncRef = useRef(false);
   const mutedPlayersRef = useRef<string[]>(loadStoredMutedPlayers());
   const lastInteriorChatSentRef = useRef(0);
@@ -477,16 +479,21 @@ export default function PlayPage() {
     });
 
     const unsubScene = eventBus.on(EVENTS.SCENE_CHANGED, (sceneName: unknown) => {
-      if (typeof sceneName === 'string') {
-        setActiveScene(sceneName);
-        track('scene_enter', { scene: sceneName });
-        if (sceneName === 'WorldScene') {
-          // Evita overlay oscuro “pegado” al salir de interiores (shop / Stripe) si React no sincronizó.
-          setShopOpen(false);
-          setShopSource('');
-          setCheckoutRedirecting(false);
-          setJukeboxOpen(false);
-          if (!localStorage.getItem('waspi_onboarding_v1')) {
+      if (typeof sceneName !== 'string') return;
+      const prev = previousPhaserSceneRef.current;
+      previousPhaserSceneRef.current = sceneName;
+      setActiveScene(sceneName);
+      track('scene_enter', { scene: sceneName });
+      if (sceneName === 'WorldScene') {
+        // Evita overlay oscuro “pegado” al salir de interiores (shop / Stripe) si React no sincronizó.
+        setShopOpen(false);
+        setShopSource('');
+        setCheckoutRedirecting(false);
+        setJukeboxOpen(false);
+        // Onboarding es casi fullscreen oscuro: solo al primer ingreso (Creator / boot), no al salir con ESC de una tienda.
+        if (!localStorage.getItem('waspi_onboarding_v1')) {
+          const firstWorldEntry = prev === '' || prev === 'CreatorScene';
+          if (firstWorldEntry) {
             setShowOnboarding(true);
           }
         }

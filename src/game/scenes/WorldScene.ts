@@ -788,6 +788,7 @@ export class WorldScene extends Phaser.Scene {
     };
     mainCam.once(Phaser.Cameras.Scene2D.Events.FADE_IN_COMPLETE, ensureWorldCameraVisible);
     this.time.delayedCall(450, ensureWorldCameraVisible);
+    this.time.delayedCall(900, ensureWorldCameraVisible);
 
     // Chat system
     this.chatSystem = new ChatSystem(this);
