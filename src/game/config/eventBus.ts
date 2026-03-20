@@ -93,4 +93,8 @@ export const EVENTS = {
   LEADERBOARD_OPEN: 'leaderboard:open',
   /** Open the Skill Tree overlay. No payload required. */
   SKILL_TREE_OPEN: 'skill:tree:open',
+  /** Open the Casino overlay. Payload: { game: 'slots' | 'roulette' | 'blackjack' | 'poker' } */
+  CASINO_OPEN: 'casino:open',
+  /** Close the Casino overlay. No payload required. */
+  CASINO_CLOSE: 'casino:close',
 } as const;
