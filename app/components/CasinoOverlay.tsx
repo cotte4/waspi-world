@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
-import { getTenksBalance, spendTenks, addTenks } from '@/src/game/systems/TenksSystem';
+import { applyTenksBalanceFromServer, getTenksBalance, spendTenks, addTenks } from '@/src/game/systems/TenksSystem';
+import { supabase } from '@/src/lib/supabase';
 
 /* ─── Types ────────────────────────────────────────────────────────────────── */
 
@@ -1157,6 +1158,29 @@ export default function CasinoOverlay({ isMobile }: CasinoOverlayProps) {
   const [balance, setBalance] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const syncTokenRef = useRef(0);
+
+  const syncTenksFromServer = useCallback(async () => {
+    const token = ++syncTokenRef.current;
+    try {
+      if (!supabase) return;
+      const { data } = await supabase.auth.getSession();
+      const jwt = data.session?.access_token;
+      if (!jwt) return;
+      const res = await fetch('/api/player/tenks', {
+        headers: { Authorization: `Bearer ${jwt}` },
+      });
+      if (!res.ok) return;
+      const json = await res.json() as { balance?: number };
+      if (typeof json.balance !== 'number') return;
+      applyTenksBalanceFromServer(json.balance, 'casino_sync_open');
+      if (syncTokenRef.current === token) {
+        setBalance(getTenksBalance());
+      }
+    } catch {
+      // Keep local balance if sync fails.
+    }
+  }, []);
 
   useEffect(() => {
     const off = eventBus.on(EVENTS.CASINO_OPEN, (payload: unknown) => {
@@ -1165,10 +1189,11 @@ export default function CasinoOverlay({ isMobile }: CasinoOverlayProps) {
       setActiveGame(game);
       setBalance(getTenksBalance());
       setOpen(true);
+      void syncTenksFromServer();
     });
     const offClose = eventBus.on(EVENTS.CASINO_CLOSE, () => setOpen(false));
     return () => { off(); offClose(); };
-  }, []);
+  }, [syncTenksFromServer]);
 
   useEffect(() => {
     if (!open) return;

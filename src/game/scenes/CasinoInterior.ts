@@ -491,11 +491,37 @@ export class CasinoInterior extends Phaser.Scene {
 
   private exitToWorld() {
     if (this.inTransition) return;
+    if (this.overlayMode) {
+      this.closeOverlay();
+    }
     const ok = transitionToWorldScene(this, this.worldExitX, this.worldExitY);
     if (ok) this.inTransition = true;
   }
 
   private handleSceneShutdown() {
+    try {
+      this.clearCasinoVisuals();
+    } catch (e) { console.error('[CasinoInterior] clearCasinoVisuals shutdown failed', e); }
+
+    try {
+      this.hideStationUi();
+    } catch (e) { console.error('[CasinoInterior] hideStationUi shutdown failed', e); }
+
+    try {
+      this.toastTween?.stop();
+      this.toastTween = undefined;
+      this.toastText?.destroy();
+      this.toastText = undefined;
+    } catch (e) { console.error('[CasinoInterior] toast cleanup failed', e); }
+
+    try {
+      eventBus.emit(EVENTS.CASINO_CLOSE);
+    } catch (e) { console.error('[CasinoInterior] CASINO_CLOSE emit failed', e); }
+
+    this.overlayMode = null;
+    this.input.enabled = true;
+    if (this.input.keyboard) this.input.keyboard.enabled = true;
+
     this.room?.shutdown();
     this.room = undefined;
   }
