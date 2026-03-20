@@ -40,6 +40,7 @@ export class PenaltyMinigame extends Phaser.Scene {
   private keySpace!: Phaser.Input.Keyboard.Key;
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private controls!: SceneControls;
+  private shuttingDown = false;
 
   constructor() {
     super({ key: 'PenaltyMinigame' });
@@ -58,6 +59,7 @@ export class PenaltyMinigame extends Phaser.Scene {
     this.doneTimerMs = 0;
     this.resultText = '';
     this.resultColor = '#FFFFFF';
+    this.shuttingDown = false;
   }
 
   init() {
@@ -230,6 +232,7 @@ export class PenaltyMinigame extends Phaser.Scene {
     let idx = 0;
 
     const showNext = () => {
+      if (this.shuttingDown || this.isFinished || !this.scene.isActive('PenaltyMinigame')) return;
       if (idx >= steps.length) {
         this.countdownActive = false;
         return;
@@ -250,7 +253,15 @@ export class PenaltyMinigame extends Phaser.Scene {
         duration: 180,
         ease: 'Back.easeOut',
         onComplete: () => {
+          if (this.shuttingDown || this.isFinished || !this.scene.isActive('PenaltyMinigame')) {
+            label.destroy();
+            return;
+          }
           this.time.delayedCall(idx === steps.length - 1 ? 320 : 600, () => {
+            if (this.shuttingDown || this.isFinished || !this.scene.isActive('PenaltyMinigame')) {
+              if (label.active) label.destroy();
+              return;
+            }
             this.tweens.add({
               targets: label,
               alpha: 0,
@@ -361,6 +372,7 @@ export class PenaltyMinigame extends Phaser.Scene {
   }
 
   private takeShot() {
+    if (this.shuttingDown || this.isFinished || !this.scene.isActive('PenaltyMinigame')) return;
     this.phase = 'shooting';
     this.resultLabel.setAlpha(0);
     this.summaryLabel.setAlpha(0);
@@ -397,6 +409,7 @@ export class PenaltyMinigame extends Phaser.Scene {
       duration: 280,
       ease: 'Sine.easeOut',
       onUpdate: () => {
+        if (this.shuttingDown || this.isFinished || !this.scene.isActive('PenaltyMinigame')) return;
         const trail = this.add.circle(this.ball.x, this.ball.y, 2, 0xffffff, 0.35);
         this.tweens.add({
           targets: trail,
@@ -409,6 +422,8 @@ export class PenaltyMinigame extends Phaser.Scene {
         });
       },
       onComplete: () => {
+        if (this.shuttingDown || this.isFinished || !this.scene.isActive('PenaltyMinigame')) return;
+        if (this.phase !== 'shooting') return;
         const inGoal =
           shot.targetX > this.goalX - this.goalW / 2 + 8 &&
           shot.targetX < this.goalX + this.goalW / 2 - 8 &&
@@ -483,6 +498,8 @@ export class PenaltyMinigame extends Phaser.Scene {
   }
 
   private resolveShot(isGoal: boolean, inGoal: boolean, saved: boolean, shotKind: 'goal' | 'post' | 'outside' | 'high') {
+    if (this.shuttingDown || this.isFinished || !this.scene.isActive('PenaltyMinigame')) return;
+    if (!this.resultLabel?.active || !this.summaryLabel?.active || !this.footer?.active) return;
     this.shotsTaken += 1;
     if (isGoal) this.goals += 1;
     this.refreshHud();
@@ -569,6 +586,7 @@ export class PenaltyMinigame extends Phaser.Scene {
   }
 
   private showFloatingLabel(text: string, color: string) {
+    if (this.shuttingDown || this.isFinished || !this.scene.isActive('PenaltyMinigame')) return;
     const cx = this.scale.width / 2;
     const label = this.add.text(cx, 310, text, {
       fontSize: '18px',
@@ -585,7 +603,15 @@ export class PenaltyMinigame extends Phaser.Scene {
       duration: 180,
       ease: 'Sine.easeOut',
       onComplete: () => {
+        if (this.shuttingDown || this.isFinished || !this.scene.isActive('PenaltyMinigame')) {
+          if (label.active) label.destroy();
+          return;
+        }
         this.time.delayedCall(240, () => {
+          if (this.shuttingDown || this.isFinished || !this.scene.isActive('PenaltyMinigame')) {
+            if (label.active) label.destroy();
+            return;
+          }
           this.tweens.add({
             targets: label,
             alpha: 0,
@@ -600,6 +626,7 @@ export class PenaltyMinigame extends Phaser.Scene {
   }
 
   private resetForNextShot() {
+    if (this.shuttingDown || this.isFinished || !this.scene.isActive('PenaltyMinigame')) return;
     this.phase = 'aiming';
     this.ball.setPosition(this.ballStartX, this.ballStartY);
     this.ball.setScale(1);
@@ -611,6 +638,8 @@ export class PenaltyMinigame extends Phaser.Scene {
   }
 
   private showFinalSummary() {
+    if (this.shuttingDown || this.isFinished || !this.scene.isActive('PenaltyMinigame')) return;
+    if (!this.summaryLabel?.active || !this.footer?.active) return;
     this.phase = 'done';
     const won = this.goals >= 3;
 
@@ -640,6 +669,8 @@ export class PenaltyMinigame extends Phaser.Scene {
     if (this.isFinished) return;
     this.isFinished = true;
     this.phase = 'exiting';
+    this.input.enabled = false;
+    if (this.input.keyboard) this.input.keyboard.enabled = false;
 
     eventBus.emit(EVENTS.PENALTY_RESULT, {
       won,
@@ -658,6 +689,12 @@ export class PenaltyMinigame extends Phaser.Scene {
   }
 
   private handleShutdown() {
+    this.shuttingDown = true;
+    this.isFinished = true;
+    this.phase = 'exiting';
+    this.countdownActive = false;
+    this.tweens.killAll();
+    this.time.removeAllEvents();
     eventBus.emit(EVENTS.PENALTY_SCENE_ACTIVE, false);
     this.input.off('pointerdown', this.handleShootInput, this);
   }
