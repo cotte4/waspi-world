@@ -9,6 +9,7 @@ Planes con trabajo pendiente **en el código o en configuración externa**.
 | [Mercado Pago — ARS](./features/mercadopago-integration.md) | 🟡 En progreso (no mergeado) | High |
 | [Resend — emails confirmación](./features/resend-emails.md) | 🟡 Pendiente `RESEND_API_KEY` / dominio | Low |
 | [UI React Features](./features/ui-react-features.md) — Minimap, Quest Tracker, Skill Tree, Leaderboard, Mobile Joystick | 🟡 Pendiente | Medium |
+| [Skill Tree Overlay](./features/skill-tree-overlay.md) — React overlay visual para los 6 árboles de habilidades | 🟡 In Progress | Medium |
 
 ## Fixes (`fixes/`)
 

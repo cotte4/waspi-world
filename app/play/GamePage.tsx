@@ -55,6 +55,7 @@ const LoginCard = dynamic(() => import('@/app/components/LoginCard'), { ssr: fal
 const LeaderboardOverlay = dynamic(() => import('@/app/components/LeaderboardOverlay'), { ssr: false });
 const QuestTracker = dynamic(() => import('@/app/components/QuestTracker'), { ssr: false });
 const VirtualJoystick = dynamic(() => import('@/app/components/VirtualJoystick'), { ssr: false });
+const SkillTreeOverlay = dynamic(() => import('@/app/components/SkillTreeOverlay'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
 const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
@@ -216,6 +217,7 @@ export default function PlayPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
+  const [skillTreeOpen, setSkillTreeOpen] = useState(false);
   const [statsData, setStatsData] = useState<PlayerStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
@@ -2195,6 +2197,9 @@ export default function PlayPage() {
           {/* Leaderboard */}
           <button onClick={() => setLeaderboardOpen(true)} className="ww-toolbar-btn" title="Leaderboard">🏆</button>
 
+          {/* Skill Tree */}
+          <button onClick={() => setSkillTreeOpen(true)} className="ww-toolbar-btn" title="Habilidades">⚡</button>
+
           <div className="ww-toolbar-divider" />
 
           {/* Rescue — dormant strip, activates on arm */}
@@ -2415,6 +2420,15 @@ export default function PlayPage() {
             isMobile={isMobile}
             currentPlayerId={undefined}
             onClose={() => setLeaderboardOpen(false)}
+          />
+        )}
+
+        {/* Skill Tree overlay */}
+        {skillTreeOpen && (
+          <SkillTreeOverlay
+            isMobile={isMobile}
+            isAuthenticated={isAuthenticated}
+            onClose={() => setSkillTreeOpen(false)}
           />
         )}
 

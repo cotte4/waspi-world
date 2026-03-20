@@ -91,4 +91,6 @@ export const EVENTS = {
   QUEST_TRACKER_REFRESH: 'quest:tracker:refresh',
   /** Open the Leaderboard overlay. No payload required. */
   LEADERBOARD_OPEN: 'leaderboard:open',
+  /** Open the Skill Tree overlay. No payload required. */
+  SKILL_TREE_OPEN: 'skill:tree:open',
 } as const;
