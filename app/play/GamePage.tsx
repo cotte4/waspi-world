@@ -68,6 +68,7 @@ const FlappyHUD = dynamic(() => import('@/app/components/FlappyHUD'), { ssr: fal
 const DinoHUD = dynamic(() => import('@/app/components/DinoHUD'), { ssr: false });
 const GymHUD = dynamic(() => import('@/app/components/GymHUD'), { ssr: false });
 const ArcadeHUD = dynamic(() => import('@/app/components/ArcadeHUD'), { ssr: false });
+const WorldHUD = dynamic(() => import('@/app/components/WorldHUD'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
 const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
@@ -2042,6 +2043,7 @@ export default function PlayPage() {
         <PhaserGame />
 
         <GameHUD />
+        <WorldHUD />
 
         {activeScene === 'CreatorScene' && (
           <CharacterCreatorOverlay isMobile={isMobile} />

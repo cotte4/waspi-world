@@ -153,4 +153,10 @@ export const EVENTS = {
   ARCADE_HUD_UPDATE: 'arcade:hud_update',
   /** ArcadeInterior scene active/inactive. Payload: boolean */
   ARCADE_SCENE_ACTIVE: 'arcade:active',
+  /** WorldScene interaction prompt. Payload: { text: string; visible: boolean; color: string } */
+  WORLD_INTERACTION_PROMPT: 'world:interaction_prompt',
+  /** PvpArenaScene HUD state update. Payload: PvpHudPayload */
+  PVP_HUD_UPDATE: 'pvp:hud_update',
+  /** PvpArenaScene active/inactive. Payload: boolean */
+  PVP_SCENE_ACTIVE: 'pvp:active',
 } as const;

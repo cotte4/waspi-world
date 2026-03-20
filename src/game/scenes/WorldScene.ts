@@ -554,6 +554,7 @@ export class WorldScene extends Phaser.Scene {
   private vecindadHud?: Phaser.GameObjects.Text;
   private interactionHint?: Phaser.GameObjects.Text;
   private interactionHighlight?: Phaser.GameObjects.Graphics;
+  private lastInteractionPromptLabel: string | null = null;
   private runtimeFailures = new Set<string>();
 
   // Gun Dealer NPC
@@ -6353,11 +6354,14 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private updateInteractionHighlight() {
-    if (!this.interactionHighlight || !this.interactionHint) return;
+    if (!this.interactionHighlight) return;
     const target = this.getInteractionTarget();
     this.interactionHighlight.clear();
     if (!target) {
-      this.interactionHint.setAlpha(0);
+      if (this.lastInteractionPromptLabel !== null) {
+        this.lastInteractionPromptLabel = null;
+        eventBus.emit(EVENTS.WORLD_INTERACTION_PROMPT, { text: '', visible: false, color: '#F5C842' });
+      }
       return;
     }
 
@@ -6367,13 +6371,15 @@ export class WorldScene extends Phaser.Scene {
     this.interactionHighlight.fillStyle(target.color, pulse * 0.2);
     this.interactionHighlight.fillRoundedRect(target.x - target.w / 2, target.y - target.h / 2, target.w, target.h, 10);
 
-    const rgb = Phaser.Display.Color.IntegerToRGB(target.color);
-    this.interactionHint.setText(target.label);
-    this.interactionHint.setColor(`rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`);
-    // Gentle bob: ±4px on a ~1.8s cycle
-    const bobY = Math.sin(this.time.now / 280) * 4;
-    this.interactionHint.setPosition(target.x, target.y - target.h / 2 - 12 + bobY);
-    this.interactionHint.setAlpha(1);
+    if (this.lastInteractionPromptLabel !== target.label) {
+      this.lastInteractionPromptLabel = target.label;
+      const rgb = Phaser.Display.Color.IntegerToRGB(target.color);
+      eventBus.emit(EVENTS.WORLD_INTERACTION_PROMPT, {
+        text: target.label,
+        visible: true,
+        color: `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`,
+      });
+    }
   }
 
   private handleInteraction() {
@@ -6566,6 +6572,10 @@ export class WorldScene extends Phaser.Scene {
     this.interactionHighlight = undefined;
     this.interactionHint?.destroy();
     this.interactionHint = undefined;
+    if (this.lastInteractionPromptLabel !== null) {
+      this.lastInteractionPromptLabel = null;
+      eventBus.emit(EVENTS.WORLD_INTERACTION_PROMPT, { text: '', visible: false, color: '#F5C842' });
+    }
 
     // Barber panel cleanup
     this.barberPanel?.destroy(true);
