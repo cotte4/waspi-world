@@ -129,4 +129,28 @@ export const EVENTS = {
   DARTS_SCENE_ACTIVE: 'darts:active',
   /** Darts final result. Payload: { score, bullseyes, tenksEarned } */
   DARTS_RESULT: 'darts:result',
+  /** Flappy Waspi HUD update. Payload: { score: number; highScore: number } */
+  FLAPPY_HUD_UPDATE: 'flappy:hud_update',
+  /** Flappy Waspi scene active/inactive. Payload: boolean */
+  FLAPPY_SCENE_ACTIVE: 'flappy:active',
+  /** Flappy Waspi game over. Payload: { score: number; highScore: number } */
+  FLAPPY_GAME_OVER: 'flappy:game_over',
+  /** DinoRun HUD update. Payload: { score: number; highScore: number } */
+  DINO_HUD_UPDATE: 'dino:hud_update',
+  /** DinoRun scene active/inactive. Payload: boolean */
+  DINO_SCENE_ACTIVE: 'dino:active',
+  /** DinoRun game over. Payload: { score: number } */
+  DINO_GAME_OVER: 'dino:game_over',
+  /** BosqueMaterialesScene HUD data update. Payload: BosqueHudPayload */
+  BOSQUE_HUD_UPDATE: 'bosque:hud_update',
+  /** BosqueMaterialesScene active/inactive. Payload: boolean */
+  BOSQUE_SCENE_ACTIVE: 'bosque:active',
+  /** GymInterior HUD state update. Payload: GymHudPayload */
+  GYM_HUD_UPDATE: 'gym:hud_update',
+  /** GymInterior scene active/inactive. Payload: boolean */
+  GYM_SCENE_ACTIVE: 'gym:active',
+  /** ArcadeInterior HUD state update. Payload: ArcadeHudPayload */
+  ARCADE_HUD_UPDATE: 'arcade:hud_update',
+  /** ArcadeInterior scene active/inactive. Payload: boolean */
+  ARCADE_SCENE_ACTIVE: 'arcade:active',
 } as const;

@@ -158,9 +158,6 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   private materialNodes: MaterialNode[] = [];
   private mobs: Mob[] = [];
 
-  private promptText?: Phaser.GameObjects.Text;
-  private hudText?: Phaser.GameObjects.Text;
-  private autoHud?: Phaser.GameObjects.Text;
   private collectedTotal = 0;
   private minigameActive = false;
   private activeMiningMinigame: MiningMinigame | null = null;
@@ -201,8 +198,11 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     this.setupMaterialNodes();
     this.setupMobs();
     this.createPlayer();
-    this.setupUi();
+    this.setupSceneLabel();
     this.setupInput();
+
+    eventBus.emit(EVENTS.BOSQUE_SCENE_ACTIVE, true);
+    this.emitHudUpdate();
 
     this.specModal = new SpecializationModal(this);
     createBackButton(this, () => this.leaveToVecindad(), 'VECINDAD');
@@ -618,28 +618,18 @@ export class BosqueMaterialesScene extends Phaser.Scene {
 
   // ─── UI ───────────────────────────────────────────────────────────────────
 
-  private setupUi() {
-    this.promptText = this.add.text(this.scale.width / 2, this.scale.height - 26, '', {
-      fontSize: '8px', fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842', stroke: '#000000', strokeThickness: 4, align: 'center',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(1000);
-
-    this.hudText = this.add.text(16, 76, `MATS: 0`, {
-      fontSize: '8px', fontFamily: '"Press Start 2P", monospace',
-      color: '#B9FF9E', stroke: '#000', strokeThickness: 3,
-    }).setScrollFactor(0).setDepth(1000);
-
+  private setupSceneLabel() {
     this.add.text(this.scale.width / 2, 14, 'BOSQUE DE MATERIALES', {
       fontSize: '9px', fontFamily: '"Press Start 2P", monospace',
       color: '#6FC86A', stroke: '#000', strokeThickness: 4,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(1000);
+  }
 
-    // Auto-mode label: shown when mining skill >= 4
-    const isAutoMode = getSkillSystem().getLevel('mining') >= 4;
-    this.autoHud = this.add.text(this.scale.width - 12, 76, '⚙ AUTO', {
-      fontSize: '7px', fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842', stroke: '#000', strokeThickness: 3,
-    }).setOrigin(1, 0).setScrollFactor(0).setDepth(1000).setVisible(isAutoMode);
+  private emitHudUpdate(prompt?: string) {
+    eventBus.emit(EVENTS.BOSQUE_HUD_UPDATE, {
+      materials: { mats: this.collectedTotal },
+      prompt: prompt ?? '',
+    });
   }
 
   // ─── Input ────────────────────────────────────────────────────────────────
@@ -809,7 +799,6 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     if (nearest.communal) {
       nearest.respawnAt = this.time.now + COMMUNAL_GARDEN_RESPAWN_MS;
       this.collectedTotal += MATERIALS_COMMUNAL_PER_TEND;
-      this.hudText?.setText(`MATS: ${this.collectedTotal}`);
       this.showPrompt(`+${MATERIALS_COMMUNAL_PER_TEND} MATERIALES [JARDÍN] +10 XP JARDINERÍA`);
       void (async () => {
         const result = await getSkillSystem().addXp('gardening', 10, 'communal_tend');
@@ -844,9 +833,6 @@ export class BosqueMaterialesScene extends Phaser.Scene {
         const miningLevel = sys.getLevel('mining');
         const isAutoMode = miningLevel >= 4;
 
-        // Show auto HUD if applicable
-        this.autoHud?.setVisible(isAutoMode);
-
         let minigameBonus = 0;
         let isAuto = isAutoMode;
 
@@ -878,15 +864,10 @@ export class BosqueMaterialesScene extends Phaser.Scene {
 
         // Quality + XP feedback together so player sees the difference
         this.showPrompt(`+${matsThisNode} MATERIALES [${qr.label}]  +${xpTotal} XP`);
-        if (this.hudText) {
-          this.hudText.setText(`MATS: ${this.collectedTotal}`).setColor(qr.color);
-          this.time.delayedCall(1600, () => this.hudText?.setColor('#B9FF9E'));
-        }
         const xpResult = await sys.addXp('mining', xpTotal, 'node_collect');
         if (!this.scene?.isActive('BosqueMaterialesScene')) return;
         if (xpResult.leveled_up) {
           eventBus.emit(EVENTS.UI_NOTICE, { message: `⛏️ MINERÍA LVL ${xpResult.new_level}!`, color: '#F5C842' });
-          this.autoHud?.setVisible(sys.getLevel('mining') >= 4);
           this.maybeShowSpecModal('mining', xpResult.new_level);
         }
         // Earn mastery MP if at Lv5
@@ -918,14 +899,13 @@ export class BosqueMaterialesScene extends Phaser.Scene {
       const gLv = getSkillSystem().getLevel('gardening');
       hint = gLv >= 5
         ? '[E] CUIDAR PLANTAS DEL JARDÍN +10 XP'
-        : `🌱 JARDÍN COMUNAL [REQUIERE JARDINERÍA LV5 — LV ACTUAL: ${gLv}]`;
+        : `JARDÍN COMUNAL [REQUIERE JARDINERÍA LV5 — LV ACTUAL: ${gLv}]`;
     } else if (dist2cave < CAVE_INTERACT_RANGE) {
       const miningLv = getSkillSystem().getLevel('mining');
       hint = miningLv >= 5
         ? '[E] ENTRAR A LA CUEVA OSCURA'
-        : `🔒 CUEVA [Mining Lv5 requerido — Lv actual: ${miningLv}]`;
+        : `CUEVA [Mining Lv5 requerido — Lv actual: ${miningLv}]`;
     } else {
-      // minero_atletico sinergia: +15% rango de recolección
       const promptRange = MATERIAL_COLLECT_RANGE * (getSkillSystem().hasSynergy('minero_atletico') ? 1.15 : 1);
       for (const node of this.materialNodes) {
         if (!node.available) continue;
@@ -937,12 +917,12 @@ export class BosqueMaterialesScene extends Phaser.Scene {
       }
     }
     if (this.py > 1100) hint = hint || '↓ SALIR AL VECINDAD';
-    this.promptText?.setText(hint);
+    this.emitHudUpdate(hint);
   }
 
   private showPrompt(msg: string) {
-    this.promptText?.setText(msg);
-    this.time.delayedCall(1800, () => this.promptText?.setText(''));
+    this.emitHudUpdate(msg);
+    this.time.delayedCall(1800, () => this.emitHudUpdate(''));
   }
 
   // ─── Communal Garden ──────────────────────────────────────────────────────
@@ -1025,6 +1005,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   }
 
   private onShutdown() {
+    eventBus.emit(EVENTS.BOSQUE_SCENE_ACTIVE, false);
     this.gardeningXpTimer?.remove();
     this.gardeningXpTimer = undefined;
     // Destroy any active minigame so its SPACE key listener doesn't leak

@@ -62,6 +62,7 @@ const BasketHUD = dynamic(() => import('@/app/components/BasketHUD'), { ssr: fal
 const PenaltyHUD = dynamic(() => import('@/app/components/PenaltyHUD'), { ssr: false });
 const DartsHUD = dynamic(() => import('@/app/components/DartsHUD'), { ssr: false });
 const VecindadHUD = dynamic(() => import('@/app/components/VecindadHUD'), { ssr: false });
+const BosqueHUD = dynamic(() => import('@/app/components/BosqueHUD'), { ssr: false });
 const GunShopOverlay = dynamic(() => import('@/app/components/GunShopOverlay'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
@@ -229,6 +230,7 @@ export default function PlayPage() {
   const [basketHudActive, setBasketHudActive] = useState(false);
   const [penaltyHudActive, setPenaltyHudActive] = useState(false);
   const [dartsHudActive, setDartsHudActive] = useState(false);
+  const [bosqueHudActive, setBosqueHudActive] = useState(false);
   const [statsData, setStatsData] = useState<PlayerStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
@@ -769,6 +771,10 @@ export default function PlayPage() {
       setDartsHudActive(payload as boolean);
     });
 
+    const unsubBosqueActive = eventBus.on(EVENTS.BOSQUE_SCENE_ACTIVE, (payload: unknown) => {
+      setBosqueHudActive(payload as boolean);
+    });
+
     return () => {
       unsubChat();
       unsubInfo();
@@ -794,6 +800,7 @@ export default function PlayPage() {
       unsubBasketActive();
       unsubPenaltyActive();
       unsubDartsActive();
+      unsubBosqueActive();
     };
   }, [applyPlayerState, playUiSfx, playerState, syncPlayerState]);
 
@@ -2483,6 +2490,9 @@ export default function PlayPage() {
 
         {/* Vecindad HUD — shown only when VecindadScene is active */}
         <VecindadHUD />
+
+        {/* Bosque HUD — shown only when BosqueMaterialesScene is active */}
+        {bosqueHudActive && <BosqueHUD />}
 
         {/* Quest Tracker — always mounted when in-game, self-manages visibility */}
         {activeScene !== 'CreatorScene' && (
