@@ -7,6 +7,8 @@ import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
 import { SceneControls } from '../systems/SceneControls';
 import { formatMovementBindingLabel } from '../systems/ControlSettings';
 import { supabase, isConfigured } from '../../lib/supabase';
+import { eventBus, EVENTS } from '../config/eventBus';
+import type { PvpHudPayload } from '../../../app/components/PvpHUD';
 
 type ArenaRemotePlayer = {
   avatar: AvatarRenderer;
@@ -149,16 +151,8 @@ export class PvpArenaScene extends Phaser.Scene {
   private pendingMatchStartSentAt = 0;
   private startingMatchId = '';
   private inTransition = false;
-  private arenaStatus!: Phaser.GameObjects.Text;
-  private rosterText!: Phaser.GameObjects.Text;
-  private liveBoardText!: Phaser.GameObjects.Text;
-  private spectatorText!: Phaser.GameObjects.Text;
-  private betText!: Phaser.GameObjects.Text;
-  private readyText!: Phaser.GameObjects.Text;
-  private hpText!: Phaser.GameObjects.Text;
-  private livesText!: Phaser.GameObjects.Text;
-  private noticeText!: Phaser.GameObjects.Text;
-  private countdownText!: Phaser.GameObjects.Text;
+  private pendingNotice = '';
+  private pendingNoticeColor = '#39FF14';
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private keyOne!: Phaser.Input.Keyboard.Key;
@@ -250,6 +244,7 @@ export class PvpArenaScene extends Phaser.Scene {
       transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
     });
     void this.syncAuthenticatedIdentity();
+    eventBus.emit(EVENTS.PVP_SCENE_ACTIVE, true);
     this.refreshUi();
     this.cameras.main.resetFX();
     this.cameras.main.setAlpha(1);
@@ -418,64 +413,6 @@ export class PvpArenaScene extends Phaser.Scene {
   }
 
   private createUi() {
-    this.betText = this.add.text(170, 94, '', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-    });
-    this.readyText = this.add.text(170, 116, '', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#B8D7FF',
-    });
-    this.rosterText = this.add.text(170, 140, '', {
-      fontSize: '7px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#D6D7E0',
-      lineSpacing: 8,
-    });
-    this.liveBoardText = this.add.text(610, 90, '', {
-      fontSize: '7px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F0F3FF',
-      lineSpacing: 8,
-      align: 'right',
-    }).setOrigin(1, 0);
-    this.spectatorText = this.add.text(610, 146, '', {
-      fontSize: '7px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#9FC6FF',
-      lineSpacing: 7,
-      align: 'right',
-    }).setOrigin(1, 0);
-    this.arenaStatus = this.add.text(400, 210, '', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#8EA4BE',
-    }).setOrigin(0.5);
-    this.hpText = this.add.text(56, 560, '', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FF7A7A',
-    });
-    this.livesText = this.add.text(282, 560, '', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-    });
-    this.noticeText = this.add.text(400, 562, '', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#39FF14',
-    }).setOrigin(0.5);
-    this.countdownText = this.add.text(400, 388, '', {
-      fontSize: '16px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-      stroke: '#000000',
-      strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(1000);
-
     this.add.text(742, 88, '1/2/3 APUESTA', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
@@ -1083,19 +1020,17 @@ export class PvpArenaScene extends Phaser.Scene {
         })()
       : 0;
 
-    this.betText.setText(`APUESTA ${this.selectedBet} TENKS  /  SALDO ${getTenksBalance()}`);
-    this.readyText.setText(
-      this.inMatch ? `MATCH ${this.matchBet} TENKS` : (this.ready ? 'ESTAS LISTO' : `${this.getInteractHint()} PARA LISTO`)
-    );
-    this.rosterText.setText([
+    const bet = `APUESTA ${this.selectedBet} TENKS  /  SALDO ${getTenksBalance()}`;
+    const ready = this.inMatch ? `MATCH ${this.matchBet} TENKS` : (this.ready ? 'ESTAS LISTO' : `${this.getInteractHint()} PARA LISTO`);
+    const roster = [
       'JUGADORES EN LA FILA',
       ...readyPlayers.slice(0, 5).map((player) => {
         const state = player.inMatch ? `FIGHT ${player.lives}` : (player.ready ? `READY ${player.bet}` : `BET ${player.bet}`);
         const me = player.playerId === this.playerId ? 'TU ' : '';
         return `${me}${player.username} ${state}`;
       }),
-    ].join('\n'));
-    this.liveBoardText.setText(activeMatchPlayers.length >= 2
+    ].join('\n');
+    const liveBoard = activeMatchPlayers.length >= 2
       ? [
           'MATCH EN VIVO',
           `${activeMatchPlayers[0]?.username ?? 'WASPI'} VS ${activeMatchPlayers[1]?.username ?? 'WASPI'}`,
@@ -1105,28 +1040,45 @@ export class PvpArenaScene extends Phaser.Scene {
           'MATCH EN VIVO',
           'ESPERANDO RETADOR',
           `POZO ${this.selectedBet * 2} TENKS`,
-        ].join('\n'));
-    this.spectatorText.setText([
+        ].join('\n');
+    const spectator = [
       `ESPECTADORES ${Math.max(0, spectatorCount - (this.inMatch ? 0 : 1))}`,
       `COLA ${readyPlayers.filter((player) => !player.inMatch).length}`,
       activeMatchPlayers.length >= 2 ? 'MIRANDO DESDE GRADAS' : (this.observedMatchResultId ? 'ULTIMO MATCH CERRADO' : 'SIN PELEA ACTIVA'),
-    ].join('\n'));
+    ].join('\n');
 
     const countdownRemaining = this.countdownEndsAt > this.time.now
       ? Math.ceil((this.countdownEndsAt - this.time.now) / 1000)
       : 0;
-    this.countdownText.setText(countdownRemaining > 0 ? String(countdownRemaining) : '');
+
+    let arenaStatus: string;
     if (this.inMatch && this.opponentId) {
       const opponent = this.remotePlayers.get(this.opponentId);
       const opponentLives = opponent?.lives ?? MAX_LIVES;
-      this.arenaStatus.setText(`ARENA ACTIVA / VIDAS TU ${this.lives} - RIVAL ${opponentLives}`);
+      arenaStatus = `ARENA ACTIVA / VIDAS TU ${this.lives} - RIVAL ${opponentLives}`;
     } else {
       const waiting = readyPlayers.filter((player) => player.ready && player.bet === this.selectedBet && !player.inMatch).length;
-      this.arenaStatus.setText(waiting >= 2 ? 'EMPAREJANDO...' : 'ESPERANDO DOS JUGADORES CON LA MISMA APUESTA');
+      arenaStatus = waiting >= 2 ? 'EMPAREJANDO...' : 'ESPERANDO DOS JUGADORES CON LA MISMA APUESTA';
     }
 
-    this.hpText.setText(`HP ${this.hp}`);
-    this.livesText.setText(`VIDAS ${this.lives}/${MAX_LIVES}`);
+    const payload: PvpHudPayload = {
+      bet,
+      ready,
+      roster,
+      liveBoard,
+      spectator,
+      arenaStatus,
+      hp: this.hp,
+      maxHp: MAX_HP,
+      lives: this.lives,
+      maxLives: MAX_LIVES,
+      notice: this.pendingNotice,
+      noticeColor: this.pendingNoticeColor,
+      countdown: countdownRemaining,
+      isSpectator: !this.inMatch && activeMatchPlayers.length >= 2,
+    };
+    eventBus.emit(EVENTS.PVP_HUD_UPDATE, payload);
+    this.pendingNotice = '';
   }
 
   private syncState() {
@@ -1165,17 +1117,8 @@ export class PvpArenaScene extends Phaser.Scene {
   }
 
   private flashNotice(message: string, color: string) {
-    this.noticeText.setText(message);
-    this.noticeText.setColor(color);
-    this.noticeText.setAlpha(1);
-    this.tweens.killTweensOf(this.noticeText);
-    this.tweens.add({
-      targets: this.noticeText,
-      alpha: 0.3,
-      duration: 1700,
-      ease: 'Sine.easeOut',
-      onComplete: () => this.noticeText.setAlpha(1),
-    });
+    this.pendingNotice = message;
+    this.pendingNoticeColor = color;
   }
 
   private async getAuthSessionInfo() {
@@ -1361,6 +1304,8 @@ export class PvpArenaScene extends Phaser.Scene {
   }
 
   private handleShutdown() {
+    eventBus.emit(EVENTS.PVP_SCENE_ACTIVE, false);
+
     try {
       if (this.pointerShootHandler) {
         this.input.off('pointerdown', this.pointerShootHandler);

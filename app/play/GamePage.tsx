@@ -68,6 +68,7 @@ const FlappyHUD = dynamic(() => import('@/app/components/FlappyHUD'), { ssr: fal
 const DinoHUD = dynamic(() => import('@/app/components/DinoHUD'), { ssr: false });
 const GymHUD = dynamic(() => import('@/app/components/GymHUD'), { ssr: false });
 const ArcadeHUD = dynamic(() => import('@/app/components/ArcadeHUD'), { ssr: false });
+const PvpHUD = dynamic(() => import('@/app/components/PvpHUD'), { ssr: false });
 const WorldHUD = dynamic(() => import('@/app/components/WorldHUD'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
@@ -238,6 +239,7 @@ export default function PlayPage() {
   const [bosqueHudActive, setBosqueHudActive] = useState(false);
   const [flappyHudActive, setFlappyHudActive] = useState(false);
   const [dinoHudActive, setDinoHudActive] = useState(false);
+  const [pvpHudActive, setPvpHudActive] = useState(false);
   const [statsData, setStatsData] = useState<PlayerStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
@@ -790,6 +792,10 @@ export default function PlayPage() {
       setDinoHudActive(payload as boolean);
     });
 
+    const unsubPvpActive = eventBus.on(EVENTS.PVP_SCENE_ACTIVE, (payload: unknown) => {
+      setPvpHudActive(payload as boolean);
+    });
+
     return () => {
       unsubChat();
       unsubInfo();
@@ -818,6 +824,7 @@ export default function PlayPage() {
       unsubBosqueActive();
       unsubFlappyActive();
       unsubDinoActive();
+      unsubPvpActive();
     };
   }, [applyPlayerState, playUiSfx, playerState, syncPlayerState]);
 
@@ -2519,6 +2526,9 @@ export default function PlayPage() {
 
         {/* Arcade HUD — self-manages visibility via ARCADE_SCENE_ACTIVE event */}
         <ArcadeHUD />
+
+        {/* PVP Arena HUD — shown only when PvpArenaScene is active */}
+        {pvpHudActive && <PvpHUD />}
 
         {/* Quest Tracker — always mounted when in-game, self-manages visibility */}
         {activeScene !== 'CreatorScene' && (
