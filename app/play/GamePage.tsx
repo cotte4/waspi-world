@@ -35,7 +35,7 @@ import {
 import { getLevelFloorXp, getMaxProgressionLevel, loadProgressionState, type ProgressionState } from '@/src/game/systems/ProgressionSystem';
 import { initStatsSystem, teardownStatsSystem, getStats, type PlayerStats } from '@/src/game/systems/StatsSystem';
 import { supabase } from '@/src/lib/supabase';
-import { getTenksBalance, initTenks } from '@/src/game/systems/TenksSystem';
+import { getTenksBalance, initTenks, initTenksFromServer } from '@/src/game/systems/TenksSystem';
 import { mutePlayer, normalizePlayerState, grantInventoryItem, type PlayerState } from '@/src/lib/playerState';
 import type { SharedParcelState } from '@/src/lib/vecindad';
 import { reconcileInventoryFromDB } from '@/src/lib/commercePersistence';
@@ -294,7 +294,7 @@ export default function PlayPage() {
     });
     saveStoredPlayerState(player);
     replaceInventory(player.inventory);
-    initTenks(player.tenks);
+    initTenks(player.tenks, { preferStored: false });
     mutedPlayersRef.current = player.mutedPlayers ?? [];
     setPlayerState(player);
     setOwned(player.inventory.owned);
@@ -954,6 +954,10 @@ export default function PlayPage() {
         void syncPlayerState(merged);
       }
     }
+
+    // Sync TENKS from the authoritative player_tenks_balance table.
+    // This overwrites any local or user_metadata value with the DB truth.
+    void initTenksFromServer(session.user.id, session.access_token);
   }, [applyPlayerState, loadVecindadSharedState, syncPlayerState]);
 
   const refreshPlayerState = useCallback(async () => {
