@@ -499,7 +499,15 @@ function BJCard({ card, hidden }: { card: number; hidden?: boolean }) {
 
 /* ─── Slots panel ───────────────────────────────────────────────────────────── */
 
-function SlotsPanel({ balance, onToast }: { balance: number; onToast: (msg: string) => void }) {
+function SlotsPanel({
+  balance,
+  onToast,
+  onBusyChange,
+}: {
+  balance: number;
+  onToast: (msg: string) => void;
+  onBusyChange: (busy: boolean) => void;
+}) {
   const [state, setState] = useState<SlotsState>({
     betIndex: 0,
     reels: ['7', '7', '7'],
@@ -507,6 +515,22 @@ function SlotsPanel({ balance, onToast }: { balance: number; onToast: (msg: stri
     spinning: false,
   });
   const spinIdRef = useRef(0);
+  const timerIdsRef = useRef<number[]>([]);
+  const pendingBetRef = useRef(0);
+
+  useEffect(() => {
+    onBusyChange(state.spinning);
+    return () => onBusyChange(false);
+  }, [state.spinning, onBusyChange]);
+
+  useEffect(() => () => {
+    timerIdsRef.current.forEach((id) => window.clearTimeout(id));
+    timerIdsRef.current = [];
+    if (pendingBetRef.current > 0) {
+      addTenks(pendingBetRef.current, 'casino_slots_refund_abort');
+      pendingBetRef.current = 0;
+    }
+  }, []);
 
   const spin = useCallback(() => {
     if (state.spinning) return;
@@ -518,15 +542,19 @@ function SlotsPanel({ balance, onToast }: { balance: number; onToast: (msg: stri
     }
     const outcome = rollSlotsOutcome();
     const myToken = ++spinIdRef.current;
+    pendingBetRef.current = bet;
+    timerIdsRef.current.forEach((id) => window.clearTimeout(id));
+    timerIdsRef.current = [];
     setState((s) => ({ ...s, spinning: true, resultText: 'GIRANDO...' }));
 
     const totalTicks = 12;
     for (let tick = 0; tick < totalTicks; tick++) {
       const t = tick;
-      window.setTimeout(() => {
+      const timerId = window.setTimeout(() => {
         if (spinIdRef.current !== myToken) return;
         const isLast = t === totalTicks - 1;
         if (isLast) {
+          pendingBetRef.current = 0;
           const payout = Math.round(bet * outcome.payoutMultiplier);
           if (payout > 0) {
             addTenks(payout, 'casino_slots_payout');
@@ -548,6 +576,7 @@ function SlotsPanel({ balance, onToast }: { balance: number; onToast: (msg: stri
           );
         }
       }, 80 * t);
+      timerIdsRef.current.push(timerId);
     }
   }, [state, onToast]);
 
@@ -595,7 +624,15 @@ function SlotsPanel({ balance, onToast }: { balance: number; onToast: (msg: stri
 
 /* ─── Roulette panel ────────────────────────────────────────────────────────── */
 
-function RoulettePanel({ balance, onToast }: { balance: number; onToast: (msg: string) => void }) {
+function RoulettePanel({
+  balance,
+  onToast,
+  onBusyChange,
+}: {
+  balance: number;
+  onToast: (msg: string) => void;
+  onBusyChange: (busy: boolean) => void;
+}) {
   const [state, setState] = useState<RouletteState>({
     betIndex: 0,
     optionIndex: 0,
@@ -605,6 +642,22 @@ function RoulettePanel({ balance, onToast }: { balance: number; onToast: (msg: s
     lastColor: null,
   });
   const spinIdRef = useRef(0);
+  const timerIdsRef = useRef<number[]>([]);
+  const pendingBetRef = useRef(0);
+
+  useEffect(() => {
+    onBusyChange(state.spinning);
+    return () => onBusyChange(false);
+  }, [state.spinning, onBusyChange]);
+
+  useEffect(() => () => {
+    timerIdsRef.current.forEach((id) => window.clearTimeout(id));
+    timerIdsRef.current = [];
+    if (pendingBetRef.current > 0) {
+      addTenks(pendingBetRef.current, 'casino_roulette_refund_abort');
+      pendingBetRef.current = 0;
+    }
+  }, []);
 
   const spin = useCallback(() => {
     if (state.spinning) return;
@@ -616,17 +669,21 @@ function RoulettePanel({ balance, onToast }: { balance: number; onToast: (msg: s
     }
     const winningNumber = Math.floor(Math.random() * 37);
     const myToken = ++spinIdRef.current;
+    pendingBetRef.current = bet;
+    timerIdsRef.current.forEach((id) => window.clearTimeout(id));
+    timerIdsRef.current = [];
     setState((s) => ({ ...s, spinning: true, resultText: 'LA BOLA ESTA GIRANDO...' }));
 
     const totalTicks = 14;
     for (let tick = 0; tick < totalTicks; tick++) {
       const t = tick;
-      window.setTimeout(() => {
+      const timerId = window.setTimeout(() => {
         if (spinIdRef.current !== myToken) return;
         const isLast = t === totalTicks - 1;
         const number = isLast ? winningNumber : Math.floor(Math.random() * 37);
         const color = getRouletteColor(number);
         if (isLast) {
+          pendingBetRef.current = 0;
           const option = ROULETTE_OPTIONS[state.optionIndex];
           const isEven = number !== 0 && number % 2 === 0;
           const won =
@@ -655,6 +712,7 @@ function RoulettePanel({ balance, onToast }: { balance: number; onToast: (msg: s
           setState((s) => s.spinning ? { ...s, lastNumber: number, lastColor: color } : s);
         }
       }, 90 * t);
+      timerIdsRef.current.push(timerId);
     }
   }, [state, onToast]);
 
@@ -731,7 +789,15 @@ function RoulettePanel({ balance, onToast }: { balance: number; onToast: (msg: s
 
 /* ─── Blackjack panel ───────────────────────────────────────────────────────── */
 
-function BlackjackPanel({ balance, onToast }: { balance: number; onToast: (msg: string) => void }) {
+function BlackjackPanel({
+  balance,
+  onToast,
+  onBusyChange,
+}: {
+  balance: number;
+  onToast: (msg: string) => void;
+  onBusyChange: (busy: boolean) => void;
+}) {
   const [state, setState] = useState<BlackjackState>({
     phase: 'bet',
     betIndex: 0,
@@ -746,6 +812,25 @@ function BlackjackPanel({ balance, onToast }: { balance: number; onToast: (msg: 
   });
 
   const dealerStepRef = useRef<number | null>(null);
+  const stateRef = useRef(state);
+
+  useEffect(() => {
+    stateRef.current = state;
+    const busy = state.phase === 'player' || state.phase === 'dealer';
+    onBusyChange(busy);
+    return () => onBusyChange(false);
+  }, [state, onBusyChange]);
+
+  useEffect(() => () => {
+    if (dealerStepRef.current !== null) {
+      window.clearTimeout(dealerStepRef.current);
+      dealerStepRef.current = null;
+    }
+    const s = stateRef.current;
+    if (!s.settled && s.currentBet > 0 && s.phase !== 'bet') {
+      addTenks(s.currentBet, 'casino_blackjack_refund_abort');
+    }
+  }, []);
 
   const resolveBlackjack = useCallback((
     playerCards: number[],
@@ -935,7 +1020,15 @@ function BlackjackPanel({ balance, onToast }: { balance: number; onToast: (msg: 
 
 /* ─── Poker panel ───────────────────────────────────────────────────────────── */
 
-function PokerPanel({ balance, onToast }: { balance: number; onToast: (msg: string) => void }) {
+function PokerPanel({
+  balance,
+  onToast,
+  onBusyChange,
+}: {
+  balance: number;
+  onToast: (msg: string) => void;
+  onBusyChange: (busy: boolean) => void;
+}) {
   const [state, setState] = useState<HoldemState>({
     phase: 'ante',
     anteIndex: 1,
@@ -949,6 +1042,21 @@ function PokerPanel({ balance, onToast }: { balance: number; onToast: (msg: stri
     actionIndex: 1,
     cpuLastAction: '',
   });
+  const stateRef = useRef(state);
+
+  useEffect(() => {
+    stateRef.current = state;
+    const busy = state.phase !== 'ante' && state.phase !== 'showdown';
+    onBusyChange(busy);
+    return () => onBusyChange(false);
+  }, [state, onBusyChange]);
+
+  useEffect(() => () => {
+    const s = stateRef.current;
+    if (s.phase !== 'ante' && s.phase !== 'showdown' && s.playerPaid > 0) {
+      addTenks(s.playerPaid, 'casino_holdem_refund_abort');
+    }
+  }, []);
 
   const cpuDecideOnRaise = useCallback((cpuHole: number[], community: number[], phase: HoldemPhase): boolean => {
     const strength = bestAvailableHand(cpuHole, community);
@@ -1157,6 +1265,7 @@ export default function CasinoOverlay({ isMobile }: CasinoOverlayProps) {
   const [activeGame, setActiveGame] = useState<GameId>('slots');
   const [balance, setBalance] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
+  const [roundBusy, setRoundBusy] = useState(false);
   const toastTimerRef = useRef<number | null>(null);
   const syncTokenRef = useRef(0);
 
@@ -1201,16 +1310,20 @@ export default function CasinoOverlay({ isMobile }: CasinoOverlayProps) {
     return off;
   }, [open]);
 
-  const handleClose = useCallback(() => {
-    setOpen(false);
-    eventBus.emit(EVENTS.CASINO_CLOSE);
-  }, []);
-
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => setToast(null), 2000);
   }, []);
+
+  const handleClose = useCallback(() => {
+    if (roundBusy) {
+      showToast('TERMINA ESTA MANO PRIMERO.');
+      return;
+    }
+    setOpen(false);
+    eventBus.emit(EVENTS.CASINO_CLOSE);
+  }, [roundBusy, showToast]);
 
   useEffect(() => () => {
     if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
@@ -1288,14 +1401,16 @@ export default function CasinoOverlay({ isMobile }: CasinoOverlayProps) {
           </div>
           <button
             onClick={handleClose}
+            disabled={roundBusy}
             style={{
               fontFamily: S.font,
               fontSize: 8,
               background: 'transparent',
               border: `1px solid rgba(255,255,255,0.2)`,
               color: S.muted,
-              cursor: 'pointer',
+              cursor: roundBusy ? 'not-allowed' : 'pointer',
               padding: '4px 8px',
+              opacity: roundBusy ? 0.5 : 1,
             }}
           >
             ✕
@@ -1310,7 +1425,14 @@ export default function CasinoOverlay({ isMobile }: CasinoOverlayProps) {
           {GAMES.map((game) => (
             <button
               key={game}
-              onClick={() => setActiveGame(game)}
+              onClick={() => {
+                if (roundBusy && activeGame !== game) {
+                  showToast('NO CAMBIES DE JUEGO EN MEDIO DE UNA MANO.');
+                  return;
+                }
+                setActiveGame(game);
+              }}
+              disabled={roundBusy && activeGame !== game}
               style={{
                 flex: 1,
                 fontFamily: S.font,
@@ -1320,8 +1442,9 @@ export default function CasinoOverlay({ isMobile }: CasinoOverlayProps) {
                 color: activeGame === game ? GAME_ACCENT[game] : S.muted,
                 border: 'none',
                 borderBottom: `2px solid ${activeGame === game ? GAME_ACCENT[game] : 'transparent'}`,
-                cursor: 'pointer',
+                cursor: roundBusy && activeGame !== game ? 'not-allowed' : 'pointer',
                 letterSpacing: '0.03em',
+                opacity: roundBusy && activeGame !== game ? 0.5 : 1,
               }}
             >
               {GAME_LABELS[game]}
@@ -1330,10 +1453,10 @@ export default function CasinoOverlay({ isMobile }: CasinoOverlayProps) {
         </div>
 
         <div style={{ padding: '20px 16px', overflowY: 'auto', flex: 1 }}>
-          {activeGame === 'slots'     && <SlotsPanel     balance={balance} onToast={showToast} />}
-          {activeGame === 'roulette'  && <RoulettePanel  balance={balance} onToast={showToast} />}
-          {activeGame === 'blackjack' && <BlackjackPanel balance={balance} onToast={showToast} />}
-          {activeGame === 'poker'     && <PokerPanel     balance={balance} onToast={showToast} />}
+          {activeGame === 'slots'     && <SlotsPanel     balance={balance} onToast={showToast} onBusyChange={setRoundBusy} />}
+          {activeGame === 'roulette'  && <RoulettePanel  balance={balance} onToast={showToast} onBusyChange={setRoundBusy} />}
+          {activeGame === 'blackjack' && <BlackjackPanel balance={balance} onToast={showToast} onBusyChange={setRoundBusy} />}
+          {activeGame === 'poker'     && <PokerPanel     balance={balance} onToast={showToast} onBusyChange={setRoundBusy} />}
         </div>
 
         <div style={{

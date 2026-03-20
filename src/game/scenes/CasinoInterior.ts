@@ -40,10 +40,12 @@ export class CasinoInterior extends Phaser.Scene {
   private rouletteWheelTween?: Phaser.Tweens.Tween;
   private worldExitX!: number;
   private worldExitY!: number;
+  private shuttingDown = false;
 
   constructor() { super({ key: 'CasinoInterior' }); }
 
   init(data: Record<string, unknown> = {}) {
+    this.shuttingDown = false;
     this.inTransition = false;
     const w = worldExitFromSceneData(data, CasinoInterior.RETURN_X, CasinoInterior.RETURN_Y);
     this.worldExitX = w.x;
@@ -63,6 +65,7 @@ export class CasinoInterior extends Phaser.Scene {
     this.controls = new SceneControls(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.shuttingDown = false;
       this.inTransition = false;
       this.input.enabled = true;
       if (this.input.keyboard) this.input.keyboard.enabled = true;
@@ -380,7 +383,7 @@ export class CasinoInterior extends Phaser.Scene {
   }
 
   private showToast(message: string) {
-    if (!this.toastText) return;
+    if (this.shuttingDown || !this.toastText) return;
     this.toastTween?.stop();
     this.toastText.setText(message);
     this.toastText.setAlpha(1);
@@ -388,7 +391,7 @@ export class CasinoInterior extends Phaser.Scene {
   }
 
   update(_time: number, delta: number) {
-    if (this.inTransition) return;
+    if (this.inTransition || this.shuttingDown) return;
     if (this.overlayMode) {
       this.room?.update();
       return;
@@ -499,6 +502,14 @@ export class CasinoInterior extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
+    if (this.shuttingDown) return;
+    this.shuttingDown = true;
+    this.inTransition = true;
+    this.input.enabled = false;
+    if (this.input.keyboard) this.input.keyboard.enabled = false;
+    this.tweens.killAll();
+    this.time.removeAllEvents();
+
     try {
       this.clearCasinoVisuals();
     } catch (e) { console.error('[CasinoInterior] clearCasinoVisuals shutdown failed', e); }
@@ -519,8 +530,6 @@ export class CasinoInterior extends Phaser.Scene {
     } catch (e) { console.error('[CasinoInterior] CASINO_CLOSE emit failed', e); }
 
     this.overlayMode = null;
-    this.input.enabled = true;
-    if (this.input.keyboard) this.input.keyboard.enabled = true;
 
     this.room?.shutdown();
     this.room = undefined;
