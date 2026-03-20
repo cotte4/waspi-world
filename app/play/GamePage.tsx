@@ -43,6 +43,7 @@ import { track } from '@/src/lib/analytics';
 
 const PhaserGame = dynamic(() => import('@/app/components/PhaserGame'), { ssr: false });
 const JukeboxOverlay = dynamic(() => import('@/app/components/JukeboxOverlay'), { ssr: false });
+const GameHUD = dynamic(() => import('@/app/components/GameHUD'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
 const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
@@ -1961,35 +1962,7 @@ export default function PlayPage() {
       >
         <PhaserGame />
 
-        <div className="absolute top-2 left-2 flex items-center gap-2 pointer-events-none flex-wrap max-w-[68%]">
-          <div className="ww-chip px-2 py-1 text-xs" style={hudBadge('#F5C842', 'rgba(245,200,66,0.4)')}>
-            {playerInfo ? playerInfo.username : 'CARGANDO...'}
-          </div>
-          {connected && (
-            <div className="ww-chip px-2 py-1 text-xs flex items-center gap-1" style={hudBadge('#39FF14', 'rgba(57,255,20,0.3)')}>
-              <span className="ww-status-dot inline-block w-1.5 h-1.5 rounded-full bg-green-400" />
-              ONLINE
-            </div>
-          )}
-          {tenks !== null && (
-            <div
-              className="ww-chip px-2 py-1 text-xs flex items-center gap-1"
-              style={{
-                ...hudBadge('#F5C842', 'rgba(245,200,66,0.4)'),
-                transform: tenksAnimating ? 'scale(1.15)' : 'scale(1)',
-                transition: 'transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-                color: tenksAnimating ? '#FFFFFF' : '#F5C842',
-              }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/assets/sprites/icon_coin_64.png" alt="T" width={14} height={14} style={{ imageRendering: 'auto', display: 'inline-block' }} />
-              {tenks}
-            </div>
-          )}
-          <div className="ww-chip px-2 py-1 text-xs" style={hudBadge('#46B3FF', 'rgba(70,179,255,0.35)')}>
-            LVL {progression.level}
-          </div>
-        </div>
+        <GameHUD />
 
         {comboMultiplier !== null && (
           <div

@@ -79,4 +79,6 @@ export const EVENTS = {
   JUKEBOX_SKIP_REQUESTED: 'jukebox:skip:requested',
   JUKEBOX_REACTION_SENT: 'jukebox:reaction:sent',
   JUKEBOX_STATE_UPDATED: 'jukebox:state:updated',
+  /** Player HP changed. Payload: { hp: number; maxHp: number } */
+  PLAYER_HP_CHANGED: 'player:hp:changed',
 } as const;

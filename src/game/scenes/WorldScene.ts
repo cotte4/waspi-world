@@ -45,6 +45,20 @@ import { MasteryPanel } from '../systems/MasteryPanel';
 import { WorldMapPanel } from '../systems/WorldMapPanel';
 import { EventBanner } from '../systems/EventBanner';
 import { EmotePanel, showEmoteBubble, type EmoteId } from '../systems/EmoteSystem';
+import { rememberWorldSpawn } from '../systems/worldReturnSpawn';
+
+/** Al entrar desde el mundo, se pasan returnX/returnY (posición actual) para reaparecer al salir. */
+const WORLD_SCENES_WITH_PLAYER_RETURN = new Set([
+  'StoreInterior',
+  'GunShopInterior',
+  'ArcadeInterior',
+  'CafeInterior',
+  'CasinoInterior',
+  'GymInterior',
+  'BasementScene',
+  'CreatorScene',
+  'PvpArenaScene',
+]);
 
 interface RemotePlayer {
   avatar: AvatarRenderer;
@@ -993,6 +1007,13 @@ export class WorldScene extends Phaser.Scene {
     this.hp = this.maxHp;
 
     this.renderHpHud();
+
+    // React GameHUD takes over HP/XP/level display — hide canvas equivalents
+    this.hpBar.setVisible(false);
+    this.hpText.setVisible(false);
+    this.xpBar?.setVisible(false);
+    this.levelBadgeBg?.setVisible(false);
+    this.levelBadgeText?.setVisible(false);
   }
 
   // ─── Voice Chat HUD ─────────────────────────────────────────────────────────
@@ -1372,6 +1393,8 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private renderHpHud() {
+    // Sync React GameHUD overlay
+    eventBus.emit(EVENTS.PLAYER_HP_CHANGED, { hp: this.hp, maxHp: this.maxHp });
     const w = 140;
     const h = 9;
     const x = 8;
@@ -1705,12 +1728,12 @@ export class WorldScene extends Phaser.Scene {
     this.combatHud?.setVisible(visible);
     this.progressionHud?.setVisible(visible);
     this.weaponHud?.setVisible(visible && this.gunEnabled);
-    // HP/XP/level badge always visible (not gated by arena HUD toggle)
-    this.hpBar?.setVisible(true);
-    this.hpText?.setVisible(true);
-    this.xpBar?.setVisible(true);
-    this.levelBadgeBg?.setVisible(true);
-    this.levelBadgeText?.setVisible(true);
+    // HP/XP/level badge handled by React GameHUD — always hidden on canvas
+    this.hpBar?.setVisible(false);
+    this.hpText?.setVisible(false);
+    this.xpBar?.setVisible(false);
+    this.levelBadgeBg?.setVisible(false);
+    this.levelBadgeText?.setVisible(false);
     this.weaponCooldownBar?.setVisible(visible && this.gunEnabled);
     // Minimap follows arena HUD toggle
     this.minimapContainer?.setVisible(visible);
@@ -6467,9 +6490,20 @@ export class WorldScene extends Phaser.Scene {
   }
 
   /** Usa SceneUi.transitionToScene — timeout de respaldo + resetFX si el fade no dispara. */
-  private transitionToScene(targetKey: string) {
+  private transitionToScene(targetKey: string, extra: Record<string, unknown> = {}) {
     clearGlobalBgm(this);
-    const ok = uiTransitionToScene(this, targetKey, {});
+    const data: Record<string, unknown> = { ...extra };
+    if (targetKey === 'VecindadScene') {
+      data.plazaReentryX = this.px;
+      data.plazaReentryY = this.py;
+    } else if (WORLD_SCENES_WITH_PLAYER_RETURN.has(targetKey)) {
+      data.returnX = this.px;
+      data.returnY = this.py;
+      if (targetKey === 'ArcadeInterior') {
+        rememberWorldSpawn(this.game, this.px, this.py);
+      }
+    }
+    const ok = uiTransitionToScene(this, targetKey, data);
     if (ok) this.inTransition = true;
   }
 
