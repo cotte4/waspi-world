@@ -56,6 +56,8 @@ const LeaderboardOverlay = dynamic(() => import('@/app/components/LeaderboardOve
 const QuestTracker = dynamic(() => import('@/app/components/QuestTracker'), { ssr: false });
 const VirtualJoystick = dynamic(() => import('@/app/components/VirtualJoystick'), { ssr: false });
 const SkillTreeOverlay = dynamic(() => import('@/app/components/SkillTreeOverlay'), { ssr: false });
+const CasinoOverlay = dynamic(() => import('@/app/components/CasinoOverlay'), { ssr: false });
+const ZombiesHUD = dynamic(() => import('@/app/components/ZombiesHUD'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
 const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
@@ -218,6 +220,7 @@ export default function PlayPage() {
   const [statsOpen, setStatsOpen] = useState(false);
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
   const [skillTreeOpen, setSkillTreeOpen] = useState(false);
+  const [zombiesHudActive, setZombiesHudActive] = useState(false);
   const [statsData, setStatsData] = useState<PlayerStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
@@ -742,6 +745,10 @@ export default function PlayPage() {
       }
     });
 
+    const unsubZombiesActive = eventBus.on(EVENTS.ZOMBIES_SCENE_ACTIVE, (payload: unknown) => {
+      setZombiesHudActive(payload as boolean);
+    });
+
     return () => {
       unsubChat();
       unsubInfo();
@@ -763,6 +770,7 @@ export default function PlayPage() {
       unsubVecindadUpdate();
       unsubFarmAction();
       unsubUiNotice();
+      unsubZombiesActive();
     };
   }, [applyPlayerState, playUiSfx, playerState, syncPlayerState]);
 
@@ -2435,6 +2443,12 @@ export default function PlayPage() {
             onClose={() => setSkillTreeOpen(false)}
           />
         )}
+
+        {/* Casino overlay — self-manages visibility via CASINO_OPEN/CLOSE events */}
+        <CasinoOverlay isMobile={isMobile} />
+
+        {/* Zombies HUD — shown only when ZombiesScene is active */}
+        {zombiesHudActive && <ZombiesHUD />}
 
         {/* Quest Tracker — always mounted when in-game, self-manages visibility */}
         {activeScene !== 'CreatorScene' && (

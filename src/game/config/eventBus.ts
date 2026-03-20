@@ -97,4 +97,12 @@ export const EVENTS = {
   CASINO_OPEN: 'casino:open',
   /** Close the Casino overlay. No payload required. */
   CASINO_CLOSE: 'casino:close',
+  /** Zombies HUD state update. Payload: ZombiesHudPayload */
+  ZOMBIES_HUD_UPDATE: 'zombies:hud_update',
+  /** Zombies wave countdown. Payload: { count: 3|2|1|0 } (0 = GO!) */
+  ZOMBIES_COUNTDOWN: 'zombies:countdown',
+  /** Zombies game over. Payload: { score: number; kills: number; wave: number } */
+  ZOMBIES_GAME_OVER: 'zombies:game_over',
+  /** Zombies scene active/inactive. Payload: boolean */
+  ZOMBIES_SCENE_ACTIVE: 'zombies:active',
 } as const;

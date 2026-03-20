@@ -391,15 +391,9 @@ export class ZombiesScene extends Phaser.Scene {
   private lastStompSfxAt = 0;
   private activePrompt?: Phaser.GameObjects.Text;
   private promptGlow?: Phaser.GameObjects.Graphics;
-  private roundText?: Phaser.GameObjects.Text;
-  private pointsText?: Phaser.GameObjects.Text;
-  private hpText?: Phaser.GameObjects.Text;
-  private ammoText?: Phaser.GameObjects.Text;
-  private statusText?: Phaser.GameObjects.Text;
-  private inventoryText?: Phaser.GameObjects.Text;
+  private killCount = 0;
   private noticeText?: Phaser.GameObjects.Text;
   private bossIntroText?: Phaser.GameObjects.Text;
-  private controlsText?: Phaser.GameObjects.Text;
   private reticle?: Phaser.GameObjects.Graphics;
   private depthsRing?: Phaser.GameObjects.Ellipse;
   private depthsLabel?: Phaser.GameObjects.Text;
@@ -471,6 +465,7 @@ export class ZombiesScene extends Phaser.Scene {
     }
     this.controls = new SceneControls(this);
     announceScene(this);
+    eventBus.emit(EVENTS.ZOMBIES_SCENE_ACTIVE, true);
     this.specModal = new SpecializationModal(this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
 
@@ -495,6 +490,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.bossAlive = false;
     this.depthsUnlocked = false;
     this.gameOver = false;
+    this.killCount = 0;
     this.zombies.clear();
     this.zombieIdSeq = 0;
     this.zombieProjectiles.clear();
@@ -1276,57 +1272,13 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private setupHud() {
-    this.roundText = this.add.text(18, 18, '', {
-      fontSize: '10px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-    }).setScrollFactor(0).setDepth(1000);
-
-    this.pointsText = this.add.text(18, 42, '', {
-      fontSize: '9px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#9EFFB7',
-    }).setScrollFactor(0).setDepth(1000);
-
-    this.hpText = this.add.text(18, 66, '', {
-      fontSize: '9px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FF6A6A',
-    }).setScrollFactor(0).setDepth(1000);
-
-    this.furiaHudText = this.add.text(18, 90, '', {
+    this.furiaHudText = this.add.text(18, 18, '', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#FF4444',
       stroke: '#000000',
       strokeThickness: 3,
     }).setScrollFactor(0).setDepth(1000);
-
-    this.ammoText = this.add.text(ZOMBIES_VIEWPORT.WIDTH - 18, ZOMBIES_VIEWPORT.HEIGHT - 48, '', {
-      fontSize: '10px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FFFFFF',
-      align: 'right',
-    }).setOrigin(1, 0).setScrollFactor(0).setDepth(1000);
-
-    this.statusText = this.add.text(ZOMBIES_VIEWPORT.WIDTH - 18, 18, '', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#7CC9FF',
-      align: 'right',
-    }).setOrigin(1, 0).setScrollFactor(0).setDepth(1000);
-
-    this.inventoryText = this.add.text(18, ZOMBIES_VIEWPORT.HEIGHT - 70, '', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-    }).setScrollFactor(0).setDepth(1000);
-
-    this.controlsText = this.add.text(ZOMBIES_VIEWPORT.WIDTH / 2, ZOMBIES_VIEWPORT.HEIGHT - 16, 'WASD MOVER  |  CLICK DISPARA  |  R RECARGA  |  Q CAMBIA  |  F FURIA  |  E INTERACTUA', {
-      fontSize: '7px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#8594A6',
-    }).setOrigin(0.5, 1).setScrollFactor(0).setDepth(1000);
 
     this.noticeText = this.add.text(ZOMBIES_VIEWPORT.WIDTH / 2, 86, '', {
       fontSize: '10px',
@@ -1444,40 +1396,50 @@ export class ZombiesScene extends Phaser.Scene {
   private renderHud() {
     const weapon = this.getWeaponStats(this.currentWeapon);
     const ammo = this.weaponInventory[this.currentWeapon];
-    const doubleSeconds = this.doublePointsUntil > this.time.now
-      ? Math.ceil((this.doublePointsUntil - this.time.now) / 1000)
+    const now = this.time.now;
+    const doubleSeconds = this.doublePointsUntil > now
+      ? Math.ceil((this.doublePointsUntil - now) / 1000)
       : 0;
-    const instaSeconds = this.instaKillUntil > this.time.now
-      ? Math.ceil((this.instaKillUntil - this.time.now) / 1000)
+    const instaSeconds = this.instaKillUntil > now
+      ? Math.ceil((this.instaKillUntil - now) / 1000)
       : 0;
-    const timedBuffs = [
-      doubleSeconds > 0 ? `2X PTS ${doubleSeconds}s` : '',
-      instaSeconds > 0 ? `INSTA KILL ${instaSeconds}s` : '',
-    ].filter(Boolean).join('  ');
-    const roundState = this.roundBreakUntil > this.time.now
-      ? `INTER ${Math.ceil((this.roundBreakUntil - this.time.now) / 1000)}s`
-      : this.nextSpawnAt > this.time.now && this.spawnedThisRound === 0
-        ? `WAVE ${Math.ceil((this.nextSpawnAt - this.time.now) / 1000)}s`
-        : this.boxRollingUntil > this.time.now
+    const roundState = this.roundBreakUntil > now
+      ? `INTER ${Math.ceil((this.roundBreakUntil - now) / 1000)}s`
+      : this.nextSpawnAt > now && this.spawnedThisRound === 0
+        ? `WAVE ${Math.ceil((this.nextSpawnAt - now) / 1000)}s`
+        : this.boxRollingUntil > now
           ? 'BOX GIRANDO'
-          : this.reloadEndsAt > this.time.now
+          : this.reloadEndsAt > now
             ? 'RECARGANDO'
             : 'EN PIE';
-    this.roundText?.setText(`ROUND ${this.round}`);
-    this.pointsText?.setText(`PTS ${this.points}`);
-    this.hpText?.setText(`HP ${Math.max(0, Math.round(this.hp))}`);
-    this.ammoText?.setText(`${weapon.displayLabel}\n${ammo.ammoInMag}/${ammo.reserveAmmo}`);
-    this.statusText?.setText([
-      this.gameOver ? 'GAME OVER' : timedBuffs || roundState,
+    const statusLines = [
+      this.gameOver ? 'GAME OVER' : roundState,
       `ZOMBIES ${this.countAliveZombies()}/${this.roundTarget}`,
       `SPAWN ${this.spawnedThisRound}`,
       this.allowDepthsGate && this.depthsUnlocked ? 'DEPTHS OPEN' : '',
       this.bossAlive ? 'BOSS ACTIVE' : this.bossRoundActive && !this.bossSpawnedThisRound ? 'BOSS INCOMING' : '',
-    ].filter(Boolean).join('\n'));
-    this.inventoryText?.setText(`ARMAS ${this.weaponOrder.map((id) => {
+    ].filter(Boolean).join('\n');
+    const weaponsStr = `ARMAS ${this.weaponOrder.map((id) => {
       const label = this.getWeaponStats(id).displayLabel;
       return id === this.currentWeapon ? `[${label}]` : label;
-    }).join('  ')}`);
+    }).join('  ')}`;
+
+    eventBus.emit(EVENTS.ZOMBIES_HUD_UPDATE, {
+      wave: this.round,
+      totalWaves: this.round,
+      kills: this.killCount,
+      enemiesLeft: this.countAliveZombies(),
+      score: this.points,
+      hp: Math.max(0, Math.round(this.hp)),
+      maxHp: ZOMBIES_PLAYER.maxHp,
+      weapon: weapon.displayLabel,
+      ammoInMag: ammo.ammoInMag,
+      reserveAmmo: ammo.reserveAmmo,
+      doublePointsLeft: doubleSeconds,
+      instaKillLeft: instaSeconds,
+      status: statusLines,
+      weapons: weaponsStr,
+    });
 
     if (this.reticle) {
       this.reticle.clear();
@@ -2610,6 +2572,7 @@ export class ZombiesScene extends Phaser.Scene {
     }
     const killReward = zombie.killReward * pointMultiplier;
     this.points += killReward;
+    this.killCount += 1;
     eventBus.emit(EVENTS.STATS_ZOMBIE_KILL);
     void getSkillSystem().addXp('gym', zombie.isBoss ? 10 : 3, 'zombie_kill').then((r) => {
       if (!this.scene?.isActive('ZombiesScene')) return;
@@ -2671,6 +2634,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.lastMoveDx = 0;
     this.player.playDeath();
     eventBus.emit(EVENTS.STATS_PVP_RESULT, { won: false }); // reuse death event for zombie death
+    eventBus.emit(EVENTS.ZOMBIES_GAME_OVER, { score: this.points, kills: this.killCount, wave: this.round });
     this.showNotice('GAME OVER - SPACE REINICIAR', '#FF6A6A');
   }
 
@@ -4119,6 +4083,7 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private handleShutdown() {
+    eventBus.emit(EVENTS.ZOMBIES_SCENE_ACTIVE, false);
     this.restartPending = false;
     try {
       this.player?.clearActionState?.();
