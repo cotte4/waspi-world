@@ -11,6 +11,7 @@ const BOARD_RADIUS = 160;
 
 export class DartsMinigame extends Phaser.Scene {
   private phase: DartsPhase = 'aiming';
+  private shuttingDown = false;
   private score = 0;
   private thrown = 0;
   private bullseyes = 0;
@@ -34,6 +35,7 @@ export class DartsMinigame extends Phaser.Scene {
   }
 
   init() {
+    this.shuttingDown = false;
     this.isFinished = false;
     this.phase = 'aiming';
     this.score = 0;
@@ -51,6 +53,7 @@ export class DartsMinigame extends Phaser.Scene {
     eventBus.emit(EVENTS.DARTS_SCENE_ACTIVE, true);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.shuttingDown = false;
       this.isFinished = false;
       this.phase = 'aiming';
       this.input.enabled = true;
@@ -99,7 +102,7 @@ export class DartsMinigame extends Phaser.Scene {
   }
 
   update(_time: number, delta: number) {
-    if (this.isFinished) return;
+    if (this.isFinished || this.shuttingDown) return;
     if (this.controls.isActionJustDown('back')) {
       this.finishAndExit(0);
       return;
@@ -125,7 +128,7 @@ export class DartsMinigame extends Phaser.Scene {
         this.finishAndExit(this.computeReward());
       } else {
         this.phase = 'aiming';
-        this.resultLabel.setAlpha(0);
+        if (this.resultLabel.active) this.resultLabel.setAlpha(0);
       }
     }
   }
@@ -168,7 +171,7 @@ export class DartsMinigame extends Phaser.Scene {
   }
 
   private throwDart() {
-    if (this.isFinished) return;
+    if (this.isFinished || this.shuttingDown) return;
     if (this.phase === 'done') {
       this.finishAndExit(this.computeReward());
       return;
@@ -195,29 +198,43 @@ export class DartsMinigame extends Phaser.Scene {
       duration: 200,
       ease: 'Sine.easeIn',
       onComplete: () => {
+        if (!this.isSceneAlive() || !dart.active) return;
         dart.setScale(0.72);
       },
     });
 
-    this.resultLabel.setAlpha(1);
-    this.resultLabel.setText(score > 0 ? `+${score}` : 'MISS');
-    this.resultLabel.setColor(score > 0 ? '#F5C842' : '#FF006E');
+    if (this.resultLabel.active) {
+      this.resultLabel.setAlpha(1);
+      this.resultLabel.setText(score > 0 ? `+${score}` : 'MISS');
+      this.resultLabel.setColor(score > 0 ? '#F5C842' : '#FF006E');
+    }
     this.resultTimerMs = 460;
     this.refreshHud();
     if (this.thrown >= TOTAL_DARTS) {
       this.phase = 'done';
       const reward = this.computeReward();
-      this.resultLabel.setText(`FINAL ${this.score} / +${reward}`);
-      this.resultLabel.setColor('#39FF14');
+      if (this.resultLabel.active) {
+        this.resultLabel.setText(`FINAL ${this.score} / +${reward}`);
+        this.resultLabel.setColor('#39FF14');
+      }
       if (this.textures.exists('icon_coin')) {
         const coinX = this.scale.width / 2 + this.resultLabel.width / 2 + 12;
         const coinImg = this.add.image(coinX, this.scale.height - 74, 'icon_coin')
           .setDisplaySize(14, 14).setDepth(200).setAlpha(0);
-        this.tweens.add({ targets: coinImg, alpha: 1, duration: 200 });
+        this.tweens.add({
+          targets: coinImg,
+          alpha: 1,
+          duration: 200,
+          onComplete: () => {
+            if (!this.isSceneAlive() || !coinImg.active) return;
+          },
+        });
       }
       this.resultTimerMs = 1600;
-      this.footer.setText('CLICK / SPACE PARA SALIR');
-      this.footer.setColor('#F5C842');
+      if (this.footer.active) {
+        this.footer.setText('CLICK / SPACE PARA SALIR');
+        this.footer.setColor('#F5C842');
+      }
     }
   }
 
@@ -262,6 +279,8 @@ export class DartsMinigame extends Phaser.Scene {
     if (this.isFinished) return;
     this.isFinished = true;
     this.phase = 'exiting';
+    this.input.enabled = false;
+    if (this.input.keyboard) this.input.keyboard.enabled = false;
     if (reward > 0) {
       addTenks(reward, 'darts_reward');
     }
@@ -281,7 +300,18 @@ export class DartsMinigame extends Phaser.Scene {
   }
 
   private handleShutdown() {
+    this.shuttingDown = true;
+    this.isFinished = true;
+    this.phase = 'exiting';
+    this.input.enabled = false;
+    if (this.input.keyboard) this.input.keyboard.enabled = false;
+    this.tweens.killAll();
+    this.time.removeAllEvents();
     eventBus.emit(EVENTS.DARTS_SCENE_ACTIVE, false);
     this.input.off('pointerdown', this.throwDart, this);
+  }
+
+  private isSceneAlive(): boolean {
+    return !this.shuttingDown && this.scene.isActive('DartsMinigame');
   }
 }

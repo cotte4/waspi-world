@@ -55,14 +55,17 @@ export default class DinoRunScene extends Phaser.Scene {
   private dashOffset: number = 0;
   private groundDashGraphics!: Phaser.GameObjects.Graphics;
   private milestoneFlashActive: boolean = false;
+  private shuttingDown: boolean = false;
 
   private tenksEarned: number = 0;
+  private retrySpaceHandler: (() => void) | null = null;
 
   constructor() {
     super({ key: 'DinoRunScene', physics: { arcade: { gravity: { x: 0, y: 0 }, debug: false } } });
   }
 
   init(): void {
+    this.shuttingDown = false;
     this.gameState = 'idle';
     this.isOnGround = true;
     this.isDucking = false;
@@ -75,10 +78,12 @@ export default class DinoRunScene extends Phaser.Scene {
     this.spawnCooldown = 1000;
     this.lastObstacleX = 0;
     this.tenksEarned = 0;
+    this.retrySpaceHandler = null;
     this.bestScore = parseInt(localStorage.getItem('waspi_dino_best') ?? '0');
   }
 
   create(): void {
+    this.shuttingDown = false;
     this.inTransition = false;
     this.input.enabled = true;
     announceScene(this);
@@ -94,16 +99,14 @@ export default class DinoRunScene extends Phaser.Scene {
     this.createInputs();
 
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.shuttingDown = false;
       this.inTransition = false;
       this.input.enabled = true;
       if (this.input.keyboard) this.input.keyboard.enabled = true;
       this.resetGame();
     });
 
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      eventBus.emit(EVENTS.DINO_SCENE_ACTIVE, false);
-      this.cleanupScene();
-    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
 
     this.scale.on('resize', this.handleResize, this);
   }
@@ -307,23 +310,28 @@ export default class DinoRunScene extends Phaser.Scene {
     }
 
     // Touch input
-    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (this.gameState === 'idle') {
-        this.startGame();
-        return;
-      }
-      if (this.gameState === 'gameover') return;
-      if (this.gameState === 'playing') {
-        this.triggerJump();
-      }
-    });
+    this.input.on('pointerdown', this.handlePointerDown, this);
+    this.input.on('pointermove', this.handlePointerMove, this);
+  }
 
-    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (!pointer.isDown) return;
-      if (this.gameState === 'playing' && pointer.velocity.y > 100) {
-        this.triggerDuck();
-      }
-    });
+  private handlePointerDown(_pointer: Phaser.Input.Pointer): void {
+    if (this.shuttingDown) return;
+    if (this.gameState === 'idle') {
+      this.startGame();
+      return;
+    }
+    if (this.gameState === 'gameover') return;
+    if (this.gameState === 'playing') {
+      this.triggerJump();
+    }
+  }
+
+  private handlePointerMove(pointer: Phaser.Input.Pointer): void {
+    if (this.shuttingDown) return;
+    if (!pointer.isDown) return;
+    if (this.gameState === 'playing' && pointer.velocity.y > 100) {
+      this.triggerDuck();
+    }
   }
 
   private triggerJump(): void {
@@ -361,6 +369,7 @@ export default class DinoRunScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number): void {
+    if (this.shuttingDown) return;
     if (this.gameState === 'idle') {
       this.handleIdleInput();
       return;
@@ -500,10 +509,10 @@ export default class DinoRunScene extends Phaser.Scene {
   private milestoneFlash(): void {
     this.milestoneFlashActive = true;
     this.cameras.main.flash(80, 255, 255, 255, true);
-    window.setTimeout(() => {
-      if (!this.scene?.isActive('DinoRunScene')) return;
+    this.time.delayedCall(200, () => {
+      if (!this.isSceneAlive()) return;
       this.milestoneFlashActive = false;
-    }, 200);
+    });
   }
 
   private show404Easter(): void {
@@ -538,7 +547,7 @@ export default class DinoRunScene extends Phaser.Scene {
   }
 
   private killRunner(): void {
-    if (this.gameState === 'dead' || this.gameState === 'gameover') return;
+    if (this.gameState === 'dead' || this.gameState === 'gameover' || this.shuttingDown) return;
     this.gameState = 'dead';
     console.log('SFX: death_dino');
 
@@ -560,10 +569,10 @@ export default class DinoRunScene extends Phaser.Scene {
     });
 
     // Transition to gameover after 500ms
-    window.setTimeout(() => {
-      if (!this.scene?.isActive('DinoRunScene')) return;
+    this.time.delayedCall(500, () => {
+      if (!this.isSceneAlive()) return;
       this.showGameOver();
-    }, 500);
+    });
   }
 
   private calculateTenks(): number {
@@ -581,7 +590,7 @@ export default class DinoRunScene extends Phaser.Scene {
   }
 
   private showGameOver(): void {
-    if (!this.scene?.isActive('DinoRunScene')) return;
+    if (!this.isSceneAlive()) return;
 
     this.gameState = 'gameover';
     this.tenksEarned = this.calculateTenks();
@@ -603,15 +612,21 @@ export default class DinoRunScene extends Phaser.Scene {
 
     // Space to retry
     if (this.input.keyboard) {
-      const retryFn = () => {
+      if (this.retrySpaceHandler) {
+        this.input.keyboard.off('keydown-SPACE', this.retrySpaceHandler);
+      }
+      this.retrySpaceHandler = () => {
         if (this.gameState !== 'gameover') return;
         if (this.input.keyboard) {
-          this.input.keyboard.off('keydown-SPACE', retryFn);
+          if (this.retrySpaceHandler) {
+            this.input.keyboard.off('keydown-SPACE', this.retrySpaceHandler);
+          }
         }
+        this.retrySpaceHandler = null;
         this.resetGame();
         this.startGame();
       };
-      this.input.keyboard.on('keydown-SPACE', retryFn);
+      this.input.keyboard.on('keydown-SPACE', this.retrySpaceHandler);
     }
   }
 
@@ -641,6 +656,10 @@ export default class DinoRunScene extends Phaser.Scene {
     this.spawnCooldown = 1000;
     this.milestoneFlashActive = false;
     this.tenksEarned = 0;
+    if (this.input.keyboard && this.retrySpaceHandler) {
+      this.input.keyboard.off('keydown-SPACE', this.retrySpaceHandler);
+    }
+    this.retrySpaceHandler = null;
 
     // Reset UI
     this.exitBtn.setVisible(false);
@@ -652,6 +671,8 @@ export default class DinoRunScene extends Phaser.Scene {
   private exitScene(): void {
     if (this.inTransition) return;
     this.inTransition = true;
+    this.input.enabled = false;
+    if (this.input.keyboard) this.input.keyboard.enabled = false;
     transitionToScene(this, 'ArcadeInterior', {});
   }
 
@@ -661,5 +682,27 @@ export default class DinoRunScene extends Phaser.Scene {
 
   private cleanupScene(): void {
     this.scale.off('resize', this.handleResize, this);
+    this.input.off('pointerdown', this.handlePointerDown, this);
+    this.input.off('pointermove', this.handlePointerMove, this);
+    if (this.input.keyboard && this.retrySpaceHandler) {
+      this.input.keyboard.off('keydown-SPACE', this.retrySpaceHandler);
+    }
+    this.retrySpaceHandler = null;
+  }
+
+  private handleShutdown(): void {
+    this.shuttingDown = true;
+    this.inTransition = true;
+    this.gameState = 'gameover';
+    this.input.enabled = false;
+    if (this.input.keyboard) this.input.keyboard.enabled = false;
+    this.tweens.killAll();
+    this.time.removeAllEvents();
+    eventBus.emit(EVENTS.DINO_SCENE_ACTIVE, false);
+    this.cleanupScene();
+  }
+
+  private isSceneAlive(): boolean {
+    return !this.shuttingDown && this.scene.isActive('DinoRunScene');
   }
 }

@@ -22,6 +22,7 @@ export class BasketMinigame extends Phaser.Scene {
   // Game state
   private phase: BasketPhase = 'aiming';
   private isFinished = false;
+  private shuttingDown = false;
   private totalScore = 0;
   private shotsTaken = 0; // 0-indexed current shot (0 = first shot in progress)
   private makesCount = 0; // how many goals scored
@@ -67,6 +68,7 @@ export class BasketMinigame extends Phaser.Scene {
   }
 
   init() {
+    this.shuttingDown = false;
     this.isFinished = false;
     this.phase = 'aiming';
     this.totalScore = 0;
@@ -98,6 +100,7 @@ export class BasketMinigame extends Phaser.Scene {
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.shuttingDown = false;
       this.isFinished = false;
       this.input.enabled = true;
       if (this.input.keyboard) this.input.keyboard.enabled = true;
@@ -298,7 +301,7 @@ export class BasketMinigame extends Phaser.Scene {
   }
 
   private onPointerDown(pointer: Phaser.Input.Pointer) {
-    if (this.phase !== 'aiming' || this.isFinished) return;
+    if (this.phase !== 'aiming' || this.isFinished || this.shuttingDown) return;
 
     this.pointerDownX = pointer.x;
     this.pointerDownY = pointer.y;
@@ -321,12 +324,12 @@ export class BasketMinigame extends Phaser.Scene {
   }
 
   private onPointerMove(pointer: Phaser.Input.Pointer) {
-    if (!this.isDragging || this.phase !== 'aiming') return;
+    if (!this.isDragging || this.phase !== 'aiming' || this.shuttingDown) return;
     this.drawAimGuide(pointer.x, pointer.y);
   }
 
   private onPointerUp(pointer: Phaser.Input.Pointer) {
-    if (!this.isDragging || this.phase !== 'aiming' || this.isFinished) return;
+    if (!this.isDragging || this.phase !== 'aiming' || this.isFinished || this.shuttingDown) return;
     this.isDragging = false;
     this.aimGuide.clear();
     const startedFromBallAnchor = this.dragFromBallAnchor;
@@ -399,7 +402,7 @@ export class BasketMinigame extends Phaser.Scene {
   }
   // Ball launch
   private launchBall(vx: number, vy: number) {
-    if (this.phase !== 'aiming') return;
+    if (this.phase !== 'aiming' || this.shuttingDown) return;
     this.phase = 'flying';
     this.goalScoredThisShot = false;
     this.touchedRimThisShot = false;
@@ -414,7 +417,7 @@ export class BasketMinigame extends Phaser.Scene {
   // ── Goal detection ──────────────────────────────────────────────────────
 
   private onGoal() {
-    if (this.phase !== 'flying') return;
+    if (this.phase !== 'flying' || this.shuttingDown) return;
     if (this.goalScoredThisShot) return;
 
     const ballBody = this.ball.body as Phaser.Physics.Arcade.Body;
@@ -427,6 +430,7 @@ export class BasketMinigame extends Phaser.Scene {
   }
 
   private scoreGoal(isSwish: boolean) {
+    if (this.shuttingDown) return;
     this.streak += 1;
     this.makesCount += 1;
 
@@ -455,12 +459,12 @@ export class BasketMinigame extends Phaser.Scene {
     this.time.timeScale = 0.3;
     this.tweens.timeScale = 0.3;
     this.physics.world.timeScale = 1 / 0.3; // physics runs at normal speed
-    window.setTimeout(() => {
-      if (!this.scene.isActive('BasketMinigame')) return;
+    this.time.delayedCall(200, () => {
+      if (!this.isSceneAlive()) return;
       this.time.timeScale = 1;
       this.tweens.timeScale = 1;
       this.physics.world.timeScale = 1;
-    }, 200);
+    });
 
     // Gold particle burst at hoop
     this.spawnGoalBurst();
@@ -483,6 +487,7 @@ export class BasketMinigame extends Phaser.Scene {
   }
 
   private onMiss() {
+    if (this.shuttingDown) return;
     this.streak = 0;
     console.log('SFX: miss');
     this.animateNet(false);
@@ -518,6 +523,7 @@ export class BasketMinigame extends Phaser.Scene {
   }
 
   private showFloatingText(text: string, color: string, x: number, startY: number) {
+    if (!this.isSceneAlive()) return;
     const label = this.add.text(x, startY, text, {
       fontSize: '13px',
       fontFamily: '"Press Start 2P", monospace',
@@ -533,8 +539,8 @@ export class BasketMinigame extends Phaser.Scene {
       duration: 200,
       ease: 'Sine.easeOut',
       onComplete: () => {
-        window.setTimeout(() => {
-          if (!this.scene.isActive('BasketMinigame')) return;
+        this.time.delayedCall(300, () => {
+          if (!this.isSceneAlive()) return;
           if (!label.active) return;
           this.tweens.add({
             targets: label,
@@ -544,12 +550,13 @@ export class BasketMinigame extends Phaser.Scene {
             ease: 'Sine.easeIn',
             onComplete: () => { if (label.active) label.destroy(); },
           });
-        }, 300);
+        });
       },
     });
   }
 
   private showFloatingTenks(amount: number, x: number, startY: number) {
+    if (!this.isSceneAlive()) return;
     const hasCoin = this.textures.exists('icon_coin');
     const textStr = `+${amount}`;
     const label = this.add.text(hasCoin ? x + 12 : x, startY, textStr, {
@@ -571,8 +578,8 @@ export class BasketMinigame extends Phaser.Scene {
       duration: 200,
       ease: 'Sine.easeOut',
       onComplete: () => {
-        window.setTimeout(() => {
-          if (!this.scene.isActive('BasketMinigame')) return;
+        this.time.delayedCall(300, () => {
+          if (!this.isSceneAlive()) return;
           if (!label.active) return;
           this.tweens.add({
             targets,
@@ -585,7 +592,7 @@ export class BasketMinigame extends Phaser.Scene {
               if (coin?.active) coin.destroy();
             },
           });
-        }, 300);
+        });
       },
     });
   }
@@ -595,6 +602,7 @@ export class BasketMinigame extends Phaser.Scene {
   }
 
   private animateNet(made: boolean) {
+    if (!this.isSceneAlive()) return;
     const drop = made ? 10 : 4;
     this.drawNet(drop);
     this.tweens.addCounter({
@@ -603,6 +611,7 @@ export class BasketMinigame extends Phaser.Scene {
       duration: made ? 350 : 180,
       ease: 'Sine.easeOut',
       onUpdate: tween => {
+        if (!this.isSceneAlive()) return;
         this.drawNet(tween.getValue() ?? 0);
       },
     });
@@ -642,7 +651,7 @@ export class BasketMinigame extends Phaser.Scene {
   }
 
   private enterDoneState() {
-    if (this.phase === 'done' || this.phase === 'exiting') return;
+    if (this.phase === 'done' || this.phase === 'exiting' || this.shuttingDown) return;
     this.phase = 'done';
 
     // Stop ball
@@ -673,8 +682,10 @@ export class BasketMinigame extends Phaser.Scene {
     const { width } = this.scale;
     this.showFloatingTenks(tenksReward, width / 2, 250);
 
-    this.hintText.setText('GUARDANDO RESULTADO...');
-    this.hintText.setColor('#46B3FF');
+    if (this.hintText.active) {
+      this.hintText.setText('GUARDANDO RESULTADO...');
+      this.hintText.setColor('#46B3FF');
+    }
 
     this.rewardPending = tenksReward > 0;
     void this.resolveReward();
@@ -682,14 +693,14 @@ export class BasketMinigame extends Phaser.Scene {
 
     // Safety: unblock after 10s if reward hangs
     if (this.rewardPending) {
-      window.setTimeout(() => {
+      this.time.delayedCall(10000, () => {
         if (!this.rewardPending || this.isFinished) return;
-        if (!this.scene.isActive('BasketMinigame')) return;
+        if (!this.isSceneAlive()) return;
         if (!this.hintText.active) return;
         this.rewardPending = false;
         this.hintText.setText('NO SE PUDO GUARDAR. VOLVIENDO...');
         this.hintText.setColor('#FF006E');
-      }, 10000);
+      });
     }
   }
 
@@ -752,6 +763,8 @@ export class BasketMinigame extends Phaser.Scene {
     if (this.rewardPending) return;
     this.isFinished = true;
     this.phase = 'exiting';
+    this.input.enabled = false;
+    if (this.input.keyboard) this.input.keyboard.enabled = false;
     transitionToScene(this, 'ArcadeInterior', {
       basketCooldownMs: 1200,
       basketReward: {
@@ -803,7 +816,7 @@ export class BasketMinigame extends Phaser.Scene {
   }
 
   private async resolveReward(): Promise<void> {
-    if (this.rewardResolved) return;
+    if (this.rewardResolved || this.shuttingDown) return;
 
     if (this.grantedRewardTenks <= 0) {
       this.rewardResolved = true;
@@ -897,9 +910,21 @@ export class BasketMinigame extends Phaser.Scene {
   // ── Cleanup ─────────────────────────────────────────────────────────────
 
   private handleShutdown() {
+    this.shuttingDown = true;
+    this.isFinished = true;
+    this.phase = 'exiting';
+    this.rewardPending = false;
+    this.input.enabled = false;
+    if (this.input.keyboard) this.input.keyboard.enabled = false;
+    this.tweens.killAll();
+    this.time.removeAllEvents();
     eventBus.emit(EVENTS.BASKET_SCENE_ACTIVE, false);
     this.input.off('pointerdown', this.onPointerDown, this);
     this.input.off('pointermove', this.onPointerMove, this);
     this.input.off('pointerup', this.onPointerUp, this);
+  }
+
+  private isSceneAlive(): boolean {
+    return !this.shuttingDown && this.scene.isActive('BasketMinigame');
   }
 }

@@ -58,6 +58,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   private bestScore = 0;
   private canRetry = false;
   private inTransition = false;
+  private shuttingDown = false;
 
   // Bird
   private bird!: Phaser.GameObjects.Rectangle;
@@ -89,6 +90,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   // ─── Lifecycle ──────────────────────────────────────────────────────────────
 
   init(): void {
+    this.shuttingDown = false;
     this.gameState = 'idle';
     this.score = 0;
     this.canRetry = false;
@@ -106,6 +108,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.shuttingDown = false;
     this.inTransition = false;
     this.input.enabled = true;
     announceScene(this);
@@ -119,6 +122,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
 
     // WAKE: restart game cleanly
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.shuttingDown = false;
       this.inTransition = false;
       this.input.enabled = true;
       if (this.input.keyboard) this.input.keyboard.enabled = true;
@@ -127,14 +131,11 @@ export class FlappyWaspiScene extends Phaser.Scene {
     });
 
     // SHUTDOWN: cleanup
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.tweens.killAll();
-      this.input.off('pointerdown');
-      eventBus.emit(EVENTS.FLAPPY_SCENE_ACTIVE, false);
-    });
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
   }
 
   update(_time: number, delta: number): void {
+    if (this.shuttingDown) return;
     if (this.gameState === 'playing') {
       this.updatePlaying(delta);
     } else if (this.gameState === 'dead') {
@@ -218,7 +219,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   }
 
   private handleFlap(): void {
-    if (this.inTransition) return;
+    if (this.inTransition || this.shuttingDown) return;
 
     if (this.gameState === 'idle') {
       this.startGame();
@@ -231,6 +232,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   }
 
   private flap(): void {
+    if (this.shuttingDown) return;
     this.birdBody.setVelocityY(-400);
     this.bird.angle = -20;
     this.birdAngle = -20;
@@ -239,6 +241,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   // ─── Game flow ──────────────────────────────────────────────────────────────
 
   private startGame(): void {
+    if (this.shuttingDown) return;
     this.gameState = 'playing';
     // Re-enable gravity on bird
     this.birdBody.setGravityY(1100);
@@ -247,6 +250,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   }
 
   private retryGame(): void {
+    if (this.shuttingDown) return;
     this.canRetry = false;
     this.hideGameoverScreen();
     this.resetGame();
@@ -254,6 +258,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   }
 
   private resetGame(): void {
+    if (this.shuttingDown) return;
     this.gameState = 'idle';
     this.score = 0;
     this.scrollDistance = 0;
@@ -288,6 +293,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   // ─── Update loop ────────────────────────────────────────────────────────────
 
   private updatePlaying(delta: number): void {
+    if (this.shuttingDown) return;
     // Input
     const spaceJustDown = Phaser.Input.Keyboard.JustDown(this.keySpace);
     if (spaceJustDown || this.pointerDown) {
@@ -366,6 +372,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   // ─── Pipes ──────────────────────────────────────────────────────────────────
 
   private spawnPipePair(): void {
+    if (this.shuttingDown) return;
     const currentGap = Math.max(MIN_GAP, BASE_GAP - Math.floor(this.score / 10) * 5);
 
     // Constrain gap center to not vary too much from last
@@ -410,6 +417,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   // ─── Score ──────────────────────────────────────────────────────────────────
 
   private incrementScore(): void {
+    if (this.shuttingDown) return;
     this.score++;
     eventBus.emit(EVENTS.FLAPPY_HUD_UPDATE, { score: this.score, highScore: this.bestScore });
 
@@ -440,7 +448,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   // ─── Death ──────────────────────────────────────────────────────────────────
 
   private killBird(): void {
-    if (this.gameState === 'dead' || this.gameState === 'gameover') return;
+    if (this.gameState === 'dead' || this.gameState === 'gameover' || this.shuttingDown) return;
     this.gameState = 'dead';
 
     // Disable gravity / freeze horizontal
@@ -473,7 +481,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
 
     // After 500ms → game over
     this.time.delayedCall(500, () => {
-      if (!this.scene.isActive('FlappyWaspiScene')) return;
+      if (!this.isSceneAlive()) return;
       this.gameState = 'gameover';
       this.birdBody.setVelocity(0, 0);
       this.birdBody.setGravityY(0);
@@ -505,6 +513,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   // ─── UI: Idle screen ────────────────────────────────────────────────────────
 
   private showIdleScreen(): void {
+    if (this.shuttingDown) return;
     this.hideGameoverScreen();
     eventBus.emit(EVENTS.FLAPPY_HUD_UPDATE, { score: 0, highScore: this.bestScore });
   }
@@ -516,6 +525,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   // ─── UI: Game over screen ────────────────────────────────────────────────────
 
   private showGameoverScreen(_isNewBest: boolean, _tenksTotal: number): void {
+    if (!this.isSceneAlive()) return;
     this.hideIdleScreen();
 
     // Retry button
@@ -544,7 +554,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
 
     // Retry logic (with 500ms lock)
     this.time.delayedCall(500, () => {
-      if (!this.scene.isActive('FlappyWaspiScene')) return;
+      if (!this.isSceneAlive()) return;
       this.canRetry = true;
     });
 
@@ -554,8 +564,10 @@ export class FlappyWaspiScene extends Phaser.Scene {
     };
 
     const doExit = () => {
-      if (this.inTransition) return;
+      if (this.inTransition || this.shuttingDown) return;
       this.inTransition = true;
+      this.input.enabled = false;
+      if (this.input.keyboard) this.input.keyboard.enabled = false;
       transitionToScene(this, 'ArcadeInterior', {});
     };
 
@@ -580,5 +592,22 @@ export class FlappyWaspiScene extends Phaser.Scene {
     this.canRetry = false;
     this.gameoverGroup.clear(true, true);
     this.keySpace?.removeAllListeners('down');
+  }
+
+  private handleShutdown(): void {
+    this.shuttingDown = true;
+    this.inTransition = true;
+    this.canRetry = false;
+    this.input.enabled = false;
+    if (this.input.keyboard) this.input.keyboard.enabled = false;
+    this.tweens.killAll();
+    this.time.removeAllEvents();
+    this.input.off('pointerdown');
+    this.keySpace?.removeAllListeners('down');
+    eventBus.emit(EVENTS.FLAPPY_SCENE_ACTIVE, false);
+  }
+
+  private isSceneAlive(): boolean {
+    return !this.shuttingDown && this.scene.isActive('FlappyWaspiScene');
   }
 }
