@@ -100,10 +100,16 @@ export class MiningMinigame {
   private resolvePromise: ((result: MinigameResult) => void) | null = null;
   private resolved = false;
   private zones: Zone[];
+  private autoResolveTimer: Phaser.Time.TimerEvent | null = null;
+  private glowTween: Phaser.Tweens.Tween | null = null;
+  private destroyed = false;
+  private isCleaningUp = false;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
     this.zones = buildZones();
+    this.scene.events.on(Phaser.Scenes.Events.SHUTDOWN, this._handleSceneShutdown, this);
+    this.scene.events.on(Phaser.Scenes.Events.DESTROY, this._handleSceneShutdown, this);
   }
 
   // -------------------------------------------------------------------------
@@ -112,6 +118,8 @@ export class MiningMinigame {
 
   play(autoMode = false): Promise<MinigameResult> {
     return new Promise<MinigameResult>((resolve) => {
+      this.destroyed = false;
+      this.isCleaningUp = false;
       this.resolvePromise = resolve;
       this.resolved = false;
       this._buildPanel(autoMode);
@@ -126,7 +134,10 @@ export class MiningMinigame {
   }
 
   destroy(): void {
+    this.destroyed = true;
     this._cleanup();
+    this.scene.events.off(Phaser.Scenes.Events.SHUTDOWN, this._handleSceneShutdown, this);
+    this.scene.events.off(Phaser.Scenes.Events.DESTROY, this._handleSceneShutdown, this);
   }
 
   // -------------------------------------------------------------------------
@@ -236,7 +247,7 @@ export class MiningMinigame {
     this.container = container;
 
     // Pulse the cursor glow
-    this.scene.tweens.add({
+    this.glowTween = this.scene.tweens.add({
       targets: cursorGlow,
       alpha: { from: 0.10, to: 0.28 },
       duration: 280,
@@ -251,7 +262,7 @@ export class MiningMinigame {
   // -------------------------------------------------------------------------
 
   private _startCursorAnimation(): void {
-    if (!this.cursorObj) return;
+    if (!this._isAlive() || !this.cursorObj) return;
 
     const barLeft = -BAR_W / 2;
     const barRight = BAR_W / 2;
@@ -286,6 +297,7 @@ export class MiningMinigame {
     );
 
     const onDown = (): void => {
+      if (!this._isAlive()) return;
       if (this.resolved) return;
       this._resolveWithCursorPosition();
     };
@@ -298,7 +310,8 @@ export class MiningMinigame {
   // -------------------------------------------------------------------------
 
   private _scheduleAutoResolve(): void {
-    this.scene.time.delayedCall(500, () => {
+    this.autoResolveTimer = this.scene.time.delayedCall(500, () => {
+      if (!this._isAlive()) return;
       if (this.resolved) return;
 
       const zoneIndex = pickAutoZoneIndex(this.zones);
@@ -358,9 +371,17 @@ export class MiningMinigame {
   }
 
   private _cleanup(): void {
+    if (this.isCleaningUp) return;
+    this.isCleaningUp = true;
+    this.autoResolveTimer?.remove(false);
+    this.autoResolveTimer = null;
     if (this.cursorTween) {
       this.cursorTween.stop();
       this.cursorTween = null;
+    }
+    if (this.glowTween) {
+      this.glowTween.stop();
+      this.glowTween = null;
     }
     if (this.spaceKey) {
       this.spaceKey.removeAllListeners();
@@ -374,5 +395,23 @@ export class MiningMinigame {
     this.cursorObj = null;
     this.cursorGlow = null;
     this.resolvePromise = null;
+    this.isCleaningUp = false;
+  }
+
+  private _handleSceneShutdown(): void {
+    this.destroyed = true;
+    if (!this.resolved && this.resolvePromise) {
+      const cb = this.resolvePromise;
+      this.resolvePromise = null;
+      this.resolved = true;
+      this._cleanup();
+      cb('miss');
+      return;
+    }
+    this._cleanup();
+  }
+
+  private _isAlive(): boolean {
+    return !this.destroyed && this.scene.sys.isActive();
   }
 }

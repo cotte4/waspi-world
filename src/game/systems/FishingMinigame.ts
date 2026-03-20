@@ -54,9 +54,16 @@ export class FishingMinigame {
   private phase: 'wait' | 'bite' | 'done' = 'wait';
   private biteStartMs = 0;
   private resolvePlay: ((result: MinigameResult) => void) | null = null;
+  private waitTimer: Phaser.Time.TimerEvent | null = null;
+  private reactTimer: Phaser.Time.TimerEvent | null = null;
+  private autoTimer: Phaser.Time.TimerEvent | null = null;
+  private isCleaningUp = false;
+  private destroyed = false;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
+    this.scene.events.on(Phaser.Scenes.Events.SHUTDOWN, this._handleSceneShutdown, this);
+    this.scene.events.on(Phaser.Scenes.Events.DESTROY, this._handleSceneShutdown, this);
   }
 
   // -------------------------------------------------------------------------
@@ -65,6 +72,8 @@ export class FishingMinigame {
 
   play(autoMode = false): Promise<MinigameResult> {
     return new Promise<MinigameResult>((resolve) => {
+      this.destroyed = false;
+      this.isCleaningUp = false;
       this.resolvePlay = resolve;
       this._buildPanel();
       this._startWaitPhase(autoMode);
@@ -72,7 +81,10 @@ export class FishingMinigame {
   }
 
   destroy(): void {
+    this.destroyed = true;
     this._cleanup();
+    this.scene.events.off(Phaser.Scenes.Events.SHUTDOWN, this._handleSceneShutdown, this);
+    this.scene.events.off(Phaser.Scenes.Events.DESTROY, this._handleSceneShutdown, this);
   }
 
   // -------------------------------------------------------------------------
@@ -222,7 +234,8 @@ export class FishingMinigame {
       ? 500
       : Phaser.Math.Between(WAIT_MIN, WAIT_MAX);
 
-    this.scene.time.delayedCall(waitMs, () => {
+    this.waitTimer = this.scene.time.delayedCall(waitMs, () => {
+      if (!this._isAlive()) return;
       if (this.phase !== 'wait') return;
       if (autoMode) {
         this._startBitePhaseAuto();
@@ -259,7 +272,8 @@ export class FishingMinigame {
     });
 
     // Timeout → miss
-    this.scene.time.delayedCall(REACT_WINDOW, () => {
+    this.reactTimer = this.scene.time.delayedCall(REACT_WINDOW, () => {
+      if (!this._isAlive()) return;
       if (this.phase !== 'bite') return;
       // Float rises back
       if (this.floatCircle) {
@@ -285,7 +299,8 @@ export class FishingMinigame {
 
     const result = this._pickAutoResult();
     // Small delay so the visual registers before resolving
-    this.scene.time.delayedCall(300, () => {
+    this.autoTimer = this.scene.time.delayedCall(300, () => {
+      if (!this._isAlive()) return;
       this._resolve(result);
     });
   }
@@ -295,6 +310,7 @@ export class FishingMinigame {
   // -------------------------------------------------------------------------
 
   private _triggerBiteVisuals(): void {
+    if (!this._isAlive()) return;
     this.bobTween?.stop();
     this.bobTween = null;
 
@@ -348,11 +364,28 @@ export class FishingMinigame {
   // -------------------------------------------------------------------------
 
   private _cleanup(): void {
+    if (this.isCleaningUp) return;
+    this.isCleaningUp = true;
     this._removeSpaceKey();
+    this.waitTimer?.remove(false);
+    this.waitTimer = null;
+    this.reactTimer?.remove(false);
+    this.reactTimer = null;
+    this.autoTimer?.remove(false);
+    this.autoTimer = null;
     this.bobTween?.stop();
     this.bobTween = null;
 
     if (this.container) {
+      if (!this._isAlive()) {
+        this.container.destroy(true);
+        this.container = null;
+        this.floatCircle = null;
+        this.statusText = null;
+        this.hintText = null;
+        this.isCleaningUp = false;
+        return;
+      }
       this.scene.tweens.add({
         targets: this.container,
         alpha: 0,
@@ -360,13 +393,16 @@ export class FishingMinigame {
         ease: 'Linear',
         onComplete: () => {
           this.container?.destroy();
-          this.container   = null;
+          this.container = null;
           this.floatCircle = null;
-          this.statusText  = null;
-          this.hintText    = null;
+          this.statusText = null;
+          this.hintText = null;
+          this.isCleaningUp = false;
         },
       });
+      return;
     }
+    this.isCleaningUp = false;
   }
 
   // -------------------------------------------------------------------------
@@ -379,9 +415,8 @@ export class FishingMinigame {
       Phaser.Input.Keyboard.KeyCodes.SPACE,
     );
     const listener = () => {
-      if (Phaser.Input.Keyboard.JustDown(this.spaceKey!)) {
-        callback();
-      }
+      if (!this._isAlive()) return;
+      callback();
     };
     // Store handler on the key object so we can remove it later
     (this.spaceKey as Phaser.Input.Keyboard.Key & { _fishHandler?: () => void })
@@ -412,5 +447,22 @@ export class FishingMinigame {
       if (roll < cumulative) return result;
     }
     return 'miss';
+  }
+
+  private _handleSceneShutdown(): void {
+    this.destroyed = true;
+    if (this.phase !== 'done' && this.resolvePlay) {
+      const cb = this.resolvePlay;
+      this.resolvePlay = null;
+      this.phase = 'done';
+      this._cleanup();
+      cb('miss');
+      return;
+    }
+    this._cleanup();
+  }
+
+  private _isAlive(): boolean {
+    return !this.destroyed && this.scene.sys.isActive();
   }
 }
