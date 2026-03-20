@@ -46,15 +46,11 @@ export class GymInterior extends Phaser.Scene {
   // ── Graphics references ──────────────────────────────────────────────────────
   private bagGfx!: Phaser.GameObjects.Graphics;
   private benchBarGfx!: Phaser.GameObjects.Graphics;
-  private promptBag!: Phaser.GameObjects.Text;
-  private promptBench!: Phaser.GameObjects.Text;
-  private feedbackText!: Phaser.GameObjects.Text;
 
   // ── Boxing bag state ─────────────────────────────────────────────────────────
   private bagPhase: BagPhase = 'idle';
   private bagSequence: ComboKey[] = [];
   private bagSeqIndex = 0;
-  private bagSeqText!: Phaser.GameObjects.Text;
   private bagTimeoutTimer?: Phaser.Time.TimerEvent;
   private bagCooldownUntil = 0;
   private bagHits = 0; // session cap
@@ -105,6 +101,7 @@ export class GymInterior extends Phaser.Scene {
     announceScene(this);
     showSceneTitle(this, 'GYM', 0xFF2222);
     this.input.enabled = true;
+    eventBus.emit(EVENTS.GYM_SCENE_ACTIVE, true);
 
     this.controls = new SceneControls(this);
 
@@ -134,27 +131,6 @@ export class GymInterior extends Phaser.Scene {
     // ── Weight bench (right side) ────────────────────────────────────────────────
     this.drawWeightBench(560, 340);
     this.benchBarGfx = this.add.graphics().setDepth(6);
-
-    // ── HUD text elements ────────────────────────────────────────────────────────
-    this.promptBag = this.add.text(220, 348, '', {
-      fontSize: '7px', fontFamily: '"Press Start 2P", monospace',
-      color: '#FF4444', stroke: '#000', strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(20);
-
-    this.bagSeqText = this.add.text(220, 232, '', {
-      fontSize: '8px', fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842', stroke: '#000', strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(20);
-
-    this.promptBench = this.add.text(560, 390, '', {
-      fontSize: '7px', fontFamily: '"Press Start 2P", monospace',
-      color: '#44AAFF', stroke: '#000', strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(20);
-
-    this.feedbackText = this.add.text(cx, 180, '', {
-      fontSize: '9px', fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842', stroke: '#000', strokeThickness: 5,
-    }).setOrigin(0.5).setDepth(22);
 
     // ── Player avatar ───────────────────────────────────────────────────────────
     this.px = cx;
@@ -231,33 +207,46 @@ export class GymInterior extends Phaser.Scene {
     const nearBag   = Phaser.Math.Distance.Between(this.px, this.py, 220, 320) < 100;
     const nearBench = Phaser.Math.Distance.Between(this.px, this.py, 560, 370) < 100;
 
-    // Bag prompt
+    let bagPrompt = '';
     if (this.bagPhase === 'idle' && nearBag) {
-      if (this.bagHits >= BAG_MAX_HITS) {
-        this.promptBag.setText('AGOTADO').setVisible(true);
-      } else {
-        this.promptBag.setText('[E] GOLPEAR BOLSA').setVisible(true);
-      }
+      bagPrompt = this.bagHits >= BAG_MAX_HITS ? 'AGOTADO' : '[E] GOLPEAR BOLSA';
     } else if (this.bagPhase === 'cooldown' && nearBag) {
       const remaining = Math.ceil((this.bagCooldownUntil - this.time.now) / 1000);
-      this.promptBag.setText(`COOLDOWN ${remaining}s`).setVisible(true);
-    } else {
-      this.promptBag.setVisible(false);
+      bagPrompt = `COOLDOWN ${remaining}s`;
     }
 
-    // Bench prompt
+    let benchPrompt = '';
     if (this.benchPhase === 'idle' && nearBench) {
-      if (this.benchReps >= BENCH_MAX_REPS) {
-        this.promptBench.setText('AGOTADO').setVisible(true);
-      } else {
-        this.promptBench.setText('[E] LEVANTAR PESAS').setVisible(true);
-      }
+      benchPrompt = this.benchReps >= BENCH_MAX_REPS ? 'AGOTADO' : '[E] LEVANTAR PESAS';
     } else if (this.benchPhase === 'cooldown' && nearBench) {
       const remaining = Math.ceil((this.benchCooldownUntil - this.time.now) / 1000);
-      this.promptBench.setText(`COOLDOWN ${remaining}s`).setVisible(true);
-    } else if (this.benchPhase !== 'active') {
-      this.promptBench.setVisible(false);
+      benchPrompt = `COOLDOWN ${remaining}s`;
+    } else if (this.benchPhase === 'active') {
+      benchPrompt = `MANTÉN [E]  ${Math.floor(this.benchProgress * 100)}%`;
     }
+
+    const bagComboDisplay = this.bagPhase === 'active'
+      ? this.bagSequence.map((k, i) => {
+          if (i < this.bagSeqIndex) return '✓';
+          if (i === this.bagSeqIndex) return `[${k}]`;
+          return k;
+        }).join(' ')
+      : '';
+
+    this.emitHud(bagPrompt, bagComboDisplay, benchPrompt, '', '');
+  }
+
+  private emitHud(bagPrompt: string, bagComboDisplay: string, benchPrompt: string, feedbackMsg: string, feedbackColor: string) {
+    eventBus.emit(EVENTS.GYM_HUD_UPDATE, {
+      bagPhase: this.bagPhase,
+      bagPrompt,
+      bagComboDisplay,
+      benchPhase: this.benchPhase,
+      benchPrompt,
+      benchProgress: this.benchProgress,
+      feedbackMsg,
+      feedbackColor,
+    });
   }
 
   // ── Boxing bag minigame ───────────────────────────────────────────────────────
@@ -303,13 +292,7 @@ export class GymInterior extends Phaser.Scene {
   }
 
   private renderComboDisplay() {
-    if (!this.bagSeqText.active) return;
-    const chars = this.bagSequence.map((k, i) => {
-      if (i < this.bagSeqIndex) return '✓';
-      if (i === this.bagSeqIndex) return `[${k}]`;
-      return k;
-    });
-    this.bagSeqText.setText(chars.join(' '));
+    // Combo display is now handled by emitHud via updateProximityPrompts
   }
 
   private checkComboInput() {
@@ -337,7 +320,7 @@ export class GymInterior extends Phaser.Scene {
       // Wrong key — restart sequence from beginning
       this.bagSeqIndex = 0;
       this.renderComboDisplay();
-      this.showFeedback('FALLO — REINICIANDO', '#FF4444');
+      this.emitHud('', '', '', 'FALLO — REINICIANDO', '#FF4444');
     }
   }
 
@@ -346,17 +329,16 @@ export class GymInterior extends Phaser.Scene {
     this.bagPhase = 'cooldown';
     this.bagCooldownUntil = this.time.now + BAG_COOLDOWN_MS;
     this.bagHits++;
-    this.bagSeqText.setText('');
 
     // Camera flash
     this.cameras.main.flash(180, 255, 50, 50, true);
 
-    this.showFeedback(`+${BAG_XP} XP GYM`, '#FF6644');
+    this.emitHud('', '', '', `+${BAG_XP} XP GYM`, '#FF6644');
     void getSkillSystem().addXp('gym', BAG_XP, 'boxing_bag_combo').then((result) => {
       if (!this.scene?.isActive('GymInterior')) return;
       if (result.leveled_up) {
         safeSceneDelayedCall(this, 200, () => {
-          this.showFeedback(`¡NIVEL ${result.new_level} GYM!`, '#F5C842');
+          this.emitHud('', '', '', `¡NIVEL ${result.new_level} GYM!`, '#F5C842');
           eventBus.emit(EVENTS.UI_NOTICE, { message: `💪 GYM nivel ${result.new_level}!`, color: '#F5C842' });
         });
       }
@@ -365,7 +347,6 @@ export class GymInterior extends Phaser.Scene {
 
   private failCombo() {
     this.bagPhase = 'idle';
-    this.bagSeqText.setText('');
     this.bagTimeoutTimer?.remove();
     // No XP, no feedback — fail silently as spec says
   }
@@ -396,7 +377,6 @@ export class GymInterior extends Phaser.Scene {
         this.benchPhase = 'active';
         this.benchProgress = 0;
         this.keyEDown = true;
-        this.promptBench.setText('MANTÉN [E]').setVisible(true);
       }
     }
 
@@ -427,14 +407,13 @@ export class GymInterior extends Phaser.Scene {
     this.benchProgress = 0;
     this.drawBenchBar(0);
 
-    this.showFeedback(`+${BENCH_XP} XP GYM`, '#44AAFF');
-    this.promptBench.setVisible(false);
+    this.emitHud('', '', '', `+${BENCH_XP} XP GYM`, '#44AAFF');
 
     void getSkillSystem().addXp('gym', BENCH_XP, 'bench_press_rep').then((result) => {
       if (!this.scene?.isActive('GymInterior')) return;
       if (result.leveled_up) {
         safeSceneDelayedCall(this, 200, () => {
-          this.showFeedback(`¡NIVEL ${result.new_level} GYM!`, '#F5C842');
+          this.emitHud('', '', '', `¡NIVEL ${result.new_level} GYM!`, '#F5C842');
           eventBus.emit(EVENTS.UI_NOTICE, { message: `💪 GYM nivel ${result.new_level}!`, color: '#F5C842' });
         });
       }
@@ -442,25 +421,6 @@ export class GymInterior extends Phaser.Scene {
   }
 
   // ── Visual helpers ────────────────────────────────────────────────────────────
-
-  private showFeedback(msg: string, color: string) {
-    if (!this.feedbackText.active) return;
-    this.feedbackText.setText(msg).setColor(color).setAlpha(1);
-    this.tweens.killTweensOf(this.feedbackText);
-    this.tweens.add({
-      targets: this.feedbackText,
-      y: { from: 190, to: 155 },
-      alpha: { from: 1, to: 0 },
-      duration: 1600,
-      ease: 'Sine.easeIn',
-      onComplete: () => {
-        if (this.feedbackText.active) {
-          this.feedbackText.setAlpha(0);
-          this.feedbackText.y = 180;
-        }
-      },
-    });
-  }
 
   private drawBenchBar(progress: number) {
     if (!this.benchBarGfx.active) return;
@@ -482,10 +442,6 @@ export class GymInterior extends Phaser.Scene {
     for (let seg = 1; seg <= 3; seg++) {
       const sx = bx + Math.floor(bw * seg * 0.25);
       this.benchBarGfx.lineBetween(sx, by + 1, sx, by + bh - 1);
-    }
-    // Label
-    if (this.benchPhase === 'active') {
-      this.promptBench.setText(`MANTÉN [E]  ${Math.floor(progress * 100)}%`).setVisible(true);
     }
   }
 
@@ -710,5 +666,6 @@ export class GymInterior extends Phaser.Scene {
   private handleShutdown() {
     this.bagTimeoutTimer?.remove();
     this.bagTimeoutTimer = undefined;
+    eventBus.emit(EVENTS.GYM_SCENE_ACTIVE, false);
   }
 }

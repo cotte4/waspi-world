@@ -35,11 +35,8 @@ const MAX_GAP_VARIANCE = 180;
 const FONT = '"Press Start 2P", monospace';
 const COL_BG = 0x0e0e14;
 const COL_GOLD = '#F5C842';
-const COL_BLUE = '#46B3FF';
 const COL_GREEN = '#39FF14';
 const COL_GREEN_N = 0x39ff14;
-const COL_PINK = '#FF006E';
-const COL_WHITE = '#ffffff';
 const COL_PIPE_FILL = 0x1a1a2e;
 
 // ─── TENKS reward table ────────────────────────────────────────────────────────
@@ -50,14 +47,6 @@ function calcTenks(score: number): number {
   if (score >= 25) return 150;
   if (score >= 10) return 75;
   return 30;
-}
-
-function getMedal(score: number): string {
-  if (score >= 100) return '💎';
-  if (score >= 50) return '🥇';
-  if (score >= 25) return '🥈';
-  if (score >= 10) return '🥉';
-  return '';
 }
 
 // ─── Scene ────────────────────────────────────────────────────────────────────
@@ -87,10 +76,8 @@ export class FlappyWaspiScene extends Phaser.Scene {
   private pointerDown = false;
 
   // UI
-  private scoreText!: Phaser.GameObjects.Text;
   private idleGroup!: Phaser.GameObjects.Group;
   private gameoverGroup!: Phaser.GameObjects.Group;
-  private blinkTween: Phaser.Tweens.Tween | null = null;
 
   // Best score persistence
   private readonly BEST_KEY = 'flappywaspi_best_v1';
@@ -113,8 +100,6 @@ export class FlappyWaspiScene extends Phaser.Scene {
     this.lastGapCenterY = 280;
     this.birdAngle = 0;
     this.pointerDown = false;
-    this.blinkTween = null;
-
     // Load best score
     const stored = parseInt(localStorage.getItem(this.BEST_KEY) ?? '0', 10);
     this.bestScore = Number.isFinite(stored) ? stored : 0;
@@ -125,6 +110,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
     this.input.enabled = true;
     announceScene(this);
 
+    eventBus.emit(EVENTS.FLAPPY_SCENE_ACTIVE, true);
     this.buildBackground();
     this.buildBird();
     this.buildUI();
@@ -142,9 +128,9 @@ export class FlappyWaspiScene extends Phaser.Scene {
 
     // SHUTDOWN: cleanup
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.blinkTween = null;
       this.tweens.killAll();
       this.input.off('pointerdown');
+      eventBus.emit(EVENTS.FLAPPY_SCENE_ACTIVE, false);
     });
   }
 
@@ -258,8 +244,6 @@ export class FlappyWaspiScene extends Phaser.Scene {
     this.birdBody.setGravityY(1100);
     // Hide idle screen
     this.hideIdleScreen();
-    // Show score
-    this.scoreText.setVisible(true);
   }
 
   private retryGame(): void {
@@ -295,11 +279,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
     this.birdBody.setGravityY(0);
     this.birdBody.allowGravity = true;
 
-    // Reset score display
-    if (this.scoreText) {
-      this.scoreText.setText('0');
-      this.scoreText.setVisible(false);
-    }
+    eventBus.emit(EVENTS.FLAPPY_HUD_UPDATE, { score: 0, highScore: this.bestScore });
 
     // Kill any running tweens on bird/ui
     this.tweens.killTweensOf(this.bird);
@@ -431,17 +411,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
 
   private incrementScore(): void {
     this.score++;
-    this.scoreText.setText(String(this.score));
-
-    // Bounce tween
-    this.tweens.add({
-      targets: this.scoreText,
-      scaleX: 1.3,
-      scaleY: 1.3,
-      duration: 75,
-      yoyo: true,
-      ease: 'Power2',
-    });
+    eventBus.emit(EVENTS.FLAPPY_HUD_UPDATE, { score: this.score, highScore: this.bestScore });
 
     // Speed up every 10 points
     if (this.score % 10 === 0) {
@@ -519,6 +489,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
       const tenksTotal = tenksBase + tenksBonus;
       addTenks(tenksTotal, `flappy_waspi_score_${this.score}`);
       eventBus.emit(EVENTS.UI_NOTICE, `+${tenksTotal} TENKS — Flappy Waspi`);
+      eventBus.emit(EVENTS.FLAPPY_GAME_OVER, { score: this.score, highScore: this.bestScore });
 
       this.showGameoverScreen(isNewBest, tenksTotal);
     });
@@ -527,17 +498,6 @@ export class FlappyWaspiScene extends Phaser.Scene {
   // ─── UI: Score display ───────────────────────────────────────────────────────
 
   private buildUI(): void {
-    this.scoreText = this.add.text(W / 2, 48, '0', {
-      fontSize: '32px',
-      fontFamily: FONT,
-      color: COL_WHITE,
-      stroke: '#000000',
-      strokeThickness: 4,
-    })
-      .setOrigin(0.5)
-      .setDepth(100)
-      .setVisible(false);
-
     this.idleGroup = this.add.group();
     this.gameoverGroup = this.add.group();
   }
@@ -546,119 +506,17 @@ export class FlappyWaspiScene extends Phaser.Scene {
 
   private showIdleScreen(): void {
     this.hideGameoverScreen();
-
-    const title = this.add.text(W / 2, 200, 'FLAPPY WASPI', {
-      fontSize: '20px',
-      fontFamily: FONT,
-      color: COL_GOLD,
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(100);
-
-    const best = this.add.text(W / 2, 240, `BEST: ${this.bestScore}`, {
-      fontSize: '10px',
-      fontFamily: FONT,
-      color: COL_BLUE,
-    }).setOrigin(0.5).setDepth(100);
-
-    const tap = this.add.text(W / 2, 310, 'TAP TO START', {
-      fontSize: '14px',
-      fontFamily: FONT,
-      color: COL_WHITE,
-      stroke: '#000000',
-      strokeThickness: 2,
-    }).setOrigin(0.5).setDepth(100);
-
-    // Blinking tween
-    this.blinkTween = this.tweens.add({
-      targets: tap,
-      alpha: 0,
-      duration: 500,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    });
-
-    const hint = this.add.text(W / 2, 380, 'SPACE or CLICK to flap', {
-      fontSize: '8px',
-      fontFamily: FONT,
-      color: '#888888',
-    }).setOrigin(0.5).setDepth(100);
-
-    this.idleGroup.addMultiple([title, best, tap, hint]);
+    eventBus.emit(EVENTS.FLAPPY_HUD_UPDATE, { score: 0, highScore: this.bestScore });
   }
 
   private hideIdleScreen(): void {
-    if (this.blinkTween) {
-      this.blinkTween.stop();
-      this.blinkTween = null;
-    }
     this.idleGroup.clear(true, true);
   }
 
   // ─── UI: Game over screen ────────────────────────────────────────────────────
 
-  private showGameoverScreen(isNewBest: boolean, tenksTotal: number): void {
+  private showGameoverScreen(_isNewBest: boolean, _tenksTotal: number): void {
     this.hideIdleScreen();
-
-    // Slide-in from top
-    const title = this.add.text(W / 2, -40, 'GAME OVER', {
-      fontSize: '24px',
-      fontFamily: FONT,
-      color: COL_PINK,
-      stroke: '#000000',
-      strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(110);
-
-    this.tweens.add({
-      targets: title,
-      y: 160,
-      duration: 300,
-      ease: 'Back.easeOut',
-    });
-
-    const medal = getMedal(this.score);
-    const medalText = medal
-      ? this.add.text(W / 2, 205, medal, { fontSize: '28px' }).setOrigin(0.5).setDepth(110)
-      : null;
-
-    const scoreLabel = this.add.text(W / 2, 240, `SCORE: ${this.score}`, {
-      fontSize: '14px',
-      fontFamily: FONT,
-      color: COL_WHITE,
-    }).setOrigin(0.5).setDepth(110);
-
-    const bestColor = isNewBest ? COL_GOLD : COL_BLUE;
-    const bestLabel = this.add.text(W / 2, 270, `BEST: ${this.bestScore}${isNewBest ? ' NEW!' : ''}`, {
-      fontSize: '10px',
-      fontFamily: FONT,
-      color: bestColor,
-    }).setOrigin(0.5).setDepth(110);
-
-    // TENKS count-up (coin icon + text)
-    const coinIcon = this.textures.exists('icon_coin')
-      ? this.add.image(W / 2 - 52, 308, 'icon_coin').setDisplaySize(18, 18).setOrigin(0.5).setDepth(110)
-      : null;
-    const tenksLabel = this.add.text(coinIcon ? W / 2 - 34 : W / 2, 308, '+0', {
-      fontSize: '12px',
-      fontFamily: FONT,
-      color: COL_GOLD,
-    }).setOrigin(0, 0.5).setDepth(110);
-
-    // Count-up animation
-    let displayed = 0;
-    const countStep = Math.ceil(tenksTotal / 20);
-    const countTimer = this.time.addEvent({
-      delay: 40,
-      repeat: 20,
-      callback: () => {
-        if (!this.scene.isActive('FlappyWaspiScene')) return;
-        displayed = Math.min(tenksTotal, displayed + countStep);
-        if (tenksLabel.active) {
-          tenksLabel.setText(`+${displayed}`);
-        }
-      },
-    });
 
     // Retry button
     const retryBg = this.add.rectangle(W / 2, 390, 160, 36, 0x1a3a1a)
@@ -706,7 +564,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
     exitBg.on('pointerdown', doExit);
     exitText.on('pointerdown', doExit);
 
-    // SPACE key to retry / exit (after lock)
+    // SPACE key to retry (after lock)
     const spaceHandler = () => {
       if (this.gameState !== 'gameover') return;
       if (!this.canRetry) return;
@@ -715,26 +573,11 @@ export class FlappyWaspiScene extends Phaser.Scene {
 
     this.keySpace.on('down', spaceHandler);
 
-    // Collect all for cleanup
-    const nodes: Phaser.GameObjects.GameObject[] = [
-      title, scoreLabel, bestLabel, tenksLabel,
-      retryBg, retryText, exitBg, exitText,
-    ];
-    if (medalText) nodes.push(medalText);
-
-    this.gameoverGroup.addMultiple(nodes);
-
-    // Store timer ref so we can clean up
-    (this.gameoverGroup as unknown as { _countTimer?: Phaser.Time.TimerEvent })._countTimer = countTimer;
+    this.gameoverGroup.addMultiple([retryBg, retryText, exitBg, exitText]);
   }
 
   private hideGameoverScreen(): void {
     this.canRetry = false;
-    const grp = this.gameoverGroup as unknown as { _countTimer?: Phaser.Time.TimerEvent };
-    if (grp._countTimer) {
-      grp._countTimer.remove();
-      grp._countTimer = undefined;
-    }
     this.gameoverGroup.clear(true, true);
     this.keySpace?.removeAllListeners('down');
   }

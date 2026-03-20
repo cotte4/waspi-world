@@ -64,6 +64,10 @@ const DartsHUD = dynamic(() => import('@/app/components/DartsHUD'), { ssr: false
 const VecindadHUD = dynamic(() => import('@/app/components/VecindadHUD'), { ssr: false });
 const BosqueHUD = dynamic(() => import('@/app/components/BosqueHUD'), { ssr: false });
 const GunShopOverlay = dynamic(() => import('@/app/components/GunShopOverlay'), { ssr: false });
+const FlappyHUD = dynamic(() => import('@/app/components/FlappyHUD'), { ssr: false });
+const DinoHUD = dynamic(() => import('@/app/components/DinoHUD'), { ssr: false });
+const GymHUD = dynamic(() => import('@/app/components/GymHUD'), { ssr: false });
+const ArcadeHUD = dynamic(() => import('@/app/components/ArcadeHUD'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
 const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
@@ -231,6 +235,8 @@ export default function PlayPage() {
   const [penaltyHudActive, setPenaltyHudActive] = useState(false);
   const [dartsHudActive, setDartsHudActive] = useState(false);
   const [bosqueHudActive, setBosqueHudActive] = useState(false);
+  const [flappyHudActive, setFlappyHudActive] = useState(false);
+  const [dinoHudActive, setDinoHudActive] = useState(false);
   const [statsData, setStatsData] = useState<PlayerStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
@@ -775,6 +781,14 @@ export default function PlayPage() {
       setBosqueHudActive(payload as boolean);
     });
 
+    const unsubFlappyActive = eventBus.on(EVENTS.FLAPPY_SCENE_ACTIVE, (payload: unknown) => {
+      setFlappyHudActive(payload as boolean);
+    });
+
+    const unsubDinoActive = eventBus.on(EVENTS.DINO_SCENE_ACTIVE, (payload: unknown) => {
+      setDinoHudActive(payload as boolean);
+    });
+
     return () => {
       unsubChat();
       unsubInfo();
@@ -801,6 +815,8 @@ export default function PlayPage() {
       unsubPenaltyActive();
       unsubDartsActive();
       unsubBosqueActive();
+      unsubFlappyActive();
+      unsubDinoActive();
     };
   }, [applyPlayerState, playUiSfx, playerState, syncPlayerState]);
 
@@ -2487,12 +2503,20 @@ export default function PlayPage() {
         {basketHudActive && <BasketHUD />}
         {penaltyHudActive && <PenaltyHUD />}
         {dartsHudActive && <DartsHUD />}
+        {flappyHudActive && <FlappyHUD />}
+        {dinoHudActive && <DinoHUD />}
 
         {/* Vecindad HUD — shown only when VecindadScene is active */}
         <VecindadHUD />
 
         {/* Bosque HUD — shown only when BosqueMaterialesScene is active */}
         {bosqueHudActive && <BosqueHUD />}
+
+        {/* Gym HUD — self-manages visibility via GYM_SCENE_ACTIVE event */}
+        <GymHUD />
+
+        {/* Arcade HUD — self-manages visibility via ARCADE_SCENE_ACTIVE event */}
+        <ArcadeHUD />
 
         {/* Quest Tracker — always mounted when in-game, self-manages visibility */}
         {activeScene !== 'CreatorScene' && (

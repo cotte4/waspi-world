@@ -44,19 +44,8 @@ export default class DinoRunScene extends Phaser.Scene {
   private spawnTimer: number = 0;
   private spawnCooldown: number = 1000;
 
-  private scoreText!: Phaser.GameObjects.Text;
-  private hiScoreText!: Phaser.GameObjects.Text;
-  private idleText!: Phaser.GameObjects.Text;
-  private gameOverContainer!: Phaser.GameObjects.Container;
-  private gameOverText!: Phaser.GameObjects.Text;
-  private gameOverScoreText!: Phaser.GameObjects.Text;
-  private newRecordText!: Phaser.GameObjects.Text;
-  private tenksText!: Phaser.GameObjects.Text;
-  private tenksCoinIcon?: Phaser.GameObjects.Image;
-  private retryText!: Phaser.GameObjects.Text;
   private exitBtn!: Phaser.GameObjects.Rectangle;
   private exitBtnText!: Phaser.GameObjects.Text;
-  private blinkTimer!: Phaser.Time.TimerEvent;
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private keyW!: Phaser.Input.Keyboard.Key;
@@ -95,6 +84,7 @@ export default class DinoRunScene extends Phaser.Scene {
     announceScene(this);
 
     this.bestScore = parseInt(localStorage.getItem('waspi_dino_best') ?? '0');
+    eventBus.emit(EVENTS.DINO_SCENE_ACTIVE, true);
 
     this.createBackground();
     this.createGround();
@@ -111,6 +101,7 @@ export default class DinoRunScene extends Phaser.Scene {
     });
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      eventBus.emit(EVENTS.DINO_SCENE_ACTIVE, false);
       this.cleanupScene();
     });
 
@@ -289,100 +280,22 @@ export default class DinoRunScene extends Phaser.Scene {
   }
 
   private createUI(): void {
-    // Score display top right
-    this.hiScoreText = this.add.text(780, 16, `HI ${String(this.bestScore).padStart(5, '0')}`, {
-      fontFamily: '"Press Start 2P"',
-      fontSize: '10px',
-      color: '#888888',
-    }).setOrigin(1, 0).setDepth(10);
-
-    this.scoreText = this.add.text(780, 32, String(this.score).padStart(5, '0'), {
-      fontFamily: '"Press Start 2P"',
-      fontSize: '10px',
-      color: '#ffffff',
-    }).setOrigin(1, 0).setDepth(10);
-
-    // Idle screen text
-    this.idleText = this.add.text(400, 300, 'PRESS SPACE TO RUN', {
-      fontFamily: '"Press Start 2P"',
-      fontSize: '14px',
-      color: '#F5C842',
-    }).setOrigin(0.5).setDepth(10);
-
-    this.blinkTimer = this.time.addEvent({
-      delay: 500,
-      loop: true,
-      callback: () => {
-        if (this.gameState === 'idle' || this.gameState === 'gameover') {
-          this.idleText.setVisible(!this.idleText.visible);
-        }
-      },
-    });
-
-    // Game over container (hidden initially)
-    this.gameOverContainer = this.add.container(400, 260).setDepth(20).setVisible(false);
-
-    const goBackground = this.add.rectangle(0, 0, 480, 260, 0x0e0e14, 0.92);
-    goBackground.setStrokeStyle(2, 0xff006e);
-
-    this.gameOverText = this.add.text(0, -100, 'GAME OVER', {
-      fontFamily: '"Press Start 2P"',
-      fontSize: '22px',
-      color: '#FF006E',
-    }).setOrigin(0.5);
-
-    this.gameOverScoreText = this.add.text(0, -55, '00000', {
-      fontFamily: '"Press Start 2P"',
-      fontSize: '18px',
-      color: '#ffffff',
-    }).setOrigin(0.5);
-
-    this.newRecordText = this.add.text(0, -15, 'NEW RECORD!', {
-      fontFamily: '"Press Start 2P"',
-      fontSize: '12px',
-      color: '#F5C842',
-    }).setOrigin(0.5).setVisible(false);
-
-    // Coin icon + TENKS amount side by side
-    if (this.textures.exists('icon_coin')) {
-      this.tenksCoinIcon = this.add.image(-38, 20, 'icon_coin').setDisplaySize(18, 18).setOrigin(0.5);
-    }
-    this.tenksText = this.add.text(this.tenksCoinIcon ? -26 : 0, 20, '+0', {
-      fontFamily: '"Press Start 2P"',
-      fontSize: '12px',
-      color: '#46B3FF',
-    }).setOrigin(this.tenksCoinIcon ? 0 : 0.5, 0.5);
-
-    this.retryText = this.add.text(0, 70, 'PRESS SPACE TO RETRY', {
-      fontFamily: '"Press Start 2P"',
-      fontSize: '9px',
-      color: '#ffffff',
-    }).setOrigin(0.5);
-
-    this.exitBtn = this.add.rectangle(0, 105, 140, 30, 0x1a1a2e).setInteractive({ useHandCursor: true });
+    // Exit button (shown during game over)
+    this.exitBtn = this.add.rectangle(400, 365, 140, 30, 0x1a1a2e)
+      .setDepth(20)
+      .setVisible(false)
+      .setInteractive({ useHandCursor: true });
     this.exitBtn.setStrokeStyle(2, 0xf5c842);
-    this.exitBtnText = this.add.text(0, 105, 'EXIT', {
+    this.exitBtnText = this.add.text(400, 365, 'EXIT', {
       fontFamily: '"Press Start 2P"',
       fontSize: '10px',
       color: '#F5C842',
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setDepth(21).setVisible(false);
 
     this.exitBtn.on('pointerover', () => this.exitBtn.setFillStyle(0x2a2a3e));
     this.exitBtn.on('pointerout', () => this.exitBtn.setFillStyle(0x1a1a2e));
     this.exitBtn.on('pointerdown', () => this.exitScene());
-
-    const containerItems: Phaser.GameObjects.GameObject[] = [
-      goBackground,
-      this.gameOverText,
-      this.gameOverScoreText,
-      this.newRecordText,
-      this.tenksText,
-      this.retryText,
-      this.exitBtn,
-      this.exitBtnText,
-    ];
-    if (this.tenksCoinIcon) containerItems.push(this.tenksCoinIcon);
-    this.gameOverContainer.add(containerItems);
+    eventBus.emit(EVENTS.DINO_HUD_UPDATE, { score: 0, highScore: this.bestScore });
   }
 
   private createInputs(): void {
@@ -442,7 +355,6 @@ export default class DinoRunScene extends Phaser.Scene {
 
   private startGame(): void {
     this.gameState = 'playing';
-    this.idleText.setVisible(false);
     this.spawnTimer = 0;
     this.spawnCooldown = 1000;
     this.triggerJump();
@@ -570,11 +482,10 @@ export default class DinoRunScene extends Phaser.Scene {
       this.show404Easter();
     }
 
-    // Update score display
-    this.scoreText.setText(String(this.score).padStart(5, '0'));
-    if (this.score > this.bestScore) {
-      this.hiScoreText.setText(`HI ${String(this.score).padStart(5, '0')}`);
-    }
+    eventBus.emit(EVENTS.DINO_HUD_UPDATE, {
+      score: this.score,
+      highScore: this.score > this.bestScore ? this.score : this.bestScore,
+    });
   }
 
   private milestoneFlash(): void {
@@ -670,36 +581,16 @@ export default class DinoRunScene extends Phaser.Scene {
     if (isNewBest) {
       this.bestScore = this.score;
       localStorage.setItem('waspi_dino_best', String(this.bestScore));
-      this.hiScoreText.setText(`HI ${String(this.bestScore).padStart(5, '0')}`);
     }
 
     addTenks(this.tenksEarned, 'dino_run_score');
     eventBus.emit(EVENTS.UI_NOTICE, `+${this.tenksEarned} TENKS earned!`);
+    eventBus.emit(EVENTS.DINO_GAME_OVER, { score: this.score });
+    eventBus.emit(EVENTS.DINO_HUD_UPDATE, { score: this.score, highScore: this.bestScore });
 
-    // Setup game over screen
-    this.gameOverScoreText.setText(String(this.score).padStart(5, '0'));
-    this.newRecordText.setVisible(isNewBest);
-    this.tenksText.setText(`+${this.tenksEarned}`);
-    this.gameOverContainer.setVisible(true);
-
-    // Count-up animation for TENKS
-    let displayed = 0;
-    const target = this.tenksEarned;
-    const countUp = this.time.addEvent({
-      delay: 30,
-      repeat: 30,
-      callback: () => {
-        if (!this.tenksText.active) {
-          countUp.destroy();
-          return;
-        }
-        displayed = Math.min(target, displayed + Math.ceil(target / 30));
-        this.tenksText.setText(`+${displayed}`);
-      },
-    });
-
-    // Idle/retry prompt text
-    this.idleText.setText('PRESS SPACE TO RETRY').setVisible(true);
+    // Show exit button
+    this.exitBtn.setVisible(true);
+    this.exitBtnText.setVisible(true);
 
     // Space to retry
     if (this.input.keyboard) {
@@ -743,11 +634,10 @@ export default class DinoRunScene extends Phaser.Scene {
     this.tenksEarned = 0;
 
     // Reset UI
-    this.scoreText.setText('00000');
-    this.hiScoreText.setText(`HI ${String(this.bestScore).padStart(5, '0')}`);
-    this.gameOverContainer.setVisible(false);
-    this.idleText.setText('PRESS SPACE TO RUN').setVisible(true);
+    this.exitBtn.setVisible(false);
+    this.exitBtnText.setVisible(false);
     this.dashOffset = 0;
+    eventBus.emit(EVENTS.DINO_HUD_UPDATE, { score: 0, highScore: this.bestScore });
   }
 
   private exitScene(): void {
@@ -762,6 +652,5 @@ export default class DinoRunScene extends Phaser.Scene {
 
   private cleanupScene(): void {
     this.scale.off('resize', this.handleResize, this);
-    if (this.blinkTimer) this.blinkTimer.destroy();
   }
 }

@@ -73,7 +73,6 @@ export class ArcadeInterior extends Phaser.Scene {
   private rewardColor = '#39FF14';
   private rewardDetail = '';
   private roomBounds = new Phaser.Geom.Rectangle();
-  private machineHint?: Phaser.GameObjects.Text;
   private basketGlowPad?: Phaser.GameObjects.Ellipse;
   private glowPad?: Phaser.GameObjects.Ellipse;
   private flappyGlowPad?: Phaser.GameObjects.Ellipse;
@@ -161,6 +160,7 @@ export class ArcadeInterior extends Phaser.Scene {
     this.controls = new SceneControls(this);
     announceScene(this);
     showSceneTitle(this, 'ARCADE', 0xFF006E);
+    eventBus.emit(EVENTS.ARCADE_SCENE_ACTIVE, true);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     // Defensive: reset inTransition if scene is resumed (e.g. after a minigame returns)
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
@@ -474,12 +474,6 @@ export class ArcadeInterior extends Phaser.Scene {
       color: '#A0A0B4',
     }).setOrigin(0.5);
 
-    this.machineHint = this.add.text(width / 2, roomY + roomH + 24, 'ESC SALIR DEL ARCADE', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#666666',
-    }).setOrigin(0.5);
-
     createBackButton(this, () => this.exitToWorld());
 
     this.px = width / 2;
@@ -568,35 +562,27 @@ export class ArcadeInterior extends Phaser.Scene {
       this.dinoGlowPad.setAlpha(inDinoZone ? 0.28 : pulse);
     }
 
-    if (this.machineHint) {
+    {
+      let hintText = 'ESC SALIR DEL ARCADE';
+      let hintColor = '#666666';
       if (this.basketCooldownMs > 0 && inBasketZone) {
-        this.machineHint.setText('BASKET RECARGANDO...');
-        this.machineHint.setColor('#888888');
+        hintText = 'BASKET RECARGANDO...'; hintColor = '#888888';
       } else if (inBasketZone) {
-        this.machineHint.setText('BASKET LISTO');
-        this.machineHint.setColor('#46B3FF');
+        hintText = 'BASKET LISTO'; hintColor = '#46B3FF';
       } else if (this.penaltyCooldownMs > 0 && inPenaltyZone) {
-        this.machineHint.setText('CABINA RECARGANDO...');
-        this.machineHint.setColor('#888888');
+        hintText = 'CABINA RECARGANDO...'; hintColor = '#888888';
       } else if (inPenaltyZone) {
-        this.machineHint.setText('PENALES LISTOS');
-        this.machineHint.setColor('#F5C842');
+        hintText = 'PENALES LISTOS'; hintColor = '#F5C842';
       } else if (this.dartsCooldownMs > 0 && inDartsZone) {
-        this.machineHint.setText('DARDOS RECARGANDO...');
-        this.machineHint.setColor('#888888');
+        hintText = 'DARDOS RECARGANDO...'; hintColor = '#888888';
       } else if (inDartsZone) {
-        this.machineHint.setText('DARDOS LISTO');
-        this.machineHint.setColor('#FF006E');
+        hintText = 'DARDOS LISTO'; hintColor = '#FF006E';
       } else if (inFlappyZone) {
-        this.machineHint.setText('FLAPPY WASPI LISTO');
-        this.machineHint.setColor('#F5C842');
+        hintText = 'FLAPPY WASPI LISTO'; hintColor = '#F5C842';
       } else if (inDinoZone) {
-        this.machineHint.setText('DINO RUN LISTO');
-        this.machineHint.setColor('#39FF14');
-      } else {
-        this.machineHint.setText('ESC SALIR DEL ARCADE');
-        this.machineHint.setColor('#666666');
+        hintText = 'DINO RUN LISTO'; hintColor = '#39FF14';
       }
+      eventBus.emit(EVENTS.ARCADE_HUD_UPDATE, { hintText, hintColor });
     }
 
     if (inBasketZone && !this.wasInsideBasketZone && this.basketCooldownMs <= 0) {
@@ -790,6 +776,7 @@ export class ArcadeInterior extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
+    eventBus.emit(EVENTS.ARCADE_SCENE_ACTIVE, false);
     try { this.tweens.killAll(); } catch (_e) { /* already destroyed */ }
 
     try {
