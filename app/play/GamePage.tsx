@@ -45,6 +45,8 @@ const PhaserGame = dynamic(() => import('@/app/components/PhaserGame'), { ssr: f
 const JukeboxOverlay = dynamic(() => import('@/app/components/JukeboxOverlay'), { ssr: false });
 const GameHUD = dynamic(() => import('@/app/components/GameHUD'), { ssr: false });
 const CharacterCreatorOverlay = dynamic(() => import('@/app/components/CharacterCreatorOverlay'), { ssr: false });
+const ShopOverlay = dynamic(() => import('@/app/components/ShopOverlay'), { ssr: false });
+const InventoryOverlay = dynamic(() => import('@/app/components/InventoryOverlay'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
 const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
@@ -2299,395 +2301,43 @@ export default function PlayPage() {
         )}
 
         {shopOpen && (
-          <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
-            <div
-              className="ww-modal p-4"
-              style={{
-                width: isMobile ? '94%' : 560,
-                maxHeight: isMobile ? '88%' : 500,
-                overflowY: 'auto',
-                background: 'rgba(10,10,18,0.96)',
-                border: '1px solid rgba(245,200,66,0.35)',
-                boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
-              }}
-            >
-              <div className="flex items-center justify-between mb-3" style={{ fontFamily: '"Press Start 2P", monospace', color: '#F5C842', fontSize: '10px' }}>
-                <span>WASPI SHOP</span>
-                <button
-                  onClick={() => {
-                    setShopSource('');
-                    setShopOpen(false);
-                    setOrdersLoaded(false);
-                    setOrders([]);
-                    eventBus.emit(EVENTS.SHOP_CLOSE);
-                  }}
-                  style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: '#999999' }}
-                >
-                  X
-                </button>
-              </div>
-
-              <div className="ww-tab-bar">
-                <button onClick={() => setShopTab('tenks_virtual')} style={tabButtonStyle(shopTab === 'tenks_virtual')}>
-                  ROPA VIRTUAL
-                </button>
-                <button onClick={() => setShopTab('physical')} style={tabButtonStyle(shopTab === 'physical')}>
-                  ROPA FÍSICA
-                </button>
-                <button onClick={() => setShopTab('tenks_packs')} style={tabButtonStyle(shopTab === 'tenks_packs')}>
-                  + TENKS
-                </button>
-                <button onClick={() => setShopTab('orders')} style={tabButtonStyle(shopTab === 'orders')}>
-                  MIS ÓRDENES
-                </button>
-              </div>
-
-              {shopTab === 'tenks_virtual' && (
-                <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
-                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: 10 }}>
-                    Compra ropa con TENKS. La prenda se agrega al inventario y se equipa al instante.
-                  </div>
-                  <div className="space-y-2">
-                    {clothingItems.map((item) => {
-                      const ownedItem = owned.includes(item.id);
-                      const active = item.slot === 'top' ? equipped.top === item.id : equipped.bottom === item.id;
-                      return (
-                        <div
-                          key={item.id}
-                          className="ww-panel"
-                          style={{
-                            padding: '12px',
-                            border: active ? '1px solid rgba(57,255,20,0.45)' : '1px solid rgba(255,255,255,0.1)',
-                            background: active ? 'rgba(57,255,20,0.07)' : 'rgba(255,255,255,0.04)',
-                          }}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className="inline-block"
-                                  style={{
-                                    width: 12,
-                                    height: 12,
-                                    background: `#${(item.color ?? 0x777777).toString(16).padStart(6, '0')}`,
-                                    border: '1px solid rgba(0,0,0,0.35)',
-                                  }}
-                                />
-                                <div style={{ fontSize: '15px', color: '#FFFFFF' }}>{item.name}</div>
-                                {active && <span style={{ fontSize: '11px', color: '#39FF14' }}>PUESTO</span>}
-                                {!active && ownedItem && <span style={{ fontSize: '11px', color: '#39FF14' }}>TUYO</span>}
-                              </div>
-                              <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.58)', marginTop: 4 }}>{item.description}</div>
-                              <div style={{ fontSize: '12px', color: '#F5C842', marginTop: 4 }}>
-                                {item.priceTenks.toLocaleString('es-AR')} TENKS
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => {
-                                if (ownedItem) {
-                                  handleEquipOwnedItem(item.id);
-                                  setShopStatus(active ? `${item.name} ya esta equipado.` : `${item.name} equipado.`);
-                                  return;
-                                }
-                                void buyShopItem(item);
-                              }}
-                              disabled={checkoutBusyId === item.id || active || (!ownedItem && !isAuthenticated)}
-                              style={authButtonStyle(
-                                active ? 'rgba(57,255,20,0.25)' : '#F5C842',
-                                active ? '#39FF14' : '#0E0E14',
-                                checkoutBusyId === item.id || active || (!ownedItem && !isAuthenticated),
-                                active
-                              )}
-                            >
-                              {active
-                                ? 'PUESTO'
-                                : checkoutBusyId === item.id
-                                  ? 'CARGANDO...'
-                                  : ownedItem
-                                    ? 'EQUIPAR'
-                                    : 'COMPRAR'}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {shopTab === 'physical' && (
-                <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
-                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.6)', marginBottom: 10 }}>
-                    Ropa física WASPI. Pagás con ARS y te llega a casa.
-                  </div>
-                  <div className="space-y-2">
-                    {getPhysicalCatalog().map((item) => {
-                      return (
-                        <div
-                          key={item.id}
-                          className="ww-panel"
-                          style={{
-                            padding: '12px',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            background: 'rgba(255,255,255,0.04)',
-                          }}
-                        >
-                          <div className="flex items-center gap-2" style={{ marginBottom: 4 }}>
-                            <span
-                              className="inline-block"
-                              style={{
-                                width: 12,
-                                height: 12,
-                                background: `#${(item.color ?? 0x777777).toString(16).padStart(6, '0')}`,
-                                border: '1px solid rgba(0,0,0,0.35)',
-                              }}
-                            />
-                            <div style={{ fontSize: '15px', color: '#FFFFFF' }}>{item.name}</div>
-                            {item.isLimited && <span style={{ fontSize: '10px', color: '#F5C842' }}>LIMITED</span>}
-                          </div>
-                          <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.58)', marginBottom: 6 }}>{item.description}</div>
-                          <div style={{ fontSize: '13px', color: '#F5C842', marginBottom: 8 }}>
-                            ${(item.priceArs ?? 0).toLocaleString('es-AR')} ARS
-                          </div>
-                          {item.sizes && item.sizes.length > 0 && (
-                            <div style={{ marginBottom: 8 }}>
-                              <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>TALLE</div>
-                              <div className="flex gap-1 flex-wrap">
-                                {item.sizes.map((size) => (
-                                  <button
-                                    key={size}
-                                    onClick={() => setSelectedSize(selectedSize === size ? '' : size)}
-                                    style={{
-                                      fontFamily: '"Press Start 2P", monospace',
-                                      fontSize: '8px',
-                                      padding: '6px 8px',
-                                      background: selectedSize === size ? '#F5C842' : 'rgba(255,255,255,0.08)',
-                                      color: selectedSize === size ? '#0E0E14' : '#FFFFFF',
-                                      border: selectedSize === size ? 'none' : '1px solid rgba(255,255,255,0.15)',
-                                      cursor: 'pointer',
-                                    }}
-                                  >
-                                    {size}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          <div style={{ marginBottom: 8 }}>
-                            <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '6px', color: 'rgba(255,255,255,0.35)', marginBottom: 4, letterSpacing: '0.06em' }}>CUPÓN (OPCIONAL)</div>
-                            <input
-                              type="text"
-                              placeholder="WASPI2026"
-                              value={discountCodeInput}
-                              onChange={(e) => setDiscountCodeInput(e.target.value.toUpperCase())}
-                              style={{
-                                width: '100%',
-                                background: 'rgba(255,255,255,0.04)',
-                                border: '1px solid rgba(245,200,66,0.2)',
-                                color: '#F5C842',
-                                fontFamily: '"Press Start 2P", monospace',
-                                fontSize: '8px',
-                                padding: '7px 8px',
-                                outline: 'none',
-                                letterSpacing: '0.08em',
-                              }}
-                            />
-                          </div>
-                          <button
-                            onClick={() => {
-                              void startStripeCheckout('product', {
-                                itemId: item.id,
-                                size: selectedSize,
-                                discountCode: discountCodeInput,
-                              });
-                            }}
-                            disabled={!selectedSize || checkoutRedirecting || !isAuthenticated}
-                            style={authButtonStyle(
-                              '#F5C842',
-                              '#0E0E14',
-                              !selectedSize || checkoutRedirecting || !isAuthenticated
-                            )}
-                          >
-                            {!isAuthenticated
-                              ? 'INICIÁ SESIÓN'
-                              : !selectedSize
-                                ? 'ELEGÍ UN TALLE'
-                                : `COMPRAR $${(item.priceArs ?? 0).toLocaleString('es-AR')} ARS`}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: 10 }}>
-                    Pago seguro via Stripe · Entrega en Argentina 3-5 días hábiles
-                  </div>
-                </div>
-              )}
-
-              {shopTab === 'tenks_packs' && (
-                <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
-                  <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginBottom: 14 }}>
-                    Comprá TENKS con ARS y gastálos en ropa virtual, armas y más.
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
-                    {TENKS_PACKS.map((pack, idx) => {
-                      const isPopular = idx === 1;
-                      return (
-                        <div
-                          key={pack.id}
-                          className="ww-pack-card"
-                          style={{
-                            flex: 1,
-                            padding: '16px 10px 12px',
-                            border: isPopular ? '1px solid rgba(245,200,66,0.55)' : '1px solid rgba(255,255,255,0.1)',
-                            background: isPopular ? 'rgba(245,200,66,0.06)' : 'rgba(255,255,255,0.03)',
-                            position: 'relative',
-                            textAlign: 'center',
-                            display: 'flex',
-                            flexDirection: 'column',
-                          }}
-                        >
-                          {isPopular && (
-                            <div style={{
-                              position: 'absolute',
-                              top: -9,
-                              left: '50%',
-                              transform: 'translateX(-50%)',
-                              fontFamily: '"Press Start 2P", monospace',
-                              fontSize: '6px',
-                              background: '#F5C842',
-                              color: '#0E0E14',
-                              padding: '3px 7px',
-                              whiteSpace: 'nowrap',
-                              letterSpacing: '0.04em',
-                            }}>
-                              MÁS POPULAR
-                            </div>
-                          )}
-                          <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '11px', color: '#F5C842', marginBottom: 2 }}>
-                            {pack.tenks.toLocaleString('es-AR')}
-                          </div>
-                          <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '6px', color: 'rgba(245,200,66,0.6)', marginBottom: 10, letterSpacing: '0.06em' }}>TENKS</div>
-                          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.45)', marginBottom: 4, lineHeight: 1.5 }}>{pack.description}</div>
-                          <div style={{ fontSize: '13px', color: '#FFFFFF', marginBottom: 12, marginTop: 'auto', paddingTop: 8 }}>
-                            ${pack.priceArs.toLocaleString('es-AR')} ARS
-                          </div>
-                          <button
-                            onClick={() => { void startStripeCheckout('tenks_pack', { packId: pack.id }); }}
-                            disabled={checkoutRedirecting || !isAuthenticated}
-                            style={{
-                              width: '100%',
-                              fontFamily: '"Press Start 2P", monospace',
-                              fontSize: '7px',
-                              padding: '9px 4px',
-                              background: isPopular ? '#F5C842' : 'rgba(245,200,66,0.14)',
-                              color: isPopular ? '#0E0E14' : '#F5C842',
-                              border: isPopular ? 'none' : '1px solid rgba(245,200,66,0.3)',
-                              cursor: checkoutRedirecting || !isAuthenticated ? 'default' : 'pointer',
-                              opacity: checkoutRedirecting || !isAuthenticated ? 0.65 : 1,
-                              letterSpacing: '0.04em',
-                            }}
-                          >
-                            {!isAuthenticated ? 'SESIÓN' : 'COMPRAR'}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginTop: 12, fontFamily: '"Press Start 2P", monospace', letterSpacing: '0.04em', lineHeight: 1.8 }}>
-                    TENKS se acreditan automáticamente tras el pago · Pago seguro via Stripe
-                  </div>
-                </div>
-              )}
-
-              {shopTab === 'orders' && (
-                <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.9)', fontSize: '14px' }}>
-                  {!isAuthenticated ? (
-                    <div style={{ textAlign: 'center', padding: '24px 0', fontFamily: '"Press Start 2P", monospace', fontSize: '8px', color: 'rgba(255,255,255,0.25)', lineHeight: 2.2, letterSpacing: '0.04em' }}>
-                      <div style={{ fontSize: 28, marginBottom: 8 }}>☠</div>
-                      Iniciá sesión para<br />ver tus pedidos.
-                    </div>
-                  ) : ordersLoading ? (
-                    <div style={{ textAlign: 'center', padding: '24px 0', fontFamily: '"Press Start 2P", monospace', fontSize: '8px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em' }}>
-                      CARGANDO...
-                    </div>
-                  ) : orders.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '24px 0', fontFamily: '"Press Start 2P", monospace', fontSize: '8px', color: 'rgba(255,255,255,0.25)', lineHeight: 2.2, letterSpacing: '0.04em' }}>
-                      <div style={{ fontSize: 24, marginBottom: 8 }}>☠</div>
-                      Todavía no compraste<br />nada físico.
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {orders.map((order) => {
-                        const item = order.items[0];
-                        const catalogItem = item ? getCatalogItem(item.product_id) : null;
-                        const d = new Date(order.created_at);
-                        const dateStr = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
-                        const totalArs = Math.round(order.total / 100);
-                        const statusColors: Record<string, string> = { paid: '#39FF14', shipped: '#46B3FF', delivered: '#F5C842' };
-                        const statusLabels: Record<string, string> = { paid: 'PAGADO', shipped: 'ENVIADO', delivered: 'ENTREGADO' };
-                        const sColor = statusColors[order.status] ?? 'rgba(255,255,255,0.4)';
-                        const sLabel = statusLabels[order.status] ?? order.status.toUpperCase();
-                        return (
-                          <div key={order.id} className="ww-panel" style={{ padding: '10px 12px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: '13px', color: '#fff', marginBottom: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {catalogItem?.name ?? item?.product_id}
-                                </div>
-                                <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', fontFamily: '"Press Start 2P", monospace', letterSpacing: '0.04em' }}>
-                                  {item?.size ? `T. ${item.size}` : ''}{item?.size ? ' · ' : ''}{dateStr}
-                                </div>
-                                {order.discount_code && (
-                                  <div style={{ fontSize: '10px', color: '#39FF14', marginTop: 3 }}>↳ {order.discount_code}</div>
-                                )}
-                              </div>
-                              <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                                <div style={{ fontSize: '12px', color: '#F5C842', marginBottom: 5 }}>${totalArs.toLocaleString('es-AR')}</div>
-                                <div style={{
-                                  display: 'inline-block',
-                                  fontFamily: '"Press Start 2P", monospace',
-                                  fontSize: '6px',
-                                  color: sColor,
-                                  border: `1px solid ${sColor}55`,
-                                  background: `${sColor}12`,
-                                  padding: '3px 5px',
-                                  letterSpacing: '0.04em',
-                                }}>
-                                  {sLabel}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {shopStatus ? (
-                <div className="ww-shop-status" style={{
-                  marginTop: 12,
-                  padding: '8px 10px',
-                  background: shopStatus.startsWith('¡') ? 'rgba(57,255,20,0.07)' : 'rgba(245,200,66,0.07)',
-                  border: shopStatus.startsWith('¡') ? '1px solid rgba(57,255,20,0.28)' : '1px solid rgba(245,200,66,0.28)',
-                  fontFamily: '"Press Start 2P", monospace',
-                  fontSize: '7px',
-                  color: shopStatus.startsWith('¡') ? '#39FF14' : '#F5C842',
-                  lineHeight: 1.9,
-                  letterSpacing: '0.03em',
-                }}>
-                  {shopStatus}
-                </div>
-              ) : (
-                <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: '11px', color: 'rgba(255,255,255,0.22)', marginTop: 10, minHeight: 16 }}>
-                  {shopTab === 'tenks_virtual' ? 'Ropa virtual: comprala con TENKS, equipala al instante.' : ''}
-                </div>
-              )}
-            </div>
-          </div>
+          <ShopOverlay
+            isMobile={isMobile}
+            shopTab={shopTab}
+            onTabChange={setShopTab}
+            onClose={() => {
+              setShopSource('');
+              setShopOpen(false);
+              setOrdersLoaded(false);
+              setOrders([]);
+              eventBus.emit(EVENTS.SHOP_CLOSE);
+            }}
+            clothingItems={clothingItems}
+            owned={owned}
+            equipped={equipped}
+            tenks={tenks}
+            isAuthenticated={isAuthenticated}
+            checkoutBusyId={checkoutBusyId}
+            checkoutRedirecting={checkoutRedirecting}
+            selectedSize={selectedSize}
+            onSizeChange={setSelectedSize}
+            discountCode={discountCodeInput}
+            onDiscountChange={setDiscountCodeInput}
+            shopStatus={shopStatus}
+            orders={orders}
+            ordersLoaded={ordersLoaded}
+            ordersLoading={ordersLoading}
+            onLoadOrders={() => void loadOrders()}
+            onBuyVirtual={(item) => void buyShopItem(item)}
+            onEquip={(itemId, active) => {
+              handleEquipOwnedItem(itemId);
+              setShopStatus(active ? 'Ya está puesto.' : 'Equipado.');
+            }}
+            onBuyPhysical={(item) => void startStripeCheckout('product', { itemId: item.id, size: selectedSize, discountCode: discountCodeInput })}
+            onBuyPack={(packId) => void startStripeCheckout('tenks_pack', { packId })}
+          />
         )}
+
 
         {playerActions && (
           <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
@@ -2726,227 +2376,21 @@ export default function PlayPage() {
         )}
 
         {inventoryOpen && (
-          <div className="ww-overlay absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }}>
-            <div
-              className="ww-modal p-4"
-              style={{
-                width: isMobile ? '94%' : 420,
-                background: 'rgba(10,10,18,0.95)',
-                border: '1px solid rgba(245,200,66,0.35)',
-                boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
-              }}
-            >
-              <div className="flex items-center justify-between mb-3" style={{ fontFamily: '"Press Start 2P", monospace', color: '#F5C842', fontSize: '10px' }}>
-                <span>INVENTARIO</span>
-                <button onClick={() => setInventoryOpen(false)} style={{ fontFamily: '"Press Start 2P", monospace', fontSize: '9px', color: '#999999' }}>
-                  X
-                </button>
-              </div>
-
-              <div style={{ fontFamily: '"Silkscreen", monospace', color: 'rgba(255,255,255,0.85)', fontSize: '14px' }}>
-                <div className="flex items-center justify-between py-2">
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>ITEM</div>
-                    <div style={{ fontSize: '16px' }}>CIG</div>
-                    <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Idle smoke puffs</div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      const next = !smoking;
-                      setSmoking(next);
-                      eventBus.emit(EVENTS.AVATAR_SET, { smoke: next });
-                    }}
-                    style={{
-                      fontFamily: '"Press Start 2P", monospace',
-                      fontSize: '9px',
-                      padding: '10px 12px',
-                      border: '1px solid rgba(255,255,255,0.15)',
-                      background: nextBtnBg(smoking),
-                      color: smoking ? '#0E0E14' : '#FFFFFF',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {smoking ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-
-                <div className="mt-2 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-3" style={{ minWidth: 0 }}>
-                      <img
-                        src="/assets/ui/icon_sword.png"
-                        alt=""
-                        width={32}
-                        height={32}
-                        decoding="async"
-                        style={{ objectFit: 'contain', flexShrink: 0, opacity: 0.95 }}
-                      />
-                      <div>
-                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>UTIL</div>
-                        <div style={{ fontSize: '16px' }}>GUN</div>
-                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Click o F para disparar</div>
-                        <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)' }}>1 pistol / 2 shotgun en training</div>
-                      </div>
-                    </div>
-                  <button
-                    onClick={() => {
-                        handleEquipOwnedItem('UTIL-GUN-01');
-                    }}
-                      style={{
-                        fontFamily: '"Press Start 2P", monospace',
-                        fontSize: '9px',
-                        padding: '10px 12px',
-                        border: '1px solid rgba(255,255,255,0.15)',
-                        background: gunOn ? '#39FF14' : 'rgba(255,255,255,0.08)',
-                        color: gunOn ? '#0E0E14' : '#FFFFFF',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {gunOn ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>UTIL</div>
-                      <div style={{ fontSize: '16px' }}>FOOTBALL</div>
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>Bote cosmetic</div>
-                    </div>
-                  <button
-                    onClick={() => {
-                        handleEquipOwnedItem('UTIL-BALL-01');
-                    }}
-                      style={{
-                        fontFamily: '"Press Start 2P", monospace',
-                        fontSize: '9px',
-                        padding: '10px 12px',
-                        border: '1px solid rgba(255,255,255,0.15)',
-                        background: ballOn ? '#39FF14' : 'rgba(255,255,255,0.08)',
-                        color: ballOn ? '#0E0E14' : '#FFFFFF',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {ballOn ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-3">
-                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>DOCUMENTOS</div>
-                  <div className="mt-2 space-y-1">
-                    {passiveUtilityItems.length === 0 && (
-                      <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>
-                        No tenes documentos especiales todavia.
-                      </div>
-                    )}
-                    {passiveUtilityItems.map((item) => (
-                      <div key={item.id} className="flex items-center justify-between">
-                        <div>
-                          <div style={{ fontSize: '13px' }}>{item.name}</div>
-                          <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>
-                            {item.description ?? 'Documento de propiedad.'}
-                          </div>
-                        </div>
-                        <div
-                          style={{
-                            fontFamily: '"Press Start 2P", monospace',
-                            fontSize: '7px',
-                            color: '#F5C842',
-                            border: '1px solid rgba(245,200,66,0.28)',
-                            padding: '7px 9px',
-                          }}
-                        >
-                          TUYO
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="mt-3">
-                  <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)' }}>ROPA</div>
-                  <div className="mt-2 space-y-1">
-                    {owned.length === 0 && <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)' }}>No tenes ropa todavia. Comprala en la tienda.</div>}
-                    {owned
-                      .map((id) => CATALOG.find((i) => i.id === id))
-                      .filter((item): item is NonNullable<typeof item> => !!item)
-                      .filter((item) => item.slot !== 'utility')
-                      .map((item) => {
-                        const id = item.id;
-                        const active = item.slot === 'top' ? equipped.top === id : equipped.bottom === id;
-                        return (
-                          <div key={id} className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className="inline-block"
-                                style={{
-                                  width: 10,
-                                  height: 10,
-                                  background: `#${(item.color ?? 0x777777).toString(16).padStart(6, '0')}`,
-                                  border: '1px solid rgba(0,0,0,0.35)',
-                                }}
-                              />
-                              <span style={{ fontSize: '13px' }}>{item.name}</span>
-                              <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)' }}>({item.slot})</span>
-                            </div>
-                            <button
-                              onClick={() => {
-                                handleEquipOwnedItem(id);
-                              }}
-                              style={{
-                                fontFamily: '"Press Start 2P", monospace',
-                                fontSize: '8px',
-                                padding: '8px 10px',
-                                border: '1px solid rgba(255,255,255,0.15)',
-                                background: active ? '#F5C842' : 'rgba(255,255,255,0.08)',
-                                color: active ? '#0E0E14' : '#FFFFFF',
-                                cursor: 'pointer',
-                              }}
-                            >
-                              EQUIP
-                            </button>
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
-
-                <div className="mt-3 flex gap-2">
-                  <button
-                    onClick={() => eventBus.emit(EVENTS.OPEN_CREATOR)}
-                    style={{
-                      flex: 1,
-                      fontFamily: '"Press Start 2P", monospace',
-                      fontSize: '9px',
-                      padding: '12px 10px',
-                      background: '#F5C842',
-                      color: '#0E0E14',
-                      cursor: 'pointer',
-                      border: 'none',
-                    }}
-                  >
-                    EDITAR WASPI
-                  </button>
-                  <button
-                    onClick={() => setInventoryOpen(false)}
-                    style={{
-                      flex: 1,
-                      fontFamily: '"Press Start 2P", monospace',
-                      fontSize: '9px',
-                      padding: '12px 10px',
-                      background: 'rgba(255,255,255,0.08)',
-                      color: '#FFFFFF',
-                      cursor: 'pointer',
-                      border: '1px solid rgba(255,255,255,0.15)',
-                    }}
-                  >
-                    CERRAR (I)
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <InventoryOverlay
+            isMobile={isMobile}
+            owned={owned}
+            equipped={equipped}
+            smoking={smoking}
+            onToggleSmoke={setSmoking}
+            gunOn={gunOn}
+            ballOn={ballOn}
+            passiveUtilityItems={passiveUtilityItems}
+            clothingCatalog={CATALOG}
+            onEquip={handleEquipOwnedItem}
+            onClose={() => setInventoryOpen(false)}
+          />
         )}
+
 
         {chatVisible && (
           <div className="absolute bottom-0 left-0 right-0">
