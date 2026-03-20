@@ -200,19 +200,32 @@ export function stopSceneMusic(
 ): void {
   if (!sound) return;
   detachGlobalBgmIfMatch(sound);
+  const managedSound = sound as Phaser.Sound.BaseSound & { manager?: unknown };
+  const sceneIsActive = !!scene.sys?.isActive?.();
   try {
     scene.tweens.killTweensOf(sound);
   } catch { /* ignore */ }
+  // If scene is shutting down (or the sound was already destroyed by a global
+  // cleanup), avoid tweening sound.volume because WebAudio internals may be null.
+  if (!sceneIsActive || !managedSound.manager || duration <= 0) {
+    try { sound.stop(); } catch { /* ignore */ }
+    try { sound.destroy(); } catch { /* ignore */ }
+    return;
+  }
   try {
     scene.tweens.add({
       targets: sound,
       volume: 0,
       duration,
       ease: 'Sine.easeOut',
-      onComplete: () => { sound.stop(); sound.destroy(); },
+      onComplete: () => {
+        try { scene.tweens.killTweensOf(sound); } catch { /* ignore */ }
+        try { sound.stop(); } catch { /* ignore */ }
+        try { sound.destroy(); } catch { /* ignore */ }
+      },
     });
   } catch {
-    sound.stop();
-    sound.destroy();
+    try { sound.stop(); } catch { /* ignore */ }
+    try { sound.destroy(); } catch { /* ignore */ }
   }
 }

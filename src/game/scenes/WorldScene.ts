@@ -642,7 +642,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private recreateCombatHud() {
-    this.combatHud?.destroy();
+    try { this.combatHud?.destroy(); } catch { /* ignore stale text */ }
     this.combatHud = this.add.text(8, 74, '', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
@@ -652,7 +652,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private recreateProgressionHud() {
-    this.progressionHud?.destroy();
+    try { this.progressionHud?.destroy(); } catch { /* ignore stale text */ }
     this.progressionHud = this.add.text(8, 116, '', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
@@ -661,7 +661,17 @@ export class WorldScene extends Phaser.Scene {
     }).setScrollFactor(0).setDepth(9999);
   }
 
+  private isTextRenderable(text?: Phaser.GameObjects.Text): text is Phaser.GameObjects.Text {
+    if (!text || !text.scene || !text.active) return false;
+    const candidate = text as Phaser.GameObjects.Text & {
+      canvas?: HTMLCanvasElement | null;
+      context?: CanvasRenderingContext2D | null;
+    };
+    return !!candidate.canvas && !!candidate.context;
+  }
+
   private guardHudRender(label: string, recreate: () => void, render: () => void) {
+    if (!this.scene.isActive('WorldScene')) return;
     try {
       render();
     } catch (error) {
@@ -1686,22 +1696,23 @@ export class WorldScene extends Phaser.Scene {
 
   private renderCombatHud() {
     this.guardHudRender('combat', () => this.recreateCombatHud(), () => {
-      if (!this.combatHud) {
+      if (!this.isTextRenderable(this.combatHud)) {
         this.recreateCombatHud();
       }
-      if (!this.combatHud) return;
+      if (!this.isTextRenderable(this.combatHud)) return;
+      const hud = this.combatHud;
       if (!this.gunEnabled) {
-        this.combatHud.setText([
+        hud.setText([
           'WEAPON OFFLINE',
           'ACTIVA GUN EN INVENTARIO',
         ]);
-        this.combatHud.setColor('#888888');
+        hud.setColor('#888888');
         return;
       }
       const weapon = WEAPON_STATS[this.currentWeapon];
       const weaponColor = '#' + weapon.color.toString(16).padStart(6, '0');
-      this.combatHud.setColor(weaponColor);
-      this.combatHud.setText([
+      hud.setColor(weaponColor);
+      hud.setText([
         `WEAPON ${weapon.label} | Q CICLA / 1-6`,
         'F / CLICK DISPARA',
       ]);
@@ -1710,15 +1721,16 @@ export class WorldScene extends Phaser.Scene {
 
   private renderProgressionHud() {
     this.guardHudRender('progression', () => this.recreateProgressionHud(), () => {
-      if (!this.progressionHud) {
+      if (!this.isTextRenderable(this.progressionHud)) {
         this.recreateProgressionHud();
       }
-      if (!this.progressionHud) return;
+      if (!this.isTextRenderable(this.progressionHud)) return;
+      const hud = this.progressionHud;
       const nextLabel = this.progression.nextLevelAt === null
         ? 'MAX'
         : `${this.progression.nextLevelAt - this.progression.xp} XP`;
 
-      this.progressionHud.setText([
+      hud.setText([
         `LVL ${this.progression.level}/${getMaxProgressionLevel()} | XP ${this.progression.xp}`,
         `KOs ${this.progression.kills} | NEXT ${nextLabel}`,
       ]);
@@ -6895,7 +6907,6 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 }
-
 
 
 
