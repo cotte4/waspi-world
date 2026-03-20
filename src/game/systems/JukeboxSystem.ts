@@ -391,7 +391,7 @@ class JukeboxSystem {
 
     // Presence puede llegar después del addSong: sin hostId aún, checkAndAdvanceQueue no avanza.
     if (entries.length > 0) {
-      this.checkAndAdvanceQueue();
+      this.checkAndAdvanceQueue(true);
     }
   }
 
@@ -399,9 +399,9 @@ class JukeboxSystem {
   // Private — queue advancement (only executed by host)
   // -------------------------------------------------------------------------
 
-  private checkAndAdvanceQueue() {
+  private checkAndAdvanceQueue(skipHostResolve = false) {
     // Presence a veces llega después del primer addSong: sin esto hostId queda null y la cola nunca arranca.
-    this.resolveHost();
+    if (!skipHostResolve) this.resolveHost();
     if (!this.isLocalHost()) return;
     if (this.state.nowPlaying) return;
 

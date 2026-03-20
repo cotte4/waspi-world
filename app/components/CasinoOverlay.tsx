@@ -257,6 +257,17 @@ function bestAvailableHand(hole: number[], community: number[]): PokerResult {
     return { label: 'CARTA ALTA', rank: 0, tiebreak: ranksSorted };
   }
   if (all.length === 5) return evaluatePokerHand(all);
+
+  if (all.length === 6) {
+    let best: PokerResult | null = null;
+    for (let i = 0; i < all.length; i++) {
+      const hand5 = all.filter((_, idx) => idx !== i);
+      const res = evaluatePokerHand(hand5);
+      if (!best || comparePokerResults(res, best) > 0) best = res;
+    }
+    return best ?? { label: 'CARTA ALTA', rank: 0, tiebreak: [0] };
+  }
+
   let best: PokerResult = { label: 'CARTA ALTA', rank: 0, tiebreak: [0] };
   for (let i = 0; i < all.length - 1; i++) {
     for (let j = i + 1; j < all.length; j++) {
