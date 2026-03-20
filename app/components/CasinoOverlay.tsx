@@ -515,6 +515,7 @@ function SlotsPanel({
     spinning: false,
   });
   const spinIdRef = useRef(0);
+  const spinGuardRef = useRef(false);
   const timerIdsRef = useRef<number[]>([]);
   const pendingBetRef = useRef(0);
 
@@ -524,6 +525,7 @@ function SlotsPanel({
   }, [state.spinning, onBusyChange]);
 
   useEffect(() => () => {
+    spinGuardRef.current = false;
     timerIdsRef.current.forEach((id) => window.clearTimeout(id));
     timerIdsRef.current = [];
     if (pendingBetRef.current > 0) {
@@ -533,9 +535,11 @@ function SlotsPanel({
   }, []);
 
   const spin = useCallback(() => {
-    if (state.spinning) return;
+    if (spinGuardRef.current || state.spinning) return;
+    spinGuardRef.current = true;
     const bet = SLOT_BETS[state.betIndex];
     if (!spendTenks(bet, 'casino_slots_bet')) {
+      spinGuardRef.current = false;
       setState((s) => ({ ...s, resultText: 'NO TENES TENKS SUFICIENTES.' }));
       onToast('NO ALCANZA PARA GIRAR.');
       return;
@@ -554,6 +558,7 @@ function SlotsPanel({
         if (spinIdRef.current !== myToken) return;
         const isLast = t === totalTicks - 1;
         if (isLast) {
+          spinGuardRef.current = false;
           pendingBetRef.current = 0;
           const payout = Math.round(bet * outcome.payoutMultiplier);
           if (payout > 0) {
@@ -642,6 +647,7 @@ function RoulettePanel({
     lastColor: null,
   });
   const spinIdRef = useRef(0);
+  const spinGuardRef = useRef(false);
   const timerIdsRef = useRef<number[]>([]);
   const pendingBetRef = useRef(0);
 
@@ -651,6 +657,7 @@ function RoulettePanel({
   }, [state.spinning, onBusyChange]);
 
   useEffect(() => () => {
+    spinGuardRef.current = false;
     timerIdsRef.current.forEach((id) => window.clearTimeout(id));
     timerIdsRef.current = [];
     if (pendingBetRef.current > 0) {
@@ -660,9 +667,11 @@ function RoulettePanel({
   }, []);
 
   const spin = useCallback(() => {
-    if (state.spinning) return;
+    if (spinGuardRef.current || state.spinning) return;
+    spinGuardRef.current = true;
     const bet = ROULETTE_BETS[state.betIndex];
     if (!spendTenks(bet, 'casino_roulette_bet')) {
+      spinGuardRef.current = false;
       setState((s) => ({ ...s, resultText: 'NO TENES TENKS SUFICIENTES.' }));
       onToast('NO ALCANZA PARA GIRAR.');
       return;
@@ -683,6 +692,7 @@ function RoulettePanel({
         const number = isLast ? winningNumber : Math.floor(Math.random() * 37);
         const color = getRouletteColor(number);
         if (isLast) {
+          spinGuardRef.current = false;
           pendingBetRef.current = 0;
           const option = ROULETTE_OPTIONS[state.optionIndex];
           const isEven = number !== 0 && number % 2 === 0;
@@ -812,6 +822,7 @@ function BlackjackPanel({
   });
 
   const dealerStepRef = useRef<number | null>(null);
+  const dealGuardRef = useRef(false);
   const stateRef = useRef(state);
 
   useEffect(() => {
@@ -826,6 +837,7 @@ function BlackjackPanel({
       window.clearTimeout(dealerStepRef.current);
       dealerStepRef.current = null;
     }
+    dealGuardRef.current = false;
     const s = stateRef.current;
     if (!s.settled && s.currentBet > 0 && s.phase !== 'bet') {
       addTenks(s.currentBet, 'casino_blackjack_refund_abort');
@@ -861,8 +873,11 @@ function BlackjackPanel({
   }, [onToast]);
 
   const startHand = useCallback(() => {
+    if (dealGuardRef.current || state.phase !== 'bet') return;
+    dealGuardRef.current = true;
     const bet = BLACKJACK_BETS[state.betIndex];
     if (!spendTenks(bet, 'casino_blackjack_bet')) {
+      dealGuardRef.current = false;
       setState((s) => ({ ...s, resultText: 'NO TENES TENKS SUFICIENTES.' }));
       onToast('NO ALCANZA PARA JUGAR.');
       return;
@@ -889,6 +904,7 @@ function BlackjackPanel({
           currentBet: bet, deck, settled: true,
         });
       }
+      window.setTimeout(() => { dealGuardRef.current = false; }, 0);
       return;
     }
     setState({
@@ -896,7 +912,8 @@ function BlackjackPanel({
       dealerHidden: true, actionIndex: 0, resultText: 'TU MANO. HIT O STAND.',
       currentBet: bet, deck, settled: false,
     });
-  }, [state.betIndex, resolveBlackjack, onToast]);
+    window.setTimeout(() => { dealGuardRef.current = false; }, 0);
+  }, [state.betIndex, state.phase, resolveBlackjack, onToast]);
 
   const hit = useCallback(() => {
     setState((s) => {
@@ -1043,6 +1060,7 @@ function PokerPanel({
     cpuLastAction: '',
   });
   const stateRef = useRef(state);
+  const dealGuardRef = useRef(false);
 
   useEffect(() => {
     stateRef.current = state;
@@ -1052,6 +1070,7 @@ function PokerPanel({
   }, [state, onBusyChange]);
 
   useEffect(() => () => {
+    dealGuardRef.current = false;
     const s = stateRef.current;
     if (s.phase !== 'ante' && s.phase !== 'showdown' && s.playerPaid > 0) {
       addTenks(s.playerPaid, 'casino_holdem_refund_abort');
@@ -1067,8 +1086,11 @@ function PokerPanel({
   }, []);
 
   const startHand = useCallback(() => {
+    if (dealGuardRef.current || state.phase !== 'ante') return;
+    dealGuardRef.current = true;
     const ante = HOLDEM_ANTES[state.anteIndex];
     if (!spendTenks(ante, 'casino_holdem_ante')) {
+      dealGuardRef.current = false;
       setState((s) => ({ ...s, resultText: 'NO TENÉS TENKS SUFICIENTES.' }));
       onToast('SIN TENKS PARA EL ANTE');
       return;
@@ -1081,7 +1103,8 @@ function PokerPanel({
       pot: ante * 2, playerPaid: ante, deck,
       resultText: 'TU TURNO — ELEGÍ UNA ACCIÓN.', actionIndex: 1, cpuLastAction: 'ENTRA',
     }));
-  }, [state.anteIndex, onToast]);
+    window.setTimeout(() => { dealGuardRef.current = false; }, 0);
+  }, [state.anteIndex, state.phase, onToast]);
 
   const advancePhase = useCallback((s: HoldemState): HoldemState => {
     const deck = [...s.deck];
@@ -1474,3 +1497,5 @@ export default function CasinoOverlay({ isMobile }: CasinoOverlayProps) {
     </div>
   );
 }
+
+
