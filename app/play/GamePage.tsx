@@ -44,6 +44,7 @@ import { track } from '@/src/lib/analytics';
 const PhaserGame = dynamic(() => import('@/app/components/PhaserGame'), { ssr: false });
 const JukeboxOverlay = dynamic(() => import('@/app/components/JukeboxOverlay'), { ssr: false });
 const GameHUD = dynamic(() => import('@/app/components/GameHUD'), { ssr: false });
+const CharacterCreatorOverlay = dynamic(() => import('@/app/components/CharacterCreatorOverlay'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
 const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
@@ -1970,6 +1971,10 @@ export default function PlayPage() {
         <PhaserGame />
 
         <GameHUD />
+
+        {activeScene === 'CreatorScene' && (
+          <CharacterCreatorOverlay isMobile={isMobile} />
+        )}
 
         {comboMultiplier !== null && (
           <div

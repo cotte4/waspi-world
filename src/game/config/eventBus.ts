@@ -81,4 +81,10 @@ export const EVENTS = {
   JUKEBOX_STATE_UPDATED: 'jukebox:state:updated',
   /** Player HP changed. Payload: { hp: number; maxHp: number } */
   PLAYER_HP_CHANGED: 'player:hp:changed',
+  /** Creator overlay → Phaser: config patch. Payload: Partial<AvatarConfig> */
+  CREATOR_CONFIG_CHANGED: 'creator:config:changed',
+  /** Creator overlay → Phaser: save & enter world. Payload: { username: string } */
+  CREATOR_COMMIT: 'creator:commit',
+  /** Phaser → Creator overlay: initial config. Payload: { config: Required<AvatarConfig> } */
+  CREATOR_READY: 'creator:ready',
 } as const;
