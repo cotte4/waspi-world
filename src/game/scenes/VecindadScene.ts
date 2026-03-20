@@ -138,8 +138,8 @@ export class VecindadScene extends Phaser.Scene {
   };
   private sharedParcels = new Map<string, SharedParcelState>();
   private parcelVisuals = new Map<string, ParcelVisual>();
-  private promptText?: Phaser.GameObjects.Text;
-  private hudText?: Phaser.GameObjects.Text;
+  private hudPrompt: string = '';
+  private hudPromptColor: string = '#F5C842';
   private farmHintText?: Phaser.GameObjects.Text;
   private farmOpen = false;
   private selectedFarmSlot = 0;
@@ -209,6 +209,7 @@ export class VecindadScene extends Phaser.Scene {
     announceScene(this);
     this.input.enabled = true;
     this.controls = new SceneControls(this);
+    eventBus.emit(EVENTS.VECINDAD_SCENE_ACTIVE, true);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
       this.inTransition = false;
@@ -639,24 +640,6 @@ export class VecindadScene extends Phaser.Scene {
   }
 
   private setupUi() {
-    this.promptText = this.add.text(this.scale.width / 2, this.scale.height - 26, '', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-      stroke: '#000000',
-      strokeThickness: 4,
-      align: 'center',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(1000);
-
-    this.hudText = this.add.text(16, 76, '', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#B9FF9E',
-      stroke: '#000000',
-      strokeThickness: 3,
-      lineSpacing: 6,
-    }).setScrollFactor(0).setDepth(1000);
-
     this.renderHud();
   }
 
@@ -924,52 +907,30 @@ export class VecindadScene extends Phaser.Scene {
   }
 
   private renderHud() {
-    if (!this.hudText) return;
     const stage = normalizeVecindadBuildStage(this.vecindadState.buildStage);
     const nextCost = getNextVecindadBuildCost(stage);
-    const mats = this.vecindadState.materials;
+    eventBus.emit(EVENTS.VECINDAD_HUD_UPDATE, {
+      materials: this.vecindadState.materials,
+      nextCost,
+      stage,
+      maxStage: MAX_VECINDAD_STAGE,
+      ownedParcelId: this.vecindadState.ownedParcelId,
+      cannabisFarmUnlocked: this.vecindadState.cannabisFarmUnlocked,
+      farmPlantsCount: (this.vecindadState.farmPlants ?? []).length,
+      prompt: this.hudPrompt,
+      promptColor: this.hudPromptColor,
+    });
+  }
 
-    // Progress bar (text-based, 10 chars wide)
-    let progressBar = '';
-    if (stage < MAX_VECINDAD_STAGE) {
-      const filled = Math.min(Math.floor((mats / nextCost) * 10), 10);
-      progressBar = '[' + '█'.repeat(filled) + '░'.repeat(10 - filled) + ']';
-    } else {
-      progressBar = '[██████████]';
-    }
-
-    const matsLine = stage >= MAX_VECINDAD_STAGE
-      ? `MATS ${mats} (MAX)`
-      : `MATS ${mats} / ${nextCost} → STAGE ${stage + 1}`;
-
-    const objective = !this.vecindadState.ownedParcelId
-      ? 'OBJETIVO COMPRA UNA PARCELA'
-      : stage <= 0
-        ? `OBJETIVO FARMEA EN BOSQUE Y LEVANTA BASE ${nextCost} MATS`
-        : stage >= MAX_VECINDAD_STAGE
-          ? 'OBJETIVO CASA COMPLETA'
-          : `OBJETIVO STAGE ${stage + 1} ${nextCost} MATS EN BOSQUE`;
-    const farmLine = this.vecindadState.cannabisFarmUnlocked
-      ? `FARM ON | PLANTAS ${(this.vecindadState.farmPlants ?? []).length}/${FARM_SLOTS}`
-      : 'FARM LOCKED';
-
-    this.hudText.setText([
-      'LA VECINDAD',
-      this.vecindadState.ownedParcelId ? `PARCELA ${this.vecindadState.ownedParcelId}` : 'SIN PARCELA',
-      matsLine,
-      progressBar,
-      `STAGE ${stage}/${MAX_VECINDAD_STAGE}${stage >= MAX_VECINDAD_STAGE ? ' MAX' : ''}`,
-      farmLine,
-      objective,
-    ]);
+  private setPrompt(text: string, color: string) {
+    this.hudPrompt = text;
+    this.hudPromptColor = color;
+    this.renderHud();
   }
 
   private updatePrompt() {
-    if (!this.promptText) return;
-
     if (this.isNearExitGate()) {
-      this.promptText.setText('SPACE VOLVER A PLAZA');
-      this.promptText.setColor('#F5C842');
+      this.setPrompt('SPACE VOLVER A PLAZA', '#F5C842');
       return;
     }
 
@@ -978,14 +939,11 @@ export class VecindadScene extends Phaser.Scene {
       const weedLv = getSkillSystem().getLevel('weed');
       const sys = getWeedDeliverySystem();
       if (!sys.canInteract(weedLv)) {
-        this.promptText.setText('🌿 DEALER [WEED LV3 REQUERIDO]');
-        this.promptText.setColor('#3a4a3a');
+        this.setPrompt('🌿 DEALER [WEED LV3 REQUERIDO]', '#3a4a3a');
       } else if (sys.isOnCooldown(nearNpc)) {
-        this.promptText.setText('🌿 DEALER | YA ENTREGASTE HOY');
-        this.promptText.setColor('#556655');
+        this.setPrompt('🌿 DEALER | YA ENTREGASTE HOY', '#556655');
       } else {
-        this.promptText.setText('E HABLAR CON DEALER');
-        this.promptText.setColor('#39FF14');
+        this.setPrompt('E HABLAR CON DEALER', '#39FF14');
       }
       return;
     }
@@ -993,32 +951,27 @@ export class VecindadScene extends Phaser.Scene {
     if (this.isNearPuestoSpot()) {
       const weedLv = getSkillSystem().getLevel('weed');
       if (weedLv < 4) {
-        this.promptText.setText('🌿 PUESTO [REQUIERE WEED LV4]');
-        this.promptText.setColor('#3a4a3a');
+        this.setPrompt('🌿 PUESTO [REQUIERE WEED LV4]', '#3a4a3a');
       } else if (this.puestoOpen) {
-        this.promptText.setText('E CERRAR PUESTO | SERVIENDO CLIENTES...');
-        this.promptText.setColor('#39FF14');
+        this.setPrompt('E CERRAR PUESTO | SERVIENDO CLIENTES...', '#39FF14');
       } else {
-        this.promptText.setText('E ABRIR PUESTO (5 MIN) +XP WEED');
-        this.promptText.setColor('#7bff7b');
+        this.setPrompt('E ABRIR PUESTO (5 MIN) +XP WEED', '#7bff7b');
       }
       return;
     }
 
     if (this.isNearOwnedFarmSpot()) {
       if (!this.vecindadState.cannabisFarmUnlocked) {
-        this.promptText.setText(`E DESBLOQUEAR CANNABIS FARM ${FARM_UNLOCK_COST} TENKS`);
-        this.promptText.setColor('#F5C842');
+        this.setPrompt(`E DESBLOQUEAR CANNABIS FARM ${FARM_UNLOCK_COST} TENKS`, '#F5C842');
       } else {
-        this.promptText.setText('E ABRIR CANNABIS FARM | SPACE CERRAR');
-        this.promptText.setColor('#39FF14');
+        this.setPrompt('E ABRIR CANNABIS FARM | SPACE CERRAR', '#39FF14');
       }
       return;
     }
 
     const parcel = this.getNearbyParcel();
     if (!parcel) {
-      this.promptText.setText('');
+      this.setPrompt('', '#F5C842');
       return;
     }
 
@@ -1029,43 +982,42 @@ export class VecindadScene extends Phaser.Scene {
     if (mine) {
       const nextCost = getNextVecindadBuildCost(stage);
       if (this.isNearHouseDoor(parcel) && stage > 0) {
-        this.promptText.setText('SPACE ENTRAR A TU CASA');
-        this.promptText.setColor('#39FF14');
+        this.setPrompt('SPACE ENTRAR A TU CASA', '#39FF14');
         return;
       }
       if (stage >= MAX_VECINDAD_STAGE) {
-        this.promptText.setText('TU CASA ESTA COMPLETA');
-        this.promptText.setColor('#39FF14');
+        this.setPrompt('TU CASA ESTA COMPLETA', '#39FF14');
         return;
       }
-      this.promptText.setText(stage <= 0
-        ? `E LEVANTAR CASA - ${nextCost} MATS`
-        : `E CONSTRUIR STAGE ${stage + 1} - ${nextCost} MATS`);
-      this.promptText.setColor('#39FF14');
+      this.setPrompt(
+        stage <= 0
+          ? `E LEVANTAR CASA - ${nextCost} MATS`
+          : `E CONSTRUIR STAGE ${stage + 1} - ${nextCost} MATS`,
+        '#39FF14',
+      );
       return;
     }
 
     if (shared) {
       if (this.isNearHouseDoor(parcel) && shared.buildStage > 0) {
-        this.promptText.setText(`SPACE VISITAR CASA DE ${shared.ownerUsername.toUpperCase()}`);
-        this.promptText.setColor('#46B3FF');
+        this.setPrompt(`SPACE VISITAR CASA DE ${shared.ownerUsername.toUpperCase()}`, '#46B3FF');
         return;
       }
-      this.promptText.setText(shared.buildStage > 0
-        ? `PARCELA ${parcel.id} OCUPADA POR ${shared.ownerUsername.toUpperCase()}`
-        : `TERRENO DE ${shared.ownerUsername.toUpperCase()} AUN EN OBRA`);
-      this.promptText.setColor('#46B3FF');
+      this.setPrompt(
+        shared.buildStage > 0
+          ? `PARCELA ${parcel.id} OCUPADA POR ${shared.ownerUsername.toUpperCase()}`
+          : `TERRENO DE ${shared.ownerUsername.toUpperCase()} AUN EN OBRA`,
+        '#46B3FF',
+      );
       return;
     }
 
     if (this.vecindadState.ownedParcelId) {
-      this.promptText.setText('YA TENES OTRA PARCELA EN LA VECINDAD');
-      this.promptText.setColor('#FFB36A');
+      this.setPrompt('YA TENES OTRA PARCELA EN LA VECINDAD', '#FFB36A');
       return;
     }
 
-    this.promptText.setText(`E COMPRAR PARCELA ${parcel.id} - ${parcel.cost} TENKS`);
-    this.promptText.setColor('#F5C842');
+    this.setPrompt(`E COMPRAR PARCELA ${parcel.id} - ${parcel.cost} TENKS`, '#F5C842');
   }
 
   private handlePrimaryAction() {
@@ -1910,6 +1862,8 @@ export class VecindadScene extends Phaser.Scene {
   }
 
   private handleSceneShutdown() {
+    eventBus.emit(EVENTS.VECINDAD_SCENE_ACTIVE, false);
+
     // Destroy any active fishing minigame so its SPACE key listener doesn't leak
     if (this.activeFishingMinigame) {
       this.activeFishingMinigame.destroy();

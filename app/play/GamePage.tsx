@@ -58,6 +58,7 @@ const VirtualJoystick = dynamic(() => import('@/app/components/VirtualJoystick')
 const SkillTreeOverlay = dynamic(() => import('@/app/components/SkillTreeOverlay'), { ssr: false });
 const CasinoOverlay = dynamic(() => import('@/app/components/CasinoOverlay'), { ssr: false });
 const ZombiesHUD = dynamic(() => import('@/app/components/ZombiesHUD'), { ssr: false });
+const VecindadHUD = dynamic(() => import('@/app/components/VecindadHUD'), { ssr: false });
 const GunShopOverlay = dynamic(() => import('@/app/components/GunShopOverlay'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
@@ -2453,6 +2454,9 @@ export default function PlayPage() {
 
         {/* Zombies HUD — shown only when ZombiesScene is active */}
         {zombiesHudActive && <ZombiesHUD />}
+
+        {/* Vecindad HUD — shown only when VecindadScene is active */}
+        <VecindadHUD />
 
         {/* Quest Tracker — always mounted when in-game, self-manages visibility */}
         {activeScene !== 'CreatorScene' && (
