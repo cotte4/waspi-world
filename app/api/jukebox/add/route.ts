@@ -10,6 +10,7 @@ import { appendTenksTransaction } from '@/src/lib/commercePersistence';
 const MAX_SONGS_PER_PLAYER = 3;
 const COST_CATALOG = 100;
 const COST_OPEN = 150;
+const STALE_QUEUE_TTL_MINUTES = 45;
 
 type AddSongBody = {
   videoId: string;
@@ -42,6 +43,19 @@ export async function POST(request: NextRequest) {
   const admin = createSupabaseAdminClient();
   if (!admin) {
     return NextResponse.json({ error: 'Admin client unavailable.' }, { status: 500 });
+  }
+
+  // Auto-heal legacy/stuck entries that were never transitioned out of "queued".
+  // This avoids permanent "queue full" for players after old jukebox host issues.
+  const staleBeforeIso = new Date(Date.now() - STALE_QUEUE_TTL_MINUTES * 60_000).toISOString();
+  const { error: staleCleanupError } = await admin
+    .from('jukebox_queue')
+    .update({ status: 'skipped', skipped_at: new Date().toISOString() })
+    .eq('added_by', user.id)
+    .eq('status', 'queued')
+    .lt('created_at', staleBeforeIso);
+  if (staleCleanupError) {
+    console.warn('POST /api/jukebox/add stale queue cleanup error:', staleCleanupError.message);
   }
 
   // --- Validate player queue limit ---

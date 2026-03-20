@@ -51,11 +51,11 @@ type BroadcastNowPlaying = {
 };
 type BroadcastSongEnded = {
   type: 'JUKEBOX_SONG_ENDED';
-  payload: { videoId: string };
+  payload: { videoId: string; queueId?: string };
 };
 type BroadcastSkipped = {
   type: 'JUKEBOX_SKIPPED';
-  payload: { videoId: string; skipVotes: number };
+  payload: { videoId: string; queueId?: string; skipVotes: number };
 };
 type BroadcastReaction = {
   type: 'JUKEBOX_REACTION';
@@ -155,6 +155,7 @@ class JukeboxSystem {
             playerName,
             joinedAt: Date.now(),
           } satisfies JukeboxPresenceEntry);
+          await this.syncStateFromServer();
         }
       });
   }
@@ -275,9 +276,10 @@ class JukeboxSystem {
       if (data.skipped) {
         this.broadcastRaw('JUKEBOX_SKIPPED', {
           videoId: current.videoId,
+          queueId: current.queueId,
           skipVotes: data.voteCount ?? 0,
         });
-        this.handleSkipped(current.videoId);
+        this.handleSkipped(current.videoId, current.queueId);
       }
 
       eventBus.emit(EVENTS.JUKEBOX_SKIP_REQUESTED, {
@@ -322,7 +324,10 @@ class JukeboxSystem {
   onSongEnded() {
     if (!this.state.nowPlaying) return;
     const ended = this.state.nowPlaying;
-    this.broadcastRaw('JUKEBOX_SONG_ENDED', { videoId: ended.videoId });
+    if (ended.queueId) {
+      void this.syncQueueEntryStatus(ended.queueId, 'skipped');
+    }
+    this.broadcastRaw('JUKEBOX_SONG_ENDED', { videoId: ended.videoId, queueId: ended.queueId });
     this.state.nowPlaying = null;
     this.state.skipVotesForCurrent = 0;
     this.onSongEndedCallback?.();
@@ -358,6 +363,48 @@ class JukeboxSystem {
   private broadcastRaw(type: string, payload: unknown) {
     if (!this.channel) return;
     this.channel.send({ type: 'broadcast', event: type, payload }).catch(() => {/* silent */});
+  }
+
+  private songMatches(a: Pick<JukeboxSong, 'videoId' | 'queueId'>, b: Pick<JukeboxSong, 'videoId' | 'queueId'>): boolean {
+    if (a.queueId && b.queueId) return a.queueId === b.queueId;
+    return a.videoId === b.videoId;
+  }
+
+  private async syncStateFromServer() {
+    try {
+      const authH = await getAuthHeaders();
+      const res = await fetch('/api/jukebox/status', {
+        method: 'GET',
+        headers: { ...authH },
+      });
+      if (!res.ok) return;
+      const data = await res.json() as {
+        ok?: boolean;
+        queue?: JukeboxSong[];
+        nowPlaying?: JukeboxSong | null;
+      };
+      if (!data.ok) return;
+      this.state.queue = Array.isArray(data.queue) ? data.queue : [];
+      this.state.nowPlaying = data.nowPlaying ?? null;
+      this.state.skipVotesForCurrent = 0;
+      eventBus.emit(EVENTS.JUKEBOX_STATE_UPDATED, this.getState());
+      this.checkAndAdvanceQueue();
+    } catch (err) {
+      console.warn('JukeboxSystem.syncStateFromServer error:', err);
+    }
+  }
+
+  private async syncQueueEntryStatus(queueId: string, status: 'playing' | 'skipped') {
+    try {
+      const authH = await getAuthHeaders();
+      await fetch('/api/jukebox/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authH },
+        body: JSON.stringify({ queueId, status }),
+      });
+    } catch (err) {
+      console.warn('JukeboxSystem.syncQueueEntryStatus error:', err);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -421,14 +468,25 @@ class JukeboxSystem {
     }
 
     this.state.nowPlaying = next;
-    this.state.queue = this.state.queue.filter((s) => s !== next);
+    this.state.queue = this.state.queue.filter((s) => !this.songMatches(s, next));
     this.state.skipVotesForCurrent = 0;
+    if (next.queueId) {
+      void this.syncQueueEntryStatus(next.queueId, 'playing');
+    }
     this.broadcastRaw('JUKEBOX_NOW_PLAYING', { ...next, startedAt: Date.now() });
     eventBus.emit(EVENTS.JUKEBOX_STATE_UPDATED, this.getState());
   }
 
-  private handleSkipped(videoId: string) {
-    if (this.state.nowPlaying?.videoId === videoId) {
+  private handleSkipped(videoId: string, queueId?: string) {
+    const current = this.state.nowPlaying;
+    if (!current) return;
+    const matches = queueId
+      ? current.queueId === queueId
+      : current.videoId === videoId;
+    if (matches) {
+      if (current.queueId) {
+        void this.syncQueueEntryStatus(current.queueId, 'skipped');
+      }
       this.state.nowPlaying = null;
       this.state.skipVotesForCurrent = 0;
       this.checkAndAdvanceQueue();
@@ -443,7 +501,7 @@ class JukeboxSystem {
   private handleBroadcast(msg: JukeboxBroadcast) {
     switch (msg.type) {
       case 'JUKEBOX_SONG_ADDED':
-        if (!this.state.queue.find((s) => s.videoId === msg.payload.videoId)) {
+        if (!this.state.queue.find((s) => this.songMatches(s, msg.payload))) {
           this.state.queue.push(msg.payload);
         }
         this.checkAndAdvanceQueue();
@@ -458,18 +516,23 @@ class JukeboxSystem {
         this.state.nowPlaying = msg.payload;
         this.state.isFallback = false;
         this.state.skipVotesForCurrent = 0;
-        this.state.queue = this.state.queue.filter((s) => s.videoId !== msg.payload.videoId);
+        this.state.queue = this.state.queue.filter((s) => !this.songMatches(s, msg.payload));
         break;
 
       case 'JUKEBOX_SONG_ENDED':
-        if (this.state.nowPlaying?.videoId === msg.payload.videoId) {
+        if (
+          this.state.nowPlaying &&
+          (msg.payload.queueId
+            ? this.state.nowPlaying.queueId === msg.payload.queueId
+            : this.state.nowPlaying.videoId === msg.payload.videoId)
+        ) {
           this.state.nowPlaying = null;
           this.state.skipVotesForCurrent = 0;
         }
         break;
 
       case 'JUKEBOX_SKIPPED':
-        this.handleSkipped(msg.payload.videoId);
+        this.handleSkipped(msg.payload.videoId, msg.payload.queueId);
         return; // state already updated inside handleSkipped
 
       case 'JUKEBOX_SKIP_VOTE':
