@@ -33,6 +33,9 @@ export class BasketMinigame extends Phaser.Scene {
   private isDragging = false;
   private dragStartX = 0;
   private dragStartY = 0;
+  private pointerDownX = 0;
+  private pointerDownY = 0;
+  private dragFromBallAnchor = false;
 
   // Reward
   private grantedRewardTenks = 0;
@@ -73,6 +76,9 @@ export class BasketMinigame extends Phaser.Scene {
     this.goalScoredThisShot = false;
     this.touchedRimThisShot = false;
     this.isDragging = false;
+    this.pointerDownX = 0;
+    this.pointerDownY = 0;
+    this.dragFromBallAnchor = false;
     this.grantedRewardTenks = 0;
     this.rewardPending = false;
     this.rewardResolved = false;
@@ -260,7 +266,7 @@ export class BasketMinigame extends Phaser.Scene {
   private buildHud() {
     const { width, height } = this.scale;
 
-    this.hintText = this.add.text(width / 2, height - 22, 'ARROJA - DRAG & SUELTA  |  ESC SALIR', {
+    this.hintText = this.add.text(width / 2, height - 22, 'ARROJA - ARRASTRA Y SUELTA (ABAJO O ARRIBA)  |  ESC SALIR', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#555566',
@@ -294,15 +300,24 @@ export class BasketMinigame extends Phaser.Scene {
   private onPointerDown(pointer: Phaser.Input.Pointer) {
     if (this.phase !== 'aiming' || this.isFinished) return;
 
+    this.pointerDownX = pointer.x;
+    this.pointerDownY = pointer.y;
     const dx = pointer.x - this.ball.x;
     const dy = pointer.y - this.ball.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
-    if (dist <= 40) {
-      this.isDragging = true;
+    this.isDragging = true;
+
+    if (dist <= 90) {
       this.dragStartX = pointer.x;
       this.dragStartY = pointer.y;
+      this.dragFromBallAnchor = false;
+      return;
     }
+
+    this.dragStartX = this.ball.x;
+    this.dragStartY = this.ball.y;
+    this.dragFromBallAnchor = true;
   }
 
   private onPointerMove(pointer: Phaser.Input.Pointer) {
@@ -314,50 +329,63 @@ export class BasketMinigame extends Phaser.Scene {
     if (!this.isDragging || this.phase !== 'aiming' || this.isFinished) return;
     this.isDragging = false;
     this.aimGuide.clear();
-
+    const startedFromBallAnchor = this.dragFromBallAnchor;
+    this.dragFromBallAnchor = false;
+    if (startedFromBallAnchor) {
+      const moved = Phaser.Math.Distance.Between(this.pointerDownX, this.pointerDownY, pointer.x, pointer.y);
+      if (moved < 18) return;
+    }
     const rawDx = this.dragStartX - pointer.x;
     const rawDy = this.dragStartY - pointer.y;
     const dragDist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
-
-    // Must be mostly upward (rawDy > 0 means drag was downward which launches upward)
-    if (rawDy < 20) {
-      // Not an upward shot — ignore
-      return;
+    if (dragDist < 12) return;
+    if (Math.abs(rawDy) < 10) return;
+    let vx = 0;
+    let vy = 0;
+    if (rawDy > 0) {
+      const clampedDist = Math.min(dragDist, MAX_FORCE);
+      const scale = dragDist > 0 ? clampedDist / dragDist : 1;
+      vx = Phaser.Math.Clamp(rawDx * VEL_FACTOR * scale, -MAX_VEL_X, MAX_VEL_X);
+      vy = Math.max(-(rawDy * VEL_FACTOR * scale), MIN_VEL_Y);
+    } else {
+      const flickDx = pointer.x - this.dragStartX;
+      const flickDy = this.dragStartY - pointer.y;
+      const flickDist = Math.sqrt(flickDx * flickDx + flickDy * flickDy);
+      const flickClamped = Math.min(flickDist, MAX_FORCE);
+      const flickScale = flickDist > 0 ? flickClamped / flickDist : 1;
+      vx = Phaser.Math.Clamp(flickDx * VEL_FACTOR * flickScale, -MAX_VEL_X, MAX_VEL_X);
+      vy = Math.max(-(flickDy * VEL_FACTOR * flickScale), MIN_VEL_Y);
     }
-
-    // Cap drag distance
-    const clampedDist = Math.min(dragDist, MAX_FORCE);
-    const scale = dragDist > 0 ? clampedDist / dragDist : 1;
-
-    const vx = Phaser.Math.Clamp(rawDx * VEL_FACTOR * scale, -MAX_VEL_X, MAX_VEL_X);
-    // vy: drag downward (rawDy > 0) launches ball upward (negative vy)
-    const vy = Math.max(-(rawDy * VEL_FACTOR * scale), MIN_VEL_Y);
-
     this.launchBall(vx, vy);
   }
-
-  // ── Aim guide ───────────────────────────────────────────────────────────
-
+  // Aim guide
   private drawAimGuide(pointerX: number, pointerY: number) {
     this.aimGuide.clear();
     if (this.phase !== 'aiming') return;
-
     const rawDx = this.dragStartX - pointerX;
     const rawDy = this.dragStartY - pointerY;
     const dragDist = Math.sqrt(rawDx * rawDx + rawDy * rawDy);
-
-    if (rawDy < 10 || dragDist < 5) return; // not upward, skip
-
-    const clampedDist = Math.min(dragDist, MAX_FORCE);
-    const scale = dragDist > 0 ? clampedDist / dragDist : 1;
-
-    const vx = rawDx * VEL_FACTOR * scale;
-    const rawVy = -(rawDy * VEL_FACTOR * scale);
+    if (Math.abs(rawDy) < 10 || dragDist < 5) return;
+    let vx = 0;
+    let rawVy = 0;
+    if (rawDy > 0) {
+      const clampedDist = Math.min(dragDist, MAX_FORCE);
+      const scale = dragDist > 0 ? clampedDist / dragDist : 1;
+      vx = rawDx * VEL_FACTOR * scale;
+      rawVy = -(rawDy * VEL_FACTOR * scale);
+    } else {
+      const flickDx = pointerX - this.dragStartX;
+      const flickDy = this.dragStartY - pointerY;
+      const flickDist = Math.sqrt(flickDx * flickDx + flickDy * flickDy);
+      const flickClamped = Math.min(flickDist, MAX_FORCE);
+      const flickScale = flickDist > 0 ? flickClamped / flickDist : 1;
+      vx = flickDx * VEL_FACTOR * flickScale;
+      rawVy = -(flickDy * VEL_FACTOR * flickScale);
+    }
+    vx = Phaser.Math.Clamp(vx, -MAX_VEL_X, MAX_VEL_X);
     const vy = Math.max(rawVy, MIN_VEL_Y);
-
     const bx = this.ball.x;
     const by = this.ball.y;
-
     this.aimGuide.fillStyle(0x46B3FF, 0.7);
     for (let i = 1; i <= 8; i++) {
       const t = i * 0.05;
@@ -369,9 +397,7 @@ export class BasketMinigame extends Phaser.Scene {
       this.aimGuide.fillCircle(px, py, radius);
     }
   }
-
-  // ── Ball launch ─────────────────────────────────────────────────────────
-
+  // Ball launch
   private launchBall(vx: number, vy: number) {
     if (this.phase !== 'aiming') return;
     this.phase = 'flying';

@@ -4,8 +4,6 @@ import { clearGlobalBgm } from './AudioManager';
 import { clearVirtualJoystickState } from './ControlSettings';
 
 const transitioningScenes = new WeakSet<Phaser.Scene>();
-let lastTransitionTime = 0;
-const TRANSITION_THROTTLE_MS = 300;
 
 export function announceScene(scene: Phaser.Scene) {
   // transitionToScene() disables input during fade-out; ensure each new scene
@@ -102,15 +100,9 @@ export function transitionToScene(
   targetKey: string,
   data: Record<string, unknown> = {},
   duration = 250,
-  options: TransitionToSceneOptions = {},
+  _options: TransitionToSceneOptions = {},
 ): boolean {
-  const now = Date.now();
-  const bypassThrottle = options.bypassThrottle === true;
-  if (!bypassThrottle && now - lastTransitionTime < TRANSITION_THROTTLE_MS) {
-    console.warn('[Waspi] transitionToScene throttled');
-    return false;
-  }
-  lastTransitionTime = now;
+  void _options;
   if (transitioningScenes.has(scene)) return false;
   transitioningScenes.add(scene);
 

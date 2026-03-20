@@ -408,6 +408,15 @@ export default class DinoRunScene extends Phaser.Scene {
   }
 
   private updateRunner(delta: number): void {
+    // Keep a fixed floor while grounded (no static collider in this minigame).
+    if (this.isOnGround) {
+      const groundedY = this.isDucking ? GROUND_Y - 8 : GROUND_Y - 16;
+      if (this.runner.y !== groundedY) this.runner.setY(groundedY);
+      if (this.runnerBody.velocity.y !== 0) this.runnerBody.setVelocityY(0);
+      this.runnerBody.setGravityY(1800);
+      return;
+    }
+
     // Landing detection
     if (!this.isOnGround && this.runnerBody.velocity.y >= 0) {
       const landingY = this.isDucking ? GROUND_Y - 8 : GROUND_Y - 16;

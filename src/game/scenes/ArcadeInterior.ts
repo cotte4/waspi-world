@@ -4,7 +4,7 @@ import { BUILDINGS, COLORS, SAFE_PLAZA_RETURN, WORLD, ZONES } from '../config/co
 import { eventBus, EVENTS } from '../config/eventBus';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
 import { attachGlobalBgm, clearGlobalBgm, detachGlobalBgmIfMatch } from '../systems/AudioManager';
-import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToWorldScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene, transitionToWorldScene } from '../systems/SceneUi';
 import { resolveArcadeWorldExit } from '../systems/worldReturnSpawn';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { SceneControls } from '../systems/SceneControls';
@@ -614,52 +614,37 @@ export class ArcadeInterior extends Phaser.Scene {
 
   private startBasket() {
     if (this.inTransition) return;
-    this.inTransition = true;
     this.flashMessage(this.scale.width / 2, this.scale.height / 2 + 52, 'ENTRANDO A BASKET', '#46B3FF');
-    this.cameras.main.fadeOut(250, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('BasketMinigame');
-    });
+    const ok = transitionToScene(this, 'BasketMinigame');
+    if (ok) this.inTransition = true;
   }
 
   private startPenalty() {
     if (this.inTransition) return;
-    this.inTransition = true;
     this.flashMessage(this.scale.width / 2, this.scale.height / 2 + 52, 'ENTRANDO A PENALES', '#39FF14');
-    this.cameras.main.fadeOut(250, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('PenaltyMinigame');
-    });
+    const ok = transitionToScene(this, 'PenaltyMinigame');
+    if (ok) this.inTransition = true;
   }
 
   private startDarts() {
     if (this.inTransition) return;
-    this.inTransition = true;
     this.flashMessage(this.scale.width / 2, this.scale.height / 2 + 52, 'ENTRANDO A DARDOS', '#FF006E');
-    this.cameras.main.fadeOut(250, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('DartsMinigame');
-    });
+    const ok = transitionToScene(this, 'DartsMinigame');
+    if (ok) this.inTransition = true;
   }
 
   private startFlappy() {
     if (this.inTransition) return;
-    this.inTransition = true;
     this.flashMessage(this.scale.width / 2, this.scale.height / 2 + 52, 'ENTRANDO A FLAPPY WASPI', '#F5C842');
-    this.cameras.main.fadeOut(250, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('FlappyWaspiScene');
-    });
+    const ok = transitionToScene(this, 'FlappyWaspiScene');
+    if (ok) this.inTransition = true;
   }
 
   private startDino() {
     if (this.inTransition) return;
-    this.inTransition = true;
     this.flashMessage(this.scale.width / 2, this.scale.height / 2 + 52, 'ENTRANDO A DINO RUN', '#39FF14');
-    this.cameras.main.fadeOut(250, 0, 0, 0);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
-      this.scene.start('DinoRunScene');
-    });
+    const ok = transitionToScene(this, 'DinoRunScene');
+    if (ok) this.inTransition = true;
   }
 
   private exitToWorld() {
