@@ -174,50 +174,41 @@ export default function QuestTracker({ isAuthenticated, isMobile }: QuestTracker
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fetchingRef = useRef(false);
 
   const completedCount = quests.filter(q => q.completed).length;
   const totalCount = quests.length;
 
   const fetchQuests = useCallback(async () => {
+    // Guard against concurrent fetches (React Strict Mode double-effect)
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
     setLoading(true);
     setError(false);
     try {
       const authH = await getAuthHeaders();
       const res = await fetch('/api/quests/daily', { headers: authH });
       if (!res.ok) {
-        if (res.status === 401) {
-          // Not authenticated — fetch without auth for preview (progress = 0)
-          const previewRes = await fetch('/api/quests/daily');
-          if (previewRes.ok) {
-            const data: DailyQuest[] = await previewRes.json();
-            setQuests(data);
-          } else {
-            setQuests([]);
-          }
-        } else {
-          setQuests([]);
-          setError(true);
-        }
+        // 401 = not authenticated; API always requires auth so no preview fetch needed
+        setQuests([]);
+        if (res.status !== 401) setError(true);
       } else {
-        const data: DailyQuest[] = await res.json();
-        setQuests(data);
+        const json = await res.json() as { quests?: DailyQuest[] };
+        setQuests(json.quests ?? []);
       }
     } catch {
       setQuests([]);
       setError(true);
     } finally {
       setLoading(false);
+      fetchingRef.current = false;
     }
   }, []);
 
-  // Initial fetch
+  // Initial fetch + periodic re-fetch (single effect)
   useEffect(() => {
-    fetchQuests();
-  }, [fetchQuests]);
-
-  // Periodic re-fetch
-  useEffect(() => {
-    intervalRef.current = setInterval(fetchQuests, REFETCH_INTERVAL_MS);
+    void fetchQuests();
+    intervalRef.current = setInterval(() => void fetchQuests(), REFETCH_INTERVAL_MS);
     return () => {
       if (intervalRef.current !== null) clearInterval(intervalRef.current);
     };
@@ -351,7 +342,7 @@ export default function QuestTracker({ isAuthenticated, isMobile }: QuestTracker
                   textAlign: 'center',
                 }}
               >
-                Vuelve mañana
+                {isAuthenticated ? 'Vuelve mañana' : 'Iniciá sesión para ver tus misiones'}
               </div>
             ) : (
               quests.map(q => <QuestRow key={q.id} quest={q} />)
