@@ -57,11 +57,7 @@ export class BasketMinigame extends Phaser.Scene {
   private shadow!: Phaser.GameObjects.Ellipse;
   private aimGuide!: Phaser.GameObjects.Graphics;
   private netGraphics!: Phaser.GameObjects.Graphics;
-  private shotText!: Phaser.GameObjects.Text;
-  private streakText!: Phaser.GameObjects.Text;
-  private scoreText!: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
-  private resultLabel!: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'BasketMinigame' });
@@ -101,6 +97,7 @@ export class BasketMinigame extends Phaser.Scene {
       if (this.input.keyboard) this.input.keyboard.enabled = true;
     });
 
+    eventBus.emit(EVENTS.BASKET_SCENE_ACTIVE, true);
     this.buildBackground();
     this.buildHoop();
     this.buildBall();
@@ -263,57 +260,21 @@ export class BasketMinigame extends Phaser.Scene {
   private buildHud() {
     const { width, height } = this.scale;
 
-    // Top-left panel
-    const hudBg = this.add.graphics().setDepth(99);
-    hudBg.fillStyle(0x000000, 0.5);
-    hudBg.fillRoundedRect(10, 10, 160, 60, 4);
-
-    this.shotText = this.add.text(20, 20, 'TIRO 0/10', {
-      fontSize: '9px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FFFFFF',
-    }).setDepth(100);
-
-    this.streakText = this.add.text(20, 40, 'RACHA 0', {
-      fontSize: '9px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-    }).setDepth(100);
-
-    // Top-right score panel
-    const scoreBg = this.add.graphics().setDepth(99);
-    scoreBg.fillStyle(0x000000, 0.5);
-    scoreBg.fillRoundedRect(width - 150, 10, 140, 60, 4);
-
-    this.scoreText = this.add.text(width - 20, 20, 'SCORE: 0', {
-      fontSize: '9px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-      align: 'right',
-    }).setOrigin(1, 0).setDepth(100);
-
-    // Bottom hint
     this.hintText = this.add.text(width / 2, height - 22, 'ARROJA - DRAG & SUELTA  |  ESC SALIR', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#555566',
     }).setOrigin(0.5).setDepth(100);
-
-    // Result label (center screen)
-    this.resultLabel = this.add.text(width / 2, 300, '', {
-      fontSize: '18px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FFFFFF',
-      stroke: '#000000',
-      strokeThickness: 4,
-    }).setOrigin(0.5).setAlpha(0).setDepth(200);
   }
 
   private refreshHud() {
     const currentShot = Math.min(this.shotsTaken + 1, TOTAL_SHOTS);
-    this.shotText.setText(`TIRO ${currentShot}/10`);
-    this.streakText.setText(`RACHA ${this.streak}`);
-    this.scoreText.setText(`SCORE: ${this.totalScore}`);
+    eventBus.emit(EVENTS.BASKET_HUD_UPDATE, {
+      score: this.totalScore,
+      streak: this.streak,
+      shot: currentShot,
+      totalShots: TOTAL_SHOTS,
+    });
   }
 
   // ── Input ───────────────────────────────────────────────────────────────
@@ -603,16 +564,8 @@ export class BasketMinigame extends Phaser.Scene {
     });
   }
 
-  private showResultLabel(text: string, color: string) {
-    const { width } = this.scale;
-    this.resultLabel.setText(text).setColor(color).setAlpha(1).setX(width / 2).setY(310);
-    this.tweens.add({
-      targets: this.resultLabel,
-      y: 295,
-      alpha: 0,
-      duration: 700,
-      ease: 'Sine.easeOut',
-    });
+  private showResultLabel(_text: string, _color: string) {
+    // Result feedback is handled via React HUD (BasketHUD) through eventBus emissions.
   }
 
   private animateNet(made: boolean) {
@@ -685,29 +638,14 @@ export class BasketMinigame extends Phaser.Scene {
       makes,
     });
 
+    eventBus.emit(EVENTS.BASKET_RESULT, {
+      score: this.totalScore,
+      made: makes,
+      attempts: TOTAL_SHOTS,
+    });
+
     const { width } = this.scale;
     this.showFloatingTenks(tenksReward, width / 2, 250);
-
-    const finalLabel = this.add.text(width / 2, 200, [
-      `FINAL: ${this.totalScore} PTS`,
-      makes === TOTAL_SHOTS ? 'PARTIDA PERFECTA!' : `${makes}/${TOTAL_SHOTS} CANASTAS`,
-    ], {
-      fontSize: '13px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-      stroke: '#000000',
-      strokeThickness: 4,
-      align: 'center',
-      lineSpacing: 10,
-    }).setOrigin(0.5).setAlpha(0).setDepth(300);
-
-    this.tweens.add({
-      targets: finalLabel,
-      alpha: 1,
-      y: 195,
-      duration: 300,
-      ease: 'Back.easeOut',
-    });
 
     this.hintText.setText('GUARDANDO RESULTADO...');
     this.hintText.setColor('#46B3FF');
@@ -933,6 +871,7 @@ export class BasketMinigame extends Phaser.Scene {
   // ── Cleanup ─────────────────────────────────────────────────────────────
 
   private handleShutdown() {
+    eventBus.emit(EVENTS.BASKET_SCENE_ACTIVE, false);
     this.input.off('pointerdown', this.onPointerDown, this);
     this.input.off('pointermove', this.onPointerMove, this);
     this.input.off('pointerup', this.onPointerUp, this);

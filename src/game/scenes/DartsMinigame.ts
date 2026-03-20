@@ -25,7 +25,6 @@ export class DartsMinigame extends Phaser.Scene {
 
   private boardG!: Phaser.GameObjects.Graphics;
   private cursor!: Phaser.GameObjects.Arc;
-  private hud!: Phaser.GameObjects.Text;
   private footer!: Phaser.GameObjects.Text;
   private resultLabel!: Phaser.GameObjects.Text;
   private controls!: SceneControls;
@@ -49,6 +48,7 @@ export class DartsMinigame extends Phaser.Scene {
     this.controls = new SceneControls(this);
     announceScene(this);
     this.input.enabled = true;
+    eventBus.emit(EVENTS.DARTS_SCENE_ACTIVE, true);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleShutdown, this);
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
       this.isFinished = false;
@@ -77,19 +77,9 @@ export class DartsMinigame extends Phaser.Scene {
       color: '#F5C842',
     }).setOrigin(0.5);
 
-    const hudBg = this.add.graphics();
-    hudBg.fillStyle(0x000000, 0.5);
-    hudBg.fillRoundedRect(8, 8, 160, 52, 4);
-
     this.boardG = this.add.graphics();
     this.drawBoard();
     this.cursor = this.add.circle(this.boardX, this.boardY, 6, 0xF5C842, 1).setStrokeStyle(2, 0x000000, 0.45);
-    this.hud = this.add.text(16, 16, '', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#ffffff',
-      lineSpacing: 6,
-    });
     this.footer = this.add.text(width / 2, height - 24, 'SPACE/CLICK TIRAR - ESC SALIR', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
@@ -259,12 +249,13 @@ export class DartsMinigame extends Phaser.Scene {
   private refreshHud() {
     const round = Math.min(3, Math.floor(this.thrown / 3) + 1);
     const dartsInRound = this.thrown % 3;
-    this.hud.setText([
-      `SCORE ${this.score}`,
-      `RONDA ${round}/3`,
-      `DARDOS ${dartsInRound}/3`,
-      `BULL ${this.bullseyes}`,
-    ]);
+    eventBus.emit(EVENTS.DARTS_HUD_UPDATE, {
+      score: this.score,
+      turn: this.thrown,
+      round,
+      dartsInRound,
+      bullseyes: this.bullseyes,
+    });
   }
 
   private finishAndExit(reward: number) {
@@ -274,6 +265,11 @@ export class DartsMinigame extends Phaser.Scene {
     if (reward > 0) {
       addTenks(reward, 'darts_reward');
     }
+    eventBus.emit(EVENTS.DARTS_RESULT, {
+      score: this.score,
+      bullseyes: this.bullseyes,
+      tenksEarned: reward,
+    });
     transitionToScene(this, 'ArcadeInterior', {
       dartsCooldownMs: 1200,
       dartsReward: {
@@ -285,6 +281,7 @@ export class DartsMinigame extends Phaser.Scene {
   }
 
   private handleShutdown() {
+    eventBus.emit(EVENTS.DARTS_SCENE_ACTIVE, false);
     this.input.off('pointerdown', this.throwDart, this);
   }
 }

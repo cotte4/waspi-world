@@ -33,7 +33,6 @@ export class PenaltyMinigame extends Phaser.Scene {
   private ball!: Phaser.GameObjects.Arc;
   private aimMarker!: Phaser.GameObjects.Arc;
   private aimGuide!: Phaser.GameObjects.Graphics;
-  private hud!: Phaser.GameObjects.Text;
   private footer!: Phaser.GameObjects.Text;
   private resultLabel!: Phaser.GameObjects.Text;
   private summaryLabel!: Phaser.GameObjects.Text;
@@ -78,6 +77,8 @@ export class PenaltyMinigame extends Phaser.Scene {
     this.ballStartY = height - 110;
     this.goalieTargetX = this.goalX;
     this.aimX = this.goalX;
+
+    eventBus.emit(EVENTS.PENALTY_SCENE_ACTIVE, true);
 
     this.cameras.main.setBackgroundColor('#08111a');
 
@@ -132,17 +133,6 @@ export class PenaltyMinigame extends Phaser.Scene {
       fontFamily: '"Press Start 2P", monospace',
       color: '#A0A0B4',
     }).setOrigin(0.5);
-
-    const hudBg = this.add.graphics();
-    hudBg.fillStyle(0x000000, 0.5);
-    hudBg.fillRoundedRect(10, 10, 180, 64, 4);
-
-    this.hud = this.add.text(18, 18, '', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FFFFFF',
-      lineSpacing: 6,
-    });
 
     this.footer = this.add.text(width / 2, height - 30, 'SPACE O CLICK PARA PATEAR - ESC SALIR', {
       fontSize: '8px',
@@ -638,11 +628,12 @@ export class PenaltyMinigame extends Phaser.Scene {
 
   private refreshHud() {
     const remaining = this.maxShots - this.shotsTaken;
-    this.hud.setText([
-      `GOLES ${this.goals}`,
-      `TIROS ${this.shotsTaken}/${this.maxShots}`,
-      `RESTAN ${remaining}`,
-    ]);
+    eventBus.emit(EVENTS.PENALTY_HUD_UPDATE, {
+      goals: this.goals,
+      shotsLeft: remaining,
+      shotsTaken: this.shotsTaken,
+      maxShots: this.maxShots,
+    });
   }
 
   private finishAndExit(won: boolean) {
@@ -667,6 +658,7 @@ export class PenaltyMinigame extends Phaser.Scene {
   }
 
   private handleShutdown() {
+    eventBus.emit(EVENTS.PENALTY_SCENE_ACTIVE, false);
     this.input.off('pointerdown', this.handleShootInput, this);
   }
 }

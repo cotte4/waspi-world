@@ -58,6 +58,9 @@ const VirtualJoystick = dynamic(() => import('@/app/components/VirtualJoystick')
 const SkillTreeOverlay = dynamic(() => import('@/app/components/SkillTreeOverlay'), { ssr: false });
 const CasinoOverlay = dynamic(() => import('@/app/components/CasinoOverlay'), { ssr: false });
 const ZombiesHUD = dynamic(() => import('@/app/components/ZombiesHUD'), { ssr: false });
+const BasketHUD = dynamic(() => import('@/app/components/BasketHUD'), { ssr: false });
+const PenaltyHUD = dynamic(() => import('@/app/components/PenaltyHUD'), { ssr: false });
+const DartsHUD = dynamic(() => import('@/app/components/DartsHUD'), { ssr: false });
 const VecindadHUD = dynamic(() => import('@/app/components/VecindadHUD'), { ssr: false });
 const GunShopOverlay = dynamic(() => import('@/app/components/GunShopOverlay'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
@@ -223,6 +226,9 @@ export default function PlayPage() {
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
   const [skillTreeOpen, setSkillTreeOpen] = useState(false);
   const [zombiesHudActive, setZombiesHudActive] = useState(false);
+  const [basketHudActive, setBasketHudActive] = useState(false);
+  const [penaltyHudActive, setPenaltyHudActive] = useState(false);
+  const [dartsHudActive, setDartsHudActive] = useState(false);
   const [statsData, setStatsData] = useState<PlayerStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
@@ -751,6 +757,18 @@ export default function PlayPage() {
       setZombiesHudActive(payload as boolean);
     });
 
+    const unsubBasketActive = eventBus.on(EVENTS.BASKET_SCENE_ACTIVE, (payload: unknown) => {
+      setBasketHudActive(payload as boolean);
+    });
+
+    const unsubPenaltyActive = eventBus.on(EVENTS.PENALTY_SCENE_ACTIVE, (payload: unknown) => {
+      setPenaltyHudActive(payload as boolean);
+    });
+
+    const unsubDartsActive = eventBus.on(EVENTS.DARTS_SCENE_ACTIVE, (payload: unknown) => {
+      setDartsHudActive(payload as boolean);
+    });
+
     return () => {
       unsubChat();
       unsubInfo();
@@ -773,6 +791,9 @@ export default function PlayPage() {
       unsubFarmAction();
       unsubUiNotice();
       unsubZombiesActive();
+      unsubBasketActive();
+      unsubPenaltyActive();
+      unsubDartsActive();
     };
   }, [applyPlayerState, playUiSfx, playerState, syncPlayerState]);
 
@@ -2454,6 +2475,11 @@ export default function PlayPage() {
 
         {/* Zombies HUD — shown only when ZombiesScene is active */}
         {zombiesHudActive && <ZombiesHUD />}
+
+        {/* Minigame HUDs — shown only when their respective scene is active */}
+        {basketHudActive && <BasketHUD />}
+        {penaltyHudActive && <PenaltyHUD />}
+        {dartsHudActive && <DartsHUD />}
 
         {/* Vecindad HUD — shown only when VecindadScene is active */}
         <VecindadHUD />
