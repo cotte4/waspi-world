@@ -52,6 +52,9 @@ const PlayerActionsOverlay = dynamic(() => import('@/app/components/PlayerAction
 const StatsOverlay = dynamic(() => import('@/app/components/StatsOverlay'), { ssr: false });
 const SettingsOverlay = dynamic(() => import('@/app/components/SettingsOverlay'), { ssr: false });
 const LoginCard = dynamic(() => import('@/app/components/LoginCard'), { ssr: false });
+const LeaderboardOverlay = dynamic(() => import('@/app/components/LeaderboardOverlay'), { ssr: false });
+const QuestTracker = dynamic(() => import('@/app/components/QuestTracker'), { ssr: false });
+const VirtualJoystick = dynamic(() => import('@/app/components/VirtualJoystick'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
 const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
@@ -212,6 +215,7 @@ export default function PlayPage() {
   const [playerActions, setPlayerActions] = useState<PlayerActionsPayload | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false);
   const [statsData, setStatsData] = useState<PlayerStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
@@ -2188,6 +2192,9 @@ export default function PlayPage() {
           {/* Stats */}
           <button onClick={() => void openStats()} className="ww-toolbar-btn" title="Estadísticas">📊</button>
 
+          {/* Leaderboard */}
+          <button onClick={() => setLeaderboardOpen(true)} className="ww-toolbar-btn" title="Leaderboard">🏆</button>
+
           <div className="ww-toolbar-divider" />
 
           {/* Rescue — dormant strip, activates on arm */}
@@ -2400,65 +2407,20 @@ export default function PlayPage() {
           />
         )}
 
-        {joystickVisible && (
-          <div
-            ref={joystickRef}
-            onPointerDown={(event) => {
-              (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
-              updateJoystickFromPoint(event.clientX, event.clientY);
-            }}
-            onPointerMove={(event) => {
-              if ((event.buttons & 1) !== 1 && !joystickUi.active) return;
-              updateJoystickFromPoint(event.clientX, event.clientY);
-            }}
-            onPointerUp={endJoystick}
-            onPointerCancel={endJoystick}
-            onPointerLeave={() => {
-              if (!joystickUi.active) return;
-              endJoystick();
-            }}
-            className="absolute left-4 bottom-16"
-            style={{
-              width: 144,
-              height: 144,
-              borderRadius: '999px',
-              border: '1px solid rgba(255,255,255,0.12)',
-              background: 'radial-gradient(circle at 50% 50%, rgba(70,179,255,0.12), rgba(0,0,0,0.18))',
-              boxShadow: '0 18px 38px rgba(0,0,0,0.35)',
-              touchAction: 'none',
-              zIndex: 25,
-            }}
-          >
-            <div
-              style={{
-                position: 'absolute',
-                left: '50%',
-                top: '50%',
-                width: 56,
-                height: 56,
-                borderRadius: '999px',
-                background: 'rgba(245,200,66,0.32)',
-                border: '1px solid rgba(245,200,66,0.42)',
-                transform: `translate(calc(-50% + ${joystickUi.dx * 34}px), calc(-50% + ${joystickUi.dy * 34}px))`,
-                boxShadow: '0 0 16px rgba(245,200,66,0.24)',
-              }}
-            />
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontFamily: '"Press Start 2P", monospace',
-                fontSize: '8px',
-                color: 'rgba(255,255,255,0.42)',
-                pointerEvents: 'none',
-              }}
-            >
-              MOVE
-            </div>
-          </div>
+        <VirtualJoystick visible={joystickVisible} />
+
+        {/* Leaderboard overlay */}
+        {leaderboardOpen && (
+          <LeaderboardOverlay
+            isMobile={isMobile}
+            currentPlayerId={undefined}
+            onClose={() => setLeaderboardOpen(false)}
+          />
+        )}
+
+        {/* Quest Tracker — always mounted when in-game, self-manages visibility */}
+        {activeScene !== 'CreatorScene' && (
+          <QuestTracker isAuthenticated={isAuthenticated} isMobile={isMobile} />
         )}
 
         {showOnboarding && (

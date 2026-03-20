@@ -87,4 +87,8 @@ export const EVENTS = {
   CREATOR_COMMIT: 'creator:commit',
   /** Phaser → Creator overlay: initial config. Payload: { config: Required<AvatarConfig> } */
   CREATOR_READY: 'creator:ready',
+  /** Phaser → QuestTracker: a quest was completed or progress changed, force re-fetch. */
+  QUEST_TRACKER_REFRESH: 'quest:tracker:refresh',
+  /** Open the Leaderboard overlay. No payload required. */
+  LEADERBOARD_OPEN: 'leaderboard:open',
 } as const;
