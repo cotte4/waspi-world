@@ -105,4 +105,28 @@ export const EVENTS = {
   ZOMBIES_GAME_OVER: 'zombies:game_over',
   /** Zombies scene active/inactive. Payload: boolean */
   ZOMBIES_SCENE_ACTIVE: 'zombies:active',
+  /** Open the Gun Shop overlay. No payload required. */
+  GUN_SHOP_OPEN: 'gunshop:open',
+  /** Close the Gun Shop overlay. No payload required. */
+  GUN_SHOP_CLOSE: 'gunshop:close',
+  /** VecindadScene HUD data update. Payload: VecindadHudPayload */
+  VECINDAD_HUD_UPDATE: 'vecindad:hud_update',
+  /** VecindadScene active/inactive. Payload: boolean */
+  VECINDAD_SCENE_ACTIVE: 'vecindad:active',
+  /** Basket HUD update. Payload: { score, streak, shot, totalShots } */
+  BASKET_HUD_UPDATE: 'basket:hud_update',
+  /** Basket scene active/inactive. Payload: boolean */
+  BASKET_SCENE_ACTIVE: 'basket:active',
+  /** Basket final result. Payload: { score, made, attempts } */
+  BASKET_RESULT: 'basket:result',
+  /** Penalty HUD update. Payload: { goals, shotsLeft, shotsTaken, maxShots } */
+  PENALTY_HUD_UPDATE: 'penalty:hud_update',
+  /** Penalty scene active/inactive. Payload: boolean */
+  PENALTY_SCENE_ACTIVE: 'penalty:active',
+  /** Darts HUD update. Payload: { score, turn, round, dartsInRound, bullseyes } */
+  DARTS_HUD_UPDATE: 'darts:hud_update',
+  /** Darts scene active/inactive. Payload: boolean */
+  DARTS_SCENE_ACTIVE: 'darts:active',
+  /** Darts final result. Payload: { score, bullseyes, tenksEarned } */
+  DARTS_RESULT: 'darts:result',
 } as const;

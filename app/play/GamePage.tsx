@@ -58,6 +58,7 @@ const VirtualJoystick = dynamic(() => import('@/app/components/VirtualJoystick')
 const SkillTreeOverlay = dynamic(() => import('@/app/components/SkillTreeOverlay'), { ssr: false });
 const CasinoOverlay = dynamic(() => import('@/app/components/CasinoOverlay'), { ssr: false });
 const ZombiesHUD = dynamic(() => import('@/app/components/ZombiesHUD'), { ssr: false });
+const GunShopOverlay = dynamic(() => import('@/app/components/GunShopOverlay'), { ssr: false });
 const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
 const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
 const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
@@ -2446,6 +2447,9 @@ export default function PlayPage() {
 
         {/* Casino overlay — self-manages visibility via CASINO_OPEN/CLOSE events */}
         <CasinoOverlay isMobile={isMobile} />
+
+        {/* Gun Shop overlay — self-manages visibility via GUN_SHOP_OPEN/CLOSE events */}
+        <GunShopOverlay isMobile={isMobile} />
 
         {/* Zombies HUD — shown only when ZombiesScene is active */}
         {zombiesHudActive && <ZombiesHUD />}

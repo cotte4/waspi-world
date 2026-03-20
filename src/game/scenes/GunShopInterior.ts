@@ -1,18 +1,11 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { SAFE_PLAZA_RETURN, ZONES } from '../config/constants';
-import { CATALOG, getItem } from '../config/catalog';
 import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToWorldScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
-import { addTenks, getTenksBalance, initTenks } from '../systems/TenksSystem';
-import { ensureItemEquipped, getInventory, ownItem, replaceInventory } from '../systems/InventorySystem';
 import { SceneControls } from '../systems/SceneControls';
-import { createScrollArea } from '../systems/ScrollArea';
-import { supabase, isConfigured } from '../../lib/supabase';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
-
-type CatalogEntry = (typeof CATALOG)[number];
 
 export class GunShopInterior extends Phaser.Scene {
   private static readonly RETURN_X = 2240;
@@ -21,6 +14,7 @@ export class GunShopInterior extends Phaser.Scene {
   private player!: AvatarRenderer;
   private controls!: SceneControls;
   private inTransition = false;
+  private shopOverlayOpen = false;
   private px = 0;
   private py = 0;
   private roomX = 0;
@@ -30,13 +24,13 @@ export class GunShopInterior extends Phaser.Scene {
   private dealerX = 0;
   private dealerY = 0;
   private dealerPrompt?: Phaser.GameObjects.Text;
-  private dealerPanel?: Phaser.GameObjects.Container;
   private room?: InteriorRoom;
   private lastMoveDx = 0;
   private lastMoveDy = 0;
   private lastIsMoving = false;
   private worldExitX!: number;
   private worldExitY!: number;
+  private offGunShopClose?: () => void;
 
   constructor() {
     super({ key: 'GunShopInterior' });
@@ -44,6 +38,7 @@ export class GunShopInterior extends Phaser.Scene {
 
   init(data: Record<string, unknown> = {}) {
     this.inTransition = false;
+    this.shopOverlayOpen = false;
     const w = worldExitFromSceneData(data, GunShopInterior.RETURN_X, GunShopInterior.RETURN_Y);
     this.worldExitX = w.x;
     this.worldExitY = w.y;
@@ -58,6 +53,7 @@ export class GunShopInterior extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
       this.inTransition = false;
+      this.shopOverlayOpen = false;
       this.input.enabled = true;
       if (this.input.keyboard) this.input.keyboard.enabled = true;
     });
@@ -93,12 +89,19 @@ export class GunShopInterior extends Phaser.Scene {
     }).setOrigin(0.5);
 
     createBackButton(this, () => {
-      if (this.dealerPanel) {
-        this.closeDealerPanel();
+      if (this.shopOverlayOpen) {
+        this.closeShopOverlay();
         return;
       }
       this.exitToWorld();
     });
+
+    this.offGunShopClose = eventBus.on(EVENTS.GUN_SHOP_CLOSE, () => {
+      this.shopOverlayOpen = false;
+      this.input.enabled = true;
+      if (this.input.keyboard) this.input.keyboard.enabled = true;
+    });
+
     this.cameras.main.fadeIn(250, 0, 0, 0);
   }
 
@@ -106,12 +109,12 @@ export class GunShopInterior extends Phaser.Scene {
     if (this.inTransition) return;
     this.room?.update();
 
-    if (this.dealerPanel) {
+    if (this.shopOverlayOpen) {
       this.lastMoveDx = 0;
       this.lastMoveDy = 0;
       this.lastIsMoving = false;
       if (this.controls.isActionJustDown('back')) {
-        this.closeDealerPanel();
+        this.closeShopOverlay();
       }
       return;
     }
@@ -125,7 +128,7 @@ export class GunShopInterior extends Phaser.Scene {
       return;
     }
     if (nearDealer && this.controls.isActionJustDown('interact')) {
-      this.openDealerPanel();
+      this.openShopOverlay();
     }
   }
 
@@ -136,7 +139,6 @@ export class GunShopInterior extends Phaser.Scene {
     g.fillStyle(0x070b16);
     g.fillRect(0, 0, width, height);
 
-    // Subtle blue ambient blooms so the room feels alive.
     g.fillStyle(0x16305a, 0.2);
     g.fillCircle(this.roomX + 120, this.roomY + 40, 120);
     g.fillStyle(0x0f1f3d, 0.16);
@@ -159,7 +161,6 @@ export class GunShopInterior extends Phaser.Scene {
       g.lineBetween(this.roomX + 8, y, this.roomX + this.roomW - 8, y);
     }
 
-    // Thin wall grid for industrial vibe.
     g.lineStyle(1, 0x1f2d4e, 0.28);
     for (let x = this.roomX + 24; x < this.roomX + this.roomW - 20; x += 34) {
       g.lineBetween(x, this.roomY + 70, x, this.roomY + this.roomH - 78);
@@ -260,7 +261,6 @@ export class GunShopInterior extends Phaser.Scene {
     const w = this.roomW - 160;
     const h = 54;
 
-    // Counter face + top
     ctr.fillStyle(0x0A1122, 1);
     ctr.fillRoundedRect(x, y, w, h, 8);
     ctr.fillStyle(0x132745, 1);
@@ -270,7 +270,6 @@ export class GunShopInterior extends Phaser.Scene {
     ctr.lineStyle(1, 0x8ED8FF, 0.5);
     ctr.lineBetween(x + 6, y - 2, x + w - 6, y - 2);
 
-    // Sticker labels
     this.add.text(x + 18, y + 8, 'NO REFUNDS', {
       fontSize: '5px',
       fontFamily: '"Press Start 2P", monospace',
@@ -343,303 +342,35 @@ export class GunShopInterior extends Phaser.Scene {
     return Phaser.Math.Distance.Between(this.px, this.py, this.dealerX, this.dealerY) <= 124;
   }
 
-  private openDealerPanel() {
-    if (this.dealerPanel) return;
-    const { width, height } = this.scale;
-    const cx = width / 2;
-    const cy = height / 2;
-    const pw = 560;
-    const ph = 330;
-    const px = cx - pw / 2;
-    const py = cy - ph / 2;
-
-    const container = this.add.container(0, 0).setDepth(1000);
-    this.dealerPanel = container;
-
-    const overlay = this.add.rectangle(cx, cy, width, height, 0x000000, 0.72);
-    container.add(overlay);
-
-    const bg = this.add.graphics();
-    bg.fillStyle(0x090e1a, 0.98);
-    bg.fillRoundedRect(px, py, pw, ph, 12);
-    bg.lineStyle(2, 0x46B3FF, 1);
-    bg.strokeRoundedRect(px, py, pw, ph, 12);
-    container.add(bg);
-
-    const headerGlow = this.add.rectangle(cx, py + 22, pw - 4, 36, 0x46B3FF, 0.06);
-    container.add(headerGlow);
-
-    const corners = this.add.graphics();
-    const cLen = 14; const cThick = 2;
-    ([[px, py], [px + pw, py], [px, py + ph], [px + pw, py + ph]] as [number, number][]).forEach(([bx, by], i) => {
-      const sx = i % 2 === 0 ? 1 : -1;
-      const sy = i < 2 ? 1 : -1;
-      corners.lineStyle(cThick, 0x8ED8FF, 0.9);
-      corners.lineBetween(bx, by, bx + sx * cLen, by);
-      corners.lineBetween(bx, by, bx, by + sy * cLen);
-    });
-    container.add(corners);
-
-    const title = this.add.text(cx, py + 22, 'ARMS DEALER', {
-      fontSize: '11px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#46B3FF',
-    }).setOrigin(0.5);
-    container.add(title);
-
-    const closeBtn = this.add.text(px + pw - 16, py + 16, 'X', {
-      fontSize: '10px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FF5A5A',
-    }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
-    closeBtn.on('pointerdown', () => this.closeDealerPanel());
-    closeBtn.on('pointerover', () => closeBtn.setColor('#FFA0A0'));
-    closeBtn.on('pointerout', () => closeBtn.setColor('#FF5A5A'));
-    container.add(closeBtn);
-
-    const balText = this.add.text(cx, py + 44, `🪙 ${getTenksBalance().toLocaleString('es-AR')} T`, {
-      fontSize: '8px',
-      fontFamily: '"Silkscreen", monospace',
-      color: '#F5C842',
-    }).setOrigin(0.5);
-    container.add(balText);
-
-    // On open, refresh local TENKS from server-authoritative balance.
-    void this.syncAuthoritativeTenks().then((balance) => {
-      if (balance === null || !this.dealerPanel || !balText.active) return;
-      balText.setText(`🪙 ${balance.toLocaleString('es-AR')} T`);
-    });
-
-    const divider = this.add.graphics();
-    divider.lineStyle(1, 0x46B3FF, 0.45);
-    divider.lineBetween(px + 20, py + 58, px + pw - 20, py + 58);
-    container.add(divider);
-
-    const footerHint = this.add.text(cx, py + ph - 10, 'BACK CIERRA', {
-      fontSize: '6px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#6E9BDB',
-    }).setOrigin(0.5);
-    container.add(footerHint);
-
-    const gunItems = CATALOG.filter((item) => item.id.startsWith('UTIL-GUN'));
-    const listY = py + 68;
-    const listH = ph - (listY - py) - 12;
-    const scrollArea = createScrollArea(this, {
-      x: px,
-      y: listY,
-      w: pw,
-      h: listH,
-      mount: container,
-      step: 34,
-      scrollbar: { depth: 1101, insetRight: 16, insetY: 8 },
-    });
-
-    gunItems.forEach((item, idx) => {
-      const rowY = listY + 10 + idx * 72;
-      this.buildGunShopRow(scrollArea.content, px, rowY, pw, item, balText);
-    });
+  private openShopOverlay() {
+    if (this.shopOverlayOpen) return;
+    this.shopOverlayOpen = true;
+    this.input.enabled = false;
+    eventBus.emit(EVENTS.GUN_SHOP_OPEN);
   }
 
-  private buildGunShopRow(
-    container: Phaser.GameObjects.Container,
-    panelX: number,
-    rowY: number,
-    panelW: number,
-    item: CatalogEntry,
-    balText: Phaser.GameObjects.Text,
-  ) {
-    const owned = getInventory().owned.includes(item.id);
-    const comingSoon = !!item.comingSoon;
-
-    const rowBg = this.add.graphics();
-    rowBg.fillStyle(0x121A2D, owned ? 0.45 : comingSoon ? 0.25 : 0.8);
-    rowBg.fillRoundedRect(panelX + 16, rowY, panelW - 32, 60, 6);
-    rowBg.lineStyle(1, owned ? 0x39FF14 : comingSoon ? 0x586A8A : 0x46B3FF, 0.8);
-    rowBg.strokeRoundedRect(panelX + 16, rowY, panelW - 32, 60, 6);
-    container.add(rowBg);
-
-    if (owned) {
-      const ownedBadge = this.add.text(panelX + panelW - 32, rowY + 10, 'OWNED', {
-        fontSize: '5px',
-        fontFamily: '"Press Start 2P", monospace',
-        color: '#39FF14',
-        backgroundColor: '#001100',
-        padding: { x: 3, y: 1 },
-      });
-      container.add(ownedBadge);
-    }
-
-    const nameText = this.add.text(panelX + 30, rowY + 13, item.name + (item.isLimited ? ' ★' : ''), {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: comingSoon ? '#6E7B95' : item.isLimited ? '#F5C842' : '#FFFFFF',
-    });
-    container.add(nameText);
-
-    const descText = this.add.text(panelX + 30, rowY + 30, item.description ?? '', {
-      fontSize: '7px',
-      fontFamily: '"Silkscreen", monospace',
-      color: comingSoon ? '#5A6885' : '#8DA6D4',
-    });
-    container.add(descText);
-
-    const priceLabel = owned ? '—' : `${item.priceTenks.toLocaleString('es-AR')} T`;
-    const priceColor = owned ? '#39FF14' : comingSoon ? '#6E7B95' : '#F5C842';
-    const priceText = this.add.text(panelX + panelW - 164, rowY + 22, priceLabel, {
-      fontSize: '8px',
-      fontFamily: '"Silkscreen", monospace',
-      color: priceColor,
-    }).setOrigin(0, 0.5);
-    container.add(priceText);
-
-    if (comingSoon) {
-      const soonLabel = this.add.text(panelX + panelW - 62, rowY + 30, 'SOON', {
-        fontSize: '7px',
-        fontFamily: '"Press Start 2P", monospace',
-        color: '#6E7B95',
-      }).setOrigin(0.5);
-      container.add(soonLabel);
-      return;
-    }
-
-    if (owned) {
-      const ownedLabel = this.add.text(panelX + panelW - 62, rowY + 30, 'OWNED', {
-        fontSize: '7px',
-        fontFamily: '"Press Start 2P", monospace',
-        color: '#39FF14',
-      }).setOrigin(0.5);
-      container.add(ownedLabel);
-      return;
-    }
-
-    const buyBtn = this.add.text(panelX + panelW - 62, rowY + 30, 'COMPRAR', {
-      fontSize: '7px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#46B3FF',
-      backgroundColor: '#0A1428',
-      padding: { x: 6, y: 4 },
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-
-    buyBtn.on('pointerover', () => buyBtn.setColor('#8ED8FF'));
-    buyBtn.on('pointerout', () => buyBtn.setColor('#46B3FF'));
-    buyBtn.on('pointerdown', () => {
-      buyBtn.setText('...').setColor('#777777').disableInteractive();
-      this.buyGunItem(item.id, item.priceTenks).then((result) => {
-        if (!buyBtn.active) return;
-        if (result.success) {
-          buyBtn.setText('✓ LISTO').setColor('#39FF14');
-          if (!rowBg.active) return; // panel was closed while purchase was in-flight
-          rowBg.clear();
-          rowBg.fillStyle(0x121A2D, 0.45);
-          rowBg.fillRoundedRect(panelX + 16, rowY, panelW - 32, 60, 6);
-          rowBg.lineStyle(1, 0x39FF14, 0.8);
-          rowBg.strokeRoundedRect(panelX + 16, rowY, panelW - 32, 60, 6);
-          balText.setText(`🪙 ${getTenksBalance().toLocaleString('es-AR')} T`);
-          return;
-        }
-        buyBtn.setText('ERROR').setColor('#FF4455');
-        eventBus.emit(EVENTS.UI_NOTICE, result.message);
-        this.time.delayedCall(1200, () => {
-          if (!buyBtn.active) return;
-          buyBtn.setText('COMPRAR').setColor('#46B3FF').setInteractive({ useHandCursor: true });
-        });
-      });
-    });
-    container.add(buyBtn);
-  }
-
-  private closeDealerPanel() {
-    this.dealerPanel?.destroy(true);
-    this.dealerPanel = undefined;
-  }
-
-  private async buyGunItem(itemId: string, priceTenks: number): Promise<{ success: boolean; message: string }> {
-    const item = getItem(itemId);
-    if (item?.comingSoon) {
-      return { success: false, message: 'Ese arma todavia no esta implementada.' };
-    }
-
-    if (!supabase || !isConfigured) {
-      if (getTenksBalance() < priceTenks) {
-        return { success: false, message: `Necesitas ${priceTenks.toLocaleString('es-AR')} TENKS.` };
-      }
-      ownItem(itemId);
-      ensureItemEquipped(itemId);
-      addTenks(-priceTenks, `gun_shop_${itemId.toLowerCase()}`);
-      return { success: true, message: `${itemId} equipado (modo offline).` };
-    }
-
-    const token = await this.getSessionToken();
-    if (!token) {
-      return { success: false, message: 'Tenes que estar logueado para comprar.' };
-    }
-
-    const res = await fetch('/api/shop/buy', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ itemId }),
-    }).catch(() => null);
-
-    if (!res?.ok) {
-      const err = await res?.json().catch(() => null) as { error?: string } | null;
-      // Keep local HUD in sync when server rejects purchase by balance.
-      await this.syncAuthoritativeTenks(token);
-      return { success: false, message: err?.error ?? 'Error al comprar. Intenta de nuevo.' };
-    }
-
-    const result = await res.json() as {
-      player?: { tenks?: number; inventory?: { owned: string[]; equipped: Record<string, unknown> } };
-      notice?: string;
-    };
-
-    // Sync full inventory from server if available, otherwise grant+equip locally.
-    if (result.player?.inventory) {
-      replaceInventory(result.player.inventory as Parameters<typeof replaceInventory>[0]);
-    } else {
-      ownItem(itemId);
-    }
-    ensureItemEquipped(itemId);
-
-    if (typeof result.player?.tenks === 'number') {
-      initTenks(result.player.tenks, { preferStored: false });
-    } else {
-      await this.syncAuthoritativeTenks(token);
-    }
-
-    return { success: true, message: result.notice ?? 'Compra completada.' };
-  }
-
-  private async getSessionToken() {
-    if (!supabase) return null;
-    const { data } = await supabase.auth.getSession();
-    return data?.session?.access_token ?? null;
-  }
-
-  private async syncAuthoritativeTenks(token?: string) {
-    const authToken = token ?? await this.getSessionToken();
-    if (!authToken) return null;
-    const res = await fetch('/api/player/tenks', {
-      headers: { Authorization: `Bearer ${authToken}` },
-    }).catch(() => null);
-    if (!res?.ok) return null;
-    const json = await res.json().catch(() => null) as { balance?: number } | null;
-    if (typeof json?.balance !== 'number') return null;
-    initTenks(json.balance, { preferStored: false });
-    return json.balance;
+  private closeShopOverlay() {
+    if (!this.shopOverlayOpen) return;
+    this.shopOverlayOpen = false;
+    this.input.enabled = true;
+    if (this.input.keyboard) this.input.keyboard.enabled = true;
+    eventBus.emit(EVENTS.GUN_SHOP_CLOSE);
   }
 
   private exitToWorld() {
     if (this.inTransition) return;
-    this.closeDealerPanel();
+    this.closeShopOverlay();
     const ok = transitionToWorldScene(this, this.worldExitX, this.worldExitY);
     if (ok) this.inTransition = true;
   }
 
   private handleSceneShutdown() {
+    this.offGunShopClose?.();
+    this.offGunShopClose = undefined;
+    if (this.shopOverlayOpen) {
+      eventBus.emit(EVENTS.GUN_SHOP_CLOSE);
+      this.shopOverlayOpen = false;
+    }
     this.room?.shutdown();
     this.room = undefined;
   }
