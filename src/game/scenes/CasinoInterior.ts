@@ -7,6 +7,7 @@ import { eventBus, EVENTS } from '../config/eventBus';
 import { SceneControls } from '../systems/SceneControls';
 import { addTenks, getTenksBalance, spendTenks } from '../systems/TenksSystem';
 import { safeSceneDelayedCall } from '../systems/AnimationSafety';
+import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
 
 type StationId = 'slots' | 'roulette' | 'blackjack' | 'poker';
 interface Station { id: StationId; label: string; cx: number; cy: number; triggerR: number; color: number; }
@@ -76,11 +77,16 @@ export class CasinoInterior extends Phaser.Scene {
   private casinoVisuals: Phaser.GameObjects.GameObject[] = [];
   private casinoTweens: Phaser.Tweens.Tween[] = [];
   private rouletteWheelTween?: Phaser.Tweens.Tween;
+  private worldExitX!: number;
+  private worldExitY!: number;
 
   constructor() { super({ key: 'CasinoInterior' }); }
 
-  init() {
+  init(data: Record<string, unknown> = {}) {
     this.inTransition = false;
+    const w = worldExitFromSceneData(data, CasinoInterior.RETURN_X, CasinoInterior.RETURN_Y);
+    this.worldExitX = w.x;
+    this.worldExitY = w.y;
   }
 
   create() {
@@ -1476,7 +1482,7 @@ export class CasinoInterior extends Phaser.Scene {
 
   private exitToWorld() {
     if (this.inTransition) return;
-    const ok = transitionToWorldScene(this, CasinoInterior.RETURN_X, CasinoInterior.RETURN_Y);
+    const ok = transitionToWorldScene(this, this.worldExitX, this.worldExitY);
     if (ok) this.inTransition = true;
   }
 

@@ -10,6 +10,7 @@ import { SceneControls } from '../systems/SceneControls';
 import { createScrollArea } from '../systems/ScrollArea';
 import { supabase, isConfigured } from '../../lib/supabase';
 import { eventBus, EVENTS } from '../config/eventBus';
+import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
 
 type CatalogEntry = (typeof CATALOG)[number];
 
@@ -34,13 +35,18 @@ export class GunShopInterior extends Phaser.Scene {
   private lastMoveDx = 0;
   private lastMoveDy = 0;
   private lastIsMoving = false;
+  private worldExitX!: number;
+  private worldExitY!: number;
 
   constructor() {
     super({ key: 'GunShopInterior' });
   }
 
-  init() {
+  init(data: Record<string, unknown> = {}) {
     this.inTransition = false;
+    const w = worldExitFromSceneData(data, GunShopInterior.RETURN_X, GunShopInterior.RETURN_Y);
+    this.worldExitX = w.x;
+    this.worldExitY = w.y;
   }
 
   create() {
@@ -629,7 +635,7 @@ export class GunShopInterior extends Phaser.Scene {
   private exitToWorld() {
     if (this.inTransition) return;
     this.closeDealerPanel();
-    const ok = transitionToWorldScene(this, GunShopInterior.RETURN_X, GunShopInterior.RETURN_Y);
+    const ok = transitionToWorldScene(this, this.worldExitX, this.worldExitY);
     if (ok) this.inTransition = true;
   }
 

@@ -5,6 +5,7 @@ import { eventBus, EVENTS } from '../config/eventBus';
 import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings';
 import { attachGlobalBgm, clearGlobalBgm, detachGlobalBgmIfMatch } from '../systems/AudioManager';
 import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToWorldScene } from '../systems/SceneUi';
+import { resolveArcadeWorldExit } from '../systems/worldReturnSpawn';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { SceneControls } from '../systems/SceneControls';
 
@@ -28,6 +29,8 @@ interface ArcadeDartsReward {
 }
 
 interface ArcadeInteriorData {
+  returnX?: number;
+  returnY?: number;
   basketReward?: ArcadeBasketReward;
   penaltyReward?: ArcadePenaltyReward;
   dartsReward?: ArcadeDartsReward;
@@ -84,6 +87,8 @@ export class ArcadeInterior extends Phaser.Scene {
   private lastMoveDy = 0;
   private lastIsMoving = false;
   private controls!: SceneControls;
+  private worldExitX!: number;
+  private worldExitY!: number;
 
   constructor() {
     super({ key: 'ArcadeInterior' });
@@ -91,6 +96,9 @@ export class ArcadeInterior extends Phaser.Scene {
 
   init(data: ArcadeInteriorData = {}) {
     this.inTransition = false;
+    const w = resolveArcadeWorldExit(this.game, data as Record<string, unknown>, ArcadeInterior.RETURN_X, ArcadeInterior.RETURN_Y);
+    this.worldExitX = w.x;
+    this.worldExitY = w.y;
     this.wasInsideBasketZone = false;
     this.wasInsidePenaltyZone = false;
     this.wasInsideDartsZone = false;
@@ -671,7 +679,7 @@ export class ArcadeInterior extends Phaser.Scene {
   private exitToWorld() {
     if (this.inTransition) return;
     this.stopArcadeMusic();
-    const ok = transitionToWorldScene(this, ArcadeInterior.RETURN_X, ArcadeInterior.RETURN_Y);
+    const ok = transitionToWorldScene(this, this.worldExitX, this.worldExitY);
     if (ok) this.inTransition = true;
   }
 

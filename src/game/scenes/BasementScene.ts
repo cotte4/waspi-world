@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { BUILDINGS, SAFE_PLAZA_RETURN } from '../config/constants';
 import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToScene, transitionToWorldScene } from '../systems/SceneUi';
+import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
 import { SceneControls } from '../systems/SceneControls';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 
@@ -91,6 +92,8 @@ export class BasementScene extends Phaser.Scene {
   private interactionText?: Phaser.GameObjects.Text;
   private interactionGlow?: Phaser.GameObjects.Ellipse;
   private controls!: SceneControls;
+  private worldExitX!: number;
+  private worldExitY!: number;
 
   constructor() {
     super({ key: 'BasementScene' });
@@ -100,8 +103,11 @@ export class BasementScene extends Phaser.Scene {
   // create
   // ---------------------------------------------------------------------------
 
-  init() {
+  init(data: Record<string, unknown> = {}) {
     this.inTransition = false;
+    const w = worldExitFromSceneData(data, BASEMENT_RETURN.x, BASEMENT_RETURN.y);
+    this.worldExitX = w.x;
+    this.worldExitY = w.y;
   }
 
   create() {
@@ -184,7 +190,7 @@ export class BasementScene extends Phaser.Scene {
 
   private exitToWorld() {
     if (this.inTransition) return;
-    const ok = transitionToWorldScene(this, BASEMENT_RETURN.x, BASEMENT_RETURN.y);
+    const ok = transitionToWorldScene(this, this.worldExitX, this.worldExitY);
     if (ok) this.inTransition = true;
   }
 
@@ -192,8 +198,8 @@ export class BasementScene extends Phaser.Scene {
     if (this.inTransition) return;
     const ok = transitionToScene(this, 'ZombiesScene', {
       returnScene: 'WorldScene',
-      returnX: BASEMENT_RETURN.x,
-      returnY: BASEMENT_RETURN.y,
+      returnX: this.worldExitX,
+      returnY: this.worldExitY,
       entryLabel: 'BASEMENT',
       allowDepthsGate: true,
     });

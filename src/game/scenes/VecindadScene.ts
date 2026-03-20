@@ -52,6 +52,9 @@ type VecindadSceneData = {
   returnX?: number;
   returnY?: number;
   materialsCollected?: number;
+  /** Posición en WorldScene al entrar por la puerta de la plaza (para salir al mismo tile). */
+  plazaReentryX?: number;
+  plazaReentryY?: number;
 };
 
 type SeedType = 'basica' | 'indica' | 'sativa' | 'purple_haze' | 'og_kush';
@@ -177,6 +180,7 @@ export class VecindadScene extends Phaser.Scene {
   private weedDeliveryDialogBg?: Phaser.GameObjects.Rectangle;
   private weedDeliveryDialogText?: Phaser.GameObjects.Text;
   private weedDeliveryDialogHint?: Phaser.GameObjects.Text;
+  private plazaReentryWorld: { x: number; y: number } | null = null;
 
   constructor() {
     super({ key: 'VecindadScene' });
@@ -184,6 +188,16 @@ export class VecindadScene extends Phaser.Scene {
 
   init(data?: VecindadSceneData) {
     this.inTransition = false;
+    if (
+      typeof data?.plazaReentryX === 'number' &&
+      typeof data?.plazaReentryY === 'number' &&
+      Number.isFinite(data.plazaReentryX) &&
+      Number.isFinite(data.plazaReentryY)
+    ) {
+      this.plazaReentryWorld = { x: data.plazaReentryX, y: data.plazaReentryY };
+    } else {
+      this.plazaReentryWorld = null;
+    }
     this.px = data?.returnX ?? VECINDAD_MAP.SPAWN_X;
     this.py = data?.returnY ?? VECINDAD_MAP.SPAWN_Y;
     if (data?.materialsCollected && data.materialsCollected > 0) {
@@ -1127,8 +1141,8 @@ export class VecindadScene extends Phaser.Scene {
       roomKey: `waspi-room-house-${parcel.id}`,
       houseLabel: ownerName,
       buildStage: getHouseInteriorStage(stage),
-      returnX: parcel.x + parcel.w / 2,
-      returnY: parcel.y + parcel.h - 28,
+      returnX: this.px,
+      returnY: this.py,
     });
   }
 
@@ -1692,12 +1706,9 @@ export class VecindadScene extends Phaser.Scene {
 
   private leaveToWorld() {
     if (this.inTransition) return;
-    const started = transitionToWorldScene(
-      this,
-      VECINDAD_MAP.RETURN_WORLD_X,
-      VECINDAD_MAP.RETURN_WORLD_Y,
-      240,
-    );
+    const wx = this.plazaReentryWorld?.x ?? VECINDAD_MAP.RETURN_WORLD_X;
+    const wy = this.plazaReentryWorld?.y ?? VECINDAD_MAP.RETURN_WORLD_Y;
+    const started = transitionToWorldScene(this, wx, wy, 240);
     if (started) this.inTransition = true;
   }
 

@@ -11,6 +11,7 @@ import { supabase, isConfigured } from '../../lib/supabase';
 import type { AudioSettings } from '../systems/AudioSettings';
 import { startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
 import { createScrollArea } from '../systems/ScrollArea';
+import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
 
 type StoreRemotePlayer = {
   avatar: AvatarRenderer;
@@ -62,13 +63,18 @@ export class StoreInterior extends Phaser.Scene {
   private lastIsMoving = false;
   private controls!: SceneControls;
   private sceneMusic: Phaser.Sound.BaseSound | null = null;
+  private worldExitX!: number;
+  private worldExitY!: number;
 
   constructor() {
     super({ key: 'StoreInterior' });
   }
 
-  init() {
+  init(data: Record<string, unknown> = {}) {
     this.inTransition = false;
+    const w = worldExitFromSceneData(data, StoreInterior.RETURN_X, StoreInterior.RETURN_Y);
+    this.worldExitX = w.x;
+    this.worldExitY = w.y;
   }
 
   create() {
@@ -758,7 +764,7 @@ export class StoreInterior extends Phaser.Scene {
     if (this.inTransition) return;
     this.dialog.clear();
     this.shopOverlayOpen = false;
-    const ok = transitionToWorldScene(this, StoreInterior.RETURN_X, StoreInterior.RETURN_Y);
+    const ok = transitionToWorldScene(this, this.worldExitX, this.worldExitY);
     if (ok) this.inTransition = true;
   }
 

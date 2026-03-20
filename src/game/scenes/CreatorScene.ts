@@ -8,6 +8,7 @@ import {
 } from '../systems/AvatarRenderer';
 import { COLORS, PLAYER } from '../config/constants';
 import { announceScene, transitionToWorldScene } from '../systems/SceneUi';
+import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
 import { SceneControls } from '../systems/SceneControls';
 
 const USERNAME_KEY = 'waspi_username';
@@ -70,6 +71,8 @@ export class CreatorScene extends Phaser.Scene {
   private readonly hairColorOptions  = [0x1F130A, 0x8B5A2B, 0xF97316, 0xEF4444, 0xFFFFFF, 0xEC4899];
   private readonly seedOptions: SeedId[] = ['procedural', 'gengar', 'buho', 'piplup', 'chacha', 'trap_a', 'trap_b', 'trap_c', 'trap_d'];
   private readonly hairStyleOptions: HairStyle[] = ['SPI', 'FLA', 'MOH', 'X'];
+  private worldExitX: number = PLAYER.SPAWN_X;
+  private worldExitY: number = PLAYER.SPAWN_Y;
 
   constructor() {
     super({ key: 'CreatorScene' });
@@ -85,6 +88,12 @@ export class CreatorScene extends Phaser.Scene {
       smoke: false,
       equipTop: '', equipBottom: '',
     };
+  }
+
+  init(data?: Record<string, unknown>) {
+    const w = worldExitFromSceneData(data, PLAYER.SPAWN_X, PLAYER.SPAWN_Y);
+    this.worldExitX = w.x;
+    this.worldExitY = w.y;
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -654,7 +663,7 @@ export class CreatorScene extends Phaser.Scene {
       if (name) window.localStorage.setItem(USERNAME_KEY, name);
       saveStoredAvatarConfig({ ...this.config, avatarKind: this.selectedSeed });
     }
-    transitionToWorldScene(this, PLAYER.SPAWN_X, PLAYER.SPAWN_Y);
+    transitionToWorldScene(this, this.worldExitX, this.worldExitY);
   }
 
   private cycleInList<T>(values: T[], current: T, direction: -1 | 1) {

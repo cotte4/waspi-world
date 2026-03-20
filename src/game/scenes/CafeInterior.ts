@@ -9,6 +9,7 @@ import { safeSceneDelayedCall } from '../systems/AnimationSafety';
 import { getSkillSystem } from '../systems/SkillSystem';
 import { JukeboxSystem } from '../systems/JukeboxSystem';
 import { JukeboxPlayer } from '../systems/JukeboxPlayer';
+import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
 
 export class CafeInterior extends Phaser.Scene {
   private static readonly RETURN_X = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
@@ -47,6 +48,8 @@ export class CafeInterior extends Phaser.Scene {
   private jukeboxGlowUnsub?: () => void;
   private jukeboxHostUnsub?: () => void;
   private jukeboxOverlayKbUnsub?: () => void;
+  private worldExitX!: number;
+  private worldExitY!: number;
   private static readonly JUKEBOX_INTERACT_RADIUS = 70;
   // Plato del Día (Cooking Lv4)
   private platoPrompt?: Phaser.GameObjects.Text;
@@ -60,8 +63,11 @@ export class CafeInterior extends Phaser.Scene {
     super({ key: 'CafeInterior' });
   }
 
-  init() {
+  init(data: Record<string, unknown> = {}) {
     this.inTransition = false;
+    const w = worldExitFromSceneData(data, CafeInterior.RETURN_X, CafeInterior.RETURN_Y);
+    this.worldExitX = w.x;
+    this.worldExitY = w.y;
   }
 
   create() {
@@ -533,7 +539,7 @@ export class CafeInterior extends Phaser.Scene {
 
   private exitToWorld() {
     if (this.inTransition) return;
-    const ok = transitionToWorldScene(this, CafeInterior.RETURN_X, CafeInterior.RETURN_Y);
+    const ok = transitionToWorldScene(this, this.worldExitX, this.worldExitY);
     if (ok) this.inTransition = true;
   }
 

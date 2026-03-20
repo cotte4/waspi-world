@@ -6,6 +6,7 @@ import { eventBus, EVENTS } from '../config/eventBus';
 import { SceneControls } from '../systems/SceneControls';
 import { safeSceneDelayedCall } from '../systems/AnimationSafety';
 import { getSkillSystem } from '../systems/SkillSystem';
+import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
 
 // ── Return coordinates in WorldScene ────────────────────────────────────────
 // GYM is in the plaza zone; player exits to the front of the building.
@@ -39,6 +40,8 @@ export class GymInterior extends Phaser.Scene {
   private player!: AvatarRenderer;
   private controls!: SceneControls;
   private inTransition = false;
+  private worldExitX!: number;
+  private worldExitY!: number;
 
   // ── Graphics references ──────────────────────────────────────────────────────
   private bagGfx!: Phaser.GameObjects.Graphics;
@@ -77,8 +80,11 @@ export class GymInterior extends Phaser.Scene {
 
   // ── Lifecycle ────────────────────────────────────────────────────────────────
 
-  init() {
+  init(data: Record<string, unknown> = {}) {
     this.inTransition = false;
+    const w = worldExitFromSceneData(data, GYM_RETURN_X, GYM_RETURN_Y);
+    this.worldExitX = w.x;
+    this.worldExitY = w.y;
     this.bagPhase = 'idle';
     this.bagSeqIndex = 0;
     this.bagSequence = [];
@@ -192,7 +198,7 @@ export class GymInterior extends Phaser.Scene {
 
   private exitToWorld() {
     if (this.inTransition) return;
-    const ok = transitionToWorldScene(this, GYM_RETURN_X, GYM_RETURN_Y);
+    const ok = transitionToWorldScene(this, this.worldExitX, this.worldExitY);
     if (ok) this.inTransition = true;
   }
 

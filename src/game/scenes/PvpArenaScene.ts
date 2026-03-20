@@ -3,6 +3,7 @@ import { AvatarRenderer, type AvatarAction, type AvatarConfig, loadStoredAvatarC
 import { COLORS, SAFE_PLAZA_RETURN } from '../config/constants';
 import { getTenksBalance, initTenks } from '../systems/TenksSystem';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToWorldScene } from '../systems/SceneUi';
+import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
 import { SceneControls } from '../systems/SceneControls';
 import { formatMovementBindingLabel } from '../systems/ControlSettings';
 import { supabase, isConfigured } from '../../lib/supabase';
@@ -176,13 +177,18 @@ export class PvpArenaScene extends Phaser.Scene {
   private pointerShootHandler?: (pointer: Phaser.Input.Pointer) => void;
   private readyBusy = false;
   private controls!: SceneControls;
+  private worldExitX!: number;
+  private worldExitY!: number;
 
   constructor() {
     super({ key: 'PvpArenaScene' });
   }
 
-  init() {
+  init(data: Record<string, unknown> = {}) {
     this.inTransition = false;
+    const w = worldExitFromSceneData(data, RETURN_WORLD_X, RETURN_WORLD_Y);
+    this.worldExitX = w.x;
+    this.worldExitY = w.y;
   }
 
   create() {
@@ -1350,7 +1356,7 @@ export class PvpArenaScene extends Phaser.Scene {
 
   private exitToWorld() {
     if (this.inTransition) return;
-    const ok = transitionToWorldScene(this, RETURN_WORLD_X, RETURN_WORLD_Y, 220);
+    const ok = transitionToWorldScene(this, this.worldExitX, this.worldExitY, 220);
     if (ok) this.inTransition = true;
   }
 
