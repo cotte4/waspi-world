@@ -92,20 +92,31 @@ export function createBackButton(scene: Phaser.Scene, onClick: () => void, label
   return { bg, text };
 }
 
+export type TransitionToSceneOptions = {
+  /** Salida al mundo: no compite con el throttle del ingreso (entrar+salir rápido del mismo local). */
+  bypassThrottle?: boolean;
+};
+
 export function transitionToScene(
   scene: Phaser.Scene,
   targetKey: string,
   data: Record<string, unknown> = {},
   duration = 250,
+  options: TransitionToSceneOptions = {},
 ): boolean {
   const now = Date.now();
-  if (now - lastTransitionTime < TRANSITION_THROTTLE_MS) {
+  const bypassThrottle = options.bypassThrottle === true;
+  if (!bypassThrottle && now - lastTransitionTime < TRANSITION_THROTTLE_MS) {
     console.warn('[Waspi] transitionToScene throttled');
     return false;
   }
   lastTransitionTime = now;
   if (transitioningScenes.has(scene)) return false;
   transitioningScenes.add(scene);
+
+  if (targetKey === 'WorldScene') {
+    eventBus.emit(EVENTS.SHOP_CLOSE);
+  }
 
   const camera = scene.cameras.main;
   let finished = false;
@@ -161,11 +172,7 @@ export function transitionToWorldScene(
   returnY: number,
   duration = 250,
 ): boolean {
-  const started = transitionToScene(scene, 'WorldScene', { returnX, returnY }, duration);
-  if (started) {
-    eventBus.emit(EVENTS.SHOP_CLOSE);
-  }
-  return started;
+  return transitionToScene(scene, 'WorldScene', { returnX, returnY }, duration, { bypassThrottle: true });
 }
 
 /**

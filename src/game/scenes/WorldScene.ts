@@ -680,6 +680,12 @@ export class WorldScene extends Phaser.Scene {
     this.input.enabled = true;
     this.controls = new SceneControls(this);
     this.shiftKey = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
+    this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      this.inTransition = false;
+      this.inputBlocked = false;
+      this.input.enabled = true;
+      if (this.input.keyboard) this.input.keyboard.enabled = true;
+    });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
 
     // Generate player ID and username
