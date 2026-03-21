@@ -383,7 +383,7 @@ export class CasinoInterior extends Phaser.Scene {
   }
 
   private showToast(message: string) {
-    if (this.shuttingDown || !this.toastText) return;
+    if (this.shuttingDown || !this.toastText?.active) return;
     this.toastTween?.stop();
     this.toastText.setText(message);
     this.toastText.setAlpha(1);

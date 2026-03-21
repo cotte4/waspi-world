@@ -15,7 +15,7 @@ type QueueRow = {
   added_by_name: string;
   cost: 100 | 150;
   status: 'queued' | 'playing' | 'skipped';
-  created_at: string;
+  added_at: string;
 };
 
 type StatusBody = {
@@ -40,9 +40,9 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await admin
     .from('jukebox_queue')
-    .select('id, video_id, title, artist, added_by, added_by_name, cost, status, created_at')
+    .select('id, video_id, title, artist, added_by, added_by_name, cost, status, added_at')
     .in('status', ['queued', 'playing'])
-    .order('created_at', { ascending: true })
+    .order('added_at', { ascending: true })
     .limit(40)
     .returns<QueueRow[]>();
 
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
           addedBy: nowPlayingRow.added_by,
           addedByName: nowPlayingRow.added_by_name,
           cost: nowPlayingRow.cost,
-          addedAt: Date.parse(nowPlayingRow.created_at) || Date.now(),
+          addedAt: Date.parse(nowPlayingRow.added_at) || Date.now(),
         }
       : null,
     queue: queueRows.map((row) => ({
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
       addedBy: row.added_by,
       addedByName: row.added_by_name,
       cost: row.cost,
-      addedAt: Date.parse(row.created_at) || Date.now(),
+      addedAt: Date.parse(row.added_at) || Date.now(),
     })),
   });
 }

@@ -1905,6 +1905,8 @@ export class VecindadScene extends Phaser.Scene {
     this.emotePanel = undefined;
     this.skillTreePanel?.destroy();
     this.skillTreePanel = undefined;
+    this.skillShopPanel?.destroy();
+    this.skillShopPanel = undefined;
     this.contractPanel?.destroy();
     this.contractPanel = undefined;
     this.questPanel?.destroy();

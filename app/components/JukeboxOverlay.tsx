@@ -141,7 +141,7 @@ function QueueList({ queue }: { queue: JukeboxSong[] }) {
     <div style={{ marginBottom: 10 }}>
       <div style={{ fontFamily: PRESS_START, fontSize: px(7), color: GOLD, marginBottom: 6 }}>📋 EN COLA ({queue.length})</div>
       {queue.slice(0, 5).map((s, i) => (
-        <div key={s.videoId + i} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: SILKSCREEN, fontSize: px(11), color: 'rgba(255,255,255,0.7)', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <div key={s.queueId ?? `${s.videoId}-${s.addedBy}-${s.addedAt}-${i}`} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: SILKSCREEN, fontSize: px(11), color: 'rgba(255,255,255,0.7)', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
           <span>{i + 1}. {s.title.slice(0, 28)}{s.title.length > 28 ? '…' : ''}</span>
           <span style={{ color: 'rgba(255,255,255,0.4)' }}>@{s.addedByName.slice(0, 12)}</span>
         </div>
@@ -383,9 +383,9 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
             {searchError && (
               <div style={{ fontFamily: SILKSCREEN, fontSize: px(11), color: '#FF6B6B', padding: '6px 0' }}>{searchError}</div>
             )}
-            {searchResults.map((r) => (
+            {searchResults.map((r, idx) => (
               <div
-                key={r.videoId}
+                key={r.videoId || `${r.title}-${r.artist}-${idx}`}
                 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.06)', gap: 8 }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>

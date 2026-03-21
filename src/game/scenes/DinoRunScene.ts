@@ -1,7 +1,8 @@
 import Phaser from 'phaser';
-import { announceScene, transitionToScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, transitionToScene, transitionToWorldScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { addTenks } from '../systems/TenksSystem';
+import { SceneControls } from '../systems/SceneControls';
 
 type GameState = 'idle' | 'playing' | 'dead' | 'gameover';
 
@@ -59,6 +60,7 @@ export default class DinoRunScene extends Phaser.Scene {
 
   private tenksEarned: number = 0;
   private retrySpaceHandler: (() => void) | null = null;
+  private controls!: SceneControls;
 
   constructor() {
     super({ key: 'DinoRunScene', physics: { arcade: { gravity: { x: 0, y: 0 }, debug: false } } });
@@ -89,7 +91,11 @@ export default class DinoRunScene extends Phaser.Scene {
     announceScene(this);
 
     this.bestScore = parseInt(localStorage.getItem('waspi_dino_best') ?? '0');
+    this.controls = new SceneControls(this);
     eventBus.emit(EVENTS.DINO_SCENE_ACTIVE, true);
+    bindSafeResetToPlaza(this, () => {
+      transitionToWorldScene(this, 1600, 1540);
+    });
 
     this.createBackground();
     this.createGround();
@@ -201,7 +207,7 @@ export default class DinoRunScene extends Phaser.Scene {
     this.physics.add.existing(this.runner);
     this.runnerBody = this.runner.body as Phaser.Physics.Arcade.Body;
     this.runnerBody.setGravityY(1800);
-    this.runnerBody.setAllowGravity(true);
+    this.runnerBody.setAllowGravity(false); // gravity off en idle; se activa en startGame()
     this.runnerBody.setCollideWorldBounds(false);
   }
 
@@ -365,11 +371,19 @@ export default class DinoRunScene extends Phaser.Scene {
     this.gameState = 'playing';
     this.spawnTimer = 0;
     this.spawnCooldown = 1000;
+    this.runnerBody.setAllowGravity(true); // activar gravity al arrancar
     this.triggerJump();
   }
 
   update(time: number, delta: number): void {
     if (this.shuttingDown) return;
+
+    // ESC/back siempre disponible sin importar el estado del juego
+    if (this.controls.isActionJustDown('back')) {
+      this.exitScene();
+      return;
+    }
+
     if (this.gameState === 'idle') {
       this.handleIdleInput();
       return;
@@ -643,6 +657,7 @@ export default class DinoRunScene extends Phaser.Scene {
     this.runnerBody.setVelocityY(0);
     this.runnerBody.setVelocityX(0);
     this.runnerBody.setGravityY(1800);
+    this.runnerBody.setAllowGravity(false); // sin gravity en idle/retry
 
     // Reset game state
     this.gameState = 'idle';

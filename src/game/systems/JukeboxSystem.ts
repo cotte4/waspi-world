@@ -128,11 +128,10 @@ class JukeboxSystem {
   // -------------------------------------------------------------------------
 
   join(playerId: string, playerName: string) {
-    this.playerId = playerId;
-    this.playerName = playerName;
-
     if (!supabase || !isConfigured) return;
     if (this.channel) return; // already joined
+    this.playerId = playerId;
+    this.playerName = playerName;
 
     this.channel = supabase.channel('cafe_jukebox', {
       config: {
@@ -164,9 +163,9 @@ class JukeboxSystem {
   // leave — called when player exits CafeInterior
   // -------------------------------------------------------------------------
 
-  leave(playerId: string) {
+  leave(playerId?: string) {
     if (!this.channel) return;
-    if (playerId !== this.playerId) return;
+    if (playerId && playerId !== this.playerId) return;
 
     this.channel.untrack();
     this.channel.unsubscribe();

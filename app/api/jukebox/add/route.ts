@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
     .update({ status: 'skipped', skipped_at: new Date().toISOString() })
     .eq('added_by', user.id)
     .eq('status', 'queued')
-    .lt('created_at', staleBeforeIso);
+    .lt('added_at', staleBeforeIso);
   if (staleCleanupError) {
     console.warn('POST /api/jukebox/add stale queue cleanup error:', staleCleanupError.message);
   }

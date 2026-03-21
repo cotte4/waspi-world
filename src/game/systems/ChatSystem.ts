@@ -69,19 +69,30 @@ export class ChatSystem {
   clearBubble(playerId: string) {
     const b = this.bubbles.get(playerId);
     if (b) {
-      b.container.destroy();
+      if (b.container?.scene && b.container.active) {
+        b.container.destroy();
+      }
       this.bubbles.delete(playerId);
     }
   }
 
   updatePosition(playerId: string, x: number, y: number) {
     const b = this.bubbles.get(playerId);
-    if (b) b.container.setPosition(x, y - 36);
+    if (!b) return;
+    if (!b.container?.scene || !b.container.active) {
+      this.bubbles.delete(playerId);
+      return;
+    }
+    b.container.setPosition(x, y - 36);
   }
 
   update() {
     const now = Date.now();
     for (const [id, b] of this.bubbles) {
+      if (!b.container?.scene || !b.container.active) {
+        this.bubbles.delete(id);
+        continue;
+      }
       const remaining = b.expiresAt - now;
       if (remaining <= 0) {
         this.clearBubble(id);

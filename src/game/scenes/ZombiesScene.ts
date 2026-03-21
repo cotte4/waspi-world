@@ -1068,6 +1068,16 @@ export class ZombiesScene extends Phaser.Scene {
     this.addWallCollider(700, 770, 180, 30);   // left of door
     this.addWallCollider(1000, 770, 650, 30);  // right of door
 
+    // ─── TOP CAPS — cierra la zona vacía sobre cada sección ───────────────────
+    // Impide que el jugador suba por encima del área jugable de cada room.
+    // START ROOM: section.x=120, y=470, w=560 → tope en y=465
+    this.addWallCollider(ARENA_MIN_X + 40, 465, 645, 15);  // cubre x=100→745
+    // YARD: section.x=710, y=420, w=400 → tope en y=415
+    this.addWallCollider(710, 415, 400, 15);
+    // WORKSHOP: section.x=1130, y=380, w=520 → tope en y=375
+    this.addWallCollider(1130, 375, 520, 15);
+    // STREET: no necesita tope — la pared horizontal en y=770 ya lo cubre
+
     // ─── 3. START ROOM obstacles (crates + barrels) ──────────────────────────
     // wooden crates cluster — left side, away from spawn at (110,575)
     this.addObstacle(200, 540, 52, 44, 0x2E1F0E, 0x8B5E2A);  // crate 1

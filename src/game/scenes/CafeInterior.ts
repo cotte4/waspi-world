@@ -564,9 +564,12 @@ export class CafeInterior extends Phaser.Scene {
   }
 
   private updatePlatoDelDia() {
-    if (!this.platoPrompt) return;
+    if (!this.platoPrompt?.active) return;
     const cookLv = getSkillSystem().getLevel('cooking');
-    if (cookLv < 4) { this.platoPrompt.setVisible(false); return; }
+    if (cookLv < 4) {
+      this.platoPrompt.setVisible(false);
+      return;
+    }
 
     const { width, height } = this.scale;
     const roomX = (width - 640) / 2;
@@ -579,13 +582,20 @@ export class CafeInterior extends Phaser.Scene {
     const alreadyCooked = localStorage.getItem(`waspi_plato_${today}`) === '1';
 
     if (nearBar && !alreadyCooked) {
-      this.platoPrompt.setText('🍳 PLATO DEL DÍA [E]').setVisible(true);
+      const promptText = 'PLATO DEL DIA [E]';
+      if (this.platoPrompt.text !== promptText) {
+        this.platoPrompt.setText(promptText);
+      }
+      this.platoPrompt.setVisible(true);
       if (this.controls.isActionJustDown('interact')) {
         this.cookPlatoDelDia(today);
       }
     } else {
-      this.platoPrompt.setText(nearBar && alreadyCooked ? 'PLATO YA PREPARADO HOY' : '')
-        .setVisible(nearBar && alreadyCooked);
+      const promptText = nearBar && alreadyCooked ? 'PLATO YA PREPARADO HOY' : '';
+      if (this.platoPrompt.text !== promptText) {
+        this.platoPrompt.setText(promptText);
+      }
+      this.platoPrompt.setVisible(nearBar && alreadyCooked);
     }
   }
 
@@ -637,9 +647,7 @@ export class CafeInterior extends Phaser.Scene {
     this.jukeboxGlowTween = undefined;
     this.jukeboxPlayer?.destroy();
     this.jukeboxPlayer = undefined;
-    try {
-      const stored = JSON.parse(localStorage.getItem('waspi_player_info') ?? '{}') as { playerId?: string };
-      if (stored.playerId) JukeboxSystem.getInstance().leave(stored.playerId);
-    } catch { /* silent */ }
+    this.platoPrompt = undefined;
+    JukeboxSystem.getInstance().leave();
   }
 }

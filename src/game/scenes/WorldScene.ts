@@ -1101,10 +1101,18 @@ export class WorldScene extends Phaser.Scene {
       void this.disableVoice();
     });
 
+    const unsubEnable = eventBus.on(EVENTS.VOICE_ENABLE, () => {
+      const vc = getVoiceChat();
+      if (vc.connected) return;
+      this.setVoicePref('on');
+      void this.activateVoice();
+    });
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       unsubMic();
       unsubSink();
       unsubDisable();
+      unsubEnable();
     });
   }
 
@@ -5345,8 +5353,6 @@ export class WorldScene extends Phaser.Scene {
       })
       .subscribe(() => {
         this.broadcastSelfState('player:join');
-        // Auto-init voice here, after the channel is confirmed subscribed
-        void this.tryAutoInitVoice();
       });
     return 'multiplayer';
   }
@@ -6567,8 +6573,12 @@ export class WorldScene extends Phaser.Scene {
     this.emotePanel = undefined;
     this.skillTreePanel?.destroy();
     this.skillTreePanel = undefined;
+    this.skillShopPanel?.destroy();
+    this.skillShopPanel = undefined;
     this.contractPanel?.destroy();
     this.contractPanel = undefined;
+    this.guildPanel?.destroy();
+    this.guildPanel = undefined;
     this.masteryPanel?.destroy();
     this.masteryPanel = undefined;
     this.worldMapPanel?.destroy();
@@ -6907,7 +6917,6 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 }
-
 
 
 

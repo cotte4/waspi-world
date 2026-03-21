@@ -108,12 +108,19 @@ export class InteriorRoom {
 
   update() {
     const { x, y } = this.options.getPosition();
-    this.localNameplate?.setPosition(x, y - (this.options.nameplateOffsetY ?? 44));
+    if (this.localNameplate?.active) {
+      this.localNameplate.setPosition(x, y - (this.options.nameplateOffsetY ?? 44));
+    }
     this.chatSystem?.updatePosition('__player__', x, y);
     this.syncPosition();
     this.chatSystem?.update();
 
     for (const [playerId, remote] of this.remotePlayers.entries()) {
+      if (!remote.avatar || !remote.avatar.scene || !remote.avatar.active || !remote.nameplate?.active) {
+        this.chatSystem?.clearBubble(playerId);
+        this.remotePlayers.delete(playerId);
+        continue;
+      }
       remote.x = Phaser.Math.Linear(remote.x, remote.targetX, 0.18);
       remote.y = Phaser.Math.Linear(remote.y, remote.targetY, 0.18);
       remote.avatar.update(remote.isMoving, remote.moveDx, remote.moveDy);
@@ -186,7 +193,9 @@ export class InteriorRoom {
     remote.targetX = next.x;
     remote.targetY = next.y;
     remote.username = next.username;
-    remote.nameplate.setText(next.username);
+    if (remote.nameplate?.active) {
+      remote.nameplate.setText(next.username);
+    }
   }
 
   private handleRemoteMove(payload: unknown) {
@@ -202,7 +211,9 @@ export class InteriorRoom {
     remote.moveDy = next.dy ?? 0;
     remote.isMoving = next.moving ?? false;
     remote.username = next.username;
-    remote.nameplate.setText(next.username);
+    if (remote.nameplate?.active) {
+      remote.nameplate.setText(next.username);
+    }
   }
 
   private handleRemoteLeave(payload: unknown) {

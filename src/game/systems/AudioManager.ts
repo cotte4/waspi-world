@@ -183,7 +183,23 @@ export function startSceneMusic(
     const sound = scene.sound.add(track, { loop: true, volume: 0 });
     globalBgmSound = sound;
     sound.play();
-    scene.tweens.add({ targets: sound, volume, duration: 700, ease: 'Sine.easeIn' });
+    // Tween sobre proxy plain-JS para evitar "Cannot set properties of null
+    // (setting 'volume')": Phaser tweena el proxy (nunca crashea) y nosotros
+    // aplicamos el valor al sound solo si sigue vivo. Esto cubre el caso donde
+    // clearGlobalBgm() es llamado desde otra escena y no puede matar el tween
+    // de SceneA desde el TweenManager de SceneB.
+    const fadeProxy = { volume: 0 };
+    scene.tweens.add({
+      targets: fadeProxy,
+      volume,
+      duration: 700,
+      ease: 'Sine.easeIn',
+      onUpdate: () => {
+        if ((sound as Phaser.Sound.BaseSound & { manager?: unknown }).manager) {
+          try { (sound as Phaser.Sound.WebAudioSound).volume = fadeProxy.volume; } catch { /* ignore */ }
+        }
+      },
+    });
     return sound;
   } catch {
     return null;

@@ -95,6 +95,7 @@ export class ArcadeInterior extends Phaser.Scene {
 
   init(data: ArcadeInteriorData = {}) {
     this.inTransition = false;
+    this.arcadeMusic = undefined;
     const w = resolveArcadeWorldExit(this.game, data as Record<string, unknown>, ArcadeInterior.RETURN_X, ArcadeInterior.RETURN_Y);
     this.worldExitX = w.x;
     this.worldExitY = w.y;
@@ -711,11 +712,18 @@ export class ArcadeInterior extends Phaser.Scene {
     const fadeIn = () => {
       if (!this.arcadeMusic || this.arcadeMusic.isPlaying) return;
       this.arcadeMusic.play();
+      const sound = this.arcadeMusic;
+      const proxy = { volume: 0 };
       this.tweens.add({
-        targets: this.arcadeMusic,
+        targets: proxy,
         volume: 0.42,
         duration: 700,
         ease: 'Sine.easeOut',
+        onUpdate: () => {
+          if ((sound as Phaser.Sound.BaseSound & { manager?: unknown }).manager) {
+            try { (sound as Phaser.Sound.WebAudioSound).volume = proxy.volume; } catch { /* ignore */ }
+          }
+        },
       });
     };
 
@@ -748,14 +756,23 @@ export class ArcadeInterior extends Phaser.Scene {
     const sound = this.arcadeMusic;
     this.arcadeMusic = undefined;
     detachGlobalBgmIfMatch(sound);
+    const currentVol = (sound as Phaser.Sound.BaseSound & { manager?: unknown }).manager
+      ? (sound as Phaser.Sound.WebAudioSound).volume
+      : 0;
+    const proxy = { volume: currentVol };
     this.tweens.add({
-      targets: sound,
+      targets: proxy,
       volume: 0,
       duration: 250,
       ease: 'Sine.easeIn',
+      onUpdate: () => {
+        if ((sound as Phaser.Sound.BaseSound & { manager?: unknown }).manager) {
+          try { (sound as Phaser.Sound.WebAudioSound).volume = proxy.volume; } catch { /* ignore */ }
+        }
+      },
       onComplete: () => {
-        sound.stop();
-        sound.destroy();
+        try { sound.stop(); } catch { /* ignore */ }
+        try { sound.destroy(); } catch { /* ignore */ }
       },
     });
   }
