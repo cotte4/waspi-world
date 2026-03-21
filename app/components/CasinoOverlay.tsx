@@ -54,6 +54,7 @@ interface HoldemState {
   resultText: string;
   actionIndex: number;
   cpuLastAction: string;
+  cpuBetPending: boolean;
 }
 
 interface RouletteBetOption {
@@ -1058,6 +1059,7 @@ function PokerPanel({
     resultText: 'ELEGÍ TU ANTE Y REPARTÍ.',
     actionIndex: 1,
     cpuLastAction: '',
+    cpuBetPending: false,
   });
   const stateRef = useRef(state);
   const dealGuardRef = useRef(false);
@@ -1078,11 +1080,36 @@ function PokerPanel({
   }, []);
 
   const cpuDecideOnRaise = useCallback((cpuHole: number[], community: number[], phase: HoldemPhase): boolean => {
+    const bluff = Math.random() < 0.08; // rarely bluff-call
+
+    if (phase === 'preflop') {
+      // Can't use hand evaluator with no community — evaluate hole card strength instead
+      const c1 = cpuHole[0] % 13; // 0=2 … 12=A
+      const c2 = cpuHole[1] % 13;
+      const isPair = c1 === c2;
+      const highCard = Math.max(c1, c2);
+      if (isPair || highCard >= 8) return false; // pocket pair or T+ → never fold preflop
+      return Math.random() < 0.12 && !bluff;    // garbage hand: rarely fold
+    }
+
     const strength = bestAvailableHand(cpuHole, community);
-    const weakHand = strength.rank <= 1;
-    const bluff = Math.random() < 0.12;
-    if (phase === 'river') return weakHand && !bluff;
-    return weakHand && Math.random() < 0.45 && !bluff;
+
+    if (phase === 'flop') {
+      // Fold only total air on flop — CPU wants to see the turn
+      return strength.rank === 0 && Math.random() < 0.25 && !bluff;
+    }
+    if (phase === 'turn') {
+      // Fold high card on turn, never fold a made hand
+      return strength.rank === 0 && !bluff;
+    }
+    if (phase === 'river') {
+      // Fold high card almost always; fold weak one-pair sometimes
+      if (strength.rank === 0) return !bluff;
+      if (strength.rank === 1) return Math.random() < 0.35 && !bluff;
+      return false; // two-pair or better: never fold
+    }
+
+    return false;
   }, []);
 
   const startHand = useCallback(() => {
@@ -1101,7 +1128,7 @@ function PokerPanel({
     setState((s) => ({
       ...s, phase: 'preflop', playerHole, cpuHole, community: [],
       pot: ante * 2, playerPaid: ante, deck,
-      resultText: 'TU TURNO — ELEGÍ UNA ACCIÓN.', actionIndex: 1, cpuLastAction: 'ENTRA',
+      resultText: 'TU TURNO — ELEGÍ UNA ACCIÓN.', actionIndex: 1, cpuLastAction: 'ENTRA', cpuBetPending: false,
     }));
     window.setTimeout(() => { dealGuardRef.current = false; }, 0);
   }, [state.anteIndex, state.phase, onToast]);
@@ -1143,7 +1170,7 @@ function PokerPanel({
     setState((s) => {
       if (action === 'fold') {
         onToast('FOLD');
-        return { ...s, phase: 'showdown', resultText: `TE FUISTE. PERDÉS ${s.playerPaid} TENKS.`, cpuLastAction: 'GANA' };
+        return { ...s, phase: 'showdown', cpuBetPending: false, resultText: `TE FUISTE. PERDÉS ${s.playerPaid} TENKS.`, cpuLastAction: 'GANA' };
       }
       if (action === 'raise') {
         const ante = HOLDEM_ANTES[s.anteIndex];
@@ -1157,17 +1184,34 @@ function PokerPanel({
         if (cpuFolds) {
           addTenks(newPot, 'casino_holdem_win');
           onToast(`+${newPot} TENKS`);
-          return { ...s, pot: newPot, playerPaid: newPaid, phase: 'showdown', resultText: `CPU FOLDEA. GANÁS ${newPot} TENKS!`, cpuLastAction: 'FOLD' };
+          return { ...s, pot: newPot, playerPaid: newPaid, phase: 'showdown', cpuBetPending: false, resultText: `CPU FOLDEA. GANÁS ${newPot} TENKS!`, cpuLastAction: 'FOLD' };
         }
-        return advancePhase({ ...s, pot: newPot, playerPaid: newPaid, cpuLastAction: 'CALL' });
+        return advancePhase({ ...s, pot: newPot, playerPaid: newPaid, cpuLastAction: 'CALL', cpuBetPending: false });
       }
-      return advancePhase({ ...s, cpuLastAction: 'CHECK' });
+      // 'check' — if CPU has a pending river bet, this is a CALL
+      if (s.cpuBetPending) {
+        const ante = HOLDEM_ANTES[s.anteIndex];
+        if (!spendTenks(ante, 'casino_holdem_call')) {
+          onToast('SIN TENKS PARA CALL');
+          return { ...s, resultText: 'NO TENÉS TENKS PARA CALL.' };
+        }
+        return advancePhase({ ...s, pot: s.pot + ante, playerPaid: s.playerPaid + ante, cpuLastAction: 'APUESTA', cpuBetPending: false });
+      }
+      // Normal check — CPU may bet on the river after player checks
+      if (s.phase === 'river') {
+        const cpuStr = bestAvailableHand(s.cpuHole, s.community);
+        if (cpuStr.rank >= 2 && Math.random() < 0.55) {
+          const ante = HOLDEM_ANTES[s.anteIndex];
+          return { ...s, cpuBetPending: true, cpuLastAction: 'APUESTA', resultText: `CPU APUESTA ${ante}T — CALL O FOLD.` };
+        }
+      }
+      return advancePhase({ ...s, cpuLastAction: 'CHECK', cpuBetPending: false });
     });
   }, [cpuDecideOnRaise, onToast, advancePhase]);
 
   const HOLDEM_PHASES: HoldemPhase[] = ['ante', 'preflop', 'flop', 'turn', 'river', 'showdown'];
   const phaseLabels = ['ANTE', 'PRE-FLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN'];
-  const { phase, anteIndex, playerHole, cpuHole, community, pot, resultText, actionIndex, cpuLastAction } = state;
+  const { phase, anteIndex, playerHole, cpuHole, community, pot, resultText, actionIndex, cpuLastAction, cpuBetPending } = state;
   const atShowdown = phase === 'showdown';
   const playerBest = phase !== 'ante' && playerHole.length === 2 ? bestAvailableHand(playerHole, community) : null;
   const cpuBest    = atShowdown && cpuHole.length === 2 ? bestAvailableHand(cpuHole, community) : null;
@@ -1254,26 +1298,43 @@ function PokerPanel({
       )}
       {(phase === 'preflop' || phase === 'flop' || phase === 'turn' || phase === 'river') && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-          {(['fold', 'check', 'raise'] as const).map((action, idx) => {
-            const labels = ['FOLD', 'PASAR', `SUBIR +${HOLDEM_ANTES[anteIndex]}T`];
-            const cols = [S.red, S.green, S.gold];
-            return (
-              <Btn
-                key={action}
-                label={labels[idx]}
-                active={actionIndex === idx}
-                color={cols[idx]}
-                onClick={() => { setState((s) => ({ ...s, actionIndex: idx })); playerAction(action); }}
-              />
-            );
-          })}
+          {cpuBetPending ? (
+            // CPU bet on the river — only CALL or FOLD
+            (['fold', 'check'] as const).map((action, idx) => {
+              const labels = ['FOLD', `CALL +${HOLDEM_ANTES[anteIndex]}T`];
+              const cols = [S.red, S.gold];
+              return (
+                <Btn
+                  key={action}
+                  label={labels[idx]}
+                  active={actionIndex === idx}
+                  color={cols[idx]}
+                  onClick={() => { setState((s) => ({ ...s, actionIndex: idx })); playerAction(action); }}
+                />
+              );
+            })
+          ) : (
+            (['fold', 'check', 'raise'] as const).map((action, idx) => {
+              const labels = ['FOLD', 'PASAR', `SUBIR +${HOLDEM_ANTES[anteIndex]}T`];
+              const cols = [S.red, S.green, S.gold];
+              return (
+                <Btn
+                  key={action}
+                  label={labels[idx]}
+                  active={actionIndex === idx}
+                  color={cols[idx]}
+                  onClick={() => { setState((s) => ({ ...s, actionIndex: idx })); playerAction(action); }}
+                />
+              );
+            })
+          )}
         </div>
       )}
       {phase === 'showdown' && (
         <Btn
           label="JUGAR OTRA"
           active
-          onClick={() => setState({ phase: 'ante', anteIndex, playerHole: [], cpuHole: [], community: [], pot: 0, playerPaid: 0, deck: [], resultText: 'ELEGÍ TU ANTE Y REPARTÍ.', actionIndex: 1, cpuLastAction: '' })}
+          onClick={() => setState({ phase: 'ante', anteIndex, playerHole: [], cpuHole: [], community: [], pot: 0, playerPaid: 0, deck: [], resultText: 'ELEGÍ TU ANTE Y REPARTÍ.', actionIndex: 1, cpuLastAction: '', cpuBetPending: false })}
           color={S.purple}
         />
       )}

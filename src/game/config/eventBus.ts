@@ -69,6 +69,7 @@ export const EVENTS = {
   /** Dispositivo de salida Web Audio (Chrome/Edge). Payload: deviceId string (vacío = default). */
   AUDIO_OUTPUT_SINK_CHANGED: 'audio:output:sink:changed',
   VOICE_DISABLE: 'voice:disable',
+  VOICE_ENABLE: 'voice:enable',
   SKILL_MILESTONE_UNLOCKED: 'skill:milestone:unlocked',
   ACTIVITY_STARTED: 'activity:started',
   ACTIVITY_STOPPED: 'activity:stopped',

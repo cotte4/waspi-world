@@ -41,6 +41,7 @@ export class PenaltyMinigame extends Phaser.Scene {
   private keyEsc!: Phaser.Input.Keyboard.Key;
   private controls!: SceneControls;
   private shuttingDown = false;
+  private shotResults: boolean[] = [];
 
   constructor() {
     super({ key: 'PenaltyMinigame' });
@@ -60,6 +61,7 @@ export class PenaltyMinigame extends Phaser.Scene {
     this.resultText = '';
     this.resultColor = '#FFFFFF';
     this.shuttingDown = false;
+    this.shotResults = [];
   }
 
   init() {
@@ -209,7 +211,7 @@ export class PenaltyMinigame extends Phaser.Scene {
     for (let i = 0; i < total; i++) {
       const px = startX + i * (pipW + gap);
       const taken = i < this.shotsTaken;
-      const isGoal = taken && i < this.goals;
+      const isGoal = taken && this.shotResults[i] === true;
       if (taken) {
         this.shotsBar.fillStyle(isGoal ? 0x39FF14 : 0xFF006E, 1);
       } else {
@@ -367,7 +369,7 @@ export class PenaltyMinigame extends Phaser.Scene {
   }
 
   private handleShootInput() {
-    if (this.phase !== 'aiming' || this.isFinished) return;
+    if (this.countdownActive || this.phase !== 'aiming' || this.isFinished) return;
     this.takeShot();
   }
 
@@ -502,6 +504,7 @@ export class PenaltyMinigame extends Phaser.Scene {
     if (!this.resultLabel?.active || !this.summaryLabel?.active || !this.footer?.active) return;
     this.shotsTaken += 1;
     if (isGoal) this.goals += 1;
+    this.shotResults.push(isGoal);
     this.refreshHud();
     this.drawShotsBar();
 
@@ -680,6 +683,8 @@ export class PenaltyMinigame extends Phaser.Scene {
 
     transitionToScene(this, 'ArcadeInterior', {
       penaltyCooldownMs: 1200,
+      basketCooldownMs: 1200,
+      dartsCooldownMs: 1200,
       penaltyReward: {
         won,
         goals: this.goals,

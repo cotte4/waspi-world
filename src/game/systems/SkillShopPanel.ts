@@ -133,6 +133,7 @@ export class SkillShopPanel {
 
   // TENKS_CHANGED unsubscribe fn
   private unsubTenks?: () => void;
+  private destroyed = false;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -145,9 +146,10 @@ export class SkillShopPanel {
 
     // Live balance updates
     const handler = (data: unknown) => {
+      if (this.destroyed || !this.container?.active || !this.scene?.sys || this.scene.sys.isActive() === false) return;
       const balance = (data as { balance: number })?.balance;
-      if (typeof balance === 'number') {
-        this.balanceText?.setText(`${balance.toLocaleString('es-AR')} T`);
+      if (typeof balance === 'number' && this.balanceText?.active) {
+        this.balanceText.setText(`${balance.toLocaleString('es-AR')} T`);
       }
       this.refreshButtonStates();
     };
@@ -181,7 +183,9 @@ export class SkillShopPanel {
   }
 
   destroy(): void {
+    this.destroyed = true;
     this.unsubTenks?.();
+    this.unsubTenks = undefined;
     this.container.destroy();
   }
 
@@ -191,9 +195,9 @@ export class SkillShopPanel {
 
   private async refresh(): Promise<void> {
     await getSkillSystem().loadPurchasedItems();
-    this.balanceText?.setText(`${getTenksBalance().toLocaleString('es-AR')} T`);
+    if (this.balanceText?.active) this.balanceText.setText(`${getTenksBalance().toLocaleString('es-AR')} T`);
     this.refreshButtonStates();
-    this.noticeText?.setText('');
+    if (this.noticeText?.active) this.noticeText.setText('');
   }
 
   // ---------------------------------------------------------------------------
@@ -202,12 +206,13 @@ export class SkillShopPanel {
 
   private refreshButtonStates(): void {
     // Guard: if container was destroyed (scene changed), don't touch dead objects
-    if (!this.container?.active) return;
+    if (this.destroyed || !this.container?.active || !this.scene?.sys || this.scene.sys.isActive() === false) return;
     const balance = getTenksBalance();
 
     SHOP_ITEMS.forEach((item, i) => {
       const card = this.cards[i];
       if (!card) return;
+      if (!card.gfx?.active || !card.btnBg?.active || !card.btnLabel?.active || !card.ownedBadge?.active) return;
       const owned    = getSkillSystem().hasPurchased(item.id);
       const canAfford = balance >= item.cost;
 
@@ -505,9 +510,10 @@ export class SkillShopPanel {
   // ---------------------------------------------------------------------------
 
   private showNotice(msg: string, color: string): void {
+    if (this.destroyed || !this.noticeText?.active) return;
     this.noticeText?.setText(msg).setColor(color);
     this.scene.time.delayedCall(2500, () => {
-      if (this.visible) this.noticeText?.setText('');
+      if (!this.destroyed && this.visible && this.noticeText?.active) this.noticeText?.setText('');
     });
   }
 }

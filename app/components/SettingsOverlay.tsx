@@ -39,6 +39,8 @@ export interface SettingsOverlayProps {
   bindingCaptureAction: ActionBinding | null;
   onCaptureAction: (action: ActionBinding | null) => void;
   // Voice
+  voiceEnabled: boolean;
+  onVoiceEnabledChange: (enabled: boolean) => void;
   micDevices: MediaDeviceInfo[];
   selectedMicDeviceId: string;
   onMicDeviceChange: (deviceId: string) => void;
@@ -438,12 +440,20 @@ function ControlsTab({
 }
 
 function VoiceTab({
+  voiceEnabled,
+  onVoiceEnabledChange,
   micDevices,
   selectedMicDeviceId,
   onMicDeviceChange,
-}: Pick<SettingsOverlayProps, 'micDevices' | 'selectedMicDeviceId' | 'onMicDeviceChange'>) {
+}: Pick<SettingsOverlayProps, 'voiceEnabled' | 'onVoiceEnabledChange' | 'micDevices' | 'selectedMicDeviceId' | 'onMicDeviceChange'>) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <ToggleRow
+        label="ACTIVAR VOZ"
+        value={voiceEnabled}
+        onToggle={() => onVoiceEnabledChange(!voiceEnabled)}
+      />
+
       <SectionLabel>MICRÓFONO</SectionLabel>
 
       {micDevices.length > 0 ? (
@@ -517,6 +527,8 @@ export default function SettingsOverlay({
   onCaptureDirection,
   bindingCaptureAction,
   onCaptureAction,
+  voiceEnabled,
+  onVoiceEnabledChange,
   micDevices,
   selectedMicDeviceId,
   onMicDeviceChange,
@@ -701,6 +713,8 @@ export default function SettingsOverlay({
           )}
           {settingsTab === 'voice' && (
             <VoiceTab
+              voiceEnabled={voiceEnabled}
+              onVoiceEnabledChange={onVoiceEnabledChange}
               micDevices={micDevices}
               selectedMicDeviceId={selectedMicDeviceId}
               onMicDeviceChange={onMicDeviceChange}

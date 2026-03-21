@@ -482,6 +482,14 @@ export class AvatarRenderer {
     if (this.isContainerUsable()) safeDestroyGameObject(this.container);
   }
 
+  get scene(): Phaser.Scene | null {
+    return this.container?.scene ?? null;
+  }
+
+  get active(): boolean {
+    return this.isContainerUsable();
+  }
+
   private isContainerUsable() {
     return Boolean(this.container?.scene && this.container.active);
   }

@@ -143,7 +143,7 @@ export default function GameHUD() {
   return (
     <div
       className="absolute pointer-events-none"
-      style={{ top: 8, left: 8, width: 168, zIndex: 50 }}
+      style={{ top: 8, right: 8, width: 168, zIndex: 50 }}
     >
       {/* ── outer panel ── */}
       <div

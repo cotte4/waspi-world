@@ -245,6 +245,9 @@ export default function PlayPage() {
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedMicDeviceId, setSelectedMicDeviceId] = useState<string>(getInitialSelectedMicDeviceId);
+  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(() =>
+    typeof window !== 'undefined' && window.localStorage.getItem('waspi_voice_pref') === 'on'
+  );
   const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<string>(() =>
     typeof window !== 'undefined' ? getStoredAudioOutputDeviceId() : ''
   );
@@ -2463,6 +2466,15 @@ export default function PlayPage() {
             onCaptureDirection={setBindingCaptureDirection}
             bindingCaptureAction={bindingCaptureAction}
             onCaptureAction={setBindingCaptureAction}
+            voiceEnabled={voiceEnabled}
+            onVoiceEnabledChange={(enabled) => {
+              setVoiceEnabled(enabled);
+              if (enabled) {
+                eventBus.emit(EVENTS.VOICE_ENABLE);
+              } else {
+                eventBus.emit(EVENTS.VOICE_DISABLE);
+              }
+            }}
             micDevices={micDevices}
             selectedMicDeviceId={selectedMicDeviceId}
             onMicDeviceChange={setSelectedMicDeviceId}

@@ -4,6 +4,7 @@ import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
 import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
+import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 
 type BasketPhase = 'aiming' | 'flying' | 'result' | 'done' | 'exiting';
 
@@ -13,10 +14,14 @@ const HOOP_Y = 190;
 const BALL_START_X = 180;
 const BALL_START_Y = 430;
 const GRAVITY = 900;
-const MAX_FORCE = 150; // max drag distance (px)
-const VEL_FACTOR = 5.5;
-const MAX_VEL_X = 600;
-const MIN_VEL_Y = -650; // most upward allowed
+const MAX_FORCE = 205; // max drag distance (px)
+const VEL_FACTOR = 6.8;
+const MAX_VEL_X = 780;
+const MIN_VEL_Y = -840; // most upward allowed
+const PLAYER_X = 150;
+const PLAYER_Y = 458;
+const HOOP_MOVE_RANGE = 120;
+const HOOP_MOVE_SPEED = 0.0015;
 
 export class BasketMinigame extends Phaser.Scene {
   // Game state
@@ -61,7 +66,15 @@ export class BasketMinigame extends Phaser.Scene {
   private shadow!: Phaser.GameObjects.Ellipse;
   private aimGuide!: Phaser.GameObjects.Graphics;
   private netGraphics!: Phaser.GameObjects.Graphics;
+  private rimBar!: Phaser.GameObjects.Graphics;
+  private boardGlow!: Phaser.GameObjects.Graphics;
   private hintText!: Phaser.GameObjects.Text;
+  private escKey?: Phaser.Input.Keyboard.Key;
+  private player!: AvatarRenderer;
+  private hoopX = HOOP_X;
+  private hoopY = HOOP_Y;
+  private hoopMoveDir = 1;
+  private hoopMoveAnchorX = HOOP_X;
 
   constructor() {
     super({ key: 'BasketMinigame' });
@@ -89,6 +102,10 @@ export class BasketMinigame extends Phaser.Scene {
     this.rewardRunPromise = null;
     this.resultTimerMs = 0;
     this.postGameTimerMs = 0;
+    this.hoopX = HOOP_X;
+    this.hoopY = HOOP_Y;
+    this.hoopMoveDir = 1;
+    this.hoopMoveAnchorX = HOOP_X;
   }
 
   create() {
@@ -109,6 +126,7 @@ export class BasketMinigame extends Phaser.Scene {
     eventBus.emit(EVENTS.BASKET_SCENE_ACTIVE, true);
     this.buildBackground();
     this.buildHoop();
+    this.buildPlayer();
     this.buildBall();
     this.buildHud();
     this.buildInputListeners();
@@ -164,30 +182,29 @@ export class BasketMinigame extends Phaser.Scene {
 
   private buildHoop() {
     // Backboard (static physics)
-    this.backboard = this.add.rectangle(HOOP_X + 80, HOOP_Y - 50, 14, 80, 0xdbe7ff, 1)
+    this.backboard = this.add.rectangle(this.hoopX + 80, this.hoopY - 50, 14, 80, 0xdbe7ff, 1)
       .setStrokeStyle(2, 0x0d1530, 1)
       .setDepth(5);
     this.physics.add.existing(this.backboard, true);
 
     // Left rim (static physics)
-    this.rimLeft = this.add.circle(HOOP_X - 38, HOOP_Y, 7, 0xff6b00, 1)
+    this.rimLeft = this.add.circle(this.hoopX - 38, this.hoopY, 7, 0xff6b00, 1)
       .setStrokeStyle(2, 0x3a1a00, 1)
       .setDepth(5);
     this.physics.add.existing(this.rimLeft, true);
 
     // Right rim (static physics)
-    this.rimRight = this.add.circle(HOOP_X + 38, HOOP_Y, 7, 0xff6b00, 1)
+    this.rimRight = this.add.circle(this.hoopX + 38, this.hoopY, 7, 0xff6b00, 1)
       .setStrokeStyle(2, 0x3a1a00, 1)
       .setDepth(5);
     this.physics.add.existing(this.rimRight, true);
 
     // Rim connector (visual only)
-    const rimBar = this.add.graphics().setDepth(4);
-    rimBar.lineStyle(5, 0xff6b00, 1);
-    rimBar.lineBetween(HOOP_X - 38, HOOP_Y, HOOP_X + 38, HOOP_Y);
+    this.rimBar = this.add.graphics().setDepth(4);
+    this.redrawHoopDecor();
 
     // Net sensor — overlap only (no isSensor in Arcade, use overlap instead of collider)
-    this.netSensor = this.add.rectangle(HOOP_X, HOOP_Y + 8, 68, 12, 0x000000, 0)
+    this.netSensor = this.add.rectangle(this.hoopX, this.hoopY + 8, 68, 12, 0x000000, 0)
       .setDepth(6);
     this.physics.add.existing(this.netSensor, true);
 
@@ -196,28 +213,74 @@ export class BasketMinigame extends Phaser.Scene {
     this.drawNet(0);
 
     // Backboard border glow
-    const boardGlow = this.add.graphics().setDepth(3);
-    boardGlow.lineStyle(1, 0xdbe7ff, 0.15);
-    boardGlow.strokeRect(HOOP_X + 73, HOOP_Y - 90, 28, 90);
+    this.boardGlow = this.add.graphics().setDepth(3);
+    this.redrawHoopDecor();
+  }
+
+  private buildPlayer() {
+    this.player = new AvatarRenderer(this, PLAYER_X, PLAYER_Y, loadStoredAvatarConfig());
+    this.player.setDepth(12);
+    this.player.update(false, 1, 0);
   }
 
   private drawNet(drop: number) {
     this.netGraphics.clear();
     this.netGraphics.lineStyle(1, 0xdce6ff, 0.7);
-    const left = HOOP_X - 34;
-    const right = HOOP_X + 34;
-    const top = HOOP_Y + 4;
+    const left = this.hoopX - 34;
+    const right = this.hoopX + 34;
+    const top = this.hoopY + 4;
     const segments = 5;
     const step = (right - left) / segments;
     for (let i = 0; i <= segments; i++) {
       const nx = left + i * step;
-      this.netGraphics.lineBetween(nx, top, nx * 0.3 + HOOP_X * 0.7, top + 28 + drop);
+      this.netGraphics.lineBetween(nx, top, nx * 0.3 + this.hoopX * 0.7, top + 28 + drop);
     }
     for (let y = 0; y <= 2; y++) {
       const ty = top + y * 12 + drop * (y / 2);
       const shrink = y * 4;
       this.netGraphics.lineBetween(left + shrink, ty, right - shrink, ty);
     }
+  }
+
+  private redrawHoopDecor() {
+    this.rimBar?.clear();
+    this.rimBar?.lineStyle(5, 0xff6b00, 1);
+    this.rimBar?.lineBetween(this.hoopX - 38, this.hoopY, this.hoopX + 38, this.hoopY);
+
+    this.boardGlow?.clear();
+    this.boardGlow?.lineStyle(1, 0xdbe7ff, 0.15);
+    this.boardGlow?.strokeRect(this.hoopX + 73, this.hoopY - 90, 28, 90);
+  }
+
+  private syncStaticBody(gameObject: Phaser.GameObjects.GameObject) {
+    const body = (gameObject as Phaser.GameObjects.GameObject & { body?: unknown }).body;
+    if (body instanceof Phaser.Physics.Arcade.StaticBody) body.updateFromGameObject();
+  }
+
+  private updateHoopPosition(delta: number) {
+    if (this.phase !== 'aiming') return;
+
+    const drift = HOOP_MOVE_SPEED * delta * this.hoopMoveDir;
+    this.hoopX += drift * HOOP_MOVE_RANGE;
+
+    if (this.hoopX > this.hoopMoveAnchorX + HOOP_MOVE_RANGE) {
+      this.hoopX = this.hoopMoveAnchorX + HOOP_MOVE_RANGE;
+      this.hoopMoveDir = -1;
+    } else if (this.hoopX < this.hoopMoveAnchorX - HOOP_MOVE_RANGE) {
+      this.hoopX = this.hoopMoveAnchorX - HOOP_MOVE_RANGE;
+      this.hoopMoveDir = 1;
+    }
+
+    this.backboard.setPosition(this.hoopX + 80, this.hoopY - 50);
+    this.rimLeft.setPosition(this.hoopX - 38, this.hoopY);
+    this.rimRight.setPosition(this.hoopX + 38, this.hoopY);
+    this.netSensor.setPosition(this.hoopX, this.hoopY + 8);
+    this.syncStaticBody(this.backboard);
+    this.syncStaticBody(this.rimLeft);
+    this.syncStaticBody(this.rimRight);
+    this.syncStaticBody(this.netSensor);
+    this.redrawHoopDecor();
+    this.drawNet(0);
   }
 
   // ── Ball construction ───────────────────────────────────────────────────
@@ -293,8 +356,8 @@ export class BasketMinigame extends Phaser.Scene {
     this.input.on('pointermove', this.onPointerMove, this);
     this.input.on('pointerup', this.onPointerUp, this);
 
-    const escKey = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
-    escKey?.on('down', () => {
+    this.escKey = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    this.escKey?.on('down', () => {
       this.rewardPending = false;
       this.finishAndExit();
     });
@@ -359,6 +422,7 @@ export class BasketMinigame extends Phaser.Scene {
       vx = Phaser.Math.Clamp(flickDx * VEL_FACTOR * flickScale, -MAX_VEL_X, MAX_VEL_X);
       vy = Math.max(-(flickDy * VEL_FACTOR * flickScale), MIN_VEL_Y);
     }
+    this.player.playShoot();
     this.launchBall(vx, vy);
   }
   // Aim guide
@@ -473,8 +537,8 @@ export class BasketMinigame extends Phaser.Scene {
     this.animateNet(true);
 
     // Floating label
-    this.showFloatingText(label, '#F5C842', HOOP_X, HOOP_Y - 30);
-    this.showFloatingText(`+${points}pts`, '#39FF14', HOOP_X, HOOP_Y - 10);
+    this.showFloatingText(label, '#F5C842', this.hoopX, this.hoopY - 30);
+    this.showFloatingText(`+${points}pts`, '#39FF14', this.hoopX, this.hoopY - 10);
 
     console.log('SFX: basket_score');
 
@@ -503,8 +567,8 @@ export class BasketMinigame extends Phaser.Scene {
     for (let i = 0; i < 10; i++) {
       const angle = Math.random() * Math.PI * 2;
       const speed = 40 + Math.random() * 80;
-      const px = HOOP_X + (Math.random() - 0.5) * 60;
-      const py = HOOP_Y + 10;
+      const px = this.hoopX + (Math.random() - 0.5) * 60;
+      const py = this.hoopY + 10;
       const particle = this.add.circle(px, py, 3 + Math.random() * 3, 0xF5C842, 1)
         .setDepth(300)
         .setBlendMode(Phaser.BlendModes.ADD);
@@ -638,6 +702,8 @@ export class BasketMinigame extends Phaser.Scene {
     const newX = Phaser.Math.Clamp(BALL_START_X + jitter, 80, 280);
     this.ball.setPosition(newX, BALL_START_Y);
     this.ball.setScale(1);
+    this.player.clearActionState();
+    this.player.update(false, 1, 0);
 
     this.shadow.setPosition(newX, BALL_START_Y + 18);
     this.shadow.setScale(1, 1);
@@ -697,6 +763,9 @@ export class BasketMinigame extends Phaser.Scene {
         if (!this.rewardPending || this.isFinished) return;
         if (!this.isSceneAlive()) return;
         if (!this.hintText.active) return;
+        this.rewardStatus = 'pending';
+        this.grantedRewardTenks = 0;
+        this.rewardResolved = true;
         this.rewardPending = false;
         this.hintText.setText('NO SE PUDO GUARDAR. VOLVIENDO...');
         this.hintText.setColor('#FF006E');
@@ -717,6 +786,11 @@ export class BasketMinigame extends Phaser.Scene {
 
   update(_time: number, delta: number) {
     if (this.isFinished) return;
+
+    this.updateHoopPosition(delta);
+    this.player.update(this.phase === 'aiming', 1, 0);
+    this.player.setPosition(PLAYER_X, PLAYER_Y);
+    this.player.setDepth(12);
 
     // Shadow follows ball horizontally on court
     if (this.phase === 'flying') {
@@ -767,6 +841,8 @@ export class BasketMinigame extends Phaser.Scene {
     if (this.input.keyboard) this.input.keyboard.enabled = false;
     transitionToScene(this, 'ArcadeInterior', {
       basketCooldownMs: 1200,
+      penaltyCooldownMs: 1200,
+      dartsCooldownMs: 1200,
       basketReward: {
         score: this.totalScore,
         shots: this.shotsTaken,
@@ -922,6 +998,9 @@ export class BasketMinigame extends Phaser.Scene {
     this.input.off('pointerdown', this.onPointerDown, this);
     this.input.off('pointermove', this.onPointerMove, this);
     this.input.off('pointerup', this.onPointerUp, this);
+    this.escKey?.off('down');
+    this.escKey = undefined;
+    this.player?.destroy();
   }
 
   private isSceneAlive(): boolean {

@@ -291,6 +291,8 @@ export class DartsMinigame extends Phaser.Scene {
     });
     transitionToScene(this, 'ArcadeInterior', {
       dartsCooldownMs: 1200,
+      basketCooldownMs: 1200,
+      penaltyCooldownMs: 1200,
       dartsReward: {
         score: this.score,
         bullseyes: this.bullseyes,
