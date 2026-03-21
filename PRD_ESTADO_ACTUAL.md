@@ -20,6 +20,35 @@ No son cuatro “versiones” del mismo documento: cada uno cumple un **rol dist
 
 ---
 
+## Sesión 2026-03-21 — Lo que se hizo
+
+### Bug fixes
+- **ZombiesScene boundary exploits (2 gaps)**: jugador podía bajar del START ROOM bajo y=940 y entrar a BURNT STREET sin abrir la puerta; también podía salir por la derecha del WORKSHOP (x>1650) evitando la puerta de STREET. Ambos cerrados con colliders adicionales.
+- **GYM building solapaba TRAINING zone**: GYM estaba en (1480,960) dentro de la zona de dummies de entrenamiento. Movido a (1550,1450), debajo de TRAINING y fuera de cualquier otra zona.
+- **Arcade cross-trigger fix + casino exploit** ya estaban en commits anteriores.
+
+### Features
+- **Gym building visual** (WorldScene): fachada de hormigón, cornisa roja LED, cartel animado `★ GYM ★`, ventanas con mancuernas/barras, puerta de neón rojo, con marker de entrada en `drawBuildingEntranceMarkers()`.
+- **Fishing dock sign** (VecindadScene): cartel montado en el pier post con `🎣 DOCK [E]`, panel oscuro + borde teal.
+- **VecindadScene — mejoras de calles y NPCs**:
+  - 2 nuevas calles: alley horizontal entre rows 2→3 (y=1268) y bottom lane entre rows 3→4 (y=1584), ambas con centerline dashes.
+  - Crosswalk stripes en ambas intersecciones de calles verticales × calle principal.
+  - 8 grietas de asfalto + 5 charcos con brillo en calles.
+  - Graffiti en paredes de parcelas: `WASPI`, `EL BARRIO`, `★ CALLE ★`, `NO PISAR`.
+  - 28 farolas con poste + brazo + bombilla + doble glow (antes eran 4 puntos).
+  - 6 bancos extra, 6 tachos de basura con detalle, 6 maceteros con arbustos pixel.
+  - 4 NPCs ambientales: **DOÑA ROSA** (calle principal), **DON CARLOS** (calle principal), **MIGUEL** (calle vertical izquierda), **LUISA** (segundo alley). Cada uno con cuerpo pixel único, nombre, hint `[E]` y dialog panel on press.
+
+### Próximos pasos sugeridos
+- Probar en browser que los NPCs ambientales no colisionan con weed NPCs (FLACO está en x=490 y DOÑA ROSA en x=560 — margen de 70px, OK)
+- `PRD_VOICE_WEBRTC_ESTADO.md` — doc de auditoría sobre el subsistema de voz WebRTC ya committeado; revisar si vale implementar servidor TURN propio
+- Animaciones idle para NPCs ambientales (bounce sutil)
+- Colisiones en parcelas para que el jugador no atraviese las casas construidas
+- Investigar los 500 en `/api/vecindad` y `/api/events` (pendiente de sesión anterior)
+- React "Cannot update during render" en apertura del Casino (pendiente)
+
+---
+
 ## Sesión 2026-03-20 — Lo que se hizo
 
 ### Jukebox del Café — UX y audio
