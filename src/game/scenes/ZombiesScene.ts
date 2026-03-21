@@ -1058,7 +1058,7 @@ export class ZombiesScene extends Phaser.Scene {
     // ─── 2. SECTION DIVIDER COLLIDERS ─────────────────────────────────────────
     // START → YARD divider (x=685), door gap y=590-700
     this.addWallCollider(685, 138, 25, 452);   // above door (extends from top wall down to door)
-    this.addWallCollider(685, 700, 25, 240);   // below door
+    this.addWallCollider(685, 700, 25, 382);   // below door — extends all way to bottom perimeter (y=1082)
 
     // YARD → WORKSHOP divider (x=1110), door gap y=560-670
     this.addWallCollider(1110, 138, 20, 422);  // above door (extends from top wall down to door)
@@ -1066,7 +1066,10 @@ export class ZombiesScene extends Phaser.Scene {
 
     // STREET horizontal divider (y=770), door gap x=880-1000
     this.addWallCollider(700, 770, 180, 30);   // left of door
-    this.addWallCollider(1000, 770, 650, 30);  // right of door
+    this.addWallCollider(1000, 770, 742, 30);  // right of door — extends to right perimeter (x=1742)
+
+    // STREET right-side seal — closes gap between STREET divider and right perimeter wall
+    this.addWallCollider(1650, 800, 92, 282);  // x=1650→1742, y=800→1082
 
     // ─── TOP CAPS — cierra la zona vacía sobre cada sección ───────────────────
     // Impide que el jugador suba por encima del área jugable de cada room.

@@ -109,8 +109,8 @@ export const BUILDINGS = {
     h: 220,
   },
   GYM: {
-    x: 1480,
-    y: 960,
+    x: 1550,
+    y: 1450,
     w: 300,
     h: 180,
   },
