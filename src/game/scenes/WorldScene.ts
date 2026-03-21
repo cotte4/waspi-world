@@ -3391,6 +3391,8 @@ export class WorldScene extends Phaser.Scene {
     this.drawCafeBuilding();
     // CASINO
     this.drawCasinoBuilding();
+    // GYM
+    this.drawGymBuilding();
     this.drawBuildingEntranceMarkers();
   }
 
@@ -3413,6 +3415,7 @@ export class WorldScene extends Phaser.Scene {
       { cx: BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2,  floorY: BUILDINGS.STORE.y + BUILDINGS.STORE.h,  color: 0xF5C842 },
       { cx: BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2,    floorY: BUILDINGS.CAFE.y + BUILDINGS.CAFE.h,    color: 0xFF8B3D },
       { cx: BUILDINGS.CASINO.x + BUILDINGS.CASINO.w / 2, floorY: BUILDINGS.CASINO.y + BUILDINGS.CASINO.h, color: 0xF5C842 },
+      { cx: BUILDINGS.GYM.x + BUILDINGS.GYM.w / 2,      floorY: BUILDINGS.GYM.y + BUILDINGS.GYM.h,      color: 0xFF2222 },
     ];
     doors.forEach(({ cx, floorY, color }) => {
       // Soft colored floor zone in front of door
@@ -3938,6 +3941,156 @@ export class WorldScene extends Phaser.Scene {
 
     // ── Warm gold ambient ────────────────────────────────────
     g.fillStyle(GOLD, 0.018);
+    g.fillRect(x, y, w, h);
+  }
+
+  private drawGymBuilding() {
+    const { x, y, w, h } = BUILDINGS.GYM;
+    const g = this.add.graphics().setDepth(2);
+    const cx = x + w / 2;
+    const RED    = 0xFF2222;
+    const DKRED  = 0x6a0808;
+
+    // ── Base facade — dark concrete ──────────────────────────────
+    g.fillStyle(0x131318);
+    g.fillRect(x, y, w, h);
+    // Concrete horizontal panel lines
+    g.lineStyle(1, 0x1e1e26, 0.8);
+    for (let ty = y + 14; ty < y + h; ty += 14) {
+      g.lineBetween(x, ty, x + w, ty);
+    }
+    // Side pillar panels
+    g.fillStyle(0x0f0f14);
+    g.fillRect(x,         y, 22, h);
+    g.fillRect(x + w - 22, y, 22, h);
+    g.lineStyle(1, 0x2a0808, 0.6);
+    g.strokeRect(x,         y, 22, h);
+    g.strokeRect(x + w - 22, y, 22, h);
+
+    // ── Roof cornice ─────────────────────────────────────────────
+    g.fillStyle(COLORS.ROOF_DARK);
+    g.fillRect(x - 8, y, w + 16, 28);
+    // Red LED top strip
+    g.lineStyle(3, RED, 0.95);
+    g.lineBetween(x - 8, y + 1, x + w + 8, y + 1);
+    // Dot chase lights
+    for (let lx = x; lx < x + w; lx += 14) {
+      g.fillStyle(RED, 0.65);
+      g.fillCircle(lx + 7, y + 8, 2);
+    }
+    g.lineStyle(1, RED, 0.3);
+    g.lineBetween(x - 8, y + 28, x + w + 8, y + 28);
+
+    // ── Sign box ─────────────────────────────────────────────────
+    const sigW = 140, sigH = 26, sigX = cx - sigW / 2, sigY = y + 3;
+    g.fillStyle(0x0a0005);
+    g.fillRect(sigX, sigY, sigW, sigH);
+    g.lineStyle(2, RED, 0.85);
+    g.strokeRect(sigX, sigY, sigW, sigH);
+    g.fillStyle(RED, 0.06);
+    g.fillRect(sigX - 4, sigY - 2, sigW + 8, sigH + 4);
+
+    // ── Upper windows (barbell + dumbbell silhouettes) ───────────
+    const upperWins = [
+      { wx: x + 26, wy: y + 38 },
+      { wx: x + w - 90, wy: y + 38 },
+    ];
+    upperWins.forEach(({ wx, wy }, i) => {
+      const ww = 64, wh = 72;
+      g.fillStyle(0x100004, 1);
+      g.fillRect(wx, wy, ww, wh);
+      g.lineStyle(2, DKRED, 0.75);
+      g.strokeRect(wx, wy, ww, wh);
+      // Inner window frame
+      g.lineStyle(1, RED, 0.18);
+      g.strokeRect(wx + 4, wy + 4, ww - 8, wh - 8);
+      // Equipment silhouettes
+      if (i === 0) {
+        // Barbell: long bar + two plates
+        g.fillStyle(0x3a0a0a, 1);
+        g.fillRect(wx + 8,  wy + 32, 48, 7);  // bar
+        g.fillRect(wx + 6,  wy + 24, 10, 22); // left plate
+        g.fillRect(wx + 48, wy + 24, 10, 22); // right plate
+        // Weight rings
+        g.lineStyle(1, RED, 0.35);
+        g.strokeRect(wx + 6,  wy + 24, 10, 22);
+        g.strokeRect(wx + 48, wy + 24, 10, 22);
+      } else {
+        // Dumbbell: two balls + short bar
+        g.fillStyle(0x3a0a0a, 1);
+        g.fillRect(wx + 10, wy + 32, 44, 6); // bar
+        g.fillCircle(wx + 14, wy + 35, 10);  // left head
+        g.fillCircle(wx + 50, wy + 35, 10);  // right head
+        g.lineStyle(1, RED, 0.35);
+        g.strokeCircle(wx + 14, wy + 35, 10);
+        g.strokeCircle(wx + 50, wy + 35, 10);
+      }
+    });
+
+    // ── Lower windows flanking door ──────────────────────────────
+    [[x + 26, y + 118], [x + w - 90, y + 118]].forEach(([wx, wy]) => {
+      const ww = 64, wh = 44;
+      g.fillStyle(0x100004, 1);
+      g.fillRect(wx, wy, ww, wh);
+      g.lineStyle(2, DKRED, 0.55);
+      g.strokeRect(wx, wy, ww, wh);
+      // Subtle horizontal bench silhouette
+      g.fillStyle(0x2a0808, 0.8);
+      g.fillRect(wx + 8, wy + 20, 48, 5);
+      g.fillRect(wx + 14, wy + 25, 6, 10);
+      g.fillRect(wx + 44, wy + 25, 6, 10);
+    });
+
+    // ── Entrance — double door with red frame ─────────────────────
+    const dX = cx - 34, dY = y + h - 80, dW = 68, dH = 80;
+    g.fillStyle(0x060000);
+    g.fillRect(dX - 4, dY - 4, dW + 8, dH + 4);
+    g.lineStyle(3, RED, 1);
+    g.strokeRect(dX - 4, dY - 4, dW + 8, dH + 4);
+    // Door panels
+    g.fillStyle(0x0a0000);
+    g.fillRect(dX, dY, dW, dH);
+    // Center divider
+    g.lineStyle(1, RED, 0.4);
+    g.lineBetween(cx, dY + 4, cx, dY + dH);
+    // Door handles
+    g.fillStyle(RED, 0.8);
+    g.fillRect(cx - 12, dY + dH / 2 - 4, 4, 8);
+    g.fillRect(cx + 8,  dY + dH / 2 - 4, 4, 8);
+    // Glow at door bottom
+    g.fillStyle(RED, 0.12);
+    g.fillRect(dX, dY + dH - 12, dW, 12);
+    // Red neon side tubes
+    g.lineStyle(3, RED, 0.9);
+    g.lineBetween(dX - 4, dY - 4, dX - 4, y + h);
+    g.lineBetween(dX + dW + 4, dY - 4, dX + dW + 4, y + h);
+    g.lineStyle(1, RED, 0.25);
+    g.lineBetween(dX - 8, dY - 4, dX - 8, y + h);
+    g.lineBetween(dX + dW + 8, dY - 4, dX + dW + 8, y + h);
+
+    // ── GYM sign — layered neon glow ─────────────────────────────
+    this.add.text(cx, sigY + sigH / 2, '★  GYM  ★', {
+      fontSize: '10px', fontFamily: '"Press Start 2P", monospace',
+      color: '#FF2222', stroke: '#FF2222', strokeThickness: 8,
+    }).setOrigin(0.5).setDepth(3).setAlpha(0.25);
+
+    const gymSign = this.add.text(cx, sigY + sigH / 2, '★  GYM  ★', {
+      fontSize: '10px', fontFamily: '"Press Start 2P", monospace',
+      color: '#FFFFFF', stroke: '#FF2222', strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(4);
+
+    this.tweens.add({
+      targets: gymSign,
+      alpha: { from: 1, to: 0.5 },
+      duration: 140,
+      yoyo: true,
+      repeat: -1,
+      hold: 1600 + Math.random() * 700,
+      ease: 'Stepped',
+    });
+
+    // ── Ambient red glow ─────────────────────────────────────────
+    g.fillStyle(RED, 0.022);
     g.fillRect(x, y, w, h);
   }
 

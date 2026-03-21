@@ -609,11 +609,22 @@ export class VecindadScene extends Phaser.Scene {
     g.fillStyle(0x5a3a1a, 1);
     g.fillRoundedRect(x - 8, y - 62, 16, 56, 4);
     g.fillRoundedRect(x - 30, y - 68, 60, 10, 4);
-    // Labels
-    this.add.text(x, y - 76, '🎣 PESCAR [E]', {
-      fontSize: '7px', fontFamily: '"Press Start 2P", monospace',
-      color: '#4A9ECC', stroke: '#000', strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(2);
+    // ── Dock sign board ─────────────────────────────────────────
+    // Sign post
+    g.fillStyle(0x3a2010, 1);
+    g.fillRect(x - 5, y - 118, 10, 44);
+    // Sign board background
+    g.fillStyle(0x1a0e06, 1);
+    g.fillRoundedRect(x - 52, y - 130, 104, 28, 4);
+    g.lineStyle(2, 0x4A9ECC, 0.8);
+    g.strokeRoundedRect(x - 52, y - 130, 104, 28, 4);
+
+    this.add.text(x, y - 116, '🎣  DOCK  [E]', {
+      fontSize: '8px', fontFamily: '"Press Start 2P", monospace',
+      color: '#4A9ECC', stroke: '#000', strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(3);
+
+    // Deep spot label (smaller, below pond)
     this.add.text(ds.x, ds.y + 34, '🌊 PROFUNDO [E] LV3+', {
       fontSize: '5px', fontFamily: '"Press Start 2P", monospace',
       color: '#2A5A8A', stroke: '#000', strokeThickness: 2,
