@@ -173,6 +173,12 @@ export class VecindadScene extends Phaser.Scene {
   playerBusy = false;
   private specModal?: SpecializationModal;
 
+  // ── Ambient NPCs ──────────────────────────────────────────────────────────
+  private ambientNpcDialogOpen = false;
+  private ambientNpcDialogBg?: Phaser.GameObjects.Rectangle;
+  private ambientNpcDialogText?: Phaser.GameObjects.Text;
+  private ambientNpcDialogHint?: Phaser.GameObjects.Text;
+
   // ── Weed Delivery NPCs ────────────────────────────────────────────────────
   private weedNpcBubbles: Map<WeedNpcId, Phaser.GameObjects.Container> = new Map();
   private weedDeliveryDialogOpen = false;
@@ -236,6 +242,7 @@ export class VecindadScene extends Phaser.Scene {
     this.setupUi();
     this.createFarmOverlay();
     this.createWeedDeliveryNpcs();
+    this.createAmbientNpcs();
     this.setupBridge();
     void this.loadSharedParcels();
     this.subscribeToParcelChanges();
@@ -294,6 +301,14 @@ export class VecindadScene extends Phaser.Scene {
       if (Phaser.Input.Keyboard.JustDown(this.keyE)) this.handleFarmPrimaryAction();
       return;
     }
+    // Ambient NPC dialog swallows all input while open
+    if (this.ambientNpcDialogOpen) {
+      if (Phaser.Input.Keyboard.JustDown(this.keyE) || Phaser.Input.Keyboard.JustDown(this.keySpace)) {
+        this.closeAmbientNpcDialog();
+      }
+      return;
+    }
+
     // Weed delivery dialog swallows E and Space while open
     if (this.weedDeliveryDialogOpen) {
       if (Phaser.Input.Keyboard.JustDown(this.keyE)) {
@@ -385,6 +400,10 @@ export class VecindadScene extends Phaser.Scene {
     g.fillRoundedRect(120, 880, VECINDAD_MAP.WIDTH - 240, 160, 22);
     g.fillRoundedRect(835, 140, 170, VECINDAD_MAP.HEIGHT - 280, 22);
     g.fillRoundedRect(1725, 140, 170, VECINDAD_MAP.HEIGHT - 280, 22);
+    // Second horizontal alley — between row 2 (ends y=1260) and row 3 (starts y=1340)
+    g.fillRoundedRect(120, 1268, VECINDAD_MAP.WIDTH - 240, 64, 12);
+    // Bottom alley — between row 3 (ends y=1580) and row 4 (starts y=1630)
+    g.fillRoundedRect(120, 1584, VECINDAD_MAP.WIDTH - 240, 40, 8);
 
     g.lineStyle(2, 0x5b4632, 0.8);
     for (let x = 180; x < VECINDAD_MAP.WIDTH - 180; x += 46) {
@@ -393,6 +412,15 @@ export class VecindadScene extends Phaser.Scene {
     for (let y = 190; y < VECINDAD_MAP.HEIGHT - 150; y += 44) {
       g.lineBetween(920, y, 920, y + 18);
       g.lineBetween(1810, y, 1810, y + 18);
+    }
+    // Centerline dashes on second alley
+    g.lineStyle(2, 0x5b4632, 0.6);
+    for (let x = 180; x < VECINDAD_MAP.WIDTH - 180; x += 46) {
+      g.lineBetween(x, 1300, x + 22, 1300);
+    }
+    // Centerline dashes on bottom alley
+    for (let x = 180; x < VECINDAD_MAP.WIDTH - 180; x += 46) {
+      g.lineBetween(x, 1604, x + 16, 1604);
     }
 
     g.fillStyle(0x2a1a10, 1);
@@ -420,8 +448,10 @@ export class VecindadScene extends Phaser.Scene {
       g.lineStyle(1, 0x45634b, 0.45);
       g.strokeCircle(1400, 960, 62 + ring * 20);
     }
+    this.drawStreetDetails(g);
     this.drawDistrictLights(g);
     this.drawDistrictProps(g);
+    this.drawExtraStreetProps(g);
     this.drawAmbientOverlays();
     this.drawFishingPond(g);
     this.drawPuestoSpot(g);
@@ -491,20 +521,64 @@ export class VecindadScene extends Phaser.Scene {
   }
 
   private drawDistrictLights(g: Phaser.GameObjects.Graphics) {
-    const lights = [
-      { x: 1090, y: 960 },
-      { x: 1400, y: 770 },
-      { x: 1400, y: 1150 },
-      { x: 1710, y: 960 },
-    ];
-    lights.forEach((light) => {
+    const drawLamp = (bx: number, by: number, arm: 1 | -1) => {
+      // Pole
       g.fillStyle(0x2a1a10, 1);
-      g.fillRect(light.x - 3, light.y - 26, 6, 42);
-      g.fillStyle(0xf5c842, 0.92);
-      g.fillCircle(light.x, light.y - 34, 5);
-      g.fillStyle(0xf5c842, 0.12);
-      g.fillCircle(light.x, light.y - 34, 28);
-    });
+      g.fillRect(bx - 3, by - 58, 6, 58);
+      // Base plate
+      g.fillRoundedRect(bx - 7, by - 4, 14, 6, 2);
+      // Arm
+      g.fillRect(bx - 3, by - 58, arm * 30, 5);
+      // Lamp housing
+      g.fillStyle(0x3a2a1a, 1);
+      g.fillRoundedRect(bx + arm * 22 - 7, by - 62, 14, 10, 3);
+      // Bulb
+      g.fillStyle(0xf5c842, 0.95);
+      g.fillCircle(bx + arm * 26, by - 58, 4);
+      // Glow near
+      g.fillStyle(0xf5c842, 0.10);
+      g.fillCircle(bx + arm * 26, by - 58, 40);
+      // Glow far
+      g.fillStyle(0xf5c842, 0.04);
+      g.fillCircle(bx + arm * 26, by - 58, 78);
+    };
+
+    // Main horizontal road (y=880–1040, center y=960)
+    const roadLamps: Array<{ x: number; y: number; arm: 1 | -1 }> = [
+      { x: 190,  y: 1038, arm:  1 },
+      { x: 440,  y: 1038, arm:  1 },
+      { x: 680,  y: 1038, arm:  1 },
+      { x: 1065, y: 1038, arm:  1 },  // just left of left vert road
+      { x: 1320, y:  882, arm: -1 },  // top edge, between intersections
+      { x: 1580, y:  882, arm: -1 },
+      { x: 1960, y: 1038, arm:  1 },  // just right of right vert road
+      { x: 2200, y: 1038, arm:  1 },
+      { x: 2500, y: 1038, arm:  1 },
+      { x: 2660, y:  882, arm: -1 },
+      // Left vertical road (x=835–1005, center x=920)
+      { x: 1002, y: 260, arm: -1 },
+      { x:  838, y: 500, arm:  1 },
+      { x: 1002, y: 740, arm: -1 },
+      { x:  838, y: 1170, arm:  1 },
+      { x: 1002, y: 1410, arm: -1 },
+      { x:  838, y: 1640, arm:  1 },
+      // Right vertical road (x=1725–1895, center x=1810)
+      { x: 1892, y: 260, arm: -1 },
+      { x: 1728, y: 500, arm:  1 },
+      { x: 1892, y: 740, arm: -1 },
+      { x: 1728, y: 1170, arm:  1 },
+      { x: 1892, y: 1410, arm: -1 },
+      { x: 1728, y: 1640, arm:  1 },
+      // Second alley (y=1268–1332, center y=1300)
+      { x:  310, y: 1330, arm:  1 },
+      { x:  640, y: 1330, arm:  1 },
+      { x: 1190, y: 1330, arm:  1 },
+      { x: 1660, y: 1270, arm: -1 },
+      { x: 2110, y: 1270, arm: -1 },
+      { x: 2510, y: 1270, arm: -1 },
+    ];
+
+    roadLamps.forEach(({ x, y, arm }) => drawLamp(x, y, arm));
   }
 
   private drawDistrictProps(g: Phaser.GameObjects.Graphics) {
@@ -980,6 +1054,13 @@ export class VecindadScene extends Phaser.Scene {
       return;
     }
 
+    const nearAmbientNpc = this.getNearbyAmbientNpc();
+    if (nearAmbientNpc) {
+      const npc = VecindadScene.AMBIENT_NPCS.find((n) => n.id === nearAmbientNpc);
+      this.setPrompt(`E HABLAR CON ${npc?.name ?? 'VECINO'}`, '#F5C842');
+      return;
+    }
+
     const parcel = this.getNearbyParcel();
     if (!parcel) {
       this.setPrompt('', '#F5C842');
@@ -1061,6 +1142,12 @@ export class VecindadScene extends Phaser.Scene {
 
     if (this.isNearOwnedFarmSpot()) {
       this.handleFarmPrimaryAction();
+      return;
+    }
+
+    const nearAmbientNpc = this.getNearbyAmbientNpc();
+    if (nearAmbientNpc) {
+      this.openAmbientNpcDialog(nearAmbientNpc);
       return;
     }
 
@@ -1929,12 +2016,293 @@ export class VecindadScene extends Phaser.Scene {
     this.worldMapPanel?.destroy();
     this.worldMapPanel = undefined;
 
+    // Ambient NPC cleanup
+    this.closeAmbientNpcDialog();
+
     // Weed Delivery NPC cleanup
     this.closeWeedDeliveryDialog();
     this.weedNpcBubbles.forEach((container) => {
       if (container.active) container.destroy();
     });
     this.weedNpcBubbles.clear();
+  }
+
+  // ─── Street Details ───────────────────────────────────────────────────────
+
+  private drawStreetDetails(g: Phaser.GameObjects.Graphics) {
+    // ── Crosswalk stripes at left vert × main horiz intersection ─────────
+    g.fillStyle(0x5a4830, 0.5);
+    for (let i = 0; i < 7; i++) {
+      g.fillRect(848 + i * 22, 884, 12, 22);   // top row
+      g.fillRect(848 + i * 22, 1016, 12, 20);  // bottom row
+      g.fillRect(840, 900 + i * 18, 20, 10);   // left column
+      g.fillRect(993, 900 + i * 18, 20, 10);   // right column
+    }
+    // ── Crosswalk stripes at right vert × main horiz intersection ────────
+    for (let i = 0; i < 7; i++) {
+      g.fillRect(1736 + i * 22, 884, 12, 22);
+      g.fillRect(1736 + i * 22, 1016, 12, 20);
+      g.fillRect(1728, 900 + i * 18, 20, 10);
+      g.fillRect(1882, 900 + i * 18, 20, 10);
+    }
+
+    // ── Asphalt cracks ────────────────────────────────────────────────────
+    g.lineStyle(1, 0x2a1e10, 0.5);
+    const cracks: Array<Array<[number, number]>> = [
+      [[212, 914], [226, 927], [220, 942]],
+      [[490, 976], [502, 988], [496, 1000]],
+      [[1340, 932], [1356, 946], [1348, 960]],
+      [[2170, 952], [2184, 966], [2177, 978]],
+      [[2490, 930], [2504, 942]],
+      [[390, 1280], [402, 1290], [396, 1302]],
+      [[1660, 1286], [1672, 1296]],
+      [[2250, 1284], [2262, 1295], [2256, 1306]],
+    ];
+    for (const crack of cracks) {
+      g.beginPath();
+      g.moveTo(crack[0][0], crack[0][1]);
+      for (let i = 1; i < crack.length; i++) {
+        g.lineTo(crack[i][0], crack[i][1]);
+      }
+      g.strokePath();
+    }
+
+    // ── Puddles ───────────────────────────────────────────────────────────
+    const puddles = [
+      { x: 348, y: 958, rx: 26, ry: 9 },
+      { x: 1590, y: 990, rx: 20, ry: 7 },
+      { x: 2350, y: 944, rx: 17, ry: 6 },
+      { x: 920,  y: 1293, rx: 18, ry: 6 },
+      { x: 1810, y: 1301, rx: 15, ry: 5 },
+    ];
+    puddles.forEach((p) => {
+      g.fillStyle(0x08141e, 0.42);
+      g.fillEllipse(p.x, p.y, p.rx * 2, p.ry * 2);
+      g.lineStyle(1, 0x162a3e, 0.28);
+      g.strokeEllipse(p.x, p.y, p.rx * 2, p.ry * 2);
+      g.fillStyle(0x1a4a7a, 0.12);
+      g.fillEllipse(p.x - 4, p.y - 2, p.rx * 0.6, p.ry * 0.4);
+    });
+
+    // ── Graffiti on parcel walls ──────────────────────────────────────────
+    const gStyle = {
+      fontFamily: '"Press Start 2P", monospace',
+      stroke: '#000000',
+      strokeThickness: 3,
+    };
+    this.add.text(252, 706, 'WASPI', { ...gStyle, fontSize: '8px', color: '#FF3333' })
+      .setDepth(1.5).setAlpha(0.6);
+    this.add.text(2148, 726, 'EL BARRIO', { ...gStyle, fontSize: '6px', color: '#4488FF' })
+      .setDepth(1.5).setAlpha(0.55);
+    this.add.text(316, 1362, '★ CALLE ★', { ...gStyle, fontSize: '6px', color: '#FF8800' })
+      .setDepth(1.5).setAlpha(0.5);
+    this.add.text(2088, 1592, 'NO PISAR', { ...gStyle, fontSize: '5px', color: '#00FFAA' })
+      .setDepth(1.5).setAlpha(0.4);
+  }
+
+  // ─── Extra street props ───────────────────────────────────────────────────
+
+  private drawExtraStreetProps(g: Phaser.GameObjects.Graphics) {
+    // ── Additional benches along streets ─────────────────────────────────
+    const extraBenches = [
+      { x: 250, y: 960 }, { x: 680, y: 960 }, { x: 2120, y: 960 }, { x: 2540, y: 960 },
+      { x: 450, y: 1300 }, { x: 2350, y: 1300 },
+    ];
+    extraBenches.forEach((b) => {
+      g.fillStyle(0x4f3a25, 1);
+      g.fillRoundedRect(b.x - 34, b.y - 8, 68, 16, 4);
+      g.fillStyle(0x2f2317, 1);
+      g.fillRect(b.x - 28, b.y + 8, 8, 10);
+      g.fillRect(b.x + 20, b.y + 8, 8, 10);
+      g.lineStyle(1, 0x7b5a3a, 0.6);
+      g.strokeRoundedRect(b.x - 34, b.y - 8, 68, 16, 4);
+    });
+
+    // ── Trash bins ────────────────────────────────────────────────────────
+    const bins = [
+      { x: 190, y: 958 }, { x: 1060, y: 880 }, { x: 1960, y: 880 },
+      { x: 350, y: 1298 }, { x: 1180, y: 1268 }, { x: 2500, y: 1298 },
+    ];
+    bins.forEach((b) => {
+      g.fillStyle(0x1e2530, 1);
+      g.fillRoundedRect(b.x - 8, b.y - 14, 16, 20, 3);
+      // Lid
+      g.fillStyle(0x2e3a44, 1);
+      g.fillRoundedRect(b.x - 9, b.y - 18, 18, 6, 2);
+      // Band
+      g.lineStyle(1, 0x3a4a58, 0.9);
+      g.lineBetween(b.x - 8, b.y - 4, b.x + 8, b.y - 4);
+      // Handle
+      g.fillStyle(0x506070, 1);
+      g.fillRect(b.x - 2, b.y - 20, 4, 4);
+    });
+
+    // ── Planter boxes with shrubs ─────────────────────────────────────────
+    const planters = [
+      { x: 840, y: 880 }, { x: 840, y: 1040 },
+      { x: 1726, y: 880 }, { x: 1726, y: 1040 },
+      { x: 840, y: 1268 }, { x: 1726, y: 1268 },
+    ];
+    planters.forEach((p) => {
+      // Box
+      g.fillStyle(0x2a1a0e, 1);
+      g.fillRoundedRect(p.x - 18, p.y - 8, 36, 20, 4);
+      g.lineStyle(2, 0x5a3a22, 0.8);
+      g.strokeRoundedRect(p.x - 18, p.y - 8, 36, 20, 4);
+      // Soil
+      g.fillStyle(0x1a120a, 1);
+      g.fillRect(p.x - 14, p.y - 6, 28, 10);
+      // Shrub (3 green circles)
+      g.fillStyle(0x2e5c1a, 1);
+      g.fillCircle(p.x - 8, p.y - 14, 7);
+      g.fillCircle(p.x,     p.y - 17, 9);
+      g.fillCircle(p.x + 8, p.y - 14, 7);
+      g.fillStyle(0x3a7022, 0.7);
+      g.fillCircle(p.x,     p.y - 17, 5);
+    });
+  }
+
+  // ─── Ambient NPCs ─────────────────────────────────────────────────────────
+
+  private static readonly AMBIENT_NPCS: Array<{
+    id: string; x: number; y: number; name: string;
+    lines: string[]; shirtColor: number; skinColor: number;
+    hatColor: number; hasHat: boolean;
+  }> = [
+    {
+      id: 'dona_rosa', x: 560, y: 960, name: 'DOÑA ROSA',
+      lines: ['QUE MIRA???', 'CONSTRUI TU CASA', 'EN VEZ DE VAGAR', 'POR EL BARRIO!'],
+      shirtColor: 0xFF6EA8, skinColor: 0xe8c4a0, hatColor: 0xCC4488, hasHat: true,
+    },
+    {
+      id: 'don_carlos', x: 1870, y: 960, name: 'DON CARLOS',
+      lines: ['EN MI TIEMPO...', 'LA GENTE SE', 'RESPETABA MAS.', '(MURMURA)'],
+      shirtColor: 0x888888, skinColor: 0xd4a07a, hatColor: 0x555555, hasHat: true,
+    },
+    {
+      id: 'miguel', x: 920, y: 510, name: 'MIGUEL',
+      lines: ['AFINACION GRATIS?', 'NAH, MENTIRA.', 'IGUAL PASATE', 'POR EL TALLER.'],
+      shirtColor: 0x1e7dc8, skinColor: 0xf5d5a4, hatColor: 0x0a4a88, hasHat: false,
+    },
+    {
+      id: 'luisa', x: 1810, y: 1430, name: 'LUISA',
+      lines: ['TENGO SEMILLAS', 'DE TODO TIPO!', 'PASA POR LA', 'CANNABIS FARM :)'],
+      shirtColor: 0x2EA862, skinColor: 0xf5d5a4, hatColor: 0x1a6644, hasHat: false,
+    },
+  ];
+
+  private static readonly AMBIENT_NPC_RANGE = 72;
+
+  private createAmbientNpcs() {
+    const g = this.add.graphics().setDepth(10);
+    for (const npc of VecindadScene.AMBIENT_NPCS) {
+      // Shadow
+      g.fillStyle(0x000000, 0.22);
+      g.fillEllipse(npc.x, npc.y + 14, 22, 7);
+      // Legs
+      g.fillStyle(0x22222e, 1);
+      g.fillRect(npc.x - 6, npc.y + 2, 5, 12);
+      g.fillRect(npc.x + 1, npc.y + 2, 5, 12);
+      // Body (shirt)
+      g.fillStyle(npc.shirtColor, 1);
+      g.fillRect(npc.x - 9, npc.y - 10, 18, 14);
+      // Arms
+      g.fillStyle(npc.skinColor, 1);
+      g.fillRect(npc.x - 13, npc.y - 9, 4, 10);
+      g.fillRect(npc.x + 9,  npc.y - 9, 4, 10);
+      // Head
+      g.fillCircle(npc.x, npc.y - 18, 9);
+      // Eyes
+      g.fillStyle(0x000000, 1);
+      g.fillRect(npc.x - 4, npc.y - 20, 2, 2);
+      g.fillRect(npc.x + 2, npc.y - 20, 2, 2);
+      // Mouth
+      g.fillRect(npc.x - 2, npc.y - 15, 4, 1);
+      // Hat or hair
+      if (npc.hasHat) {
+        g.fillStyle(npc.hatColor, 1);
+        g.fillRect(npc.x - 10, npc.y - 26, 20, 4);  // brim
+        g.fillRect(npc.x - 7,  npc.y - 32, 14, 8);  // crown
+      } else {
+        g.fillStyle(npc.hatColor, 1);
+        g.fillRect(npc.x - 8, npc.y - 27, 16, 8);   // hair
+      }
+      // Name label
+      this.add.text(npc.x, npc.y - 44, npc.name, {
+        fontSize: '6px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#F5C842',
+        stroke: '#000000',
+        strokeThickness: 3,
+      }).setOrigin(0.5).setDepth(11);
+      // [E] hint
+      this.add.text(npc.x, npc.y - 56, '[E]', {
+        fontSize: '5px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#aaaaaa',
+        stroke: '#000000',
+        strokeThickness: 2,
+      }).setOrigin(0.5).setDepth(11);
+    }
+  }
+
+  private getNearbyAmbientNpc(): string | null {
+    for (const npc of VecindadScene.AMBIENT_NPCS) {
+      if (Phaser.Math.Distance.Between(this.px, this.py, npc.x, npc.y) < VecindadScene.AMBIENT_NPC_RANGE) {
+        return npc.id;
+      }
+    }
+    return null;
+  }
+
+  private openAmbientNpcDialog(npcId: string) {
+    if (this.ambientNpcDialogOpen) return;
+    const npc = VecindadScene.AMBIENT_NPCS.find((n) => n.id === npcId);
+    if (!npc) return;
+    this.ambientNpcDialogOpen = true;
+
+    const { width, height } = this.scale;
+    const cx = width / 2;
+    const cy = height - 110;
+
+    this.ambientNpcDialogBg = this.add
+      .rectangle(cx, cy, 480, 120, 0x111318, 0.95)
+      .setStrokeStyle(2, 0xF5C842, 0.7)
+      .setScrollFactor(0)
+      .setDepth(2000);
+
+    this.ambientNpcDialogText = this.add
+      .text(cx, cy - 18, `${npc.name}:\n${npc.lines.join('\n')}`, {
+        fontSize: '7px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#E8D8B8',
+        align: 'center',
+        lineSpacing: 5,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2001);
+
+    this.ambientNpcDialogHint = this.add
+      .text(cx, cy + 46, '[E]  [SPACE]  CERRAR', {
+        fontSize: '6px',
+        fontFamily: '"Press Start 2P", monospace',
+        color: '#F5C842',
+        align: 'center',
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(2001);
+  }
+
+  private closeAmbientNpcDialog() {
+    this.ambientNpcDialogOpen = false;
+    if (this.ambientNpcDialogBg?.active) this.ambientNpcDialogBg.destroy();
+    if (this.ambientNpcDialogText?.active) this.ambientNpcDialogText.destroy();
+    if (this.ambientNpcDialogHint?.active) this.ambientNpcDialogHint.destroy();
+    this.ambientNpcDialogBg = undefined;
+    this.ambientNpcDialogText = undefined;
+    this.ambientNpcDialogHint = undefined;
   }
 
   // ─── Weed Delivery NPCs ──────────────────────────────────────────────────
