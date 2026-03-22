@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { AvatarRenderer, AvatarConfig, type AvatarAction, type HairStyle, loadStoredAvatarConfig, saveStoredAvatarConfig } from '../systems/AvatarRenderer';
+import { AvatarRenderer, AvatarConfig, type AvatarAction, type HairStyle, loadStoredAvatarConfig, saveStoredAvatarConfig, initAvatarFromServer } from '../systems/AvatarRenderer';
 import { getAuthHeaders } from '../systems/authHelper';
 import { ChatSystem } from '../systems/ChatSystem';
 import { WORLD, PLAYER, COLORS, ZONES, BUILDINGS, CHAT, SAFE_PLAZA_RETURN } from '../config/constants';
@@ -567,6 +567,9 @@ export class WorldScene extends Phaser.Scene {
   private cottenksDialog: BranchedDialog | null = null;
   private cottenksQuestMarker?: Phaser.GameObjects.Text;
 
+  // Server-authoritative quest flags (Phase 5 migration)
+  private serverQuestFlags: Record<string, string> = {};
+
   // BARBER NPC
   private barberPanelOpen = false;
   private barberPanel: Phaser.GameObjects.Container | null = null;
@@ -710,10 +713,23 @@ export class WorldScene extends Phaser.Scene {
         const uid = data.session?.user?.id;
         if (uid) void initStatsSystem(uid);
 
-        // Load server-authoritative state in parallel (progression + inventory).
+        // Server-authoritative username: hydrate localStorage so getOrCreateUsername()
+        // picks up the canonical username for this and future sessions.
+        const serverUsername = data.session?.user?.user_metadata?.username;
+        if (typeof serverUsername === 'string' && serverUsername.trim()) {
+          const stored = localStorage.getItem('waspi_username');
+          if (stored !== serverUsername.trim()) {
+            localStorage.setItem('waspi_username', serverUsername.trim());
+            this.playerUsername = serverUsername.trim();
+          }
+        }
+
+        // Load server-authoritative state in parallel (progression + inventory + avatar + quest flags).
         const [serverProgression] = await Promise.all([
           loadProgressionFromServer(),
           initInventoryFromServer(),
+          initAvatarFromServer(),
+          this.loadQuestFlagsFromServer(),
         ]);
 
         if (serverProgression !== null) {
@@ -4556,8 +4572,11 @@ export class WorldScene extends Phaser.Scene {
       strokeThickness: 2,
     }).setOrigin(0.5, 1).setDepth(9000);
 
-    // Quest marker — only shown until the player talks to COTTENKS for the first time
-    if (typeof localStorage !== 'undefined' && !localStorage.getItem('waspi_cottenks_met')) {
+    // Quest marker — only shown until the player talks to COTTENKS for the first time.
+    // Checked against both localStorage (optimistic cache) and server flags.
+    const cottenksMetLocally = typeof localStorage !== 'undefined' && !!localStorage.getItem('waspi_cottenks_met');
+    const cottenksMetServer = !!this.serverQuestFlags['cottenks_met'];
+    if (!cottenksMetLocally && !cottenksMetServer) {
       const questMarker = this.add.text(x, y - 60, '!', {
         fontSize: '18px',
         fontFamily: '"Press Start 2P", monospace',
@@ -4621,6 +4640,19 @@ export class WorldScene extends Phaser.Scene {
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem('waspi_cottenks_met', 'true');
       }
+      // Persist to server so the flag survives localStorage clears.
+      void (async () => {
+        try {
+          const authH = await getAuthHeaders();
+          await fetch('/api/player/flags', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authH },
+            body: JSON.stringify({ flag_key: 'cottenks_met' }),
+          });
+        } catch (e) {
+          console.warn('[WorldScene] cottenks_met server persist failed', e);
+        }
+      })();
     };
 
     const endBye: DialogNode = {
@@ -6068,6 +6100,20 @@ export class WorldScene extends Phaser.Scene {
       .trim()
       .replace(/\b(boludo|pelotudo|idiota|mierda|puta|puto)\b/gi, '***')
       .slice(0, CHAT.MAX_CHARS);
+  }
+
+  private async loadQuestFlagsFromServer(): Promise<void> {
+    try {
+      const authH = await getAuthHeaders();
+      const res = await fetch('/api/player/flags', { headers: authH });
+      if (!res.ok) return;
+      const json = (await res.json()) as { flags?: Record<string, string> };
+      if (json.flags && typeof json.flags === 'object') {
+        this.serverQuestFlags = json.flags;
+      }
+    } catch (e) {
+      console.warn('[WorldScene] loadQuestFlagsFromServer failed', e);
+    }
   }
 
   private loadMutedPlayers() {

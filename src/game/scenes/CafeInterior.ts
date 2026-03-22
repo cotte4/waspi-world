@@ -10,6 +10,7 @@ import { getSkillSystem } from '../systems/SkillSystem';
 import { JukeboxSystem } from '../systems/JukeboxSystem';
 import { JukeboxPlayer } from '../systems/JukeboxPlayer';
 import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
+import { getAuthHeaders } from '../systems/authHelper';
 
 export class CafeInterior extends Phaser.Scene {
   private static readonly RETURN_X = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
@@ -53,6 +54,8 @@ export class CafeInterior extends Phaser.Scene {
   private static readonly JUKEBOX_INTERACT_RADIUS = 70;
   // Plato del Día (Cooking Lv4)
   private platoPrompt?: Phaser.GameObjects.Text;
+  // Server-authoritative quest flags (Phase 5 migration)
+  private serverQuestFlags: Record<string, string> = {};
   private static readonly PLATO_BUFFS = [
     'VELOCIDAD +20% — 5 MIN', 'HP +15 — PERMANENTE (SESIÓN)',
     'DAÑO +10% — 3 MIN', 'EXTRACCIÓN +25% — 3 MIN',
@@ -76,6 +79,8 @@ export class CafeInterior extends Phaser.Scene {
     showSceneTitle(this, 'CAFÉ', 0xFF8B3D);
     this.input.enabled = true;
     this.controls = new SceneControls(this);
+    // Fire-and-forget: hydrate serverQuestFlags for plato_cooking check.
+    this.loadQuestFlagsFromServer();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
       this.inTransition = false;
@@ -578,8 +583,10 @@ export class CafeInterior extends Phaser.Scene {
     const barFrontY = roomY + 98 + 44 + 16;        // barY + barH + some gap
 
     const nearBar = Phaser.Math.Distance.Between(this.px, this.py, barCx, barFrontY) < 80;
-    const today = new Date().toISOString().slice(0, 10);
-    const alreadyCooked = localStorage.getItem(`waspi_plato_${today}`) === '1';
+    const today = this.todayUTCDateString();
+    const alreadyCookedLocally = localStorage.getItem(`waspi_plato_${today}`) === '1';
+    const alreadyCookedServer = this.serverQuestFlags['plato_cooking'] === today;
+    const alreadyCooked = alreadyCookedLocally || alreadyCookedServer;
 
     if (nearBar && !alreadyCooked) {
       const promptText = 'PLATO DEL DIA [E]';
@@ -601,6 +608,19 @@ export class CafeInterior extends Phaser.Scene {
 
   private cookPlatoDelDia(today: string) {
     localStorage.setItem(`waspi_plato_${today}`, '1');
+    // Persist to server so the daily flag survives localStorage clears.
+    void (async () => {
+      try {
+        const authH = await getAuthHeaders();
+        await fetch('/api/player/flags', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authH },
+          body: JSON.stringify({ flag_key: 'plato_cooking', flag_value: today }),
+        });
+      } catch (e) {
+        console.warn('[CafeInterior] plato_cooking server persist failed', e);
+      }
+    })();
     const buff = CafeInterior.PLATO_BUFFS[Math.floor(Math.random() * CafeInterior.PLATO_BUFFS.length)];
     eventBus.emit(EVENTS.UI_NOTICE, { message: `🍳 PLATO DEL DÍA: ${buff}`, color: '#FF7043' });
     // alquimista spec: +30 XP instead of 15 for plato del dia
@@ -628,6 +648,26 @@ export class CafeInterior extends Phaser.Scene {
     } else {
       this.cafeTableXpAccMs = 0;
     }
+  }
+
+  private todayUTCDateString(): string {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  private loadQuestFlagsFromServer(): void {
+    void (async () => {
+      try {
+        const authH = await getAuthHeaders();
+        const res = await fetch('/api/player/flags', { headers: authH });
+        if (!res.ok) return;
+        const json = (await res.json()) as { flags?: Record<string, string> };
+        if (json.flags && typeof json.flags === 'object') {
+          this.serverQuestFlags = json.flags;
+        }
+      } catch (e) {
+        console.warn('[CafeInterior] loadQuestFlagsFromServer failed', e);
+      }
+    })();
   }
 
   private handleSceneShutdown() {
