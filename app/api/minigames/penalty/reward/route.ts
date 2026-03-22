@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  await ensurePlayerRow(admin, user, next);
+  await ensurePlayerRow(admin, user, next, { syncTenksBalance: won });
   await recordGameSession(admin, {
     playerId: user.id,
     minigame: 'penalty',

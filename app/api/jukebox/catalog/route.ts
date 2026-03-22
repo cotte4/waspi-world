@@ -7,8 +7,6 @@ import {
 } from '@/src/lib/supabaseServer';
 import { getLocalJukeboxSongsByCategory } from '@/src/game/systems/jukeboxLibrary';
 
-const VALID_CATEGORIES = new Set(['trap', 'lofi', 'retro', 'urbano_arg', 'hype']);
-
 type CatalogRow = {
   video_id: string;
   title: string;
@@ -26,11 +24,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const category = request.nextUrl.searchParams.get('category')?.trim().toLowerCase() ?? '';
-  if (!VALID_CATEGORIES.has(category)) {
-    return NextResponse.json({ error: 'Invalid catalog category.' }, { status: 400 });
-  }
-
   const admin = createSupabaseAdminClient();
   if (!admin) {
     return NextResponse.json({ error: 'Admin client unavailable.' }, { status: 500 });
@@ -39,7 +32,6 @@ export async function GET(request: NextRequest) {
   const { data, error } = await admin
     .from('jukebox_catalog')
     .select('video_id, title, artist, category')
-    .eq('category', category)
     .order('artist', { ascending: true })
     .order('title', { ascending: true })
     .returns<CatalogRow[]>();
@@ -51,7 +43,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     ok: true,
     songs: [
-      ...getLocalJukeboxSongsByCategory(category),
+      ...getLocalJukeboxSongsByCategory(),
       ...((data ?? []).map((row) => ({
         videoId: row.video_id,
         title: row.title,

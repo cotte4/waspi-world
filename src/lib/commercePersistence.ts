@@ -14,6 +14,10 @@ type DiscountCodeRow = {
 
 const PLAYER_METADATA_KEY = 'waspiPlayer';
 
+type EnsurePlayerRowOptions = {
+  syncTenksBalance?: boolean;
+};
+
 function getUsername(user: User) {
   const username = user.user_metadata?.username;
   if (typeof username === 'string' && username.trim()) return username.trim();
@@ -64,7 +68,12 @@ export async function ensureCatalogSeeded(admin: SupabaseClient) {
   if (error) throw error;
 }
 
-export async function ensurePlayerRow(admin: SupabaseClient, user: User, playerState?: PlayerState) {
+export async function ensurePlayerRow(
+  admin: SupabaseClient,
+  user: User,
+  playerState?: PlayerState,
+  options: EnsurePlayerRowOptions = {}
+) {
   const state = normalizePlayerState(playerState ?? user.user_metadata?.[PLAYER_METADATA_KEY] ?? DEFAULT_PLAYER_STATE);
   const username = await resolveUniqueUsername(admin, user);
   const { error } = await admin
@@ -80,6 +89,14 @@ export async function ensurePlayerRow(admin: SupabaseClient, user: User, playerS
     }, { onConflict: 'id' });
 
   if (error) throw error;
+
+  if (options.syncTenksBalance) {
+    const { error: tenksError } = await admin
+      .from('player_tenks_balance')
+      .upsert({ player_id: user.id, balance: state.tenks }, { onConflict: 'player_id' });
+
+    if (tenksError) throw tenksError;
+  }
 }
 
 export async function syncPlayerInventory(admin: SupabaseClient, playerId: string, playerState: PlayerState) {

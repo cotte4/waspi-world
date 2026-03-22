@@ -116,7 +116,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      await ensurePlayerRow(admin, user, next);
+      await ensurePlayerRow(admin, user, next, { syncTenksBalance: purchaseType === 'tenks_pack' });
 
       // Mark session processed and update user_metadata. If this fails, the item
       // is already in player_inventory (DB) and will be reconciled on next player load.

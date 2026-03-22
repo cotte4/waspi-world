@@ -361,6 +361,7 @@ export class ZombiesScene extends Phaser.Scene {
   private bossRoundActive = false;
   private bossSpawnedThisRound = false;
   private bossAlive = false;
+  private runStartedAt = 0;
   private depthsUnlocked = false;
   private gameOver = false;
   private playerLevel = 1;
@@ -499,6 +500,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.bossRoundActive = false;
     this.bossSpawnedThisRound = false;
     this.bossAlive = false;
+    this.runStartedAt = this.time.now;
     this.depthsUnlocked = false;
     this.gameOver = false;
     this.killCount = 0;
@@ -1440,6 +1442,7 @@ export class ZombiesScene extends Phaser.Scene {
       this.gameOver ? 'GAME OVER' : roundState,
       `ZOMBIES ${this.countAliveZombies()}/${this.roundTarget}`,
       `SPAWN ${this.spawnedThisRound}`,
+      `PRESSURE ${this.getPressureTier()}`,
       this.allowDepthsGate && this.depthsUnlocked ? 'DEPTHS OPEN' : '',
       this.bossAlive ? 'BOSS ACTIVE' : this.bossRoundActive && !this.bossSpawnedThisRound ? 'BOSS INCOMING' : '',
     ].filter(Boolean).join('\n');
@@ -1511,9 +1514,9 @@ export class ZombiesScene extends Phaser.Scene {
 
   private beginRound() {
     this.round += 1;
-    this.roundTarget = getRoundZombieCount(this.round);
+    this.roundTarget = this.getScaledRoundTarget(this.round);
     this.spawnedThisRound = 0;
-    this.nextSpawnAt = this.time.now + getRoundWarmupMs(this.round);
+    this.nextSpawnAt = this.time.now + this.getScaledRoundWarmupMs(this.round);
     this.roundBreakUntil = 0;
     this.bossRoundActive = this.isBossRound(this.round);
     this.bossSpawnedThisRound = false;
@@ -1534,6 +1537,36 @@ export class ZombiesScene extends Phaser.Scene {
 
   private isBossRound(round: number) {
     return round >= 10 && round % 10 === 0;
+  }
+
+  private getRunElapsedMinutes() {
+    if (this.runStartedAt <= 0) return 0;
+    return Math.max(0, (this.time.now - this.runStartedAt) / 60000);
+  }
+
+  private getPressureTier() {
+    return Math.min(8, Math.floor(this.getRunElapsedMinutes() / 3.5));
+  }
+
+  private getScaledRoundTarget(round: number) {
+    const base = getRoundZombieCount(round);
+    const pressure = this.getPressureTier();
+    return Math.min(96, base + Math.floor(round * 1.4) + pressure * 4 + Math.floor(round * pressure * 0.35));
+  }
+
+  private getScaledSpawnDelayMs(round: number) {
+    const pressure = this.getPressureTier();
+    return Math.max(120, getSpawnDelayForRound(round) - pressure * 55 - round * 6);
+  }
+
+  private getScaledRoundWarmupMs(round: number) {
+    const pressure = this.getPressureTier();
+    return Math.max(650, getRoundWarmupMs(round) - pressure * 120);
+  }
+
+  private getScaledConcurrentCap(round: number) {
+    const pressure = this.getPressureTier();
+    return Math.min(36, getRoundConcurrentCap(round) + Math.floor(round / 4) + pressure);
   }
 
   update(_time: number, delta: number) {
@@ -1868,13 +1901,13 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private handleRoundFlow() {
-    const concurrentCap = getRoundConcurrentCap(this.round);
+    const concurrentCap = this.getScaledConcurrentCap(this.round);
     if (this.spawnedThisRound < this.roundTarget) {
       if (this.time.now >= this.nextSpawnAt && this.countAliveZombies() < concurrentCap) {
         const spawned = this.spawnZombie();
         if (spawned) {
           this.spawnedThisRound += 1;
-          this.nextSpawnAt = this.time.now + getSpawnDelayForRound(this.round) + Phaser.Math.Between(-60, 90);
+          this.nextSpawnAt = this.time.now + this.getScaledSpawnDelayMs(this.round) + Phaser.Math.Between(-60, 90);
         } else {
           this.nextSpawnAt = this.time.now + 180;
         }
@@ -2069,9 +2102,9 @@ export class ZombiesScene extends Phaser.Scene {
       displayLabel: 'BOSS',
       hp,
       speed: getZombieSpeedForRound(0.55, this.round),
-      damage: 32,
-      attackRange: 36,
-      attackCooldownMs: 900,
+      damage: 42,
+      attackRange: 42,
+      attackCooldownMs: 760,
       hitReward: 25,
       killReward: 420,
       radius: 28,
@@ -2225,8 +2258,10 @@ export class ZombiesScene extends Phaser.Scene {
 
   private updateZombies(delta: number) {
     const dt = delta / 1000;
+    const activeZombies: ZombieState[] = [];
     for (const zombie of this.zombies.values()) {
       if (!zombie.alive) continue;
+      activeZombies.push(zombie);
       if (zombie.spawnNodeId) {
         const node = this.spawnNodes.get(zombie.spawnNodeId);
         if (node) {
@@ -2269,8 +2304,14 @@ export class ZombiesScene extends Phaser.Scene {
       const dist = Math.hypot(dx, dy) || 1;
       const nx = dx / dist;
       const ny = dy / dist;
+      const moveMultiplier = this.getZombieMoveMultiplier(zombie);
 
       if (dist > zombie.attackRange + 2) {
+        if (zombie.isBoss && this.time.now - zombie.lastSpecialAt >= 2200) {
+          zombie.lastSpecialAt = this.time.now;
+          if (dist > 150) this.performBossRush(zombie, target, dist, nx, ny);
+          else this.performBossNova(zombie);
+        }
         const bossCanBurst = zombie.isBoss
           && dist >= 180
           && dist <= 460
@@ -2282,8 +2323,8 @@ export class ZombiesScene extends Phaser.Scene {
         if (bossCanBurst) {
           zombie.state = 'attack';
           const lateral = Math.sin(this.time.now / 280 + zombie.phase) * 0.2;
-          const driftX = zombie.x + (-ny * lateral) * zombie.speed * 30 * dt;
-          const driftY = zombie.y + (nx * lateral) * zombie.speed * 30 * dt;
+          const driftX = zombie.x + (-ny * lateral) * zombie.speed * 30 * dt * moveMultiplier;
+          const driftY = zombie.y + (nx * lateral) * zombie.speed * 30 * dt * moveMultiplier;
           if (!this.isBlocked(driftX, zombie.y, zombie.radius)) zombie.x = driftX;
           if (!this.isBlocked(zombie.x, driftY, zombie.radius)) zombie.y = driftY;
           if (this.time.now - zombie.lastAttackAt >= zombie.attackCooldownMs) {
@@ -2293,8 +2334,8 @@ export class ZombiesScene extends Phaser.Scene {
         } else if (canShoot) {
           zombie.state = 'attack';
           const lateral = Math.sin(this.time.now / 360 + zombie.phase) * 0.3;
-          const orbitX = zombie.x + (-ny * lateral) * zombie.speed * 42 * dt;
-          const orbitY = zombie.y + (nx * lateral) * zombie.speed * 42 * dt;
+          const orbitX = zombie.x + (-ny * lateral) * zombie.speed * 42 * dt * moveMultiplier;
+          const orbitY = zombie.y + (nx * lateral) * zombie.speed * 42 * dt * moveMultiplier;
           if (!this.isBlocked(orbitX, zombie.y, zombie.radius)) zombie.x = orbitX;
           if (!this.isBlocked(zombie.x, orbitY, zombie.radius)) zombie.y = orbitY;
           if (this.time.now - zombie.lastAttackAt >= zombie.attackCooldownMs) {
@@ -2303,8 +2344,8 @@ export class ZombiesScene extends Phaser.Scene {
           }
         } else {
           const lateral = Math.sin(this.time.now / 320 + zombie.phase) * (zombie.type === 'runner' ? 0.42 : zombie.type === 'brute' ? 0.08 : 0.22);
-          const moveX = (nx - ny * lateral) * zombie.speed * 60 * dt;
-          const moveY = (ny + nx * lateral) * zombie.speed * 60 * dt;
+          const moveX = (nx - ny * lateral) * zombie.speed * 60 * dt * moveMultiplier;
+          const moveY = (ny + nx * lateral) * zombie.speed * 60 * dt * moveMultiplier;
           const nextX = zombie.x + moveX;
           const nextY = zombie.y + moveY;
           if (!this.isBlocked(nextX, zombie.y, zombie.radius)) zombie.x = nextX;
@@ -2328,6 +2369,121 @@ export class ZombiesScene extends Phaser.Scene {
       zombie.shadow.setDepth(zombie.container.depth - 1);
       this.renderZombieHp(zombie);
       this.setZombieState(zombie, zombie.state);
+    }
+
+    this.resolveZombieCrowding(activeZombies);
+  }
+
+  private getZombieMoveMultiplier(zombie: ZombieState) {
+    if (!zombie.isBoss) return 1;
+    const hpRatio = zombie.maxHp > 0 ? zombie.hp / zombie.maxHp : 1;
+    if (hpRatio <= 0.3) return 3.2;
+    if (hpRatio <= 0.6) return 2.5;
+    return 1.7;
+  }
+
+  private performBossRush(
+    zombie: ZombieState,
+    target: SharedRunPlayerState,
+    distance: number,
+    nx: number,
+    ny: number,
+  ) {
+    const rushDistance = Phaser.Math.Clamp(distance * 0.5, 96, 180);
+    let landedX = zombie.x;
+    let landedY = zombie.y;
+
+    for (const ratio of [1, 0.8, 0.6, 0.4]) {
+      const tryX = zombie.x + nx * rushDistance * ratio;
+      const tryY = zombie.y + ny * rushDistance * ratio;
+      if (this.isBlocked(tryX, tryY, zombie.radius)) continue;
+      landedX = tryX;
+      landedY = tryY;
+      break;
+    }
+
+    const trail = this.add.circle(zombie.x, zombie.y, zombie.radius + 18, 0xFF6A6A, 0.16).setDepth(149);
+    this.tweens.add({
+      targets: trail,
+      alpha: 0,
+      scale: 1.7,
+      duration: 220,
+      ease: 'Sine.easeOut',
+      onComplete: () => trail.destroy(),
+    });
+
+    zombie.x = landedX;
+    zombie.y = landedY;
+    zombie.state = 'attack';
+    this.cameras.main.shake(90, 0.0024);
+    this.spawnBossProjectileBurst(zombie);
+
+    if (Phaser.Math.Distance.Between(zombie.x, zombie.y, target.x, target.y) <= zombie.attackRange + 52) {
+      zombie.lastAttackAt = this.time.now;
+      this.applyDamageToPlayer(target.player_id, Math.round(zombie.damage * 1.45));
+    }
+  }
+
+  private performBossNova(zombie: ZombieState) {
+    const shock = this.add.circle(zombie.x, zombie.y, zombie.radius + 16, 0xFF4D7A, 0.18).setDepth(150);
+    this.tweens.add({
+      targets: shock,
+      alpha: 0,
+      scale: 2.8,
+      duration: 260,
+      ease: 'Sine.easeOut',
+      onComplete: () => shock.destroy(),
+    });
+    for (let i = 0; i < 8; i += 1) {
+      this.spawnZombieProjectile(
+        zombie,
+        (Math.PI * 2 * i) / 8,
+        300,
+        7,
+        Math.max(16, Math.round(zombie.damage * 0.78)),
+      );
+    }
+    this.cameras.main.shake(110, 0.0028);
+  }
+
+  private resolveZombieCrowding(zombies: ZombieState[]) {
+    for (let i = 0; i < zombies.length; i += 1) {
+      const a = zombies[i];
+      if (!a.alive || a.spawnNodeId) continue;
+
+      for (let j = i + 1; j < zombies.length; j += 1) {
+        const b = zombies[j];
+        if (!b.alive || b.spawnNodeId) continue;
+
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const minDist = a.radius + b.radius + 6;
+        const distSq = dx * dx + dy * dy;
+        if (distSq <= 0 || distSq >= minDist * minDist) continue;
+
+        const dist = Math.sqrt(distSq);
+        const nx = dx / dist;
+        const ny = dy / dist;
+        const push = (minDist - dist) * 0.5;
+        const nextAX = a.x - nx * push;
+        const nextAY = a.y - ny * push;
+        const nextBX = b.x + nx * push;
+        const nextBY = b.y + ny * push;
+
+        if (!this.isBlocked(nextAX, a.y, a.radius)) a.x = nextAX;
+        if (!this.isBlocked(a.x, nextAY, a.radius)) a.y = nextAY;
+        if (!this.isBlocked(nextBX, b.y, b.radius)) b.x = nextBX;
+        if (!this.isBlocked(b.x, nextBY, b.radius)) b.y = nextBY;
+      }
+    }
+
+    for (const zombie of zombies) {
+      if (!zombie.alive || zombie.spawnNodeId) continue;
+      zombie.container.setPosition(zombie.x, zombie.y);
+      zombie.shadow.setPosition(zombie.x, zombie.y + zombie.radius + 8);
+      zombie.container.setDepth(Math.floor(zombie.y / 10));
+      zombie.shadow.setDepth(zombie.container.depth - 1);
+      this.renderZombieHp(zombie);
     }
   }
 

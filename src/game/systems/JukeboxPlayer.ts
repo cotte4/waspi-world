@@ -94,7 +94,12 @@ export class JukeboxPlayer {
     if (this.currentVideoId === videoId && (this.player || this.pendingVideoId === videoId)) {
       return;
     }
+    this.bindUserGestureRetry();
     this.currentVideoId = videoId;
+    this.pendingVideoId = null;
+    if (this.tryPlayLocalTrack(videoId)) {
+      return;
+    }
     if (!this.player) {
       this.pendingVideoId = videoId;
       if (this.apiLoaded) {
@@ -255,6 +260,7 @@ export class JukeboxPlayer {
     const fallbackTrack = getDefaultJukeboxFallbackTrack();
     if (!fallbackTrack || !this.localAudio) return;
     if (this.fallbackActive && this.localAudio.src.includes(fallbackTrack.assetPath)) return;
+    this.bindUserGestureRetry();
     this.currentVideoId = null;
     this.pendingVideoId = null;
     this.fallbackActive = true;

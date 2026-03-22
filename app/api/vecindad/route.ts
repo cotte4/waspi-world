@@ -167,7 +167,7 @@ export async function POST(request: NextRequest) {
 
       try {
         await persistPlayerMetadata(admin, user, player);
-        await ensurePlayerRow(admin, user, player);
+        await ensurePlayerRow(admin, user, player, { syncTenksBalance: true });
       } catch (error) {
         if (!myParcel) {
           await deleteVecindadParcel(admin, parcel.id).catch(() => undefined);
@@ -256,7 +256,7 @@ export async function POST(request: NextRequest) {
       };
       await unlockPlayerFeature(admin, user.id, CANNABIS_FARM_UNLOCK_KEY);
       await persistPlayerMetadata(admin, user, player);
-      await ensurePlayerRow(admin, user, player);
+      await ensurePlayerRow(admin, user, player, { syncTenksBalance: true });
       const parcels = await listVecindadParcels(admin);
       return NextResponse.json({
         player: await mergePlayerWithVecindad(admin, user.id, player),
@@ -297,7 +297,7 @@ export async function POST(request: NextRequest) {
         waterCount: 0,
       });
       await persistPlayerMetadata(admin, user, player);
-      await ensurePlayerRow(admin, user, player);
+      await ensurePlayerRow(admin, user, player, { syncTenksBalance: true });
       const parcels = await listVecindadParcels(admin);
       return NextResponse.json({
         player: await mergePlayerWithVecindad(admin, user.id, player),
@@ -353,7 +353,7 @@ export async function POST(request: NextRequest) {
       };
       await clearFarmPlant(admin, user.id, slotIndex);
       await persistPlayerMetadata(admin, user, player);
-      await ensurePlayerRow(admin, user, player);
+      await ensurePlayerRow(admin, user, player, { syncTenksBalance: true });
       const parcels = await listVecindadParcels(admin);
       return NextResponse.json({
         player: await mergePlayerWithVecindad(admin, user.id, player),

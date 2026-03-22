@@ -8,7 +8,7 @@ import {
 import { appendTenksTransaction } from '@/src/lib/commercePersistence';
 
 const SKIP_COST = 500;
-const SKIP_THRESHOLD = 3;
+const SKIP_THRESHOLD = 1;
 
 type SkipBody = { videoId: string; queueId: string };
 type BalanceRow = { balance: number };

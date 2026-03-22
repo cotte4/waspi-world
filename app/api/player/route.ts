@@ -81,7 +81,7 @@ export async function PUT(request: NextRequest) {
   let syncWarning: string | null = null;
   try {
     await ensureCatalogSeeded(admin);
-    await ensurePlayerRow(admin, user, nextPlayer);
+    await ensurePlayerRow(admin, user, nextPlayer, { syncTenksBalance: true });
     await syncPlayerInventory(admin, user.id, nextPlayer);
     nextPlayer = await mergePlayerWithVecindad(admin, user.id, nextPlayer);
   } catch (syncError) {

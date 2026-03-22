@@ -36,7 +36,8 @@ export const LOCAL_JUKEBOX_FALLBACK_TRACKS: LocalJukeboxFallbackTrack[] = [
   },
 ];
 
-export function getLocalJukeboxSongsByCategory(category: string): LocalJukeboxSong[] {
+export function getLocalJukeboxSongsByCategory(category?: string): LocalJukeboxSong[] {
+  if (!category) return [...LOCAL_JUKEBOX_SONGS];
   return LOCAL_JUKEBOX_SONGS.filter((song) => song.category === category);
 }
 

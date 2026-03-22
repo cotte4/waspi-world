@@ -109,7 +109,7 @@ export async function persistPlayerMetadata(
 
   if (error) throw error;
   await ensureCatalogSeeded(admin);
-  await ensurePlayerRow(admin, input.user, input.player);
+  await ensurePlayerRow(admin, input.user, input.player, { syncTenksBalance: true });
 }
 
 async function releaseExpiredReservation(admin: SupabaseClient, current: UserWithPlayer) {
