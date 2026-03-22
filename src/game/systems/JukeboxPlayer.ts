@@ -84,6 +84,9 @@ export class JukeboxPlayer {
   // -------------------------------------------------------------------------
 
   play(videoId: string) {
+    if (this.currentVideoId === videoId && (this.player || this.pendingVideoId === videoId)) {
+      return;
+    }
     this.currentVideoId = videoId;
     if (!this.player) {
       this.pendingVideoId = videoId;

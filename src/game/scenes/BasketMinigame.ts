@@ -966,7 +966,7 @@ export class BasketMinigame extends Phaser.Scene {
     } | null;
 
     if (typeof json?.player?.tenks === 'number') {
-      initTenks(json.player.tenks, { preferStored: false });
+      initTenks(json.player.tenks);
     }
     if (typeof json?.tenksEarned === 'number') {
       this.grantedRewardTenks = json.tenksEarned;

@@ -105,7 +105,7 @@ class QuestSystem {
         if (data.reward_granted === true) {
           // Sync TENKS balance (server-authoritative)
           if (typeof data.new_balance === 'number') {
-            initTenks(data.new_balance, { preferStored: false });
+            initTenks(data.new_balance);
           }
 
           const xpPart = data.reward_xp ? ` +${data.reward_xp}XP` : '';

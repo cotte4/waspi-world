@@ -32,19 +32,9 @@ export async function GET(request: NextRequest) {
     .eq('player_id', user.id)
     .single<{ balance: number }>();
 
-  const { data: playerRow, error: playerError } = await admin
-    .from('players')
-    .select('tenks')
-    .eq('id', user.id)
-    .maybeSingle<{ tenks: number }>();
-
-  if (playerError) {
-    return NextResponse.json({ error: playerError.message }, { status: 500 });
-  }
-
   if (error && error.code === 'PGRST116') {
-    // Row not found — seed from players.tenks if available, else use default.
-    const seedBalance = playerRow?.tenks ?? DEFAULT_BALANCE;
+    // Row not found — seed with default balance for new players.
+    const seedBalance = DEFAULT_BALANCE;
 
     const { data: created, error: insertError } = await admin
       .from('player_tenks_balance')
@@ -63,15 +53,5 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const reconciledBalance = Math.max(data.balance, playerRow?.tenks ?? data.balance);
-  if (reconciledBalance !== data.balance) {
-    const { error: upsertError } = await admin
-      .from('player_tenks_balance')
-      .upsert({ player_id: user.id, balance: reconciledBalance });
-    if (upsertError) {
-      return NextResponse.json({ error: upsertError.message }, { status: 500 });
-    }
-  }
-
-  return NextResponse.json({ balance: reconciledBalance });
+  return NextResponse.json({ balance: data.balance });
 }

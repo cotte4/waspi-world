@@ -481,7 +481,7 @@ export class SkillShopPanel {
           if (result.success) {
             // Sync local TENKS balance with server value
             if (typeof result.new_balance === 'number') {
-              initTenks(result.new_balance, { preferStored: false });
+              initTenks(result.new_balance);
             }
             this.showNotice(result.notice ?? `${item.name} comprado!`, '#39FF14');
             eventBus.emit(EVENTS.UI_NOTICE, { message: `${item.name} comprado!`, color: '#39FF14' });

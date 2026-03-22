@@ -138,6 +138,13 @@ export async function POST(request: NextRequest) {
 
     await ensurePlayerRow(admin, user, next);
 
+    // Keep player_tenks_balance authoritative — update it with the new total.
+    if (reward > 0) {
+      await admin
+        .from('player_tenks_balance')
+        .upsert({ player_id: user.id, balance: next.tenks }, { onConflict: 'player_id' });
+    }
+
     if (reward > 0) {
       try {
         await appendTenksTransaction(admin, {

@@ -14,13 +14,13 @@ type QueueRow = {
   added_by: string;
   added_by_name: string;
   cost: 100 | 150;
-  status: 'queued' | 'playing' | 'skipped';
+  status: 'queued' | 'playing' | 'played' | 'skipped';
   added_at: string;
 };
 
 type StatusBody = {
   queueId: string;
-  status: 'playing' | 'skipped';
+  status: 'playing' | 'played' | 'skipped';
 };
 
 export async function GET(request: NextRequest) {
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => null) as StatusBody | null;
-  if (!body?.queueId || (body.status !== 'playing' && body.status !== 'skipped')) {
+  if (!body?.queueId || (body.status !== 'playing' && body.status !== 'played' && body.status !== 'skipped')) {
     return NextResponse.json({ error: 'Missing required fields: queueId, status.' }, { status: 400 });
   }
 
@@ -101,13 +101,58 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Admin client unavailable.' }, { status: 500 });
   }
 
+  if (body.status === 'playing') {
+    const { data: queueEntry, error: queueError } = await admin
+      .from('jukebox_queue')
+      .select('id, status')
+      .eq('id', body.queueId)
+      .maybeSingle<{ id: string; status: 'queued' | 'playing' | 'played' | 'skipped' }>();
+
+    if (queueError) {
+      return NextResponse.json({ error: queueError.message }, { status: 500 });
+    }
+    if (!queueEntry || queueEntry.status !== 'queued') {
+      return NextResponse.json({ error: 'La canción ya no está disponible para reproducirse.' }, { status: 409 });
+    }
+
+    const { data: currentPlaying, error: currentPlayingError } = await admin
+      .from('jukebox_queue')
+      .select('id')
+      .eq('status', 'playing')
+      .limit(1)
+      .maybeSingle<{ id: string }>();
+
+    if (currentPlayingError) {
+      return NextResponse.json({ error: currentPlayingError.message }, { status: 500 });
+    }
+    if (currentPlaying) {
+      return NextResponse.json({ error: 'Ya hay una canción en reproducción.' }, { status: 409 });
+    }
+  } else {
+    const { data: queueEntry, error: queueError } = await admin
+      .from('jukebox_queue')
+      .select('id, status')
+      .eq('id', body.queueId)
+      .maybeSingle<{ id: string; status: 'queued' | 'playing' | 'played' | 'skipped' }>();
+
+    if (queueError) {
+      return NextResponse.json({ error: queueError.message }, { status: 500 });
+    }
+    if (!queueEntry || queueEntry.status !== 'playing') {
+      return NextResponse.json({ error: 'La canción ya no está sonando.' }, { status: 409 });
+    }
+  }
+
+  const updatePayload =
+    body.status === 'skipped'
+      ? { status: 'skipped', skipped_at: new Date().toISOString() }
+      : body.status === 'played'
+        ? { status: 'played', played_at: new Date().toISOString() }
+        : { status: 'playing' };
+
   const { error } = await admin
     .from('jukebox_queue')
-    .update(
-      body.status === 'skipped'
-        ? { status: 'skipped', skipped_at: new Date().toISOString() }
-        : { status: 'playing' }
-    )
+    .update(updatePayload)
     .eq('id', body.queueId);
 
   if (error) {

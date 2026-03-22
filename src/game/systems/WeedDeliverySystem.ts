@@ -18,7 +18,6 @@ export type WeedOrder = {
   strainName: WeedStrainName;
   minQuality: WeedQualityTier;
   rewardBase: number;
-  cooldownKey: string;
 };
 
 export type WeedDeliverResult = {
@@ -103,7 +102,6 @@ export class WeedDeliverySystem {
       strainName,
       minQuality,
       rewardBase: QUALITY_REWARDS[minQuality],
-      cooldownKey: cooldownKey(npcId),
     };
   }
 

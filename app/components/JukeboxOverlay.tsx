@@ -22,6 +22,13 @@ type SearchResult = {
   thumbnail: string;
 };
 
+type CatalogSong = {
+  videoId: string;
+  title: string;
+  artist: string;
+  category: string;
+};
+
 type SearchTab = 'catalog' | 'open';
 
 const CATALOG_CATEGORIES = [
@@ -166,6 +173,10 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching]       = useState(false);
   const [searchError, setSearchError]   = useState('');
+  const [catalogCategory, setCatalogCategory] = useState<string | null>(null);
+  const [catalogSongs, setCatalogSongs] = useState<CatalogSong[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState('');
   const [actionBusy, setActionBusy]     = useState(false);
   const [actionMsg, setActionMsg]       = useState('');
   const searchTimerRef                  = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -216,6 +227,28 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
   }, [runSearch]);
 
   useEffect(() => () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); }, []);
+
+  const loadCatalog = useCallback(async (category: string) => {
+    setCatalogCategory(category);
+    setCatalogLoading(true);
+    setCatalogError('');
+    setCatalogSongs([]);
+    try {
+      const token = await getAuthToken();
+      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(`/api/jukebox/catalog?category=${encodeURIComponent(category)}`, { headers });
+      const data = await res.json() as { songs?: CatalogSong[]; error?: string };
+      if (!res.ok) {
+        setCatalogError(data.error ?? 'Error al cargar el catálogo.');
+        return;
+      }
+      setCatalogSongs(data.songs ?? []);
+    } catch {
+      setCatalogError('Error de red al cargar el catálogo.');
+    } finally {
+      setCatalogLoading(false);
+    }
+  }, []);
 
   // Foco en el buscador: si no, el canvas de Phaser suele quedarse con el foco y las teclas no entran al input.
   useEffect(() => {
@@ -412,16 +445,49 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
               {CATALOG_CATEGORIES.map((cat) => (
                 <button
                   key={cat.id}
-                  style={{ ...tabBtnStyle(false), fontSize: px(9), padding: '8px 12px', minHeight: px(40) }}
-                  onClick={() => setActionMsg('Catálogo curado — próximamente 🚧')}
+                  style={{ ...tabBtnStyle(catalogCategory === cat.id), fontSize: px(9), padding: '8px 12px', minHeight: px(40) }}
+                  onClick={() => void loadCatalog(cat.id)}
                 >
                   {cat.label}
                 </button>
               ))}
             </div>
-            <div style={{ fontFamily: SILKSCREEN, fontSize: px(10), color: 'rgba(255,255,255,0.3)', marginTop: 10 }}>
-              El catálogo curado se carga con 200+ tracks pre-aprobados. Mientras tanto, usá búsqueda abierta.
+            <div style={{ fontFamily: SILKSCREEN, fontSize: px(10), color: 'rgba(255,255,255,0.3)', marginTop: 10, marginBottom: 8 }}>
+              Tracks curados y más baratos para que el café tenga identidad sin depender siempre de búsqueda abierta.
             </div>
+            {catalogLoading && (
+              <div style={{ fontFamily: SILKSCREEN, fontSize: px(11), color: 'rgba(255,255,255,0.4)', padding: '6px 0' }}>
+                cargando catálogo...
+              </div>
+            )}
+            {catalogError && (
+              <div style={{ fontFamily: SILKSCREEN, fontSize: px(11), color: '#FF6B6B', padding: '6px 0' }}>
+                {catalogError}
+              </div>
+            )}
+            {!catalogLoading && !catalogError && catalogCategory && catalogSongs.length === 0 && (
+              <div style={{ fontFamily: SILKSCREEN, fontSize: px(11), color: 'rgba(255,255,255,0.45)', padding: '8px 0' }}>
+                No hay canciones cargadas todavía en esta categoría.
+              </div>
+            )}
+            {catalogSongs.map((song, idx) => (
+              <div
+                key={song.videoId || `${song.title}-${song.artist}-${idx}`}
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.06)', gap: 8 }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: SILKSCREEN, fontSize: px(12), color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {song.title}
+                  </div>
+                  <div style={{ fontFamily: SILKSCREEN, fontSize: px(10), color: 'rgba(255,255,255,0.45)' }}>
+                    {song.artist}
+                  </div>
+                </div>
+                <button style={addBtnStyle} disabled={actionBusy} onClick={() => void handleAddSong({ ...song, thumbnail: '' }, 100)}>
+                  +100⊤
+                </button>
+              </div>
+            ))}
           </div>
         )}
 

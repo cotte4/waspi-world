@@ -324,7 +324,7 @@ class JukeboxSystem {
     if (!this.state.nowPlaying) return;
     const ended = this.state.nowPlaying;
     if (ended.queueId) {
-      void this.syncQueueEntryStatus(ended.queueId, 'skipped');
+      void this.syncQueueEntryStatus(ended.queueId, 'played');
     }
     this.broadcastRaw('JUKEBOX_SONG_ENDED', { videoId: ended.videoId, queueId: ended.queueId });
     this.state.nowPlaying = null;
@@ -393,7 +393,7 @@ class JukeboxSystem {
     }
   }
 
-  private async syncQueueEntryStatus(queueId: string, status: 'playing' | 'skipped') {
+  private async syncQueueEntryStatus(queueId: string, status: 'playing' | 'played' | 'skipped') {
     try {
       const authH = await getAuthHeaders();
       await fetch('/api/jukebox/status', {

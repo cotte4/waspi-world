@@ -185,7 +185,7 @@ class ContractSystem {
         // Sync TENKS balance using the server-authoritative total (new_balance),
         // not the partial reward amount (reward_tenks).
         if (typeof data.new_balance === 'number') {
-          initTenks(data.new_balance, { preferStored: false });
+          initTenks(data.new_balance);
         }
 
         return { success: true, reward_tenks: data.reward_tenks, notice: data.notice };

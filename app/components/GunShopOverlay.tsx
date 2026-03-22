@@ -35,7 +35,7 @@ async function syncTenksFromServer(token: string): Promise<number | null> {
   if (!res?.ok) return null;
   const json = await res.json().catch(() => null) as { balance?: number } | null;
   if (typeof json?.balance !== 'number') return null;
-  initTenks(json.balance, { preferStored: false });
+  initTenks(json.balance);
   return json.balance;
 }
 
@@ -54,7 +54,7 @@ async function buyGunItem(
     }
     ownItem(itemId);
     ensureItemEquipped(itemId);
-    initTenks(getTenksBalance() - priceTenks, { preferStored: false });
+    initTenks(getTenksBalance() - priceTenks);
     return { success: true, message: `${itemId} equipado (modo offline).` };
   }
 
@@ -91,7 +91,7 @@ async function buyGunItem(
   ensureItemEquipped(itemId);
 
   if (typeof result.player?.tenks === 'number') {
-    initTenks(result.player.tenks, { preferStored: false });
+    initTenks(result.player.tenks);
   } else {
     await syncTenksFromServer(token);
   }
