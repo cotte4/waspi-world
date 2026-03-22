@@ -80,6 +80,8 @@ export const EVENTS = {
   JUKEBOX_SKIP_REQUESTED: 'jukebox:skip:requested',
   JUKEBOX_REACTION_SENT: 'jukebox:reaction:sent',
   JUKEBOX_STATE_UPDATED: 'jukebox:state:updated',
+  JUKEBOX_AUDIO_UNLOCK_REQUIRED: 'jukebox:audio:unlock-required',
+  JUKEBOX_AUDIO_UNLOCKED: 'jukebox:audio:unlocked',
   /** Player HP changed. Payload: { hp: number; maxHp: number } */
   PLAYER_HP_CHANGED: 'player:hp:changed',
   /** Creator overlay → Phaser: config patch. Payload: Partial<AvatarConfig> */

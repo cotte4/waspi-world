@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 import { JukeboxSystem, type JukeboxState, type JukeboxSong } from '@/src/game/systems/JukeboxSystem';
 import { getTenksBalance } from '@/src/game/systems/TenksSystem';
+import { getDefaultJukeboxFallbackTrack } from '@/src/game/systems/jukeboxLibrary';
 import { supabase } from '@/src/lib/supabase';
 
 // ---------------------------------------------------------------------------
@@ -62,12 +63,14 @@ async function getAuthToken(): Promise<string | null> {
 // Sub-component: NowPlayingBar
 // ---------------------------------------------------------------------------
 
-function NowPlayingBar({ song, skipVotes, onReact, onSkip, disabled }: {
+function NowPlayingBar({ song, skipVotes, onReact, onSkip, disabled, isFallback, fallbackTrackLabel }: {
   song: JukeboxSong | null;
   skipVotes: number;
   onReact: (e: '🔥' | '💩') => void;
   onSkip: () => void;
   disabled: boolean;
+  isFallback: boolean;
+  fallbackTrackLabel: string;
 }) {
   const [fireCount, setFireCount] = useState(0);
   const [mehCount,  setMehCount]  = useState(0);
@@ -112,9 +115,19 @@ function NowPlayingBar({ song, skipVotes, onReact, onSkip, disabled }: {
             🔥 {fireCount} · 💩 {mehCount} · ⏭ {skipVotes}/3 votos skip
           </div>
         </>
+      ) : isFallback ? (
+        <>
+          <div style={{ fontFamily: PRESS_START, fontSize: px(7), color: GOLD, marginBottom: 6 }}>☕ AMBIENTE DEL CAFE</div>
+          <div style={{ fontFamily: SILKSCREEN, fontSize: px(13), color: '#fff', marginBottom: 2 }}>
+            {fallbackTrackLabel}
+          </div>
+          <div style={{ fontFamily: SILKSCREEN, fontSize: px(11), color: 'rgba(255,255,255,0.5)', marginBottom: 8 }}>
+            Sonando en loop hasta que alguien ponga un tema en la cola.
+          </div>
+        </>
       ) : (
         <div style={{ fontFamily: PRESS_START, fontSize: px(7), color: 'rgba(255,255,255,0.3)', padding: '8px 0' }}>
-          🎵 QUEUE VACÍA — ¡SÉ EL PRIMERO!
+          🎵 NO HAY NADA SONANDO TODAVIA
         </div>
       )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -136,11 +149,11 @@ function NowPlayingBar({ song, skipVotes, onReact, onSkip, disabled }: {
 // Sub-component: QueueList
 // ---------------------------------------------------------------------------
 
-function QueueList({ queue }: { queue: JukeboxSong[] }) {
+function QueueList({ queue, isFallback }: { queue: JukeboxSong[]; isFallback: boolean }) {
   if (queue.length === 0) {
     return (
       <div style={{ fontFamily: SILKSCREEN, fontSize: px(11), color: 'rgba(255,255,255,0.3)', padding: '8px 0', marginBottom: 10 }}>
-        La queue está vacía.
+        {isFallback ? 'No hay canciones pedidas. Está sonando el ambiente del café.' : 'La cola está vacía.'}
       </div>
     );
   }
@@ -162,6 +175,7 @@ function QueueList({ queue }: { queue: JukeboxSong[] }) {
 // ---------------------------------------------------------------------------
 
 export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProps) {
+  const fallbackTrack = getDefaultJukeboxFallbackTrack();
   const handleClose = useCallback(() => {
     eventBus.emit(EVENTS.JUKEBOX_CLOSE);
     onClose();
@@ -179,6 +193,7 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
   const [catalogError, setCatalogError] = useState('');
   const [actionBusy, setActionBusy]     = useState(false);
   const [actionMsg, setActionMsg]       = useState('');
+  const [audioUnlockNeeded, setAudioUnlockNeeded] = useState(false);
   const searchTimerRef                  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef                  = useRef<HTMLInputElement>(null);
 
@@ -190,6 +205,15 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
       }
     });
     return off;
+  }, []);
+
+  useEffect(() => {
+    const offNeed = eventBus.on(EVENTS.JUKEBOX_AUDIO_UNLOCK_REQUIRED, () => setAudioUnlockNeeded(true));
+    const offOk = eventBus.on(EVENTS.JUKEBOX_AUDIO_UNLOCKED, () => setAudioUnlockNeeded(false));
+    return () => {
+      offNeed();
+      offOk();
+    };
   }, []);
 
   // --- Subscribe to TENKS balance changes ---
@@ -378,10 +402,20 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
           onReact={handleReact}
           onSkip={handleSkip}
           disabled={actionBusy}
+          isFallback={state.isFallback}
+          fallbackTrackLabel={fallbackTrack?.title ?? 'Ambiente del café'}
         />
 
+        {audioUnlockNeeded && (
+          <div style={{ fontFamily: SILKSCREEN, fontSize: px(11), color: '#F5C842', background: 'rgba(245,200,66,0.08)', border: `1px solid ${GOLD}33`, padding: '8px 10px', marginBottom: 10 }}>
+            Tu navegador frenó el audio automático.
+            <br />
+            Hacé click, tocá la pantalla o apretá una tecla para activarlo.
+          </div>
+        )}
+
         {/* Queue */}
-        <QueueList queue={state.queue} />
+        <QueueList queue={state.queue} isFallback={state.isFallback} />
 
         {/* Feedback message */}
         {actionMsg && (
