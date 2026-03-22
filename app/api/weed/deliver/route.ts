@@ -92,6 +92,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Admin client no disponible.' }, { status: 500 });
   }
 
+  // ── Server-side cooldown check ─────────────────────────────────────────────
+  const COOLDOWN_MS = 24 * 60 * 60 * 1000;
+  const { data: cooldownRow } = await admin
+    .from('weed_delivery_cooldowns')
+    .select('delivered_at')
+    .eq('player_id', user.id)
+    .eq('npc_id', npcId)
+    .maybeSingle<{ delivered_at: string }>();
+
+  if (cooldownRow) {
+    const elapsed = Date.now() - new Date(cooldownRow.delivered_at).getTime();
+    if (elapsed < COOLDOWN_MS) {
+      const remainingSeconds = Math.ceil((COOLDOWN_MS - elapsed) / 1000);
+      return NextResponse.json(
+        { error: 'En enfriamiento.', cooldown_remaining_seconds: remainingSeconds },
+        { status: 429 },
+      );
+    }
+  }
+
   // ── Fetch current TENKS balance ────────────────────────────────────────────
   const { data: balanceRow, error: balanceErr } = await admin
     .from('player_tenks_balance')
@@ -114,6 +134,14 @@ export async function POST(request: NextRequest) {
   if (upsertErr) {
     return NextResponse.json({ error: upsertErr.message }, { status: 500 });
   }
+
+  // ── Record cooldown ────────────────────────────────────────────────────────
+  await admin
+    .from('weed_delivery_cooldowns')
+    .upsert(
+      { player_id: user.id, npc_id: npcId, delivered_at: new Date().toISOString() },
+      { onConflict: 'player_id,npc_id' },
+    );
 
   // ── Log TENKS transaction ──────────────────────────────────────────────────
   try {

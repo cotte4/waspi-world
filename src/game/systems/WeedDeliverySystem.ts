@@ -1,7 +1,7 @@
 // WeedDeliverySystem.ts
 // Manages the 3 daily Weed Delivery NPC orders.
-// Cooldown per NPC stored in localStorage — no DB required.
-// TENKS reward is always validated server-side via /api/weed/deliver.
+// Cooldown per NPC stored in-memory (loaded from server on init).
+// TENKS reward and cooldown enforcement are both server-side via /api/weed/deliver.
 
 import { getAuthHeaders } from './authHelper';
 import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
@@ -41,7 +41,7 @@ const QUALITY_REWARDS: Record<WeedQualityTier, number> = {
   good: 400,
   excellent: 800,
 };
-const COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
+const COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const WEED_LEVEL_REQUIRED = 3;
 
 // ---------------------------------------------------------------------------
@@ -65,9 +65,8 @@ function todayDateString(): string {
   return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
 }
 
-function cooldownKey(npcId: WeedNpcId): string {
-  return `waspi_weed_delivery_${npcId}`;
-}
+// In-memory cooldown map: npcId → epoch ms of last delivery (loaded from server on init)
+const cooldownMap = new Map<WeedNpcId, number>();
 
 // ---------------------------------------------------------------------------
 // Singleton
@@ -109,17 +108,39 @@ export class WeedDeliverySystem {
   }
 
   isOnCooldown(npcId: WeedNpcId): boolean {
-    if (typeof window === 'undefined') return false;
-    const raw = window.localStorage.getItem(cooldownKey(npcId));
-    if (!raw) return false;
-    const deliveredAt = Number(raw);
-    if (isNaN(deliveredAt)) return false;
+    const deliveredAt = cooldownMap.get(npcId);
+    if (deliveredAt === undefined) return false;
     return Date.now() - deliveredAt < COOLDOWN_MS;
   }
 
   markDelivered(npcId: WeedNpcId): void {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(cooldownKey(npcId), String(Date.now()));
+    cooldownMap.set(npcId, Date.now());
+  }
+
+  /**
+   * Load server-authoritative cooldowns into the in-memory map.
+   * Call once when entering VecindadScene with an authenticated user.
+   */
+  async initCooldownsFromServer(): Promise<void> {
+    try {
+      const authH = await getAuthHeaders();
+      if (!authH.Authorization) return;
+
+      const res = await fetchWithTimeout('/api/weed/cooldowns', { headers: authH }, 6000);
+      if (!res.ok) return;
+
+      const json = await res.json() as { cooldowns?: Record<string, number> } | null;
+      if (!json?.cooldowns) return;
+
+      for (const npcId of VALID_NPC_IDS) {
+        const ts = json.cooldowns[npcId];
+        if (typeof ts === 'number' && ts > 0) {
+          cooldownMap.set(npcId, ts);
+        }
+      }
+    } catch {
+      // Network error — cooldowns stay at current in-memory state (conservative: no block)
+    }
   }
 
   /**

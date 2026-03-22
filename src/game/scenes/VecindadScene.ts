@@ -223,6 +223,7 @@ export class VecindadScene extends Phaser.Scene {
       if (this.input.keyboard) this.input.keyboard.enabled = true;
     });
     this.loadVecindadState();
+    void getWeedDeliverySystem().initCooldownsFromServer();
 
     if (this.pendingMaterials > 0) {
       this.vecindadState = {
