@@ -242,7 +242,7 @@ export class AvatarRenderer {
     this.rightHand = scene.add.rectangle( bodyR + 4, handY, 7, 7, c.bodyColor);
     all.push(this.leftHand, this.rightHand);
 
-    // ── Chain (below neck, before mouth) ─────────────────────────
+    // ── Chain (upper chest, below eyes) ──────────────────────────
     all.push(...this.buildChain(scene, bodyY, c.chainStyle, c.chainColor));
 
     // ── Mouth ────────────────────────────────────────────────────
@@ -298,6 +298,7 @@ export class AvatarRenderer {
 
   // ── Mouth builder ────────────────────────────────────────────────────────────
   private buildMouth(scene: Phaser.Scene, bodyY: number, style: MouthStyle): Phaser.GameObjects.GameObject[] {
+    if (style === 'neutral') return []; // no mouth marker by default — smile/grin/serious are deliberate choices
     const mouthY = bodyY + 5;
     const g = scene.add.graphics();
     g.lineStyle(1.5, 0x000000, 0.65);
@@ -330,12 +331,7 @@ export class AvatarRenderer {
         g.fillRect( 0.5, mouthY - 0.5, 2.5, 2.5);
         break;
       }
-      case 'neutral':
       default:
-        g.beginPath();
-        g.moveTo(-3, mouthY + 1);
-        g.lineTo( 3, mouthY + 1);
-        g.strokePath();
         break;
     }
     return [g];
@@ -381,6 +377,7 @@ export class AvatarRenderer {
         g.fillRoundedRect(-13, topY + 10, 26, 5, 2);
         return [g];
       }
+      default: return [];
     }
   }
 
@@ -420,13 +417,14 @@ export class AvatarRenderer {
         g.strokeRoundedRect(-15, eyeY - 5, 30, 9, 3);
         return [g];
       }
+      default: return [];
     }
   }
 
   // ── Chain builder ────────────────────────────────────────────────────────────
   private buildChain(scene: Phaser.Scene, bodyY: number, style: ChainStyle, color: number): Phaser.GameObjects.GameObject[] {
     if (style === 'none') return [];
-    const chainY = bodyY + 9;
+    const chainY = bodyY + 2; // upper chest, just below shirt neckline
 
     switch (style) {
       case 'thin': {
@@ -455,6 +453,7 @@ export class AvatarRenderer {
         pendant.setStrokeStyle(1, 0x000000, 0.3);
         return [g, pendant];
       }
+      default: return [];
     }
   }
 

@@ -3,6 +3,7 @@ import {
   AvatarRenderer,
   AvatarConfig,
   HairStyle,
+  DEFAULT_AVATAR_CONFIG,
   loadStoredAvatarConfig,
   saveStoredAvatarConfig,
 } from '../systems/AvatarRenderer';
@@ -77,18 +78,7 @@ export class CreatorScene extends Phaser.Scene {
 
   constructor() {
     super({ key: 'CreatorScene' });
-    this.config = {
-      avatarKind:  'procedural',
-      bodyColor:   COLORS.SKIN_LIGHT,
-      hairColor:   COLORS.HAIR_BROWN,
-      eyeColor:    0x2244CC,
-      topColor:    COLORS.BODY_BLUE,
-      bottomColor: COLORS.LEGS_DARK,
-      hairStyle:   'SPI',
-      pp: 2, tt: 2,
-      smoke: false,
-      equipTop: '', equipBottom: '',
-    };
+    this.config = { ...DEFAULT_AVATAR_CONFIG };
   }
 
   init(data?: Record<string, unknown>) {
