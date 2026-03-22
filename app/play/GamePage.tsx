@@ -319,7 +319,7 @@ export default function PlayPage() {
     });
     saveStoredPlayerState(player);
     replaceInventory(player.inventory);
-    initTenks(player.tenks, { preferStored: false });
+    initTenks(player.tenks);
     mutedPlayersRef.current = player.mutedPlayers ?? [];
     setPlayerState(player);
     setOwned(player.inventory.owned);
@@ -1023,6 +1023,20 @@ export default function PlayPage() {
     // Sync TENKS from the authoritative player_tenks_balance table.
     // This overwrites any local or user_metadata value with the DB truth.
     void initTenksFromServer(session.user.id, session.access_token);
+
+    // Hydrate username: if the session carries a username in user_metadata,
+    // write it to localStorage so WorldScene picks it up immediately.
+    const serverUsername = session.user.user_metadata?.username;
+    if (typeof serverUsername === 'string' && serverUsername.trim()) {
+      const storedUsername = typeof window !== 'undefined'
+        ? window.localStorage.getItem('waspi_username')
+        : null;
+      if (storedUsername !== serverUsername.trim()) {
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem('waspi_username', serverUsername.trim());
+        }
+      }
+    }
   }, [applyPlayerState, loadVecindadSharedState, syncPlayerState]);
 
   const refreshPlayerState = useCallback(async () => {

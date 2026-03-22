@@ -8,6 +8,7 @@ import {
   safeSceneDelayedCall,
   safeWithLiveSprite,
 } from './AnimationSafety';
+import { getAuthHeaders } from './authHelper';
 
 export type AvatarKind = 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha' | 'trap_a' | 'trap_b' | 'trap_c' | 'trap_d';
 export type HairStyle   = 'SPI' | 'FLA' | 'MOH' | 'MCH' | 'X' | 'CRL' | 'BUN';
@@ -135,6 +136,26 @@ export function loadStoredAvatarConfig(): Required<AvatarConfig> {
 export function saveStoredAvatarConfig(config: AvatarConfig) {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(AVATAR_STORAGE_KEY, JSON.stringify(normalizeAvatarConfig(config)));
+}
+
+/**
+ * Fetch the server-authoritative avatar config and hydrate localStorage.
+ * Server wins on load; localStorage stays as session cache.
+ * Falls back silently on network/auth error.
+ */
+export async function initAvatarFromServer(): Promise<void> {
+  try {
+    const authH = await getAuthHeaders();
+    if (!authH['Authorization']) return; // no session — stay on local
+    const res = await fetch('/api/player', { headers: authH });
+    if (!res.ok) return;
+    const json = await res.json() as { player?: { avatar?: AvatarConfig } };
+    if (json.player?.avatar && typeof json.player.avatar === 'object') {
+      saveStoredAvatarConfig(json.player.avatar);
+    }
+  } catch {
+    // Network error — avatar stays at current localStorage value.
+  }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
