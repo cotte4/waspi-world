@@ -8,7 +8,7 @@ import {
 import { appendTenksTransaction } from '@/src/lib/commercePersistence';
 
 const MAX_SONGS_PER_PLAYER = 3;
-const COST_CATALOG = 100;
+const COST_CATALOG = 0;
 const COST_OPEN = 150;
 const STALE_QUEUE_TTL_MINUTES = 45;
 
@@ -16,7 +16,7 @@ type AddSongBody = {
   videoId: string;
   title: string;
   artist: string;
-  cost: 100 | 150;
+  cost: 0 | 150;
   addedByName: string;
 };
 
@@ -116,13 +116,15 @@ export async function POST(request: NextRequest) {
 
   const newBalance = serverBalance - cost;
 
-  // --- Deduct TENKS atomically ---
-  const { error: deductError } = await admin
-    .from('player_tenks_balance')
-    .upsert({ player_id: user.id, balance: newBalance });
+  if (cost > 0) {
+    // --- Deduct TENKS atomically ---
+    const { error: deductError } = await admin
+      .from('player_tenks_balance')
+      .upsert({ player_id: user.id, balance: newBalance });
 
-  if (deductError) {
-    return NextResponse.json({ error: deductError.message }, { status: 500 });
+    if (deductError) {
+      return NextResponse.json({ error: deductError.message }, { status: 500 });
+    }
   }
 
   // --- Insert into queue ---
@@ -142,9 +144,11 @@ export async function POST(request: NextRequest) {
 
   if (insertError) {
     // Compensating refund if queue insert fails
-    await admin
-      .from('player_tenks_balance')
-      .upsert({ player_id: user.id, balance: serverBalance });
+    if (cost > 0) {
+      await admin
+        .from('player_tenks_balance')
+        .upsert({ player_id: user.id, balance: serverBalance });
+    }
 
     return NextResponse.json({ error: insertError.message }, { status: 500 });
   }
@@ -158,15 +162,17 @@ export async function POST(request: NextRequest) {
   const queuePosition = queueCount ?? 0;
 
   // --- Log TENKS transaction ---
-  try {
-    await appendTenksTransaction(admin, {
-      playerId: user.id,
-      amount: -cost,
-      reason: `jukebox_add_song`,
-      balanceAfter: newBalance,
-    });
-  } catch (err) {
-    console.error('POST /api/jukebox/add transaction log error:', err);
+  if (cost > 0) {
+    try {
+      await appendTenksTransaction(admin, {
+        playerId: user.id,
+        amount: -cost,
+        reason: `jukebox_add_song`,
+        balanceAfter: newBalance,
+      });
+    } catch (err) {
+      console.error('POST /api/jukebox/add transaction log error:', err);
+    }
   }
 
   return NextResponse.json({

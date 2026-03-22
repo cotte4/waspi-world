@@ -5,7 +5,6 @@ import { getAuthHeaders } from '@/src/game/systems/authHelper';
 import {
   ALL_SKILL_IDS,
   getSkillDef,
-  SKILL_XP_THRESHOLDS,
 } from '@/src/game/config/skillTrees';
 import type { SkillId, SkillTreeDef, MilestoneDef } from '@/src/game/config/skillTrees';
 
@@ -262,7 +261,6 @@ function SkillPanel({
   const actionCount = data?.action_count ?? 0;
   const isMaxLevel = level >= 5;
 
-  const xpStart = xpForLevel(level);
   const xpEnd = isMaxLevel ? 1500 : xpForLevel(level + 1);
   const pct = isMaxLevel ? 1 : xpProgress(xp, level);
 

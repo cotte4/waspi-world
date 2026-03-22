@@ -527,7 +527,9 @@ export class FlappyWaspiScene extends Phaser.Scene {
 
   // ─── UI: Game over screen ────────────────────────────────────────────────────
 
-  private showGameoverScreen(_isNewBest: boolean, _tenksTotal: number): void {
+  private showGameoverScreen(isNewBest: boolean, tenksTotal: number): void {
+    void isNewBest;
+    void tenksTotal;
     if (!this.isSceneAlive()) return;
     this.hideIdleScreen();
 

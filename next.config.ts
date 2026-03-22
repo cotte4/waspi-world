@@ -25,14 +25,14 @@ const securityHeaders = [
     key: 'Content-Security-Policy',
     value: [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
+      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com data:",
       "img-src 'self' data: blob: https:",
-      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://*.ingest.us.sentry.io https://*.ingest.sentry.io https://*.peerjs.com wss://*.peerjs.com",
+      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://*.ingest.us.sentry.io https://*.ingest.sentry.io https://*.peerjs.com wss://*.peerjs.com https://*.youtube.com https://*.googlevideo.com https://*.ytimg.com",
       "worker-src 'self' blob:",
-      "frame-src https://js.stripe.com https://hooks.stripe.com",
-      "media-src 'self' blob:",
+      "frame-src https://js.stripe.com https://hooks.stripe.com https://www.youtube.com https://www.youtube-nocookie.com",
+      "media-src 'self' blob: https://*.googlevideo.com https://*.youtube.com",
     ].join('; '),
   },
 ];
@@ -63,10 +63,14 @@ export default withSentryConfig(nextConfig, {
     disable: !process.env.VERCEL,
   },
 
-  // Disable Sentry's automatic instrumentation of API routes
-  // (we call Sentry.captureException manually where needed)
-  autoInstrumentServerFunctions: false,
+  webpack: {
+    // Disable Sentry's automatic instrumentation of API routes
+    // (we call Sentry.captureException manually where needed)
+    autoInstrumentServerFunctions: false,
 
-  // Avoid wrapping the entire app in a Sentry boundary we don't control
-  disableLogger: true,
+    treeshake: {
+      // Strip Sentry debug logging from the production bundle.
+      removeDebugLogging: true,
+    },
+  },
 });

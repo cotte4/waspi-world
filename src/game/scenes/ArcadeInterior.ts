@@ -779,7 +779,7 @@ export class ArcadeInterior extends Phaser.Scene {
 
   private handleSceneShutdown() {
     eventBus.emit(EVENTS.ARCADE_SCENE_ACTIVE, false);
-    try { this.tweens.killAll(); } catch (_e) { /* already destroyed */ }
+    try { this.tweens.killAll(); } catch { /* already destroyed */ }
 
     try {
       this.room?.shutdown();

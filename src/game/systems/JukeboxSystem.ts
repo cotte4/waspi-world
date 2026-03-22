@@ -18,7 +18,7 @@ export interface JukeboxSong {
   artist: string;
   addedBy: string;
   addedByName: string;
-  cost: 100 | 150;
+  cost: 0 | 150;
   addedAt: number;
   queueId?: string;
 }
@@ -187,7 +187,7 @@ class JukeboxSystem {
     videoId: string;
     title: string;
     artist: string;
-    cost: 100 | 150;
+    cost: 0 | 150;
   }): Promise<{ ok: boolean; error?: string; newBalance?: number }> {
     try {
       const authH = await getAuthHeaders();

@@ -19,6 +19,7 @@ declare global {
             controls: number;
             disablekb: number;
             fs: number;
+            origin?: string;
             rel: number;
             modestbranding: number;
             playsinline: number;
@@ -66,10 +67,13 @@ export class JukeboxPlayer {
   private currentVideoId: string | null = null;
   private onSongEnded: () => void;
   private apiLoaded = false;
+  private playerReady = false;
   private myApiCallback: (() => void) | null = null;
   private userGestureUnsub: (() => void) | null = null;
   private localAudio: HTMLAudioElement | null = null;
   private fallbackActive = false;
+  private playbackRetryTimer: number | null = null;
+  private playbackRetryAttempts = 0;
 
   constructor(onSongEnded: () => void) {
     this.onSongEnded = onSongEnded;
@@ -100,7 +104,7 @@ export class JukeboxPlayer {
     if (this.tryPlayLocalTrack(videoId)) {
       return;
     }
-    if (!this.player) {
+    if (!this.player || !this.playerReady) {
       this.pendingVideoId = videoId;
       if (this.apiLoaded) {
         this.initPlayer();
@@ -114,16 +118,8 @@ export class JukeboxPlayer {
   stop() {
     this.pendingVideoId = null;
     this.currentVideoId = null;
-    this.fallbackActive = false;
-    if (this.localAudio) {
-      try {
-        this.localAudio.pause();
-        this.localAudio.currentTime = 0;
-        this.localAudio.loop = false;
-        this.localAudio.removeAttribute('src');
-        this.localAudio.load();
-      } catch { /* local audio may be unavailable */ }
-    }
+    this.clearPlaybackRetry();
+    this.stopLocalAudio();
     if (!this.player) return;
     try {
       this.player.stopVideo();
@@ -142,6 +138,7 @@ export class JukeboxPlayer {
       } catch { /* silent — player may already be destroyed */ }
       this.player = null;
     }
+    this.playerReady = false;
 
     if (this.myApiCallback) {
       JukeboxPlayer.apiReadyCallbacks.delete(this.myApiCallback);
@@ -158,6 +155,7 @@ export class JukeboxPlayer {
 
     this.shouldReportEnded = false;
     this.pendingVideoId = null;
+    this.clearPlaybackRetry();
   }
 
   // -------------------------------------------------------------------------
@@ -172,7 +170,7 @@ export class JukeboxPlayer {
     div.id = PLAYER_CONTAINER_ID;
     // Keep player valid for YouTube autoplay/viewport checks, but visually unobtrusive.
     div.style.cssText =
-      'position:fixed;opacity:0.01;pointer-events:none;width:220px;height:140px;bottom:0;right:0;z-index:-1;';
+      'position:fixed;opacity:0.01;pointer-events:none;width:220px;height:220px;bottom:8px;right:8px;z-index:1;';
     document.body.appendChild(div);
   }
 
@@ -237,12 +235,24 @@ export class JukeboxPlayer {
     } catch { /* iframe may not be ready */ }
   }
 
+  private stopLocalAudio() {
+    this.fallbackActive = false;
+    if (!this.localAudio) return;
+    try {
+      this.localAudio.pause();
+      this.localAudio.currentTime = 0;
+      this.localAudio.loop = false;
+      this.localAudio.removeAttribute('src');
+      this.localAudio.load();
+    } catch { /* local audio may be unavailable */ }
+  }
+
   private tryPlayLocalTrack(videoId: string): boolean {
     const localSong = getLocalJukeboxSongByVideoId(videoId);
     if (!localSong || !this.localAudio) return false;
     try {
-      this.fallbackActive = false;
-      this.localAudio.loop = false;
+      this.clearPlaybackRetry();
+      this.stopLocalAudio();
       this.localAudio.src = localSong.assetPath;
       this.localAudio.currentTime = 0;
       this.localAudio.volume = 1;
@@ -256,6 +266,35 @@ export class JukeboxPlayer {
     }
   }
 
+  private clearPlaybackRetry() {
+    if (this.playbackRetryTimer !== null) {
+      window.clearTimeout(this.playbackRetryTimer);
+      this.playbackRetryTimer = null;
+    }
+    this.playbackRetryAttempts = 0;
+  }
+
+  private schedulePlaybackRetry(videoId: string) {
+    if (typeof window === 'undefined') return;
+    if (!this.player || !this.playerReady) return;
+    if (this.playbackRetryAttempts >= 4) return;
+    if (this.playbackRetryTimer !== null) return;
+
+    this.playbackRetryTimer = window.setTimeout(() => {
+      this.playbackRetryTimer = null;
+      if (!this.player || !this.playerReady) return;
+      if (this.currentVideoId !== videoId || this.fallbackActive) return;
+      this.playbackRetryAttempts += 1;
+      try {
+        this.player.playVideo?.();
+        this.tryUnmutePlaying();
+      } catch {
+        eventBus.emit(EVENTS.JUKEBOX_AUDIO_UNLOCK_REQUIRED);
+      }
+      this.schedulePlaybackRetry(videoId);
+    }, 1200);
+  }
+
   playFallback() {
     const fallbackTrack = getDefaultJukeboxFallbackTrack();
     if (!fallbackTrack || !this.localAudio) return;
@@ -263,9 +302,11 @@ export class JukeboxPlayer {
     this.bindUserGestureRetry();
     this.currentVideoId = null;
     this.pendingVideoId = null;
+    this.clearPlaybackRetry();
     this.fallbackActive = true;
     try {
-      this.localAudio.pause();
+      this.stopLocalAudio();
+      this.fallbackActive = true;
       this.localAudio.src = fallbackTrack.assetPath;
       this.localAudio.currentTime = 0;
       this.localAudio.loop = true;
@@ -277,14 +318,19 @@ export class JukeboxPlayer {
   }
 
   private startPlayback(videoId: string) {
+    this.stopLocalAudio();
     if (this.tryPlayLocalTrack(videoId)) return;
-    if (!this.player) return;
+    if (!this.player || !this.playerReady) {
+      this.pendingVideoId = videoId;
+      return;
+    }
+    this.clearPlaybackRetry();
     try {
       // Start muted first to satisfy autoplay policies, then unmute best-effort.
       this.player.loadVideoById(videoId);
       this.player.mute?.();
       this.player.playVideo?.();
-      eventBus.emit(EVENTS.JUKEBOX_AUDIO_UNLOCKED);
+      this.schedulePlaybackRetry(videoId);
       window.setTimeout(() => this.tryUnmutePlaying(), 250);
     } catch {
       eventBus.emit(EVENTS.JUKEBOX_AUDIO_UNLOCK_REQUIRED);
@@ -322,18 +368,20 @@ export class JukeboxPlayer {
 
     this.player = new window.YT.Player(PLAYER_CONTAINER_ID, {
       width: 220,
-      height: 140,
+      height: 220,
       playerVars: {
         autoplay: 1,
         controls: 0,
         disablekb: 1,
         fs: 0,
+        origin: typeof window !== 'undefined' ? window.location.origin : undefined,
         rel: 0,
         modestbranding: 1,
         playsinline: 1,
       },
       events: {
         onReady: () => {
+          this.playerReady = true;
           this.tryUnmutePlaying();
           if (this.pendingVideoId) {
             this.startPlayback(this.pendingVideoId);
@@ -344,16 +392,26 @@ export class JukeboxPlayer {
         onStateChange: (event) => {
           if (!window.YT?.PlayerState) return;
           if (event.data === window.YT.PlayerState.PLAYING) {
+            this.clearPlaybackRetry();
+            eventBus.emit(EVENTS.JUKEBOX_AUDIO_UNLOCKED);
             this.tryUnmutePlaying();
           }
           if (event.data === window.YT.PlayerState.CUED && this.currentVideoId) {
             this.player?.playVideo?.();
+            this.schedulePlaybackRetry(this.currentVideoId);
+          }
+          if (event.data === window.YT.PlayerState.BUFFERING && this.currentVideoId) {
+            this.schedulePlaybackRetry(this.currentVideoId);
           }
           if (event.data === window.YT.PlayerState.ENDED && this.shouldReportEnded) {
+            this.clearPlaybackRetry();
             this.onSongEnded();
+          } else if (event.data === window.YT.PlayerState.ENDED) {
+            this.clearPlaybackRetry();
           }
         },
         onError: (event) => {
+          this.clearPlaybackRetry();
           console.error('JukeboxPlayer YouTube error code:', event.data);
           if (this.shouldReportEnded) this.onSongEnded();
         },

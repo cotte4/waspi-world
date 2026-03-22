@@ -284,7 +284,7 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
   }, [searchTab]);
 
   // --- Add song ---
-  const handleAddSong = useCallback(async (result: SearchResult, cost: 100 | 150) => {
+  const handleAddSong = useCallback(async (result: SearchResult, cost: 0 | 150) => {
     if (actionBusy) return;
     if (balance < cost) { setActionMsg(`Necesitás ${cost} TENKS. Tenés ${balance}.`); return; }
     setActionBusy(true);
@@ -429,7 +429,7 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
         {/* Search tabs */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
           <button style={tabBtnStyle(searchTab === 'open')}    onClick={() => setSearchTab('open')}>    🌐 ABIERTO (150⊤)</button>
-          <button style={tabBtnStyle(searchTab === 'catalog')} onClick={() => setSearchTab('catalog')}>🏷️ CURADO (100⊤)</button>
+          <button style={tabBtnStyle(searchTab === 'catalog')} onClick={() => setSearchTab('catalog')}>🏷️ CURADO (GRATIS)</button>
         </div>
 
         {/* Open search tab */}
@@ -489,7 +489,7 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
               ))}
             </div>
             <div style={{ fontFamily: SILKSCREEN, fontSize: px(10), color: 'rgba(255,255,255,0.3)', marginTop: 10, marginBottom: 8 }}>
-              Tracks curados y más baratos para que el café tenga identidad sin depender siempre de búsqueda abierta.
+              Tracks curados gratis para que el café tenga identidad sin depender siempre de búsqueda abierta.
             </div>
             {catalogLoading && (
               <div style={{ fontFamily: SILKSCREEN, fontSize: px(11), color: 'rgba(255,255,255,0.4)', padding: '6px 0' }}>
@@ -503,7 +503,7 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
             )}
             {!catalogLoading && !catalogError && catalogSongs.length === 0 && (
               <div style={{ fontFamily: SILKSCREEN, fontSize: px(11), color: 'rgba(255,255,255,0.45)', padding: '8px 0' }}>
-                No hay canciones cargadas todavía en esta categoría.
+                No hay canciones curadas cargadas todavía.
               </div>
             )}
             {catalogSongs.map((song, idx) => (
@@ -519,8 +519,8 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
                     {song.artist}
                   </div>
                 </div>
-                <button style={addBtnStyle} disabled={actionBusy} onClick={() => void handleAddSong({ ...song, thumbnail: '' }, 100)}>
-                  +100⊤
+                <button style={addBtnStyle} disabled={actionBusy} onClick={() => void handleAddSong({ ...song, thumbnail: '' }, 0)}>
+                  GRATIS
                 </button>
               </div>
             ))}

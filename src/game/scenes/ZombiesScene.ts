@@ -2005,6 +2005,7 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private getPackCost(weaponId: ZombiesWeaponId) {
+    void weaponId;
     return 5000;
   }
 

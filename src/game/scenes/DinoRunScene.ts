@@ -322,7 +322,7 @@ export default class DinoRunScene extends Phaser.Scene {
     this.input.on('pointermove', this.handlePointerMove, this);
   }
 
-  private handlePointerDown(_pointer: Phaser.Input.Pointer): void {
+  private handlePointerDown(): void {
     if (this.shuttingDown) return;
     if (this.gameState === 'idle') {
       this.startGame();
@@ -377,7 +377,7 @@ export default class DinoRunScene extends Phaser.Scene {
     this.triggerJump();
   }
 
-  update(time: number, delta: number): void {
+  update(_time: number, delta: number): void {
     if (this.shuttingDown) return;
 
     // ESC/back siempre disponible sin importar el estado del juego
@@ -394,7 +394,7 @@ export default class DinoRunScene extends Phaser.Scene {
     if (this.gameState !== 'playing') return;
 
     this.handleInput();
-    this.updateRunner(delta);
+    this.updateRunner();
     this.updateObstacles(delta);
     this.updateScore(delta);
     this.updateGroundDashes(delta);
@@ -432,7 +432,7 @@ export default class DinoRunScene extends Phaser.Scene {
     }
   }
 
-  private updateRunner(delta: number): void {
+  private updateRunner(): void {
     // Keep a fixed floor while grounded (no static collider in this minigame).
     if (this.isOnGround) {
       const groundedY = this.isDucking ? GROUND_Y - 8 : GROUND_Y - 16;

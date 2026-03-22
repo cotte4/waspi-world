@@ -20,7 +20,6 @@ import {
 // ---------------------------------------------------------------------------
 
 const VALID_SKILL_IDS = ['mining', 'fishing', 'gardening', 'cooking', 'gym', 'weed'] as const;
-type SkillId = (typeof VALID_SKILL_IDS)[number];
 
 // Specializations that grant +1 quality tier on their skill's rolls.
 // Defined inline — never import from src/game (browser code) in a route.

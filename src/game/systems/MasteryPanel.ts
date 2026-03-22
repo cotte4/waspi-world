@@ -226,7 +226,7 @@ export class MasteryPanel {
     this.buildSkillNavigator(panelLeft, panelTop, cx);
 
     // ── Tree area ──
-    this.buildTree(panelLeft, panelTop, cx, cy);
+    this.buildTree(panelLeft, panelTop, cx);
 
     // ── Description + unlock zone ──
     this.buildDescriptionZone(panelLeft, panelTop, cx);
@@ -309,7 +309,6 @@ export class MasteryPanel {
     panelLeft: number,
     panelTop: number,
     cx: number,
-    _cy: number,
   ): void {
     const skillId  = ALL_SKILL_IDS[this.currentSkillIndex] as SkillId;
     const nodes    = getTreeForSkill(skillId);

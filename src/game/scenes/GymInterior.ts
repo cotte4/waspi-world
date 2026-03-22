@@ -162,7 +162,7 @@ export class GymInterior extends Phaser.Scene {
 
     this.handleMovement(delta);
     this.updateProximityPrompts();
-    this.updateBagMinigame(delta);
+    this.updateBagMinigame();
     this.updateBenchMinigame(delta);
 
     if (this.controls.isActionJustDown('back') || Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
@@ -251,7 +251,7 @@ export class GymInterior extends Phaser.Scene {
 
   // ── Boxing bag minigame ───────────────────────────────────────────────────────
 
-  private updateBagMinigame(_delta: number) {
+  private updateBagMinigame() {
     const nearBag = Phaser.Math.Distance.Between(this.px, this.py, 220, 320) < 100;
 
     if (this.bagPhase === 'idle' && nearBag && this.bagHits < BAG_MAX_HITS) {

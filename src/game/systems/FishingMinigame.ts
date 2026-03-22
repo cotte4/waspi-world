@@ -25,9 +25,7 @@ const BG_COLOR     = 0x0e0e14;
 const BORDER_COLOR = 0x4a9ecc;
 const WATER_COLORS = [0x1a2e3e, 0x1e3548, 0x162838];
 const FLOAT_COLOR  = 0xff6b35;
-const LINE_COLOR   = 0x888888;
 const GOLD_HEX     = '#F5C842';
-const WHITE_HEX    = '#FFFFFF';
 const FONT_MAIN    = '"Press Start 2P", monospace';
 const FONT_SMALL   = '"Silkscreen", monospace';
 

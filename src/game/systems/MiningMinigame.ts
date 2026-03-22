@@ -64,7 +64,7 @@ function buildZones(): Zone[] {
 // Weights: MISS 40%, OK 35%, GOOD 20%, PERFECT 5%
 // ---------------------------------------------------------------------------
 
-function pickAutoZoneIndex(zones: Zone[]): number {
+function pickAutoZoneIndex(): number {
   const roll = Phaser.Math.Between(1, 100);
   if (roll <= 40) {
     // MISS — pick left or right miss zone

@@ -5,8 +5,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 import { CHAT } from '@/src/game/config/constants';
-import { CATALOG, getItem as getCatalogItem, getPhysicalCatalog, type CatalogItem } from '@/src/game/config/catalog';
-import { TENKS_PACKS } from '@/src/lib/tenksPacks';
+import { CATALOG, getItem as getCatalogItem, type CatalogItem } from '@/src/game/config/catalog';
 import { getInventory, equipItem, hasUtilityEquipped, replaceInventory } from '@/src/game/systems/InventorySystem';
 import { loadAudioSettings, saveAudioSettings, type AudioSettings } from '@/src/game/systems/AudioSettings';
 import { applyOutputSinkToSfxContext } from '@/src/game/systems/AudioManager';
@@ -14,7 +13,6 @@ import {
   applySinkIdToAudioContext,
   getStoredAudioOutputDeviceId,
   setStoredAudioOutputDeviceId,
-  supportsAudioOutputDevicePicker,
 } from '@/src/game/systems/audioOutputSink';
 import { loadHudSettings, saveHudSettings, type HudSettings } from '@/src/game/systems/HudSettings';
 import {
@@ -26,20 +24,40 @@ import {
   isSupportedMovementBindingCode,
   loadControlSettings,
   saveControlSettings,
-  setVirtualJoystickState,
   type ActionBinding,
   type ControlSettings,
   type MovementDirection,
-  type MovementScheme,
 } from '@/src/game/systems/ControlSettings';
 import { getLevelFloorXp, getMaxProgressionLevel, loadProgressionState, type ProgressionState } from '@/src/game/systems/ProgressionSystem';
-import { initStatsSystem, teardownStatsSystem, getStats, type PlayerStats } from '@/src/game/systems/StatsSystem';
+import { initStatsSystem, getStats, type PlayerStats } from '@/src/game/systems/StatsSystem';
 import { supabase } from '@/src/lib/supabase';
 import { getTenksBalance, initTenks, initTenksFromServer } from '@/src/game/systems/TenksSystem';
 import { mutePlayer, normalizePlayerState, grantInventoryItem, type PlayerState } from '@/src/lib/playerState';
-import type { SharedParcelState } from '@/src/lib/vecindad';
 import { reconcileInventoryFromDB } from '@/src/lib/commercePersistence';
 import { track } from '@/src/lib/analytics';
+import { usePlayPageSceneEvents } from '@/app/play/hooks/usePlayPageSceneEvents';
+import { CHAT_SCENES, INTERIOR_SOCIAL_SCENES, JOYSTICK_SCENES, MAGIC_LINK_COOLDOWN_MS, VOICE_MIC_DEVICE_KEY } from '@/app/play/lib/playPageConstants';
+import {
+  getInitialCheckoutState,
+  getInitialMagicLinkCooldownUntil,
+  getInitialSelectedMicDeviceId,
+  loadStoredAvatarConfig,
+  loadStoredMutedPlayers,
+  loadStoredPlayerState,
+  mergeHydratedPlayerState,
+  saveStoredAvatarConfig,
+  saveStoredPlayerState,
+} from '@/app/play/lib/playPageStorage';
+import type {
+  ChatMsg,
+  CombatStats,
+  OrderRow,
+  PlayerActionsPayload,
+  PlayerInfo,
+  PresencePlayer,
+  SettingsTab,
+  ShopTab,
+} from '@/app/play/types';
 
 const PhaserGame = dynamic(() => import('@/app/components/PhaserGame'), { ssr: false });
 const JukeboxOverlay = dynamic(() => import('@/app/components/JukeboxOverlay'), { ssr: false });
@@ -70,114 +88,6 @@ const GymHUD = dynamic(() => import('@/app/components/GymHUD'), { ssr: false });
 const ArcadeHUD = dynamic(() => import('@/app/components/ArcadeHUD'), { ssr: false });
 const PvpHUD = dynamic(() => import('@/app/components/PvpHUD'), { ssr: false });
 const WorldHUD = dynamic(() => import('@/app/components/WorldHUD'), { ssr: false });
-const AVATAR_STORAGE_KEY = 'waspi_avatar_config';
-const PLAYER_STATE_STORAGE_KEY = 'waspi_player_state';
-const MAGIC_LINK_COOLDOWN_KEY = 'waspi_magic_link_cooldown_until';
-const VOICE_MIC_DEVICE_KEY = 'waspi_voice_mic_device_id';
-const MAGIC_LINK_COOLDOWN_MS = 60_000;
-
-type SettingsTab = 'audio' | 'hud' | 'controls' | 'voice';
-
-interface ChatMsg {
-  id: string;
-  playerId: string;
-  username: string;
-  message: string;
-  isMe: boolean;
-}
-
-interface PlayerInfo {
-  playerId: string;
-  username: string;
-}
-
-interface PresencePlayer {
-  playerId: string;
-  username: string;
-}
-
-interface CombatStats {
-  kills: number;
-  deaths: number;
-}
-
-type ShopTab = 'tenks_virtual' | 'physical' | 'tenks_packs' | 'orders';
-
-interface OrderRow {
-  id: string;
-  created_at: string;
-  items: Array<{ product_id: string; size: string }>;
-  total: number;
-  currency: string;
-  status: string;
-  discount_code: string | null;
-}
-
-interface ShopOpenPayload {
-  tab?: ShopTab;
-  itemId?: string;
-  source?: string;
-}
-
-interface PenaltyResultPayload {
-  won: boolean;
-  goals: number;
-  shots: number;
-}
-
-interface PlayerActionsPayload {
-  playerId: string;
-  username: string;
-}
-
-interface ParcelBuyPayload {
-  parcelId: string;
-  cost: number;
-}
-
-interface VecindadUpdatePayload {
-  vecindad: PlayerState['vecindad'];
-  notice?: string;
-}
-
-interface VecindadSharedPayload {
-  parcels: SharedParcelState[];
-  broadcast?: boolean;
-}
-
-type FarmActionRequestPayload =
-  | { action: 'farm_unlock' }
-  | { action: 'farm_plant'; slotIndex: number; seedType: 'basica' | 'indica' | 'sativa' | 'purple_haze' | 'og_kush' }
-  | { action: 'farm_water'; slotIndex: number }
-  | { action: 'farm_harvest'; slotIndex: number };
-
-const CHAT_SCENES = new Set([
-  'WorldScene',
-  'VecindadScene',
-  'StoreInterior',
-  'GunShopInterior',
-  'CafeInterior',
-  'ArcadeInterior',
-  'CasinoInterior',
-  'HouseInterior',
-  'PvpArenaScene',
-  'ZombiesScene',
-  'BasementZombiesScene',
-  'BosqueMaterialesScene',
-]);
-const INTERIOR_SOCIAL_SCENES = new Set([
-  'VecindadScene',
-  'StoreInterior',
-  'GunShopInterior',
-  'CafeInterior',
-  'ArcadeInterior',
-  'CasinoInterior',
-  'HouseInterior',
-  'ZombiesScene',
-  'BasementZombiesScene',
-  'BosqueMaterialesScene',
-]);
-const JOYSTICK_SCENES = new Set(['WorldScene', 'VecindadScene', 'StoreInterior', 'GunShopInterior', 'PvpArenaScene', 'ZombiesScene', 'BasementZombiesScene', 'BosqueMaterialesScene']);
 
 export default function PlayPage() {
   const initialInventory = useMemo(() => getInventory(), []);
@@ -190,13 +100,13 @@ export default function PlayPage() {
   const [input, setInput] = useState('');
   const [lastSent, setLastSent] = useState(0);
   const [playerInfo, setPlayerInfo] = useState<PlayerInfo | null>(null);
-  const [connected, setConnected] = useState(false);
+  const [, setConnected] = useState(false);
   const [presencePlayers, setPresencePlayers] = useState<PresencePlayer[]>([]);
-  const [combatStats, setCombatStats] = useState<CombatStats>({ kills: 0, deaths: 0 });
+  const [, setCombatStats] = useState<CombatStats>({ kills: 0, deaths: 0 });
   const [progression, setProgression] = useState<ProgressionState>(initialProgression);
   const [playerState, setPlayerState] = useState<PlayerState | null>(null);
   const [tenks, setTenks] = useState<number | null>(null);
-  const [tenksAnimating, setTenksAnimating] = useState(false);
+  const [, setTenksAnimating] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [smoking, setSmoking] = useState(false);
   const [owned, setOwned] = useState<string[]>(initialInventory.owned);
@@ -258,7 +168,6 @@ export default function PlayPage() {
   const [controlSettings, setControlSettings] = useState<ControlSettings>(initialControlSettings);
   const [bindingCaptureDirection, setBindingCaptureDirection] = useState<MovementDirection | null>(null);
   const [bindingCaptureAction, setBindingCaptureAction] = useState<ActionBinding | null>(null);
-  const [joystickUi, setJoystickUi] = useState({ active: false, dx: 0, dy: 0 });
   const [rescueArmed, setRescueArmed] = useState(false);
   const [activeActivities, setActiveActivities] = useState<ReadonlySet<string>>(new Set());
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -272,7 +181,6 @@ export default function PlayPage() {
   const lastInteriorChatSentRef = useRef(0);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const joystickRef = useRef<HTMLDivElement>(null);
   const rescueTimeoutRef = useRef<number | null>(null);
   const [chatEnabled, setChatEnabled] = useState(true);
   const chatVisible = chatEnabled && CHAT_SCENES.has(activeScene);
@@ -905,7 +813,6 @@ export default function PlayPage() {
 
   useEffect(() => {
     if (isMobile && activeScene === 'WorldScene' && !localStorage.getItem('waspi_mobile_hint_v1')) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowMobileHint(true);
       const t = window.setTimeout(() => {
         setShowMobileHint(false);
@@ -1221,21 +1128,6 @@ export default function PlayPage() {
     if (error) {
       setAuthStatus(error.message);
     }
-  }, []);
-
-  const signOut = useCallback(async () => {
-    if (!supabase) return;
-    setAuthBusy(true);
-    const { error } = await supabase.auth.signOut();
-    setAuthBusy(false);
-    if (error) {
-      setAuthStatus(error.message);
-      return;
-    }
-    tokenRef.current = null;
-    setAuthEmail(null);
-    teardownStatsSystem();
-    setAuthStatus('Sesion cerrada.');
   }, []);
 
   const buyShopItem = useCallback(async (item: CatalogItem) => {
@@ -1703,28 +1595,6 @@ export default function PlayPage() {
     }
     armSafeReset();
   }, [armSafeReset, confirmSafeReset, rescueArmed]);
-
-  const updateJoystickFromPoint = useCallback((clientX: number, clientY: number) => {
-    const el = joystickRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    const max = rect.width * 0.28;
-    const rawDx = clientX - centerX;
-    const rawDy = clientY - centerY;
-    const distance = Math.hypot(rawDx, rawDy) || 1;
-    const clamped = Math.min(max, distance);
-    const dx = Number(((rawDx / distance) * (clamped / max)).toFixed(4));
-    const dy = Number(((rawDy / distance) * (clamped / max)).toFixed(4));
-    setJoystickUi({ active: true, dx, dy });
-    setVirtualJoystickState({ active: true, dx, dy });
-  }, []);
-
-  const endJoystick = useCallback(() => {
-    setJoystickUi({ active: false, dx: 0, dy: 0 });
-    clearVirtualJoystickState();
-  }, []);
 
   const passiveUtilityItems = useMemo(
     () => owned
@@ -2677,51 +2547,6 @@ export default function PlayPage() {
   );
 }
 
-function nextBtnBg(smoking: boolean) {
-  return smoking ? '#39FF14' : 'rgba(255,255,255,0.08)';
-}
-
-function toggleButtonStyle(enabled: boolean) {
-  return {
-    fontFamily: '"Press Start 2P", monospace',
-    fontSize: '9px',
-    padding: '10px 12px',
-    border: '1px solid rgba(255,255,255,0.15)',
-    background: enabled ? '#39FF14' : 'rgba(255,255,255,0.08)',
-    color: enabled ? '#0E0E14' : '#FFFFFF',
-    cursor: 'pointer',
-  } as const;
-}
-
-function optionButtonStyle(active: boolean) {
-  return {
-    fontFamily: '"Press Start 2P", monospace',
-    fontSize: '8px',
-    padding: '10px 8px',
-    border: active ? '1px solid rgba(245,200,66,0.45)' : '1px solid rgba(255,255,255,0.12)',
-    background: active ? 'rgba(245,200,66,0.18)' : 'rgba(255,255,255,0.05)',
-    color: active ? '#F5C842' : '#FFFFFF',
-    cursor: 'pointer',
-    textAlign: 'center',
-  } as const;
-}
-
-function movementSchemeLabel(scheme: MovementScheme) {
-  switch (scheme) {
-    case 'wasd':
-      return 'Solo WASD';
-    case 'arrows':
-      return 'Solo flechas';
-    case 'ijkl':
-      return 'IJKL';
-    case 'custom':
-      return 'Custom';
-    case 'both':
-    default:
-      return 'WASD + flechas';
-  }
-}
-
 function directionLabel(direction: MovementDirection) {
   switch (direction) {
     case 'up':
@@ -2752,59 +2577,6 @@ function actionLabel(action: ActionBinding) {
     default:
       return 'ACCION';
   }
-}
-
-function authButtonStyle(background: string, color: string, disabled: boolean, bordered = false) {
-  return {
-    width: '100%',
-    fontFamily: '"Press Start 2P", monospace',
-    fontSize: '8px',
-    padding: '10px 8px',
-    background,
-    color,
-    cursor: disabled ? 'default' : 'pointer',
-    border: bordered ? '1px solid rgba(255,255,255,0.15)' : 'none',
-    opacity: disabled ? 0.65 : 1,
-  } as const;
-}
-
-function tabButtonStyle(active: boolean) {
-  return {
-    fontFamily: '"Press Start 2P", monospace',
-    fontSize: '7px',
-    padding: '9px 10px',
-    background: active ? 'rgba(245,200,66,0.1)' : 'transparent',
-    color: active ? '#F5C842' : 'rgba(255,255,255,0.38)',
-    border: 'none',
-    borderBottom: active ? '2px solid #F5C842' : '2px solid transparent',
-    cursor: 'pointer',
-    letterSpacing: '0.04em',
-    whiteSpace: 'nowrap' as const,
-    flexShrink: 0,
-  } as const;
-}
-
-function modalCloseButtonStyle() {
-  return {
-    fontFamily: '"Press Start 2P", monospace',
-    fontSize: '8px',
-    padding: '8px 10px',
-    color: '#FFFFFF',
-    background: 'rgba(255,255,255,0.08)',
-    border: '1px solid rgba(255,255,255,0.15)',
-    cursor: 'pointer',
-    flexShrink: 0,
-  } as const;
-}
-
-function hudBadge(color: string, border: string) {
-  return {
-    background: 'rgba(0,0,0,0.7)',
-    border: `1px solid ${border}`,
-    fontFamily: '"Press Start 2P", monospace',
-    color,
-    fontSize: '7px',
-  } as const;
 }
 
 function hudCollapseButtonStyle() {
@@ -2937,15 +2709,3 @@ function getInitialSelectedMicDeviceId(): string {
   if (typeof window === 'undefined') return '';
   return window.localStorage.getItem(VOICE_MIC_DEVICE_KEY) ?? '';
 }
-
-const textInputStyle = {
-  width: '100%',
-  background: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.12)',
-  color: '#FFFFFF',
-  fontFamily: '"Silkscreen", monospace',
-  fontSize: '12px',
-  padding: '8px 10px',
-  outline: 'none',
-} as const;
-

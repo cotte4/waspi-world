@@ -661,7 +661,9 @@ export class BasketMinigame extends Phaser.Scene {
     });
   }
 
-  private showResultLabel(_text: string, _color: string) {
+  private showResultLabel(text: string, color: string) {
+    void text;
+    void color;
     // Result feedback is handled via React HUD (BasketHUD) through eventBus emissions.
   }
 

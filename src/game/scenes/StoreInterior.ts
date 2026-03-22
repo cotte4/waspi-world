@@ -474,7 +474,6 @@ export class StoreInterior extends Phaser.Scene {
       for (let si = 0; si < shelfCount; si++) {
         const sy = shelfStartY + si * shelfSpacing;
         const sw = 16;
-        const sd = 48;
         // Shelf bracket protruding from right wall
         rshelfG.fillStyle(0x17173a, 1);
         rshelfG.fillRect(rsX - sw, sy, sw, 5);

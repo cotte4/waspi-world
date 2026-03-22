@@ -20,6 +20,134 @@ No son cuatro “versiones” del mismo documento: cada uno cumple un **rol dist
 
 ---
 
+## Sesión 2026-03-22 — Plan de refactor estructural
+
+### Objetivo
+- Reducir deuda técnica en los archivos más grandes sin cambiar la arquitectura base del proyecto.
+- Convertir los archivos gigantes en orquestadores y mover la lógica detallada a módulos con responsabilidad clara.
+- Mejorar navegación, review diffs, onboarding y seguridad al tocar gameplay/UI.
+
+### Decisión de arquitectura
+- **`app/play/GamePage.tsx`** pasa a tratarse como un **compositor de hooks y overlays**, no como dueño de todos los dominios de UI.
+- **`src/game/scenes/WorldScene.ts`** se mantiene como **escena principal única**, pero con extracción progresiva a módulos en `src/game/scenes/world/`.
+- **`src/game/scenes/ZombiesScene.ts`** se mantiene como **base scene reutilizable** para `BasementZombiesScene`, pero con extracción a módulos en `src/game/scenes/zombies/`.
+
+### Orden recomendado de ejecución
+1. **`GamePage.tsx`** — mayor mejora de mantenibilidad con menor riesgo de gameplay.
+2. **`WorldScene.ts`** — extracción por subsistemas, sin romper ownership de la escena.
+3. **`ZombiesScene.ts`** — limpieza por dominios ya relativamente estables.
+
+### Plan concreto por archivo
+
+#### 1. `app/play/GamePage.tsx`
+
+**Problema actual**
+- Mezcla auth, shop/checkout, chat, joystick mobile, settings, event bus, player sync, overlays y render JSX gigante.
+- Alto costo cognitivo para cualquier cambio pequeño.
+
+**Objetivo**
+- Dejar `PlayPage` como capa de composición.
+- Mover estado y side effects a hooks por dominio.
+
+**Extracciones propuestas**
+- `app/play/hooks/usePlayPageAuth.ts`
+- `app/play/hooks/usePlayPageShop.ts`
+- `app/play/hooks/usePlayPageChat.ts`
+- `app/play/hooks/usePlayPageSettings.ts`
+- `app/play/hooks/usePlayPageJoystick.ts`
+- `app/play/hooks/usePlayPageSceneEvents.ts`
+- `app/play/hooks/usePlayPagePlayerState.ts`
+- `app/play/lib/playPageConstants.ts`
+- `app/play/lib/playPageStorage.ts`
+- `app/play/types.ts`
+
+**Secuencia de implementación**
+1. Mover types, scene sets, storage keys y helpers de localStorage fuera del archivo.
+2. Extraer `usePlayPageSceneEvents` para aislar subscriptions a `eventBus`.
+3. Extraer `usePlayPageAuth`.
+4. Extraer `usePlayPageShop`.
+5. Extraer `usePlayPageChat`.
+6. Recién después evaluar si conviene dividir el JSX en subcomponentes.
+
+#### 2. `src/game/scenes/WorldScene.ts`
+
+**Problema actual**
+- La escena es el centro del juego y además contiene detalles de voice, HUD, training, armas, render de mapa, NPCs, realtime y minimap.
+- El tamaño por sí solo no es el problema; la mezcla de responsabilidades sí.
+
+**Objetivo**
+- Mantener una sola escena principal.
+- Extraer helpers/módulos que operen sobre `scene: WorldScene`.
+
+**Extracciones propuestas**
+- `src/game/scenes/world/boot.ts`
+- `src/game/scenes/world/voice.ts`
+- `src/game/scenes/world/weapons.ts`
+- `src/game/scenes/world/training.ts`
+- `src/game/scenes/world/realtime.ts`
+- `src/game/scenes/world/renderWorld.ts`
+- `src/game/scenes/world/npcs.ts`
+- `src/game/scenes/world/vecindad.ts`
+- `src/game/scenes/world/minimap.ts`
+
+**Secuencia de implementación**
+1. Extraer constantes/helper puros usados por voice/weapons/training.
+2. Extraer `renderWorld.ts` (`drawBackground`, `drawPlaza`, `drawBuildings`, `drawStreet`, `drawLampPosts`, `drawVignette`).
+3. Extraer `voice.ts`.
+4. Extraer `weapons.ts`.
+5. Extraer `training.ts`.
+6. Extraer `realtime.ts` y `minimap.ts`.
+
+**Regla**
+- Evitar estado oculto en módulos. La fuente de verdad sigue siendo `WorldScene`.
+
+#### 3. `src/game/scenes/ZombiesScene.ts`
+
+**Problema actual**
+- Mezcla arena builder, doors, HUD, rounds, zombies, pickups, coop/shared snapshots, remotos y chat bridge.
+- Además funciona como base para `BasementZombiesScene`, por lo que cualquier refactor debe preservar esa relación.
+
+**Objetivo**
+- Mantener `ZombiesScene` como base scene.
+- Extraer dominios grandes sin romper la extensión de `BasementZombiesScene`.
+
+**Extracciones propuestas**
+- `src/game/scenes/zombies/arena.ts`
+- `src/game/scenes/zombies/hud.ts`
+- `src/game/scenes/zombies/spawning.ts`
+- `src/game/scenes/zombies/combat.ts`
+- `src/game/scenes/zombies/pickups.ts`
+- `src/game/scenes/zombies/sharedRun.ts`
+- `src/game/scenes/zombies/realtime.ts`
+- `src/game/scenes/zombies/player.ts`
+
+**Secuencia de implementación**
+1. Extraer `arena.ts`.
+2. Extraer `hud.ts`.
+3. Extraer `sharedRun.ts`.
+4. Extraer `combat.ts`.
+5. Extraer `pickups.ts` y `realtime.ts`.
+
+### Criterios de calidad del refactor
+- No dividir por líneas; dividir por responsabilidad.
+- No crear archivos minúsculos que agreguen fricción.
+- Cada extracción debe poder probarse visualmente antes de pasar a la siguiente.
+- No cambiar comportamiento salvo que aparezca un bug incidental.
+- El nombre del archivo debe anticipar correctamente qué contiene.
+
+### Riesgos a evitar
+- Sobre-fragmentación de React/Phaser en demasiados archivos.
+- Mover lógica stateful a helpers sin una interfaz clara.
+- Romper el bridge React-Phaser (`eventBus`) por reordenar efectos sin auditar dependencias.
+- Romper `BasementZombiesScene` al extraer lógica que hoy asume campos `protected`/privados vía casting.
+
+### Resultado esperado
+- Menor tiempo para ubicar código por feature.
+- Menor riesgo al tocar shop/auth/chat/UI.
+- Menor riesgo al iterar World/Zombies sin abrir archivos de miles de líneas para cambios pequeños.
+
+---
+
 ## Sesión 2026-03-21 — Lo que se hizo
 
 ### Bug fixes
@@ -545,30 +673,38 @@ Estimacion: 1 semana
 6. **Musica por escena** — WorldScene ambient (lo-fi hip hop / chill), ZombiesScene (tense loop), CasinoInterior (jazz/lounge), StoreInterior (chill streetwear vibes).
 7. **Completar armas activas** — implementar WeaponMode para uzi, blaster, deagle, cannon. Conectar items de catalogo con logica real de gameplay.
 
+### Fase B.1: Refactor estructural previo a expansión
+Estimacion: 1-2 semanas
+
+8. **Refactor de `GamePage.tsx`** — mover auth, chat, shop, settings, joystick, player sync y event bus a hooks/librerías específicas. `PlayPage` queda como compositor.
+9. **Refactor de `WorldScene.ts`** — extraer voice, weapons, training, renderWorld, realtime, vecindad y minimap a `src/game/scenes/world/`.
+10. **Refactor de `ZombiesScene.ts`** — extraer arena, HUD, spawning, combat, sharedRun y realtime a `src/game/scenes/zombies/`.
+11. **QA de regresión del refactor** — validar auth, shop, chat, joystick mobile, WorldScene, ZombiesScene y BasementZombiesScene tras cada extracción.
+
 ### Fase C: Sprite Overhaul Final (segun PRD_SPRITE_OVERHAUL.md)
 Estimacion: 2–3 semanas (segun disponibilidad de assets generados con AI pipeline)
 
-8. **Phase 3 pendiente** — generar reload_strip.png para las 6 armas. Crear directorio arm_overlay/ con hold_idle y hold_shoot strips.
-9. **Wiring completo** — verificar que las 4 variantes de player (trap_A–D) se usan correctamente segun AvatarKind. Validar que el fallback procedural sigue funcionando.
-10. **NEAREST filter** — asegurar que todos los nuevos spritesheets usan Phaser.Textures.FilterMode.NEAREST para mantener el look pixel art.
+12. **Phase 3 pendiente** — generar reload_strip.png para las 6 armas. Crear directorio arm_overlay/ con hold_idle y hold_shoot strips.
+13. **Wiring completo** — verificar que las 4 variantes de player (trap_A–D) se usan correctamente segun AvatarKind. Validar que el fallback procedural sigue funcionando.
+14. **NEAREST filter** — asegurar que todos los nuevos spritesheets usan Phaser.Textures.FilterMode.NEAREST para mantener el look pixel art.
 
 ### Fase D: Features Post-MVP
 Estimacion: 3–4 semanas
 
-11. **Leaderboard global** — endpoint GET /api/leaderboard + UI in-game. Fuente de datos: tabla `player_stats` ya existente en DB.
-12. **Chat moderation real** — filtro de palabras configurable server-side. Ban temporal automatico por acumulacion de reportes. Logs en DB (48hs retention via pg_cron).
-13. **Mercado Pago** — integracion para el mercado argentino. Alta prioridad para conversion en el target local.
-14. **Daily login streak + TENKS diarios** — 100 TENKS/dia + 50 por dia consecutivo. Requiere Auth implementado primero.
-15. **Decision tilemaps** — confirmar Phaser Graphics como final O migrar a Tiled. Si se migra: impacta colisiones, pathfinding enemies, performance del rendering.
+15. **Leaderboard global** — endpoint GET /api/leaderboard + UI in-game. Fuente de datos: tabla `player_stats` ya existente en DB.
+16. **Chat moderation real** — filtro de palabras configurable server-side. Ban temporal automatico por acumulacion de reportes. Logs en DB (48hs retention via pg_cron).
+17. **Mercado Pago** — integracion para el mercado argentino. Alta prioridad para conversion en el target local.
+18. **Daily login streak + TENKS diarios** — 100 TENKS/dia + 50 por dia consecutivo. Requiere Auth implementado primero.
+19. **Decision tilemaps** — confirmar Phaser Graphics como final O migrar a Tiled. Si se migra: impacta colisiones, pathfinding enemies, performance del rendering.
 
 ### Fase E: Expansion de Contenido
 Estimacion: continuo
 
-16. **Nuevas zonas** — expansion del mapa mas alla de las 8 zonas actuales. El PRD menciona "EXPANSION" al sur de la Plaza como zona post-MVP.
-17. **Vendedor IA conversacional** — Claude API como reemplazo del dialog scriptado en StoreInterior. Recomendaciones segun historial de compras.
-18. **Eventos temporales** — drops limitados, pop-up stores, partidos PvP rankeados.
-19. **Mobile** — validar calidad de touch controls en dispositivos reales iOS/Android. Chat log minimizado por defecto en mobile. Shop panel full-screen en mobile.
-20. **Cupones Stripe** — API preparada en el PRD, no implementada en UI. Conectar con resultados de minijuegos (penales/basquet 3+ goles = cupon 10%).
+20. **Nuevas zonas** — expansion del mapa mas alla de las 8 zonas actuales. El PRD menciona "EXPANSION" al sur de la Plaza como zona post-MVP.
+21. **Vendedor IA conversacional** — Claude API como reemplazo del dialog scriptado en StoreInterior. Recomendaciones segun historial de compras.
+22. **Eventos temporales** — drops limitados, pop-up stores, partidos PvP rankeados.
+23. **Mobile** — validar calidad de touch controls en dispositivos reales iOS/Android. Chat log minimizado por defecto en mobile. Shop panel full-screen en mobile.
+24. **Cupones Stripe** — API preparada en el PRD, no implementada en UI. Conectar con resultados de minijuegos (penales/basquet 3+ goles = cupon 10%).
 
 ---
 

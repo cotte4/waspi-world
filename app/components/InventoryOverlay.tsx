@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 import type { CatalogItem } from '@/src/game/config/catalog';
 
@@ -371,8 +372,14 @@ export default function InventoryOverlay({
                 background: gunOn ? 'rgba(57,255,20,0.05)' : 'rgba(255,255,255,0.02)',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <img src="/assets/ui/icon_sword.png" alt="" width={24} height={24} decoding="async"
-                    style={{ objectFit: 'contain', opacity: 0.9, flexShrink: 0 }} />
+                  <Image
+                    src="/assets/ui/icon_sword.png"
+                    alt=""
+                    width={24}
+                    height={24}
+                    unoptimized
+                    style={{ objectFit: 'contain', opacity: 0.9, flexShrink: 0 }}
+                  />
                   <div>
                     <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 14, color: '#FFFFFF' }}>PISTOLA 9MM</div>
                     <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 2 }}>

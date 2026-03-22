@@ -2368,7 +2368,7 @@ export class WorldScene extends Phaser.Scene {
         avatarContainer.each((child: Phaser.GameObjects.GameObject) => {
           try {
             (child as unknown as Tintable).setTint?.(0xFF3333);
-          } catch (_e) { /* child may not support setTint */ }
+          } catch { /* child may not support setTint */ }
         });
         this.time.delayedCall(100, () => {
           try {
@@ -2376,14 +2376,14 @@ export class WorldScene extends Phaser.Scene {
               avatarContainer.each((child: Phaser.GameObjects.GameObject) => {
                 try {
                   (child as unknown as Tintable).clearTint?.();
-                } catch (_e) { /* ignore */ }
+                } catch { /* ignore */ }
               });
             }
-          } catch (_e) { /* ignore */ }
+          } catch { /* ignore */ }
         });
       }
-    } catch (_e) {
-      console.error('[Waspi] Avatar hit tint failed', _e);
+    } catch (error) {
+      console.error('[Waspi] Avatar hit tint failed', error);
     }
 
     const pushAngle = Phaser.Math.Angle.Between(sourceX, sourceY, this.px, this.py);
@@ -7418,6 +7418,5 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 }
-
 
 
