@@ -10,6 +10,7 @@ Planes con trabajo pendiente **en el código o en configuración externa**.
 | [Resend — emails confirmación](./features/resend-emails.md) | 🟡 Pendiente `RESEND_API_KEY` / dominio | Low |
 | [UI React Features](./features/ui-react-features.md) — Minimap, Quest Tracker, Skill Tree, Leaderboard, Mobile Joystick | 🟡 Pendiente | Medium |
 | [Skill Tree Overlay](./features/skill-tree-overlay.md) — React overlay visual para los 6 árboles de habilidades | 🟡 In Progress | Medium |
+| [DRIP STUDIO](./features/drip-studio.md) — Full streetwear character creator: 9 slots, DRIP SCORE, new AvatarRenderer layers | 🟡 In Progress | High |
 
 ## Fixes (`fixes/`)
 

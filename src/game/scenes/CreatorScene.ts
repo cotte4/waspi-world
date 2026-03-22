@@ -187,6 +187,8 @@ export class CreatorScene extends Phaser.Scene {
 
   // ─────────────────────────────────────────────────────────────────
   update() {
+    // Drive avatar animation (aura particles, etc.) in the preview
+    if (this.preview?.active) this.preview.update(false, 0, 0);
     // React overlay handles all UI — only ESC exits to world
     if (Phaser.Input.Keyboard.JustDown(this.keyEsc) || this.controls.isActionJustDown('back')) {
       this.commitAndEnter();

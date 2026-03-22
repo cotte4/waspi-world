@@ -3,51 +3,145 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 
-// ── types (local — avoids importing Phaser-dependent AvatarRenderer) ──────────
-type HairStyle = 'SPI' | 'FLA' | 'MOH' | 'X';
-type AvatarKind =
-  | 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha'
-  | 'trap_a' | 'trap_b' | 'trap_c' | 'trap_d';
+// ── types ─────────────────────────────────────────────────────────────────────
+type AvatarKind    = 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha' | 'trap_a' | 'trap_b' | 'trap_c' | 'trap_d';
+type HairStyle     = 'SPI' | 'FLA' | 'MOH' | 'MCH' | 'X' | 'CRL' | 'BUN';
+type HatStyle      = 'none' | 'snapback' | 'beanie' | 'bucket' | 'headband';
+type MouthStyle    = 'neutral' | 'smile' | 'serious' | 'grin';
+type GlassesStyle  = 'none' | 'round' | 'shades' | 'visor';
+type ChainStyle    = 'none' | 'thin' | 'chunky';
+type ShoeStyle     = 'low' | 'high' | 'slides';
+type AuraEffect    = 'none' | 'smoke' | 'sparkle' | 'cash' | 'stars';
+type SlotId        = 'character' | 'face' | 'hair' | 'hat' | 'outfit' | 'shoes' | 'chain' | 'glasses' | 'aura';
 
 interface AvatarCfg {
-  avatarKind: AvatarKind;
-  bodyColor:  number;
-  eyeColor:   number;
-  hairColor:  number;
-  hairStyle:  HairStyle;
-  pp: number;
-  tt: number;
+  avatarKind:   AvatarKind;
+  bodyColor:    number;
+  eyeColor:     number;
+  hairColor:    number;
+  hairStyle:    HairStyle;
+  topColor:     number;
+  bottomColor:  number;
+  pp:           number;
+  tt:           number;
+  smoke:        boolean;
+  hatStyle:     HatStyle;
+  hatColor:     number;
+  mouthStyle:   MouthStyle;
+  glassesStyle: GlassesStyle;
+  glassesColor: number;
+  chainStyle:   ChainStyle;
+  chainColor:   number;
+  shoeStyle:    ShoeStyle;
+  shoeColor:    number;
+  auraColor:    number;
+  auraEffect:   AuraEffect;
+  bodyWidth:    number;
+  bodyHeight:   number;
 }
 
-// ── constants ─────────────────────────────────────────────────────────────────
-const BODY_COLORS = [0xF5D5A4, 0xE6B98A, 0xD89B73, 0xBF7B4E, 0x9B5A3A, 0x7A412A];
-const EYE_COLORS  = [0x222222, 0x3B82F6, 0x22C55E, 0xA855F7, 0xDC2626, 0xFACC15];
-const HAIR_COLORS = [0x1F130A, 0x8B5A2B, 0xF97316, 0xEF4444, 0xFFFFFF, 0xEC4899];
-const HAIR_STYLES: HairStyle[] = ['SPI', 'FLA', 'MOH', 'X'];
+// ── palettes ──────────────────────────────────────────────────────────────────
+const BODY_COLORS    = [0xFFE0C0, 0xF5D5A4, 0xE6B98A, 0xD89B73, 0xBF7B4E, 0x9B5A3A, 0x7A412A, 0x4A2510];
+const EYE_COLORS     = [0x222222, 0x3B82F6, 0x22C55E, 0xA855F7, 0xDC2626, 0xFACC15, 0xFF6B6B, 0x06B6D4];
+const HAIR_COLORS    = [0x1F130A, 0x8B5A2B, 0xF97316, 0xEF4444, 0xFFFFFF, 0xEC4899, 0xA855F7, 0xFACC15, 0x3B82F6, 0x22C55E];
+const HAT_COLORS     = [0x111111, 0xFFFFFF, 0xF5C842, 0xDC2626, 0x3B82F6, 0x22C55E, 0xA855F7, 0xFF6B6B];
+const TOP_COLORS     = [0x111827, 0xFFFFFF, 0xDC2626, 0x3B82F6, 0x22C55E, 0xF97316, 0xA855F7, 0xF5C842, 0xEC4899, 0x06B6D4];
+const BOTTOM_COLORS  = [0x111827, 0x374151, 0x6B7280, 0xDC2626, 0x3B82F6, 0xF5C842, 0xA855F7, 0xFFFFFF];
+const SHOE_COLORS    = [0xFFFFFF, 0x111111, 0xDC2626, 0x3B82F6, 0xF5C842, 0x22C55E, 0xA855F7, 0xF97316];
+const GLASSES_COLORS = [0x111111, 0x1F2937, 0xDC2626, 0x3B82F6, 0xF5C842, 0xEC4899];
+const AURA_COLORS    = [0xF5C842, 0x39FF14, 0xFF006E, 0x46B3FF, 0xA855F7, 0xFF6B6B, 0xFFFFFF, 0xF97316];
 
-const SEEDS: Array<{ id: AvatarKind; label: string; dot: string }> = [
-  { id: 'procedural', label: 'PROC', dot: '#888888' },
-  { id: 'gengar',     label: 'GEN',  dot: '#A855F7' },
-  { id: 'buho',       label: 'BUHO', dot: '#22C55E' },
-  { id: 'piplup',     label: 'PIP',  dot: '#3B82F6' },
-  { id: 'chacha',     label: 'CHA',  dot: '#EC4899' },
-  { id: 'trap_a',     label: 'TRA',  dot: '#F5C842' },
-  { id: 'trap_b',     label: 'TRB',  dot: '#F5C842' },
-  { id: 'trap_c',     label: 'TRC',  dot: '#F5C842' },
-  { id: 'trap_d',     label: 'TRD',  dot: '#F5C842' },
+const CHAIN_METALS = [
+  { color: 0xF5C842, label: 'GOLD' },
+  { color: 0xC0C0C0, label: 'SLVR' },
+  { color: 0xB9F2FF, label: 'DIAM' },
 ];
 
+const SEEDS = [
+  { id: 'procedural' as AvatarKind, label: 'PROC', dot: '#888888' },
+  { id: 'gengar'     as AvatarKind, label: 'GEN',  dot: '#A855F7' },
+  { id: 'buho'       as AvatarKind, label: 'BUHO', dot: '#22C55E' },
+  { id: 'piplup'     as AvatarKind, label: 'PIP',  dot: '#3B82F6' },
+  { id: 'chacha'     as AvatarKind, label: 'CHA',  dot: '#EC4899' },
+  { id: 'trap_a'     as AvatarKind, label: 'TRA',  dot: '#F5C842' },
+  { id: 'trap_b'     as AvatarKind, label: 'TRB',  dot: '#F5C842' },
+  { id: 'trap_c'     as AvatarKind, label: 'TRC',  dot: '#F5C842' },
+  { id: 'trap_d'     as AvatarKind, label: 'TRD',  dot: '#F5C842' },
+];
+
+const SLOTS: Array<{ id: SlotId; label: string; icon: string }> = [
+  { id: 'character', label: 'CHARACTER', icon: '◈' },
+  { id: 'face',      label: 'FACE',      icon: '◉' },
+  { id: 'hair',      label: 'HAIR',      icon: '≋' },
+  { id: 'hat',       label: 'HAT',       icon: '▲' },
+  { id: 'outfit',    label: 'OUTFIT',    icon: '▣' },
+  { id: 'shoes',     label: 'SHOES',     icon: '◆' },
+  { id: 'chain',     label: 'CHAIN',     icon: '◎' },
+  { id: 'glasses',   label: 'GLASSES',   icon: '⊡' },
+  { id: 'aura',      label: 'AURA',      icon: '✦' },
+];
+
+// ── constants ─────────────────────────────────────────────────────────────────
 const USERNAME_KEY = 'waspi_username';
 const AVATAR_KEY   = 'waspi_avatar_config';
 
 const DEFAULT_CFG: AvatarCfg = {
-  avatarKind: 'procedural',
-  bodyColor:  0xF5D5A4,
-  eyeColor:   0x2244CC,
-  hairColor:  0x8B5A2B,
-  hairStyle:  'SPI',
+  avatarKind:   'procedural',
+  bodyColor:    0xF5D5A4,
+  eyeColor:     0x2244CC,
+  hairColor:    0x8B5A2B,
+  hairStyle:    'SPI',
+  topColor:     0x3B82F6,
+  bottomColor:  0x111827,
   pp: 2, tt: 2,
+  smoke:        false,
+  hatStyle:     'none',
+  hatColor:     0x111111,
+  mouthStyle:   'neutral',
+  glassesStyle: 'none',
+  glassesColor: 0x111111,
+  chainStyle:   'none',
+  chainColor:   0xF5C842,
+  shoeStyle:    'low',
+  shoeColor:    0xEEEEEE,
+  auraColor:    0xF5C842,
+  auraEffect:   'none',
+  bodyWidth:    1.0,
+  bodyHeight:   1.0,
 };
+
+// ── DRIP SCORE ────────────────────────────────────────────────────────────────
+function calcDripScore(cfg: AvatarCfg): number {
+  let s = 8;
+  if (cfg.hatStyle     !== 'none')    s += 12;
+  if (cfg.glassesStyle !== 'none')    s += 10;
+  if (cfg.chainStyle   !== 'none')    s += 12;
+  if (cfg.auraEffect   !== 'none')    s += 15;
+  if (cfg.mouthStyle   !== 'neutral') s +=  6;
+  if (cfg.shoeStyle    !== 'low')     s +=  8;
+  if (cfg.smoke)                      s +=  5;
+  if (cfg.bodyColor    !== DEFAULT_CFG.bodyColor)   s += 4;
+  if (cfg.hairColor    !== DEFAULT_CFG.hairColor)   s += 4;
+  if (cfg.eyeColor     !== DEFAULT_CFG.eyeColor)    s += 4;
+  if (cfg.topColor     !== DEFAULT_CFG.topColor)    s += 4;
+  if (cfg.bottomColor  !== DEFAULT_CFG.bottomColor) s += 4;
+  if (cfg.shoeColor    !== DEFAULT_CFG.shoeColor)   s += 4;
+  if (cfg.pp > 5 || cfg.pp < 2)  s += 3;
+  if (cfg.tt > 5 || cfg.tt < 2)  s += 3;
+  if (cfg.bodyWidth  !== 1.0)     s += 3;
+  if (cfg.bodyHeight !== 1.0)     s += 3;
+  return Math.min(100, s);
+}
+
+function dripRank(score: number): { rank: string; color: string } {
+  if (score >= 95) return { rank: 'SSS', color: '#FF006E' };
+  if (score >= 85) return { rank: 'SS',  color: '#F5C842' };
+  if (score >= 75) return { rank: 'S',   color: '#39FF14' };
+  if (score >= 60) return { rank: 'A',   color: '#46B3FF' };
+  if (score >= 45) return { rank: 'B',   color: '#A855F7' };
+  if (score >= 30) return { rank: 'C',   color: '#888888' };
+  return               { rank: 'D',   color: '#555555' };
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 const toHex = (n: number) => `#${n.toString(16).padStart(6, '0')}`;
@@ -67,20 +161,36 @@ function getInitialUsername(): string {
 }
 
 function randomCfg(): AvatarCfg {
-  const kinds: AvatarKind[] = SEEDS.map(s => s.id);
+  function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
+  const rnd01 = () => parseFloat((Math.random() * 0.7 + 0.7).toFixed(2)); // 0.7..1.4
   return {
-    avatarKind: kinds[Math.floor(Math.random() * kinds.length)],
-    bodyColor:  BODY_COLORS[Math.floor(Math.random() * BODY_COLORS.length)],
-    eyeColor:   EYE_COLORS[Math.floor(Math.random() * EYE_COLORS.length)],
-    hairColor:  HAIR_COLORS[Math.floor(Math.random() * HAIR_COLORS.length)],
-    hairStyle:  HAIR_STYLES[Math.floor(Math.random() * HAIR_STYLES.length)],
-    pp: Math.floor(Math.random() * 11),
-    tt: Math.floor(Math.random() * 11),
+    avatarKind:   pick(SEEDS).id,
+    bodyColor:    pick(BODY_COLORS),
+    eyeColor:     pick(EYE_COLORS),
+    hairColor:    pick(HAIR_COLORS),
+    hairStyle:    pick(['SPI','FLA','MOH','MCH','X','CRL','BUN'] as HairStyle[]),
+    topColor:     pick(TOP_COLORS),
+    bottomColor:  pick(BOTTOM_COLORS),
+    pp:           Math.floor(Math.random() * 11),
+    tt:           Math.floor(Math.random() * 11),
+    smoke:        Math.random() < 0.25,
+    hatStyle:     pick(['none','none','none','snapback','beanie','bucket','headband'] as HatStyle[]),
+    hatColor:     pick(HAT_COLORS),
+    mouthStyle:   pick(['neutral','smile','serious','grin'] as MouthStyle[]),
+    glassesStyle: pick(['none','none','round','shades','visor'] as GlassesStyle[]),
+    glassesColor: pick(GLASSES_COLORS),
+    chainStyle:   pick(['none','none','thin','chunky'] as ChainStyle[]),
+    chainColor:   pick(CHAIN_METALS).color,
+    shoeStyle:    pick(['low','high','slides'] as ShoeStyle[]),
+    shoeColor:    pick(SHOE_COLORS),
+    auraColor:    pick(AURA_COLORS),
+    auraEffect:   pick(['none','none','smoke','sparkle','cash','stars'] as AuraEffect[]),
+    bodyWidth:    rnd01(),
+    bodyHeight:   rnd01(),
   };
 }
 
-// ── micro components ──────────────────────────────────────────────────────────
-
+// ── micro-components ──────────────────────────────────────────────────────────
 function Swatch({ color, selected, onSelect }: { color: number; selected: boolean; onSelect: () => void }) {
   const css = toHex(color);
   return (
@@ -88,88 +198,362 @@ function Swatch({ color, selected, onSelect }: { color: number; selected: boolea
       onClick={onSelect}
       title={css}
       style={{
-        width: 22, height: 22, borderRadius: '50%',
+        width: 20, height: 20, borderRadius: '50%',
         background: css,
-        border: selected ? '2px solid #fff' : '2px solid rgba(255,255,255,0.1)',
-        boxShadow: selected ? `0 0 8px ${css}, 0 0 18px ${css}55` : 'none',
+        border: selected ? '2px solid #fff' : '2px solid rgba(255,255,255,0.08)',
+        boxShadow: selected ? `0 0 8px ${css}, 0 0 16px ${css}44` : 'none',
         cursor: 'pointer', outline: 'none', flexShrink: 0,
-        transition: 'box-shadow .14s, border-color .14s',
+        transition: 'box-shadow .12s, border-color .12s',
       }}
     />
   );
 }
 
-function Slider({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+function StyleBtn({ label, active, onClick, wide }: { label: string; active: boolean; onClick: () => void; wide?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        flex: wide ? 'none' : 1,
+        padding: wide ? '5px 8px' : '5px 3px',
+        background: active ? 'rgba(245,200,66,0.14)' : 'rgba(0,0,0,0.5)',
+        border: `1px solid ${active ? '#F5C842' : 'rgba(57,255,20,0.14)'}`,
+        color: active ? '#F5C842' : 'rgba(170,170,170,0.55)',
+        fontFamily: '"Press Start 2P", monospace', fontSize: 6,
+        cursor: 'pointer', outline: 'none',
+        transition: 'all .12s', whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function SliderRow({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const pct = value / 10;
-
   const handleTrack = useCallback((e: React.MouseEvent) => {
     if (!trackRef.current) return;
     const r = trackRef.current.getBoundingClientRect();
     onChange(Math.round(Math.min(10, Math.max(0, ((e.clientX - r.left) / r.width) * 10))));
   }, [onChange]);
-
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <span style={{ fontFamily: 'Silkscreen, monospace', fontSize: 8, color: 'rgba(57,255,20,0.65)', width: 22, flexShrink: 0 }}>
-        {label}
-      </span>
-      <button onClick={() => onChange(Math.max(0, value - 1))} style={sliderBtnStyle}>−</button>
-      <div
-        ref={trackRef}
-        onClick={handleTrack}
-        style={{ flex: 1, height: 5, background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(57,255,20,0.18)', position: 'relative', cursor: 'pointer' }}
-      >
-        <div style={{ width: `${pct * 100}%`, height: '100%', background: '#F5C842', boxShadow: '0 0 5px rgba(245,200,66,.6)', transition: 'width .1s' }} />
-        <div style={{
-          position: 'absolute', left: `${pct * 100}%`, top: '50%',
-          transform: 'translate(-50%,-50%)',
-          width: 11, height: 11, borderRadius: '50%',
-          background: '#F5C842', boxShadow: '0 0 7px #F5C842',
-          border: '2px solid #111',
-        }} />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+      <span style={{ fontFamily: 'Silkscreen, monospace', fontSize: 7, color: 'rgba(57,255,20,0.6)', width: 24, flexShrink: 0 }}>{label}</span>
+      <button onClick={() => onChange(Math.max(0, value - 1))} style={smallBtn}>−</button>
+      <div ref={trackRef} onClick={handleTrack} style={{ flex: 1, height: 4, background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(57,255,20,0.15)', position: 'relative', cursor: 'pointer' }}>
+        <div style={{ width: `${pct * 100}%`, height: '100%', background: '#F5C842', transition: 'width .1s' }} />
+        <div style={{ position: 'absolute', left: `${pct * 100}%`, top: '50%', transform: 'translate(-50%,-50%)', width: 10, height: 10, borderRadius: '50%', background: '#F5C842', border: '2px solid #111' }} />
       </div>
-      <button onClick={() => onChange(Math.min(10, value + 1))} style={sliderBtnStyle}>+</button>
-      <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 7, color: '#F5C842', minWidth: 14, textAlign: 'right' }}>{value}</span>
+      <button onClick={() => onChange(Math.min(10, value + 1))} style={smallBtn}>+</button>
+      <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 6, color: '#F5C842', minWidth: 12, textAlign: 'right' }}>{value}</span>
     </div>
   );
 }
 
-const sliderBtnStyle: React.CSSProperties = {
-  width: 18, height: 18,
-  background: 'rgba(0,0,0,0.55)',
-  border: '1px solid rgba(57,255,20,0.22)',
-  color: '#39FF14', cursor: 'pointer',
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  fontFamily: '"Press Start 2P", monospace', fontSize: 9,
-  flexShrink: 0, outline: 'none',
-};
-
-function SLabel({ children }: { children: React.ReactNode }) {
+function ScaleSlider({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const pct = (value - 0.7) / 0.7; // 0.7..1.4 mapped to 0..1
+  const handleTrack = useCallback((e: React.MouseEvent) => {
+    if (!trackRef.current) return;
+    const r = trackRef.current.getBoundingClientRect();
+    const raw = (e.clientX - r.left) / r.width;
+    onChange(parseFloat((raw * 0.7 + 0.7).toFixed(2)));
+  }, [onChange]);
   return (
-    <div style={{ fontFamily: 'Silkscreen, monospace', fontSize: 8, color: 'rgba(57,255,20,0.6)', letterSpacing: '0.1em', marginBottom: 5 }}>
-      {children}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+      <span style={{ fontFamily: 'Silkscreen, monospace', fontSize: 7, color: 'rgba(57,255,20,0.6)', width: 24, flexShrink: 0 }}>{label}</span>
+      <button onClick={() => onChange(parseFloat(Math.max(0.7, value - 0.1).toFixed(2)))} style={smallBtn}>−</button>
+      <div ref={trackRef} onClick={handleTrack} style={{ flex: 1, height: 4, background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(57,255,20,0.15)', position: 'relative', cursor: 'pointer' }}>
+        <div style={{ width: `${pct * 100}%`, height: '100%', background: '#46B3FF', transition: 'width .1s' }} />
+        <div style={{ position: 'absolute', left: `${pct * 100}%`, top: '50%', transform: 'translate(-50%,-50%)', width: 10, height: 10, borderRadius: '50%', background: '#46B3FF', border: '2px solid #111' }} />
+      </div>
+      <button onClick={() => onChange(parseFloat(Math.min(1.4, value + 0.1).toFixed(2)))} style={smallBtn}>+</button>
+      <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 6, color: '#46B3FF', minWidth: 22, textAlign: 'right' }}>{value.toFixed(1)}×</span>
     </div>
   );
+}
+
+function SLabel({ children }: { children: React.ReactNode }) {
+  return <div style={{ fontFamily: 'Silkscreen, monospace', fontSize: 7, color: 'rgba(57,255,20,0.55)', letterSpacing: '0.08em', marginBottom: 5 }}>{children}</div>;
 }
 
 function Divider() {
-  return <div style={{ height: 1, background: 'linear-gradient(90deg,transparent,rgba(57,255,20,.14),transparent)', margin: '6px 0' }} />;
+  return <div style={{ height: 1, background: 'linear-gradient(90deg,transparent,rgba(57,255,20,.12),transparent)', margin: '7px 0' }} />;
 }
 
+function SwatchRow({ colors, value, onChange }: { colors: number[]; value: number; onChange: (c: number) => void }) {
+  return (
+    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+      {colors.map(c => <Swatch key={c} color={c} selected={value === c} onSelect={() => onChange(c)} />)}
+    </div>
+  );
+}
+
+// ── slot editor: per-slot content ─────────────────────────────────────────────
+function SlotEditor({ slot, cfg, update }: { slot: SlotId; cfg: AvatarCfg; update: (p: Partial<AvatarCfg>) => void }) {
+  switch (slot) {
+
+    case 'character':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SLabel>PERSONAJE</SLabel>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 4 }}>
+            {SEEDS.map(s => {
+              const active = cfg.avatarKind === s.id;
+              return (
+                <button key={s.id} onClick={() => update({ avatarKind: s.id })} style={{
+                  padding: '7px 3px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                  background: active ? 'rgba(245,200,66,0.1)' : 'rgba(0,0,0,0.45)',
+                  border: `1px solid ${active ? '#F5C842' : 'rgba(57,255,20,0.12)'}`,
+                  boxShadow: active ? '0 0 10px rgba(245,200,66,0.2)' : 'none',
+                  cursor: 'pointer', outline: 'none', transition: 'all .12s',
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.dot, boxShadow: `0 0 4px ${s.dot}` }} />
+                  <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 6, color: active ? '#F5C842' : 'rgba(160,160,160,0.5)' }}>{s.label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <Divider />
+          <SLabel>PIEL</SLabel>
+          <SwatchRow colors={BODY_COLORS} value={cfg.bodyColor} onChange={c => update({ bodyColor: c })} />
+          <Divider />
+          <SLabel>PROPORCIONES</SLabel>
+          <SliderRow label="PP" value={cfg.pp} onChange={v => update({ pp: v })} />
+          <SliderRow label="TT" value={cfg.tt} onChange={v => update({ tt: v })} />
+          <ScaleSlider label="W" value={cfg.bodyWidth}  onChange={v => update({ bodyWidth: v })} />
+          <ScaleSlider label="H" value={cfg.bodyHeight} onChange={v => update({ bodyHeight: v })} />
+        </div>
+      );
+
+    case 'face':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SLabel>OJOS</SLabel>
+          <SwatchRow colors={EYE_COLORS} value={cfg.eyeColor} onChange={c => update({ eyeColor: c })} />
+          <Divider />
+          <SLabel>BOCA</SLabel>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {(['neutral','smile','serious','grin'] as MouthStyle[]).map(s => (
+              <StyleBtn key={s} label={s.toUpperCase().slice(0,4)} active={cfg.mouthStyle === s} onClick={() => update({ mouthStyle: s })} />
+            ))}
+          </div>
+          <Divider />
+          <SLabel>HUMO</SLabel>
+          <button
+            onClick={() => update({ smoke: !cfg.smoke })}
+            style={{ ...ghostBtn(cfg.smoke ? '#39FF14' : '#444455'), width: '100%', padding: '8px' }}
+          >
+            {cfg.smoke ? '● ENCENDIDO' : '○ APAGADO'}
+          </button>
+        </div>
+      );
+
+    case 'hair':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SLabel>ESTILO</SLabel>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {(['SPI','FLA','MOH','MCH','CRL','BUN','X'] as HairStyle[]).map(s => (
+              <StyleBtn key={s} label={s} active={cfg.hairStyle === s} onClick={() => update({ hairStyle: s })} wide />
+            ))}
+          </div>
+          <Divider />
+          <SLabel>COLOR</SLabel>
+          <SwatchRow colors={HAIR_COLORS} value={cfg.hairColor} onChange={c => update({ hairColor: c })} />
+        </div>
+      );
+
+    case 'hat':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SLabel>TIPO</SLabel>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {(['none','snapback','beanie','bucket','headband'] as HatStyle[]).map(s => (
+              <StyleBtn key={s} label={s === 'none' ? 'NONE' : s.toUpperCase().slice(0,4)} active={cfg.hatStyle === s} onClick={() => update({ hatStyle: s })} wide />
+            ))}
+          </div>
+          <Divider />
+          <SLabel>COLOR</SLabel>
+          <SwatchRow colors={HAT_COLORS} value={cfg.hatColor} onChange={c => update({ hatColor: c })} />
+        </div>
+      );
+
+    case 'outfit':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SLabel>TOP / CAMISA</SLabel>
+          <SwatchRow colors={TOP_COLORS} value={cfg.topColor} onChange={c => update({ topColor: c })} />
+          <Divider />
+          <SLabel>BOTTOM / PANTALON</SLabel>
+          <SwatchRow colors={BOTTOM_COLORS} value={cfg.bottomColor} onChange={c => update({ bottomColor: c })} />
+        </div>
+      );
+
+    case 'shoes':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SLabel>ESTILO</SLabel>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {(['low','high','slides'] as ShoeStyle[]).map(s => (
+              <StyleBtn key={s} label={s.toUpperCase()} active={cfg.shoeStyle === s} onClick={() => update({ shoeStyle: s })} />
+            ))}
+          </div>
+          <Divider />
+          <SLabel>COLOR</SLabel>
+          <SwatchRow colors={SHOE_COLORS} value={cfg.shoeColor} onChange={c => update({ shoeColor: c })} />
+        </div>
+      );
+
+    case 'chain':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SLabel>ESTILO</SLabel>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {(['none','thin','chunky'] as ChainStyle[]).map(s => (
+              <StyleBtn key={s} label={s.toUpperCase()} active={cfg.chainStyle === s} onClick={() => update({ chainStyle: s })} />
+            ))}
+          </div>
+          <Divider />
+          <SLabel>METAL</SLabel>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {CHAIN_METALS.map(m => (
+              <button key={m.label} onClick={() => update({ chainColor: m.color })} style={{
+                flex: 1, padding: '7px 4px',
+                background: cfg.chainColor === m.color ? 'rgba(245,200,66,0.12)' : 'rgba(0,0,0,0.5)',
+                border: `1px solid ${cfg.chainColor === m.color ? '#F5C842' : 'rgba(57,255,20,0.12)'}`,
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                cursor: 'pointer', outline: 'none',
+              }}>
+                <span style={{ width: 12, height: 12, borderRadius: '50%', background: toHex(m.color), display: 'block', boxShadow: `0 0 6px ${toHex(m.color)}` }} />
+                <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 6, color: cfg.chainColor === m.color ? '#F5C842' : '#666' }}>{m.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+
+    case 'glasses':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SLabel>TIPO</SLabel>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {(['none','round','shades','visor'] as GlassesStyle[]).map(s => (
+              <StyleBtn key={s} label={s.toUpperCase().slice(0,5)} active={cfg.glassesStyle === s} onClick={() => update({ glassesStyle: s })} wide />
+            ))}
+          </div>
+          <Divider />
+          <SLabel>COLOR</SLabel>
+          <SwatchRow colors={GLASSES_COLORS} value={cfg.glassesColor} onChange={c => update({ glassesColor: c })} />
+        </div>
+      );
+
+    case 'aura':
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <SLabel>EFECTO</SLabel>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {(['none','smoke','sparkle','cash','stars'] as AuraEffect[]).map(s => (
+              <StyleBtn key={s} label={s.toUpperCase().slice(0,5)} active={cfg.auraEffect === s} onClick={() => update({ auraEffect: s })} wide />
+            ))}
+          </div>
+          <Divider />
+          <SLabel>COLOR</SLabel>
+          <SwatchRow colors={AURA_COLORS} value={cfg.auraColor} onChange={c => update({ auraColor: c })} />
+        </div>
+      );
+
+    default: return null;
+  }
+}
+
+// ── DRIP score bar ────────────────────────────────────────────────────────────
+function DripScoreBar({ cfg }: { cfg: AvatarCfg }) {
+  const score = calcDripScore(cfg);
+  const { rank, color } = dripRank(score);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+      <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 7, color: '#F5C842', whiteSpace: 'nowrap' }}>DRIP</span>
+      <div style={{ flex: 1, height: 6, background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(245,200,66,0.2)', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ width: `${score}%`, height: '100%', background: `linear-gradient(90deg, #F5C842, ${color})`, transition: 'width .3s ease', boxShadow: `0 0 8px ${color}88` }} />
+      </div>
+      <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 9, color, textShadow: `0 0 10px ${color}`, minWidth: 30, textAlign: 'right', transition: 'color .2s' }}>
+        {rank}
+      </span>
+      <span style={{ fontFamily: 'Silkscreen, monospace', fontSize: 8, color: 'rgba(255,255,255,0.35)', minWidth: 26 }}>{score}</span>
+    </div>
+  );
+}
+
+// ── slot sidebar item ─────────────────────────────────────────────────────────
+function SlotItem({ slot, active, cfg, onClick }: { slot: typeof SLOTS[0]; active: boolean; cfg: AvatarCfg; onClick: () => void }) {
+  const badge = getSlotBadge(slot.id, cfg);
+  return (
+    <button onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', gap: 7, padding: '7px 8px',
+      background: active ? 'rgba(245,200,66,0.08)' : 'transparent',
+      borderLeft: `2px solid ${active ? '#F5C842' : 'transparent'}`,
+      borderTop: 'none', borderRight: 'none', borderBottom: 'none',
+      cursor: 'pointer', outline: 'none', width: '100%',
+      transition: 'background .12s, border-color .12s',
+    }}>
+      <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 8, color: active ? '#F5C842' : 'rgba(140,140,140,0.55)', width: 14, flexShrink: 0 }}>{slot.icon}</span>
+      <span style={{ fontFamily: 'Silkscreen, monospace', fontSize: 9, color: active ? '#F5C842' : 'rgba(180,180,180,0.5)', flex: 1, textAlign: 'left' }}>{slot.label}</span>
+      {badge && (
+        <span style={{ width: 10, height: 10, borderRadius: '50%', background: badge, flexShrink: 0, boxShadow: `0 0 5px ${badge}` }} />
+      )}
+    </button>
+  );
+}
+
+function getSlotBadge(slot: SlotId, cfg: AvatarCfg): string | null {
+  switch (slot) {
+    case 'character': return toHex(cfg.bodyColor);
+    case 'face':      return toHex(cfg.eyeColor);
+    case 'hair':      return cfg.hairStyle === 'X' ? null : toHex(cfg.hairColor);
+    case 'hat':       return cfg.hatStyle     !== 'none' ? toHex(cfg.hatColor)     : null;
+    case 'outfit':    return toHex(cfg.topColor);
+    case 'shoes':     return toHex(cfg.shoeColor);
+    case 'chain':     return cfg.chainStyle   !== 'none' ? toHex(cfg.chainColor)   : null;
+    case 'glasses':   return cfg.glassesStyle !== 'none' ? toHex(cfg.glassesColor) : null;
+    case 'aura':      return cfg.auraEffect   !== 'none' ? toHex(cfg.auraColor)    : null;
+    default:          return null;
+  }
+}
+
+// ── panel wrapper ─────────────────────────────────────────────────────────────
 function Panel({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
     <div style={{
-      background: 'rgba(7,7,13,0.94)',
-      border: '1px solid rgba(57,255,20,0.28)',
-      boxShadow: '0 0 20px rgba(57,255,20,0.07), inset 0 0 24px rgba(0,0,0,0.55)',
-      backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.09) 3px,rgba(0,0,0,0.09) 4px)',
+      background: 'rgba(5,5,12,0.96)',
+      border: '1px solid rgba(57,255,20,0.22)',
+      boxShadow: '0 0 24px rgba(0,0,0,0.6), inset 0 0 20px rgba(0,0,0,0.4)',
+      backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.07) 3px,rgba(0,0,0,0.07) 4px)',
       ...style,
     }}>
       {children}
     </div>
   );
 }
+
+// ── style helpers ─────────────────────────────────────────────────────────────
+const smallBtn: React.CSSProperties = {
+  width: 16, height: 16, background: 'rgba(0,0,0,0.55)',
+  border: '1px solid rgba(57,255,20,0.18)', color: '#39FF14',
+  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  fontFamily: '"Press Start 2P", monospace', fontSize: 9, flexShrink: 0, outline: 'none', padding: 0,
+};
+
+const ghostBtn = (color: string): React.CSSProperties => ({
+  padding: '6px 9px', background: 'rgba(0,0,0,0.55)',
+  border: `1px solid ${color}55`, color,
+  fontFamily: '"Press Start 2P", monospace', fontSize: 7,
+  cursor: 'pointer', outline: 'none',
+  boxShadow: `0 0 8px ${color}18`,
+  transition: 'border-color .14s, box-shadow .14s',
+  whiteSpace: 'nowrap', flexShrink: 0,
+});
 
 // ── main component ────────────────────────────────────────────────────────────
 interface Props { isMobile?: boolean }
@@ -178,17 +562,15 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
   const [cfg, setCfg]           = useState<AvatarCfg>(loadInitialCfg);
   const [username, setUsername] = useState<string>(getInitialUsername);
   const [saving, setSaving]     = useState(false);
-  const [tab, setTab]           = useState<'tipo' | 'color' | 'estilo'>('tipo');
+  const [activeSlot, setActiveSlot] = useState<SlotId>('character');
   const prevCfgRef              = useRef<AvatarCfg>(cfg);
 
-  // Emit config change whenever it differs from last emit
   useEffect(() => {
     if (cfg === prevCfgRef.current) return;
     prevCfgRef.current = cfg;
     eventBus.emit(EVENTS.CREATOR_CONFIG_CHANGED, cfg);
   }, [cfg]);
 
-  // Receive initial config from Phaser on scene load
   useEffect(() => {
     const unsub = eventBus.on(EVENTS.CREATOR_READY, (payload: unknown) => {
       const p = payload as { config: AvatarCfg };
@@ -198,7 +580,7 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
     return () => unsub();
   }, []);
 
-  const updateCfg = useCallback((patch: Partial<AvatarCfg>) => {
+  const update = useCallback((patch: Partial<AvatarCfg>) => {
     setCfg(prev => ({ ...prev, ...patch }));
   }, []);
 
@@ -216,10 +598,10 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
   };
 
   const handleReset = () => {
-    const stored = loadInitialCfg();
-    setCfg(stored);
-    prevCfgRef.current = stored;
-    eventBus.emit(EVENTS.CREATOR_CONFIG_CHANGED, stored);
+    const s = loadInitialCfg();
+    setCfg(s);
+    prevCfgRef.current = s;
+    eventBus.emit(EVENTS.CREATOR_CONFIG_CHANGED, s);
   };
 
   const handleSave = () => {
@@ -229,183 +611,81 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
     eventBus.emit(EVENTS.CREATOR_COMMIT, { username });
   };
 
-  const seedLabel = SEEDS.find(s => s.id === cfg.avatarKind)?.label ?? 'PROC';
-
-  // ── shared panels ──────────────────────────────────────────────────────────
-  const seedGrid = (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5 }}>
-      {SEEDS.map(s => {
-        const active = cfg.avatarKind === s.id;
-        return (
-          <button
-            key={s.id}
-            onClick={() => updateCfg({ avatarKind: s.id })}
-            style={{
-              padding: '7px 3px',
-              background: active ? 'rgba(245,200,66,0.1)' : 'rgba(0,0,0,0.45)',
-              border: `1px solid ${active ? '#F5C842' : 'rgba(57,255,20,0.13)'}`,
-              boxShadow: active ? '0 0 10px rgba(245,200,66,0.22)' : 'none',
-              cursor: 'pointer', display: 'flex', flexDirection: 'column',
-              alignItems: 'center', gap: 4, outline: 'none',
-              transition: 'border-color .14s, box-shadow .14s, background .14s',
-            }}
-          >
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.dot, boxShadow: `0 0 5px ${s.dot}` }} />
-            <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 6, color: active ? '#F5C842' : 'rgba(180,180,180,0.55)' }}>
-              {s.label}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-
-  const colorPanel = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div>
-        <SLabel>CUERPO</SLabel>
-        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-          {BODY_COLORS.map(c => <Swatch key={c} color={c} selected={cfg.bodyColor === c} onSelect={() => updateCfg({ bodyColor: c })} />)}
-        </div>
-      </div>
-      <div>
-        <SLabel>OJOS</SLabel>
-        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-          {EYE_COLORS.map(c => <Swatch key={c} color={c} selected={cfg.eyeColor === c} onSelect={() => updateCfg({ eyeColor: c })} />)}
-        </div>
-      </div>
-      <div>
-        <SLabel>PELO</SLabel>
-        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-          {HAIR_COLORS.map(c => <Swatch key={c} color={c} selected={cfg.hairColor === c} onSelect={() => updateCfg({ hairColor: c })} />)}
-        </div>
-      </div>
-    </div>
-  );
-
-  const stylePanel = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-      <div>
-        <SLabel>ESTILO PELO</SLabel>
-        <div style={{ display: 'flex', gap: 4 }}>
-          {HAIR_STYLES.map(s => {
-            const active = cfg.hairStyle === s;
-            return (
-              <button
-                key={s}
-                onClick={() => updateCfg({ hairStyle: s })}
-                style={{
-                  flex: 1, padding: '5px 3px',
-                  background: active ? 'rgba(245,200,66,0.12)' : 'rgba(0,0,0,0.5)',
-                  border: `1px solid ${active ? '#F5C842' : 'rgba(57,255,20,0.14)'}`,
-                  color: active ? '#F5C842' : 'rgba(180,180,180,0.55)',
-                  fontFamily: '"Press Start 2P", monospace', fontSize: 7,
-                  cursor: 'pointer', outline: 'none', transition: 'all .14s',
-                }}
-              >
-                {s}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <Slider label="PP" value={cfg.pp} onChange={v => updateCfg({ pp: v })} />
-      <Slider label="TT" value={cfg.tt} onChange={v => updateCfg({ tt: v })} />
-    </div>
-  );
-
-  // ── bottom bar (shared) ────────────────────────────────────────────────────
+  // ── bottom bar ──────────────────────────────────────────────────────────────
   const bottomBar = (
-    <Panel style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
-      {/* Username */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7, flex: 1, minWidth: 0 }}>
-        <span style={{ fontFamily: 'Silkscreen, monospace', fontSize: 8, color: 'rgba(57,255,20,0.5)', whiteSpace: 'nowrap' }}>
-          ID
-        </span>
-        <input
-          value={username}
-          onChange={handleUsername}
-          placeholder="TU_NOMBRE"
-          maxLength={18}
-          spellCheck={false}
-          style={{
-            flex: 1, minWidth: 0,
-            background: 'rgba(0,0,0,0.7)',
-            border: 'none', borderBottom: '2px solid rgba(245,200,66,0.42)',
-            color: '#fff', fontFamily: 'Silkscreen, monospace',
-            fontSize: 12, padding: '3px 6px',
-            outline: 'none', letterSpacing: '2px',
-          }}
-        />
-      </div>
-
-      {/* Action buttons */}
+    <Panel style={{ padding: '7px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <DripScoreBar cfg={cfg} />
+      <div style={{ width: 1, height: 28, background: 'rgba(57,255,20,0.12)' }} />
+      <span style={{ fontFamily: 'Silkscreen, monospace', fontSize: 8, color: 'rgba(57,255,20,0.45)', whiteSpace: 'nowrap' }}>ID</span>
+      <input
+        value={username}
+        onChange={handleUsername}
+        placeholder="TU_NOMBRE"
+        maxLength={18}
+        spellCheck={false}
+        style={{
+          flex: 1, minWidth: 0,
+          background: 'rgba(0,0,0,0.7)',
+          border: 'none', borderBottom: '2px solid rgba(245,200,66,0.38)',
+          color: '#fff', fontFamily: 'Silkscreen, monospace',
+          fontSize: 11, padding: '3px 6px', outline: 'none', letterSpacing: '2px',
+        }}
+      />
       <button onClick={handleRandom} style={ghostBtn('#39FF14')}>RANDOM</button>
       <button onClick={handleReset}  style={ghostBtn('#46B3FF')}>RESET</button>
-
-      {/* CTA */}
       <button
         onClick={handleSave}
         disabled={saving}
         style={{
-          padding: '9px 16px',
+          padding: '9px 14px',
           background: saving ? 'rgba(245,200,66,0.25)' : '#F5C842',
           border: 'none', cursor: saving ? 'default' : 'pointer',
-          color: '#0a0a0a',
-          fontFamily: '"Press Start 2P", monospace', fontSize: 8,
-          boxShadow: saving ? 'none' : '0 0 18px rgba(245,200,66,0.38)',
+          color: '#0a0a0a', fontFamily: '"Press Start 2P", monospace', fontSize: 8,
+          boxShadow: saving ? 'none' : '0 0 18px rgba(245,200,66,0.4)',
           transition: 'box-shadow .2s, background .2s',
-          whiteSpace: 'nowrap', flexShrink: 0,
-          letterSpacing: '0.04em',
+          whiteSpace: 'nowrap', flexShrink: 0, letterSpacing: '0.04em',
         }}
       >
-        {saving ? '...' : 'ENTRAR  ►'}
+        {saving ? '...' : 'ENTRAR ►'}
       </button>
     </Panel>
   );
 
-  // ── MOBILE layout ──────────────────────────────────────────────────────────
+  // ── MOBILE layout ───────────────────────────────────────────────────────────
   if (isMobile) {
-    const tabs: Array<{ id: typeof tab; label: string }> = [
-      { id: 'tipo',   label: 'TIPO'   },
-      { id: 'color',  label: 'COLOR'  },
-      { id: 'estilo', label: 'ESTILO' },
-    ];
     return (
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', zIndex: 60, pointerEvents: 'none' }}>
         {/* Header */}
-        <Panel style={{ padding: '5px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'auto' }}>
-          <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 8, color: '#F5C842', letterSpacing: '0.06em' }}>
-            CHARACTER SELECT
-          </span>
+        <Panel style={{ padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 8, pointerEvents: 'auto' }}>
+          <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 7, color: '#F5C842', whiteSpace: 'nowrap' }}>DRIP STUDIO</span>
+          <DripScoreBar cfg={cfg} />
         </Panel>
 
-        {/* Tabs */}
-        <div style={{ display: 'flex', pointerEvents: 'auto' }}>
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} style={{
-              flex: 1, padding: '7px 4px',
-              background: tab === t.id ? 'rgba(57,255,20,0.1)' : 'rgba(7,7,13,0.9)',
-              border: `1px solid ${tab === t.id ? 'rgba(57,255,20,0.45)' : 'rgba(57,255,20,0.1)'}`,
-              color: tab === t.id ? '#39FF14' : 'rgba(140,140,140,0.6)',
-              fontFamily: '"Press Start 2P", monospace', fontSize: 7,
-              cursor: 'pointer', outline: 'none',
-            }}>{t.label}</button>
-          ))}
+        {/* Slot tabs — horizontal scroll */}
+        <div style={{ display: 'flex', overflowX: 'auto', pointerEvents: 'auto', scrollbarWidth: 'none' }}>
+          {SLOTS.map(s => {
+            const active = activeSlot === s.id;
+            return (
+              <button key={s.id} onClick={() => setActiveSlot(s.id)} style={{
+                flexShrink: 0, padding: '6px 8px',
+                background: active ? 'rgba(57,255,20,0.1)' : 'rgba(5,5,12,0.9)',
+                border: `1px solid ${active ? 'rgba(57,255,20,0.4)' : 'rgba(57,255,20,0.08)'}`,
+                color: active ? '#39FF14' : 'rgba(120,120,120,0.6)',
+                fontFamily: '"Press Start 2P", monospace', fontSize: 6,
+                cursor: 'pointer', outline: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+              }}>
+                <span>{s.icon}</span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Transparent preview area */}
-        <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 8, pointerEvents: 'none' }}>
-          <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 6, color: '#0a0a0a', background: '#F5C842', padding: '3px 8px' }}>
-            ● {seedLabel}
-          </div>
-        </div>
+        <div style={{ flex: 1, pointerEvents: 'none' }} />
 
-        {/* Options */}
-        <Panel style={{ padding: 10, pointerEvents: 'auto', maxHeight: '44%', overflowY: 'auto' }}>
-          {tab === 'tipo'   && seedGrid}
-          {tab === 'color'  && colorPanel}
-          {tab === 'estilo' && stylePanel}
+        {/* Editor */}
+        <Panel style={{ padding: 10, pointerEvents: 'auto', maxHeight: '42%', overflowY: 'auto' }}>
+          <SlotEditor slot={activeSlot} cfg={cfg} update={update} />
         </Panel>
 
         {/* Bottom */}
@@ -414,93 +694,61 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
     );
   }
 
-  // ── DESKTOP layout (800×600) ───────────────────────────────────────────────
+  // ── DESKTOP layout ──────────────────────────────────────────────────────────
   return (
     <div style={{
       position: 'absolute', inset: 0,
       display: 'grid',
-      gridTemplateColumns: '188px 1fr 188px',
-      gridTemplateRows: '1fr 56px',
+      gridTemplateColumns: '152px 1fr 210px',
+      gridTemplateRows: '1fr 54px',
       zIndex: 60,
       pointerEvents: 'none',
     }}>
+      {/* ── Header strip (top of left + right panels only) */}
 
-      {/* ── Left panel ──────────────────────────────────────────────────── */}
+      {/* ── Left: slot list ─────────────────────────────────────────── */}
       <Panel style={{
         gridRow: '1', gridColumn: '1',
-        padding: '10px 10px 12px',
-        display: 'flex', flexDirection: 'column', gap: 9,
-        pointerEvents: 'auto',
+        display: 'flex', flexDirection: 'column',
+        pointerEvents: 'auto', overflowY: 'auto',
       }}>
-        {/* Branding */}
-        <div style={{ textAlign: 'center' }}>
-          <div style={{
-            fontFamily: '"Press Start 2P", monospace', fontSize: 7,
-            color: '#F5C842', letterSpacing: '0.08em',
-            textShadow: '0 0 12px rgba(245,200,66,0.45)',
-          }}>
+        {/* branding */}
+        <div style={{ padding: '10px 10px 6px', borderBottom: '1px solid rgba(57,255,20,0.1)' }}>
+          <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 6, color: '#F5C842', letterSpacing: '0.06em', textShadow: '0 0 10px rgba(245,200,66,0.4)' }}>
             WASPI WORLD
           </div>
-          <div style={{ fontFamily: 'Silkscreen, monospace', fontSize: 9, color: 'rgba(57,255,20,0.55)', letterSpacing: '0.12em', marginTop: 3 }}>
-            CHARACTER SELECT
+          <div style={{ fontFamily: 'Silkscreen, monospace', fontSize: 8, color: 'rgba(57,255,20,0.5)', letterSpacing: '0.1em', marginTop: 4 }}>
+            DRIP STUDIO
           </div>
-          <Divider />
         </div>
-
-        <SLabel>◈ PERSONAJE</SLabel>
-        {seedGrid}
+        {/* slots */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', paddingTop: 4 }}>
+          {SLOTS.map(s => (
+            <SlotItem key={s.id} slot={s} active={activeSlot === s.id} cfg={cfg} onClick={() => setActiveSlot(s.id)} />
+          ))}
+        </div>
       </Panel>
 
-      {/* ── Center: transparent — Phaser avatar shows through ───────────── */}
-      <div style={{
-        gridRow: '1', gridColumn: '2',
-        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-        paddingBottom: 16,
-        pointerEvents: 'none',
-      }}>
-        {/* Seed name pill anchored to bottom of preview area */}
-        <div style={{
-          fontFamily: '"Press Start 2P", monospace', fontSize: 7,
-          color: '#0a0a0a', background: '#F5C842',
-          padding: '4px 10px',
-          boxShadow: '0 0 14px rgba(245,200,66,0.3)',
-          letterSpacing: '0.05em',
-        }}>
-          ● {seedLabel}
-        </div>
-      </div>
+      {/* ── Center: transparent — Phaser avatar shows through ───────── */}
+      <div style={{ gridRow: '1', gridColumn: '2', pointerEvents: 'none' }} />
 
-      {/* ── Right panel ─────────────────────────────────────────────────── */}
+      {/* ── Right: slot editor ───────────────────────────────────────── */}
       <Panel style={{
         gridRow: '1', gridColumn: '3',
         padding: '10px 10px 12px',
-        display: 'flex', flexDirection: 'column', gap: 10,
-        pointerEvents: 'auto',
-        overflowY: 'auto',
+        display: 'flex', flexDirection: 'column', gap: 0,
+        pointerEvents: 'auto', overflowY: 'auto',
       }}>
-        <SLabel>◈ CUSTOM</SLabel>
-        {colorPanel}
-        <Divider />
-        {stylePanel}
+        <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 6, color: 'rgba(57,255,20,0.5)', letterSpacing: '0.08em', marginBottom: 10 }}>
+          {SLOTS.find(s => s.id === activeSlot)?.icon} {SLOTS.find(s => s.id === activeSlot)?.label}
+        </div>
+        <SlotEditor slot={activeSlot} cfg={cfg} update={update} />
       </Panel>
 
-      {/* ── Bottom bar: full width ───────────────────────────────────────── */}
+      {/* ── Bottom bar ──────────────────────────────────────────────── */}
       <div style={{ gridRow: '2', gridColumn: '1 / span 3', pointerEvents: 'auto' }}>
         {bottomBar}
       </div>
     </div>
   );
 }
-
-// ── style helpers ─────────────────────────────────────────────────────────────
-const ghostBtn = (color: string): React.CSSProperties => ({
-  padding: '6px 9px',
-  background: 'rgba(0,0,0,0.55)',
-  border: `1px solid ${color}55`,
-  color,
-  fontFamily: '"Press Start 2P", monospace', fontSize: 7,
-  cursor: 'pointer', outline: 'none',
-  boxShadow: `0 0 8px ${color}18`,
-  transition: 'border-color .14s, box-shadow .14s',
-  whiteSpace: 'nowrap', flexShrink: 0,
-});
