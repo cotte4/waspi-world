@@ -314,7 +314,7 @@ export class MiningMinigame {
       if (!this._isAlive()) return;
       if (this.resolved) return;
 
-      const zoneIndex = pickAutoZoneIndex(this.zones);
+      const zoneIndex = pickAutoZoneIndex();
       const zone = this.zones[zoneIndex];
       const targetX = randomXInZone(zone);
 
