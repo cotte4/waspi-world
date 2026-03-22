@@ -25,6 +25,13 @@ import type { SkillId } from '../systems/SkillSystem';
 import { recordDistanceDelta } from '../systems/StatsSystem';
 import { getSkillSystem } from '../systems/SkillSystem';
 import { getQuestSystem } from '../systems/QuestSystem';
+import {
+  loadProgressionState,
+  addXpToProgression,
+  saveProgressionState,
+  syncXpToServer,
+  type ProgressionState,
+} from '../systems/ProgressionSystem';
 import { supabase, isConfigured } from '../../lib/supabase';
 import {
   ZOMBIES_PLAYER,
@@ -356,6 +363,8 @@ export class ZombiesScene extends Phaser.Scene {
   private bossAlive = false;
   private depthsUnlocked = false;
   private gameOver = false;
+  private playerLevel = 1;
+  private progression!: ProgressionState;
   private currentWeapon: ZombiesWeaponId = 'pistol';
   private weaponInventory!: WeaponInventory;
   private weaponOrder: ZombiesWeaponId[] = ['pistol'];
@@ -480,6 +489,8 @@ export class ZombiesScene extends Phaser.Scene {
     this.currentWeapon = this.weaponOrder[this.weaponOrder.length - 1];
     this.points = ZOMBIES_POINTS.start;
     this.hp = ZOMBIES_PLAYER.maxHp;
+    this.progression = loadProgressionState();
+    this.playerLevel = this.progression.level;
     this.round = 0;
     this.roundTarget = 0;
     this.spawnedThisRound = 0;
@@ -1929,24 +1940,34 @@ export class ZombiesScene extends Phaser.Scene {
   private getWeaponStats(weaponId: ZombiesWeaponId) {
     const base = ZOMBIES_WEAPONS[weaponId];
     const state = this.getWeaponState(weaponId);
-    if (!state.upgraded) {
-      return {
-        ...base,
-        displayLabel: base.label,
-      };
-    }
 
+    const stats = state.upgraded
+      ? {
+          ...base,
+          damage: Math.round(base.damage * (weaponId === 'raygun' ? 1.45 : 1.7)),
+          fireDelayMs: Math.max(
+            weaponId === 'smg' ? 70 : 90,
+            Math.round(base.fireDelayMs * 0.78),
+          ),
+          magazineSize: Math.round(base.magazineSize * (weaponId === 'shotgun' ? 1.6 : 1.5)),
+          reserveAmmo: Math.round(base.reserveAmmo * 1.35),
+          reloadMs: Math.max(800, Math.round(base.reloadMs * 0.8)),
+          displayLabel: `${base.label}*`,
+        }
+      : { ...base, displayLabel: base.label };
+
+    if (this.playerLevel <= 1) return stats;
+
+    const lvl = this.playerLevel - 1;
+    const dmgMult = 1 + lvl * 0.05;
+    const delayMult = Math.max(0.55, 1 - lvl * 0.03);
     return {
-      ...base,
-      damage: Math.round(base.damage * (weaponId === 'raygun' ? 1.45 : 1.7)),
+      ...stats,
+      damage: Math.round(stats.damage * dmgMult),
       fireDelayMs: Math.max(
-        weaponId === 'smg' ? 70 : 90,
-        Math.round(base.fireDelayMs * 0.78),
+        weaponId === 'smg' ? 60 : 80,
+        Math.round(stats.fireDelayMs * delayMult),
       ),
-      magazineSize: Math.round(base.magazineSize * (weaponId === 'shotgun' ? 1.6 : 1.5)),
-      reserveAmmo: Math.round(base.reserveAmmo * 1.35),
-      reloadMs: Math.max(800, Math.round(base.reloadMs * 0.8)),
-      displayLabel: `${base.label}*`,
     };
   }
 
@@ -2586,6 +2607,15 @@ export class ZombiesScene extends Phaser.Scene {
     const killReward = zombie.killReward * pointMultiplier;
     this.points += killReward;
     this.killCount += 1;
+    const xpGained = zombie.isBoss ? 25 : zombie.killReward >= 120 ? 12 : zombie.killReward >= 70 ? 7 : 5;
+    const prevLevel = this.progression.level;
+    this.progression = addXpToProgression(this.progression, xpGained);
+    saveProgressionState(this.progression);
+    this.playerLevel = this.progression.level;
+    syncXpToServer(xpGained);
+    if (this.progression.level > prevLevel) {
+      this.showNotice(`¡NIVEL ${this.progression.level}! ARMAS +${((this.progression.level - 1) * 5).toFixed(0)}% DMG`, '#F5C842');
+    }
     eventBus.emit(EVENTS.STATS_ZOMBIE_KILL);
     void getSkillSystem().addXp('gym', zombie.isBoss ? 10 : 3, 'zombie_kill').then((r) => {
       if (!this.scene?.isActive('ZombiesScene')) return;

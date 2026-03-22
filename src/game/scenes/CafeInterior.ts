@@ -445,12 +445,14 @@ export class CafeInterior extends Phaser.Scene {
       // Wire host changes to JukeboxPlayer
       this.jukeboxHostUnsub = eventBus.on(EVENTS.JUKEBOX_STATE_UPDATED, (p: unknown) => {
         if (!this.scene?.isActive('CafeInterior')) return;
-        const s = p as { hostId?: string | null; nowPlaying?: { videoId?: string } | null } | null;
+        const s = p as { hostId?: string | null; nowPlaying?: { videoId?: string } | null; isFallback?: boolean } | null;
         if (s && typeof s.hostId !== 'undefined') {
           this.jukeboxPlayer?.setHost(s.hostId === playerId);
         }
         if (s?.nowPlaying?.videoId) {
           this.jukeboxPlayer?.play(s.nowPlaying.videoId);
+        } else if (s?.hostId === playerId && s?.nowPlaying == null && s?.isFallback) {
+          this.jukeboxPlayer?.playFallback();
         } else {
           this.jukeboxPlayer?.stop();
         }

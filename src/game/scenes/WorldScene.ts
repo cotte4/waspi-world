@@ -37,6 +37,7 @@ import type { VecindadState } from '../../lib/playerState';
 import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
 import { EnemySprite, registerZombieAnims, type ZombieType } from '../systems/EnemySprite';
 import { SkillTreePanel } from '../systems/SkillTreePanel';
+import { ProgressionPanel } from '../systems/ProgressionPanel';
 import { SkillShopPanel } from '../systems/SkillShopPanel';
 import { getSkillSystem } from '../systems/SkillSystem';
 import { ContractPanel } from '../systems/ContractPanel';
@@ -472,6 +473,7 @@ export class WorldScene extends Phaser.Scene {
   private keyFive!: Phaser.Input.Keyboard.Key;
   private keySix!: Phaser.Input.Keyboard.Key;
   private skillTreePanel?: SkillTreePanel;
+  private progressionPanel?: ProgressionPanel;
   private skillShopPanel?: SkillShopPanel;
   private contractPanel?: ContractPanel;
   private guildPanel?: GuildPanel;
@@ -906,8 +908,9 @@ export class WorldScene extends Phaser.Scene {
     // Minimap
     this.runBootStep('minimap', () => this.setupMinimap());
 
-    // Skill tree panel (T) + Skill shop panel (Y) + Contract panel (C)
+    // Skill tree panel (T) + Skill shop panel (Y) + Contract panel (C) + Progression panel (I)
     this.skillTreePanel = new SkillTreePanel(this);
+    this.progressionPanel = new ProgressionPanel(this);
     this.skillShopPanel = new SkillShopPanel(this);
     this.contractPanel  = new ContractPanel(this);
     this.guildPanel     = new GuildPanel(this);
@@ -6354,6 +6357,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.keyT && Phaser.Input.Keyboard.JustDown(this.keyT)) { this.skillTreePanel?.toggle(); }
     if (this.keyY && Phaser.Input.Keyboard.JustDown(this.keyY)) { this.skillShopPanel?.toggle(); }
     if (this.keyC && Phaser.Input.Keyboard.JustDown(this.keyC)) { this.contractPanel?.toggle(); }
+    if (this.keyI && Phaser.Input.Keyboard.JustDown(this.keyI)) { this.progressionPanel?.toggle(); }
     if (this.keyH && Phaser.Input.Keyboard.JustDown(this.keyH)) { this.guildPanel?.toggle(); }
     if (this.keyM && Phaser.Input.Keyboard.JustDown(this.keyM)) { this.worldMapPanel?.toggle(); }
     if (this.keyN && Phaser.Input.Keyboard.JustDown(this.keyN)) { this.masteryPanel?.toggle(); }
