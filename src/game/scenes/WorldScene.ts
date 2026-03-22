@@ -6,7 +6,7 @@ import { WORLD, PLAYER, COLORS, ZONES, BUILDINGS, CHAT, SAFE_PLAZA_RETURN } from
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
 import { addTenks, initTenks, getTenksBalance } from '../systems/TenksSystem';
-import { ensureItemEquipped, getEquippedColors, hasUtilityEquipped, ownItem, getInventory, replaceInventory } from '../systems/InventorySystem';
+import { ensureItemEquipped, getEquippedColors, hasUtilityEquipped, ownItem, getInventory, replaceInventory, initInventoryFromServer } from '../systems/InventorySystem';
 import { DialogSystem } from '../systems/DialogSystem';
 import { BranchedDialog, type DialogNode } from '../systems/BranchedDialog';
 import { CATALOG, getItem } from '../config/catalog';
@@ -710,8 +710,12 @@ export class WorldScene extends Phaser.Scene {
         const uid = data.session?.user?.id;
         if (uid) void initStatsSystem(uid);
 
-        // Load server-authoritative progression and hydrate localStorage + in-memory state.
-        const serverProgression = await loadProgressionFromServer();
+        // Load server-authoritative state in parallel (progression + inventory).
+        const [serverProgression] = await Promise.all([
+          loadProgressionFromServer(),
+          initInventoryFromServer(),
+        ]);
+
         if (serverProgression !== null) {
           this.progression = loadProgressionState();
           this.renderProgressionHud();

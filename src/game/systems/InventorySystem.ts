@@ -1,6 +1,7 @@
 import { eventBus, EVENTS } from '../config/eventBus';
 import { getItem } from '../config/catalog';
 import type { InventoryState } from '../../lib/playerState';
+import { getAuthHeaders } from './authHelper';
 
 const KEY = 'waspi_inventory_v1';
 const DEFAULT_UTILITY_ID = 'UTIL-GUN-01';
@@ -119,4 +120,25 @@ export function getEquippedColors(): { topColor?: number; bottomColor?: number }
 export function hasUtilityEquipped(id: string) {
   const s = loadState();
   return (s.equipped.utility ?? []).includes(id);
+}
+
+/**
+ * Load inventory from server and hydrate localStorage.
+ * Server wins on load. Falls back silently if the request fails.
+ */
+export async function initInventoryFromServer(): Promise<void> {
+  try {
+    const authH = await getAuthHeaders();
+    if (!authH.Authorization) return;
+
+    const res = await fetch('/api/player/inventory', { headers: authH });
+    if (!res.ok) return;
+
+    const json = await res.json() as { inventory?: InventoryState } | null;
+    if (!json?.inventory) return;
+
+    replaceInventory(ensureDemoLoadout(json.inventory));
+  } catch {
+    // Network error — keep current localStorage state.
+  }
 }
