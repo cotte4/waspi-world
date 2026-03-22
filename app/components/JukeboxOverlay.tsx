@@ -27,7 +27,6 @@ type CatalogSong = {
   videoId: string;
   title: string;
   artist: string;
-  category: string;
 };
 
 type SearchTab = 'catalog' | 'open';
@@ -187,7 +186,6 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching]       = useState(false);
   const [searchError, setSearchError]   = useState('');
-  const [catalogCategory, setCatalogCategory] = useState<string | null>(null);
   const [catalogSongs, setCatalogSongs] = useState<CatalogSong[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState('');
@@ -252,15 +250,14 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
 
   useEffect(() => () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); }, []);
 
-  const loadCatalog = useCallback(async (category: string) => {
-    setCatalogCategory(category);
+  const loadCatalog = useCallback(async () => {
     setCatalogLoading(true);
     setCatalogError('');
     setCatalogSongs([]);
     try {
       const token = await getAuthToken();
       const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
-      const res = await fetch(`/api/jukebox/catalog?category=${encodeURIComponent(category)}`, { headers });
+      const res = await fetch('/api/jukebox/catalog', { headers });
       const data = await res.json() as { songs?: CatalogSong[]; error?: string };
       if (!res.ok) {
         setCatalogError(data.error ?? 'Error al cargar el catálogo.');
@@ -273,6 +270,11 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
       setCatalogLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (searchTab !== 'catalog') return;
+    void loadCatalog();
+  }, [searchTab, loadCatalog]);
 
   // Foco en el buscador: si no, el canvas de Phaser suele quedarse con el foco y las teclas no entran al input.
   useEffect(() => {
@@ -472,15 +474,15 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
         {/* Catalog tab */}
         {searchTab === 'catalog' && (
           <div>
-            <div style={{ fontFamily: SILKSCREEN, fontSize: px(11), color: 'rgba(255,255,255,0.5)', marginBottom: 10 }}>
+            <div style={{ display: 'none', fontFamily: SILKSCREEN, fontSize: px(11), color: 'rgba(255,255,255,0.5)', marginBottom: 10 }}>
               Elegí una categoría:
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {CATALOG_CATEGORIES.map((cat) => (
                 <button
                   key={cat.id}
-                  style={{ ...tabBtnStyle(catalogCategory === cat.id), fontSize: px(9), padding: '8px 12px', minHeight: px(40) }}
-                  onClick={() => void loadCatalog(cat.id)}
+                  style={{ ...tabBtnStyle(false), fontSize: px(9), padding: '8px 12px', minHeight: px(40), display: 'none' }}
+                  onClick={() => void loadCatalog()}
                 >
                   {cat.label}
                 </button>
@@ -499,7 +501,7 @@ export default function JukeboxOverlay({ onClose, isMobile }: JukeboxOverlayProp
                 {catalogError}
               </div>
             )}
-            {!catalogLoading && !catalogError && catalogCategory && catalogSongs.length === 0 && (
+            {!catalogLoading && !catalogError && catalogSongs.length === 0 && (
               <div style={{ fontFamily: SILKSCREEN, fontSize: px(11), color: 'rgba(255,255,255,0.45)', padding: '8px 0' }}>
                 No hay canciones cargadas todavía en esta categoría.
               </div>

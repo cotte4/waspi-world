@@ -61,7 +61,7 @@ const miningTree: SkillTreeDef = {
       name: 'Minero Novato',
       xpRequired: 0,
       description:
-        'Acceso a nodos de piedra y tierra. Extraés 1 recurso por golpe.',
+        'Buscá nodos brillantes en el mapa y presioná SPACE. En el minijuego, frenate en la zona DORADA para máximo drop y XP.',
       type: 'passive',
     },
     {
@@ -69,7 +69,7 @@ const miningTree: SkillTreeDef = {
       name: 'Extractor',
       xpRequired: 100,
       description:
-        'Nodos de cobre y hierro desbloqueados. Velocidad de extracción +20%.',
+        'Nodos de cobre y hierro desbloqueados. +20% velocidad de extracción (el cursor va más lento).',
       type: 'passive',
       buffs: [{ stat: 'extractSpeed', value: 20, mode: 'percent' }],
     },
@@ -78,7 +78,7 @@ const miningTree: SkillTreeDef = {
       name: 'Dinamitero',
       xpRequired: 300,
       description:
-        'Ítem Dinamita: destruye nodos instantáneamente y triplica el drop.',
+        'Ítem Dinamita disponible en el inventario: destruye nodos al instante y triplica el drop sin minijuego.',
       type: 'active',
     },
     {
@@ -119,7 +119,7 @@ const fishingTree: SkillTreeDef = {
       name: 'Pescador Amateur',
       xpRequired: 0,
       description:
-        'Caña básica habilitada. Acceso a zonas de pesca comunes.',
+        'Acercate a una zona de agua y presioná SPACE para lanzar. Esperá a que muerda y reaccioná a tiempo. Cada pesca = XP.',
       type: 'passive',
     },
     {
@@ -127,7 +127,7 @@ const fishingTree: SkillTreeDef = {
       name: 'Anzuelero',
       xpRequired: 100,
       description:
-        'Carnada especial disponible. +25% probabilidad de peces de rareza media.',
+        'Carnada especial disponible en el inventario. +25% probabilidad de peces de rareza media y superior.',
       type: 'passive',
       buffs: [{ stat: 'fishingLuck', value: 25, mode: 'percent' }],
     },
@@ -177,7 +177,7 @@ const gardeningTree: SkillTreeDef = {
       name: 'Jardinero Principiante',
       xpRequired: 0,
       description:
-        'Semillas básicas habilitadas (tomate, lechuga, maíz). Tiempo de cosecha estándar.',
+        'Comprá semillas (tomate, lechuga, maíz) y plantalas en tu parcela. Regá y cosechá para ganar XP.',
       type: 'passive',
     },
     {
@@ -235,7 +235,7 @@ const cookingTree: SkillTreeDef = {
       name: 'Cocinero Amateur',
       xpRequired: 0,
       description:
-        'Recetas básicas habilitadas (sándwich, mate, café). Consumir otorga +10% buff de HP.',
+        'Usá la cocina del Café o de tu parcela. Combiná ingredientes para preparar recetas y ganar XP. Consumir da +10% HP.',
       type: 'active',
       buffs: [{ stat: 'maxHp', value: 5, mode: 'flat' }],
     },
@@ -294,7 +294,7 @@ const gymTree: SkillTreeDef = {
       name: 'Principiante',
       xpRequired: 0,
       description:
-        'Máquinas básicas del gym desbloqueadas. +5% HP máximo.',
+        'Entrá al Gym (zona norte) y usá las máquinas. Cada sesión de entrenamiento da XP. +5% HP máximo.',
       type: 'passive',
       buffs: [{ stat: 'maxHp', value: 5, mode: 'percent' }],
     },
@@ -358,7 +358,7 @@ const weedTree: SkillTreeDef = {
       name: 'Consumidor Casual',
       xpRequired: 0,
       description:
-        'Comprá y consumí producto básico. Buff de percepción activo: ves ítems ocultos durante 2 min.',
+        'Comprá producto en el barrio y consumilo. Ganas XP al consumir. Buff de percepción: ves ítems ocultos 2 min.',
       type: 'active',
     },
     {
@@ -366,7 +366,7 @@ const weedTree: SkillTreeDef = {
       name: 'Conocedor',
       xpRequired: 100,
       description:
-        'Variedades disponibles (indica / sativa / híbrido), cada una con buff único.',
+        'Acceso a 3 variedades (Sativa Verde, Indica Oscura, Híbrida Dorada) con buffs únicos cada una.',
       type: 'active',
     },
     {
@@ -374,7 +374,7 @@ const weedTree: SkillTreeDef = {
       name: 'Cultivador',
       xpRequired: 300,
       description:
-        'Plantá tus propias variedades en la parcela de la Vecindad. Buff pasivo suave mientras estés abastecido.',
+        'Desbloqueás el sistema de delivery: entregá producto a dealers en la Vecindad por TENKS y XP.',
       type: 'passive',
     },
     {

@@ -565,6 +565,9 @@ export class WorldScene extends Phaser.Scene {
   private gunDealerDialog: DialogSystem | null = null;
   private gunShopOpen = false;
 
+  // MENTOR NPC
+  private mentorDialog: BranchedDialog | null = null;
+
   // COTTENKS NPC
   private cottenksDialog: BranchedDialog | null = null;
   private cottenksQuestMarker?: Phaser.GameObjects.Text;
@@ -861,6 +864,7 @@ export class WorldScene extends Phaser.Scene {
     // Ambient NPC
     this.runBootStep('ambient npcs', () => this.spawnAmbientNPCs());
     // Dealer now lives inside GunShopInterior.
+    this.runBootStep('mentor npc', () => this.spawnMentorNPC());
     this.runBootStep('cottenks npc', () => this.spawnCottenksNPC());
     this.runBootStep('barber npc', () => this.spawnBarberNPC());
 
@@ -4993,6 +4997,229 @@ export class WorldScene extends Phaser.Scene {
     }).setOrigin(0.5, 1).setDepth(9000);
   }
 
+  // ---------------------------------------------------------------------------
+  // EL MENTOR NPC
+  // ---------------------------------------------------------------------------
+
+  private spawnMentorNPC() {
+    const x = 1200;
+    const y = 558;
+    const depth = Math.floor(y / 10);
+
+    const g = this.add.graphics().setDepth(depth);
+
+    // Shadow
+    g.fillStyle(0x000000, 0.25);
+    g.fillEllipse(x, y + 28, 30, 10);
+
+    // Robe body
+    g.fillStyle(0x1a1a3e, 1);
+    g.fillRoundedRect(x - 11, y - 16, 22, 34, 6);
+
+    // Collar detail
+    g.fillStyle(0x4ECDC4, 0.6);
+    g.fillTriangle(x - 6, y - 16, x + 6, y - 16, x, y - 4);
+
+    // Head
+    g.fillStyle(0xDEB887, 1);
+    g.fillCircle(x, y - 28, 12);
+
+    // Grey hair / beard
+    g.fillStyle(0xAAAAAA, 1);
+    g.fillRoundedRect(x - 10, y - 40, 20, 10, 3);
+    // beard
+    g.fillRoundedRect(x - 6, y - 20, 12, 8, 3);
+
+    // Eyes
+    g.fillStyle(0x333333, 1);
+    g.fillCircle(x - 4, y - 30, 2);
+    g.fillCircle(x + 4, y - 30, 2);
+
+    // Staff (left side)
+    g.lineStyle(2, 0xC8A45A, 1);
+    g.lineBetween(x - 14, y - 36, x - 14, y + 28);
+    g.fillStyle(0x4ECDC4, 1);
+    g.fillCircle(x - 14, y - 38, 4);
+
+    // Nameplate
+    this.add.text(x, y - 60, 'EL MENTOR', {
+      fontSize: '7px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#4ECDC4',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(9000);
+
+    this.add.text(x, y - 48, 'GUÍA DEL BARRIO', {
+      fontSize: '5px',
+      fontFamily: '"Silkscreen", monospace',
+      color: '#888899',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5, 1).setDepth(9000);
+
+    // Idle float tween on the graphics object
+    this.tweens.add({
+      targets: g,
+      y: 3,
+      duration: 2400,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+  }
+
+  private openMentorDialog() {
+    if (this.mentorDialog?.isActive()) return;
+    this.inputBlocked = true;
+
+    const done = () => {
+      this.mentorDialog = null;
+      this.inputBlocked = false;
+    };
+
+    // Placeholder node used to satisfy forward refs; patched below after all nodes are built.
+    const PLACEHOLDER: DialogNode = { lines: [] };
+
+    const nodeMining: DialogNode = {
+      lines: [
+        'EL MENTOR: Minería — buscá nodos brillantes',
+        'en el mapa y acercate.',
+        'EL MENTOR: Presioná SPACE. En el minijuego',
+        'frenate en la zona DORADA para más XP.',
+        'EL MENTOR: Lv2: cobre y hierro, +20% vel.',
+        'EL MENTOR: Lv3: Dinamita — triple drop.',
+        'EL MENTOR: Lv5: nodos de oro y auto-drop',
+        'en tu parcela cada 10 minutos.',
+      ],
+      choices: [
+        { label: 'Ver otra skill', next: PLACEHOLDER },
+        { label: 'Entendido, gracias.', next: { lines: ['EL MENTOR: A minar se ha dicho.'], onComplete: done } },
+      ],
+    };
+
+    const nodeFishing: DialogNode = {
+      lines: [
+        'EL MENTOR: Pesca — acercate a una zona',
+        'de agua y presioná SPACE para lanzar.',
+        'EL MENTOR: Cuando el indicador se active,',
+        'reaccioná rápido. Cada pesca da XP.',
+        'EL MENTOR: Lv2: carnada especial +25% suerte.',
+        'EL MENTOR: Lv3: zonas restringidas desbloqueadas.',
+        'EL MENTOR: Lv5: trampa automática,',
+        '1 pez cada 30 min sin estar presente.',
+      ],
+      choices: [
+        { label: 'Ver otra skill', next: PLACEHOLDER },
+        { label: 'Entendido, gracias.', next: { lines: ['EL MENTOR: Que piquen los peces.'], onComplete: done } },
+      ],
+    };
+
+    const nodeGardening: DialogNode = {
+      lines: [
+        'EL MENTOR: Jardinería — comprá semillas',
+        'y plantalas en tu parcela de la Vecindad.',
+        'EL MENTOR: Regá y cosechá para ganar XP.',
+        'EL MENTOR: Lv2: fertilizante, -30% tiempo.',
+        'EL MENTOR: Lv3: especias, hongos y cacao.',
+        'EL MENTOR: Lv4: cosecha doble por ciclo.',
+        'EL MENTOR: Lv5: ciclo automático.',
+      ],
+      choices: [
+        { label: 'Ver otra skill', next: PLACEHOLDER },
+        { label: 'Entendido, gracias.', next: { lines: ['EL MENTOR: Manos a la tierra.'], onComplete: done } },
+      ],
+    };
+
+    const nodeCooking: DialogNode = {
+      lines: [
+        'EL MENTOR: Cocina — usá la cocina del Café',
+        'o de tu parcela para preparar recetas.',
+        'EL MENTOR: Cada receta cocinada da XP.',
+        'EL MENTOR: Los platos bufféan HP y stats.',
+        'EL MENTOR: Lv3: Plato del día —',
+        'buff poderoso aleatorio, 1 vez por día.',
+        'EL MENTOR: Lv4: vendé comida a otros jugadores.',
+      ],
+      choices: [
+        { label: 'Ver otra skill', next: PLACEHOLDER },
+        { label: 'Entendido, gracias.', next: { lines: ['EL MENTOR: Buen provecho.'], onComplete: done } },
+      ],
+    };
+
+    const nodeGym: DialogNode = {
+      lines: [
+        'EL MENTOR: Gym — entrá al Gym (zona norte)',
+        'y usá las máquinas. Cada sesión da XP.',
+        'EL MENTOR: Lv1: +5% HP máximo.',
+        'EL MENTOR: Lv2: +10% velocidad.',
+        'EL MENTOR: Lv3: +15% daño físico.',
+        'EL MENTOR: Lv4: Modo Furia — +30% daño',
+        '10 seg, cooldown 3 min.',
+      ],
+      choices: [
+        { label: 'Ver otra skill', next: PLACEHOLDER },
+        { label: 'Entendido, gracias.', next: { lines: ['EL MENTOR: A romperla en el gym.'], onComplete: done } },
+      ],
+    };
+
+    const nodeWeed: DialogNode = {
+      lines: [
+        'EL MENTOR: Weed — comprá producto y consumilo.',
+        'Cada consumo da XP.',
+        'EL MENTOR: Lv2: Sativa (velocidad),',
+        'Indica (HP), Híbrida (daño).',
+        'EL MENTOR: Lv3: delivery a dealers',
+        'en la Vecindad por TENKS y XP.',
+        'EL MENTOR: Lv5: Kingpin —',
+        '5% rake de todas las transacciones globales.',
+      ],
+      choices: [
+        { label: 'Ver otra skill', next: PLACEHOLDER },
+        { label: 'Entendido, gracias.', next: { lines: ['EL MENTOR: ...discreto, ¿no?'], onComplete: done } },
+      ],
+    };
+
+    const backToMenu: DialogNode = {
+      lines: ['EL MENTOR: ¿Algo más querés saber?'],
+      choices: [
+        { label: '⛏️  Minería',     next: nodeMining },
+        { label: '🎣  Pesca',        next: nodeFishing },
+        { label: '🌱  Jardinería',   next: nodeGardening },
+        { label: '🍳  Cocina',       next: nodeCooking },
+        { label: '🏋️  Gym',          next: nodeGym },
+        { label: '🌿  Weed',         next: nodeWeed },
+        { label: 'Ya entendí, gracias.', next: { lines: ['EL MENTOR: Cualquier duda, acá estoy.'], onComplete: done } },
+      ],
+    };
+
+    const rootNode: DialogNode = {
+      lines: [
+        'EL MENTOR: Ey, pará un segundo.',
+        'EL MENTOR: Hay 6 habilidades en este barrio.',
+        'EL MENTOR: Abrí el panel [T] para tu progreso.',
+        'EL MENTOR: ¿Sobre cuál querés saber?',
+      ],
+      choices: [
+        { label: '⛏️  Minería',     next: nodeMining },
+        { label: '🎣  Pesca',        next: nodeFishing },
+        { label: '🌱  Jardinería',   next: nodeGardening },
+        { label: '🍳  Cocina',       next: nodeCooking },
+        { label: '🏋️  Gym',          next: nodeGym },
+        { label: '🌿  Weed',         next: nodeWeed },
+        { label: 'Todo claro, gracias.', next: { lines: ['EL MENTOR: Cualquier duda, acá estoy siempre.'], onComplete: done } },
+      ],
+    };
+
+    // Patch "Ver otra skill" choice in each node to point to backToMenu
+    [nodeMining, nodeFishing, nodeGardening, nodeCooking, nodeGym, nodeWeed].forEach((node) => {
+      if (node.choices) (node.choices[0] as { next: DialogNode }).next = backToMenu;
+    });
+
+    this.mentorDialog = new BranchedDialog(this);
+    this.mentorDialog.start(rootNode);
+  }
+
   private openBarberPanel() {
     if (this.barberPanelOpen) return;
     this.barberPanelOpen = true;
@@ -5289,7 +5516,10 @@ export class WorldScene extends Phaser.Scene {
     finalY = Math.max(finalY, ZONES.BUILDING_TOP + 4);
 
     // ── Hard south cap: nothing navigable below training zone bottom ──────────
-    const MAP_SOUTH = ZONES.TRAINING_Y + ZONES.TRAINING_H + 80;
+    const MAP_SOUTH = Math.max(
+      ZONES.TRAINING_Y + ZONES.TRAINING_H + 80,
+      BUILDINGS.GYM.y + BUILDINGS.GYM.h + 80,
+    );
     finalY = Math.min(finalY, MAP_SOUTH);
 
     // ── Building facade collision ─────────────────────────────────────────────
@@ -5355,6 +5585,43 @@ export class WorldScene extends Phaser.Scene {
         const overlapRight = (b.x + b.w) - finalX;
         if (overlapLeft < overlapRight) finalX = b.x - 8;
         else finalX = b.x + b.w + 8;
+      }
+    }
+
+    // Gym collision: solid from top/sides, open at the lower doorway so the player
+    // can walk around the facade and enter from the front.
+    {
+      const b = BUILDINGS.GYM;
+      const gymDoorX = b.x + b.w / 2;
+      const gymDoorHalfWidth = 42;
+      const gymDoorTop = b.y + b.h - 88;
+      const insideVerticalSpan = finalY > b.y + 8 && finalY < b.y + b.h + 8;
+
+      if (finalX > b.x + 8 && finalX < b.x + b.w - 8 && this.py <= b.y + 8 && finalY > b.y + 8) {
+        finalY = b.y - 1;
+      }
+
+      if (insideVerticalSpan && this.px <= b.x + 8 && finalX > b.x + 8) {
+        finalX = b.x - 1;
+      }
+
+      if (insideVerticalSpan && this.px >= b.x + b.w - 8 && finalX < b.x + b.w - 8) {
+        finalX = b.x + b.w + 1;
+      }
+
+      const inGymBounds = finalX > b.x + 8 && finalX < b.x + b.w - 8 && finalY > b.y + 8 && finalY < b.y + b.h + 8;
+      const inDoorLane = Math.abs(finalX - gymDoorX) <= gymDoorHalfWidth && finalY >= gymDoorTop;
+      if (inGymBounds && !inDoorLane) {
+        const overlapTop = Math.abs(finalY - b.y);
+        const overlapLeft = Math.abs(finalX - b.x);
+        const overlapRight = Math.abs((b.x + b.w) - finalX);
+        const overlapBottom = Math.abs((b.y + b.h) - finalY);
+        const minOverlap = Math.min(overlapTop, overlapLeft, overlapRight, overlapBottom);
+
+        if (minOverlap === overlapTop) finalY = b.y - 1;
+        else if (minOverlap === overlapLeft) finalX = b.x - 1;
+        else if (minOverlap === overlapRight) finalX = b.x + b.w + 1;
+        else finalY = b.y + b.h + 1;
       }
     }
 
@@ -6577,6 +6844,13 @@ export class WorldScene extends Phaser.Scene {
       return { x: gymDoorX, y: BUILDINGS.GYM.y + BUILDINGS.GYM.h - 28, w: 110, h: 76, label: 'SPACE ENTRAR GYM', color: 0xFF2222, sceneKey: 'GymInterior' };
     }
 
+    const MENTOR_X = 1200;
+    const MENTOR_Y = 558;
+    const nearMentor = Math.abs(this.px - MENTOR_X) < 90 && Math.abs(this.py - MENTOR_Y) < 90;
+    if (nearMentor && !this.mentorDialog?.isActive()) {
+      return { x: MENTOR_X, y: MENTOR_Y - 36, w: 180, h: 70, label: 'SPACE HABLAR CON EL MENTOR', color: 0x4ECDC4, npcKey: 'mentor' };
+    }
+
     const COTTENKS_X = 1615;
     const COTTENKS_Y = 558;
     const nearCottenks = Math.abs(this.px - COTTENKS_X) < 100 && Math.abs(this.py - COTTENKS_Y) < 100;
@@ -6633,6 +6907,12 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
 
+    // Advance / confirm MENTOR dialog
+    if (this.mentorDialog?.isActive()) {
+      this.mentorDialog.advance();
+      return;
+    }
+
     // Advance / confirm COTTENKS dialog
     if (this.cottenksDialog?.isActive()) {
       this.cottenksDialog.advance();
@@ -6648,6 +6928,10 @@ export class WorldScene extends Phaser.Scene {
     const target = this.getInteractionTarget();
     if (target?.sceneKey) {
       this.transitionToScene(target.sceneKey);
+      return;
+    }
+    if (target?.npcKey === 'mentor') {
+      this.openMentorDialog();
       return;
     }
     if (target?.npcKey === 'cottenks') {
@@ -7134,7 +7418,6 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 }
-
 
 
 
