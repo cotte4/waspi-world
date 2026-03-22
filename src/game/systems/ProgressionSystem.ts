@@ -1,70 +1,20 @@
-export type ProgressionState = {
-  kills: number;
-  xp: number;
-  level: number;
-  nextLevelAt: number | null;
-};
+import {
+  type ProgressionState,
+  clampKills,
+  clampXp,
+  getProgressionForTotals,
+  getLevelMilestones,
+  getMaxProgressionLevel,
+  getLevelFloorXp,
+} from '@/src/lib/progression';
+import { getAuthHeaders } from './authHelper';
+
+export type { ProgressionState };
 
 const STORAGE_KEY = 'waspi_progression_v2';
 const LEGACY_STORAGE_KEY = 'waspi_progression_v1';
-const MAX_LEVEL = 42;
 
-function buildLevelMilestones(maxLevel: number) {
-  const milestones = [0];
-  let totalXp = 0;
-  for (let level = 2; level <= maxLevel; level += 1) {
-    // Easier early levels, then a steep late-game climb.
-    const stepXp = Math.round(6 + Math.pow(level - 1, 2.08) * 2.1);
-    totalXp += stepXp;
-    milestones.push(totalXp);
-  }
-  return milestones;
-}
-
-const LEVEL_MILESTONES = buildLevelMilestones(MAX_LEVEL);
-
-function clampKills(kills: unknown) {
-  return typeof kills === 'number' && Number.isFinite(kills) ? Math.max(0, Math.floor(kills)) : 0;
-}
-
-function clampXp(xp: unknown) {
-  return typeof xp === 'number' && Number.isFinite(xp) ? Math.max(0, Math.floor(xp)) : 0;
-}
-
-export function getLevelMilestones() {
-  return [...LEVEL_MILESTONES];
-}
-
-export function getMaxProgressionLevel() {
-  return LEVEL_MILESTONES.length;
-}
-
-export function getLevelFloorXp(level: number) {
-  const safeLevel = Math.max(1, Math.min(getMaxProgressionLevel(), Math.floor(level)));
-  return LEVEL_MILESTONES[safeLevel - 1] ?? 0;
-}
-
-export function getProgressionForTotals(kills: number, xp: number): ProgressionState {
-  const safeKills = clampKills(kills);
-  const safeXp = clampXp(xp);
-  let levelIndex = 0;
-  for (let i = 0; i < LEVEL_MILESTONES.length; i += 1) {
-    if (safeXp >= LEVEL_MILESTONES[i]) {
-      levelIndex = i;
-    } else {
-      break;
-    }
-  }
-
-  const level = levelIndex + 1;
-  const nextLevelAt = LEVEL_MILESTONES[levelIndex + 1] ?? null;
-  return {
-    kills: safeKills,
-    xp: safeXp,
-    level,
-    nextLevelAt,
-  };
-}
+export { getLevelMilestones, getMaxProgressionLevel, getLevelFloorXp, getProgressionForTotals };
 
 export function loadProgressionState(): ProgressionState {
   if (typeof window === 'undefined') return getProgressionForTotals(0, 0);
@@ -96,4 +46,51 @@ export function initProgressionState(kills: number, xp: number): ProgressionStat
   const state = getProgressionForTotals(kills, xp);
   saveProgressionState(state);
   return state;
+}
+
+/**
+ * Load progression from server (zombie_kills, xp, level) and hydrate localStorage.
+ * Server wins. Falls back silently to current localStorage value if request fails.
+ * Returns deaths so the caller can also hydrate CombatStats.
+ */
+export async function loadProgressionFromServer(): Promise<{ deaths: number } | null> {
+  try {
+    const authH = await getAuthHeaders();
+    if (!authH.Authorization) return null;
+
+    const res = await fetch('/api/player/progression', { headers: authH });
+    if (!res.ok) return null;
+
+    const json = await res.json() as {
+      kills?: number;
+      xp?: number;
+      deaths?: number;
+    } | null;
+
+    if (!json) return null;
+
+    const kills = clampKills(json.kills ?? 0);
+    const xp = clampXp(json.xp ?? 0);
+    initProgressionState(kills, xp);
+
+    return { deaths: typeof json.deaths === 'number' ? Math.max(0, Math.floor(json.deaths)) : 0 };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fire-and-forget sync of XP gained from a kill to the server.
+ * The server applies the delta with clamps and recomputes level.
+ */
+export function syncXpToServer(xpDelta: number): void {
+  void (async () => {
+    const authH = await getAuthHeaders();
+    if (!authH.Authorization) return;
+    await fetch('/api/player/progression', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authH },
+      body: JSON.stringify({ xp_delta: xpDelta }),
+    }).catch(() => null);
+  })();
 }

@@ -14,8 +14,8 @@ import { loadAudioSettings, type AudioSettings } from '../systems/AudioSettings'
 import { clearGlobalBgm, startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
 import { getShootTargetWorld } from '../systems/shootingAim';
 import { loadHudSettings, type HudSettings } from '../systems/HudSettings';
-import { addXpToProgression, getMaxProgressionLevel, loadProgressionState, saveProgressionState, type ProgressionState } from '../systems/ProgressionSystem';
-import { loadCombatStats, saveCombatStats, type CombatStats } from '../systems/CombatStats';
+import { addXpToProgression, getMaxProgressionLevel, loadProgressionState, saveProgressionState, loadProgressionFromServer, syncXpToServer, type ProgressionState } from '../systems/ProgressionSystem';
+import { loadCombatStats, saveCombatStats, applyCombatStatsFromServer, type CombatStats } from '../systems/CombatStats';
 import { createScrollArea } from '../systems/ScrollArea';
 import {
   ensureFallbackRectTexture,
@@ -704,14 +704,23 @@ export class WorldScene extends Phaser.Scene {
     this.loadMutedPlayers();
     this.loadVecindadState();
 
-    // Init TENKS balance (local-only for ahora)
-    initTenks(5000);
-
-    // Init stats system with authenticated user ID (fire-and-forget)
+    // Init stats system + progression from server (fire-and-forget)
     if (supabase && isConfigured) {
-      void supabase.auth.getSession().then(({ data }) => {
+      void supabase.auth.getSession().then(async ({ data }) => {
         const uid = data.session?.user?.id;
         if (uid) void initStatsSystem(uid);
+
+        // Load server-authoritative progression and hydrate localStorage + in-memory state.
+        const serverProgression = await loadProgressionFromServer();
+        if (serverProgression !== null) {
+          this.progression = loadProgressionState();
+          this.renderProgressionHud();
+          eventBus.emit(EVENTS.PLAYER_PROGRESSION, this.progression);
+
+          const updatedCombat = applyCombatStatsFromServer(serverProgression.deaths);
+          this.combatStats = updatedCombat;
+          eventBus.emit(EVENTS.PLAYER_COMBAT_STATS, this.combatStats);
+        }
       });
     }
 
@@ -2043,6 +2052,7 @@ export class WorldScene extends Phaser.Scene {
     const previousLevel = this.progression.level;
     this.progression = addXpToProgression(this.progression, state.xpReward);
     saveProgressionState(this.progression);
+    syncXpToServer(state.xpReward);
     this.renderProgressionHud();
     eventBus.emit(EVENTS.PLAYER_PROGRESSION, this.progression);
     const tenksReward = this.getScaledTrainingTenksReward(state.tenksReward);
@@ -5196,7 +5206,7 @@ export class WorldScene extends Phaser.Scene {
     // Always equip utility items so they take effect immediately
     ensureItemEquipped(itemId); // idempotent equip for utilities
     if (typeof result.player?.tenks === 'number') {
-      initTenks(result.player.tenks, { preferStored: false });
+      initTenks(result.player.tenks);
     }
     return { success: true, message: result.notice ?? `${itemId} comprado!` };
   }

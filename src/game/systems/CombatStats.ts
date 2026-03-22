@@ -31,3 +31,15 @@ export function saveCombatStats(stats: CombatStats) {
     deaths: clamp(stats.deaths),
   }));
 }
+
+/**
+ * Hydrate combat stats from the server value returned by loadProgressionFromServer.
+ * Keeps localStorage as fast local cache; server wins on load.
+ */
+export function applyCombatStatsFromServer(deaths: number) {
+  const current = loadCombatStats();
+  // Server is authoritative for deaths; kills come from ProgressionSystem.kills (zombie_kills)
+  const updated: CombatStats = { kills: current.kills, deaths: Math.max(0, Math.floor(deaths)) };
+  saveCombatStats(updated);
+  return updated;
+}
