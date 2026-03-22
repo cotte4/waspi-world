@@ -169,7 +169,7 @@ export class AvatarRenderer {
   private lastDx = 0;
   private lastDy = 0;
   private lastPuffAt = 0;
-  private lastAuraAt = 0;
+  private lastAuraAt = Date.now();
   readonly config: Required<AvatarConfig>;
 
   constructor(scene: Phaser.Scene, x: number, y: number, config: AvatarConfig = {}) {

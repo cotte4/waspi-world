@@ -196,7 +196,8 @@ export class PenaltyMinigame extends Phaser.Scene {
     this.cameras.main.resetFX();
     this.cameras.main.setAlpha(1);
     this.cameras.main.fadeIn(220, 0, 0, 0);
-    this.runCountdown();
+    // Defer one tick so the scene is in RUNNING state before isActive() checks fire
+    this.time.delayedCall(0, () => this.runCountdown());
   }
 
   private drawShotsBar() {

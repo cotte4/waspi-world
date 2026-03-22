@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -470,7 +470,7 @@ function SlotEditor({ slot, cfg, update }: { slot: SlotId; cfg: AvatarCfg; updat
 
 // ── DRIP score bar ────────────────────────────────────────────────────────────
 function DripScoreBar({ cfg }: { cfg: AvatarCfg }) {
-  const score = calcDripScore(cfg);
+  const score = useMemo(() => calcDripScore(cfg), [cfg]);
   const { rank, color } = dripRank(score);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
@@ -563,19 +563,20 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
   const [username, setUsername] = useState<string>(getInitialUsername);
   const [saving, setSaving]     = useState(false);
   const [activeSlot, setActiveSlot] = useState<SlotId>('character');
-  const prevCfgRef              = useRef<AvatarCfg>(cfg);
+  const debounceRef             = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (cfg === prevCfgRef.current) return;
-    prevCfgRef.current = cfg;
-    eventBus.emit(EVENTS.CREATOR_CONFIG_CHANGED, cfg);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      eventBus.emit(EVENTS.CREATOR_CONFIG_CHANGED, cfg);
+    }, 150);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [cfg]);
 
   useEffect(() => {
     const unsub = eventBus.on(EVENTS.CREATOR_READY, (payload: unknown) => {
       const p = payload as { config: AvatarCfg };
       setCfg(p.config);
-      prevCfgRef.current = p.config;
     });
     return () => unsub();
   }, []);
@@ -590,19 +591,9 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
     if (typeof window !== 'undefined') window.localStorage.setItem(USERNAME_KEY, cleaned);
   };
 
-  const handleRandom = () => {
-    const r = randomCfg();
-    setCfg(r);
-    prevCfgRef.current = r;
-    eventBus.emit(EVENTS.CREATOR_CONFIG_CHANGED, r);
-  };
+  const handleRandom = () => setCfg(randomCfg());
 
-  const handleReset = () => {
-    const s = loadInitialCfg();
-    setCfg(s);
-    prevCfgRef.current = s;
-    eventBus.emit(EVENTS.CREATOR_CONFIG_CHANGED, s);
-  };
+  const handleReset = () => setCfg(loadInitialCfg());
 
   const handleSave = () => {
     if (saving) return;
