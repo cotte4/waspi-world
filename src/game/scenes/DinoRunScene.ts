@@ -3,6 +3,7 @@ import { announceScene, bindSafeResetToPlaza, transitionToScene, transitionToWor
 import { eventBus, EVENTS } from '../config/eventBus';
 import { addTenks } from '../systems/TenksSystem';
 import { SceneControls } from '../systems/SceneControls';
+import { getAuthHeaders } from '../systems/authHelper';
 
 type GameState = 'idle' | 'playing' | 'dead' | 'gameover';
 
@@ -93,6 +94,7 @@ export default class DinoRunScene extends Phaser.Scene {
     this.bestScore = parseInt(localStorage.getItem('waspi_dino_best') ?? '0');
     this.controls = new SceneControls(this);
     eventBus.emit(EVENTS.DINO_SCENE_ACTIVE, true);
+    void this.loadBestScoreFromServer();
     bindSafeResetToPlaza(this, () => {
       transitionToWorldScene(this, 1600, 1540);
     });
@@ -613,6 +615,7 @@ export default class DinoRunScene extends Phaser.Scene {
     if (isNewBest) {
       this.bestScore = this.score;
       localStorage.setItem('waspi_dino_best', String(this.bestScore));
+      void this.submitScoreToServer(this.score);
     }
 
     addTenks(this.tenksEarned, 'dino_run_score');
@@ -719,5 +722,37 @@ export default class DinoRunScene extends Phaser.Scene {
 
   private isSceneAlive(): boolean {
     return !this.shuttingDown && this.scene.isActive('DinoRunScene');
+  }
+
+  private async loadBestScoreFromServer(): Promise<void> {
+    try {
+      const authH = await getAuthHeaders();
+      if (!authH.Authorization) return;
+      const res = await fetch('/api/minigames/score?game=dino', { headers: authH });
+      if (!res.ok) return;
+      const json = await res.json() as { best?: number } | null;
+      if (typeof json?.best !== 'number') return;
+      if (json.best > this.bestScore) {
+        this.bestScore = json.best;
+        localStorage.setItem('waspi_dino_best', String(this.bestScore));
+        eventBus.emit(EVENTS.DINO_HUD_UPDATE, { score: this.score, highScore: this.bestScore });
+      }
+    } catch {
+      // Silent fallback — keep localStorage value
+    }
+  }
+
+  private async submitScoreToServer(score: number): Promise<void> {
+    try {
+      const authH = await getAuthHeaders();
+      if (!authH.Authorization) return;
+      await fetch('/api/minigames/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authH },
+        body: JSON.stringify({ game: 'dino', score }),
+      });
+    } catch {
+      // Non-fatal — score stays in localStorage
+    }
   }
 }

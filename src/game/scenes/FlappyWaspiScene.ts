@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { addTenks } from '../systems/TenksSystem';
+import { getAuthHeaders } from '../systems/authHelper';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -119,6 +120,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
     this.buildUI();
     this.buildInput();
     this.showIdleScreen();
+    void this.loadBestScoreFromServer();
 
     // WAKE: restart game cleanly
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
@@ -490,6 +492,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
       if (isNewBest) {
         this.bestScore = this.score;
         localStorage.setItem(this.BEST_KEY, String(this.bestScore));
+        void this.submitScoreToServer(this.score);
       }
 
       const tenksBase = calcTenks(this.score);
@@ -609,5 +612,37 @@ export class FlappyWaspiScene extends Phaser.Scene {
 
   private isSceneAlive(): boolean {
     return !this.shuttingDown && this.scene.isActive('FlappyWaspiScene');
+  }
+
+  private async loadBestScoreFromServer(): Promise<void> {
+    try {
+      const authH = await getAuthHeaders();
+      if (!authH.Authorization) return;
+      const res = await fetch('/api/minigames/score?game=flappy', { headers: authH });
+      if (!res.ok) return;
+      const json = await res.json() as { best?: number } | null;
+      if (typeof json?.best !== 'number') return;
+      if (json.best > this.bestScore) {
+        this.bestScore = json.best;
+        localStorage.setItem(this.BEST_KEY, String(this.bestScore));
+        eventBus.emit(EVENTS.FLAPPY_HUD_UPDATE, { score: this.score, highScore: this.bestScore });
+      }
+    } catch {
+      // Silent fallback — keep localStorage value
+    }
+  }
+
+  private async submitScoreToServer(score: number): Promise<void> {
+    try {
+      const authH = await getAuthHeaders();
+      if (!authH.Authorization) return;
+      await fetch('/api/minigames/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authH },
+        body: JSON.stringify({ game: 'flappy', score }),
+      });
+    } catch {
+      // Non-fatal — score stays in localStorage
+    }
   }
 }
