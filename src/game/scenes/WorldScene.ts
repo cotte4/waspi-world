@@ -47,6 +47,37 @@ import { WorldMapPanel } from '../systems/WorldMapPanel';
 import { EventBanner } from '../systems/EventBanner';
 import { EmotePanel, showEmoteBubble, type EmoteId } from '../systems/EmoteSystem';
 import { rememberWorldSpawn } from '../systems/worldReturnSpawn';
+import {
+  drawBackgroundLayer,
+  drawBuildingEntranceMarkerLayer,
+  drawPlazaLayer,
+  drawStreetLayer,
+  drawVignetteLayer,
+} from './world/renderWorld';
+import {
+  resolveAndHandleWorldInteractionFrame,
+  resolveWorldInteractionTarget,
+  syncWorldInteractionPrompt,
+  type InteractionTarget as WorldInteractionTarget,
+} from './world/interaction';
+import {
+  applySharedVecindadParcels as applySharedVecindadParcelState,
+  collectVecindadMaterial,
+  createDefaultVecindadState,
+  isInsideVecindadDistrict as isInsideVecindadDistrictArea,
+  loadVecindadStateFromStorage,
+  refreshVecindadParcelVisuals,
+  renderVecindadHud as renderVecindadHudState,
+  resolveOwnedParcelBuildAttempt,
+  updateVecindadParcelPrompt,
+} from './world/vecindad';
+import {
+  applyWorldParcelState,
+  applyWorldSharedParcelsEvent,
+  broadcastWorldVecindadState,
+  handleWorldRemoteVecindadUpdate,
+  loadWorldSharedVecindadState,
+} from './world/realtimeVecindad';
 
 /** Al entrar desde el mundo, se pasan returnX/returnY (posición actual) para reaparecer al salir. */
 const WORLD_SCENES_WITH_PLAYER_RETURN = new Set([
@@ -210,16 +241,7 @@ type MaterialNode = {
   label: Phaser.GameObjects.Text;
 };
 
-type InteractionTarget = {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  label: string;
-  color: number;
-  sceneKey?: string;
-  npcKey?: string;
-};
+type InteractionTarget = WorldInteractionTarget;
 
 const REMOTE_CHAT_MIN_MS = 1000;
 const REMOTE_MOVE_MIN_MS = 100;
@@ -544,11 +566,7 @@ export class WorldScene extends Phaser.Scene {
   private footballTick = 0;
   private progression: ProgressionState = loadProgressionState();
   private combatStats: CombatStats = loadCombatStats();
-  private vecindadState: VecindadState = {
-    ownedParcelId: undefined,
-    buildStage: 0,
-    materials: 0,
-  };
+  private vecindadState: VecindadState = createDefaultVecindadState() as VecindadState;
   private sharedParcelState = new Map<string, SharedParcelState>();
   private parcelVisuals = new Map<string, ParcelVisual>();
   private parcelPrompt?: Phaser.GameObjects.Text;
@@ -2747,113 +2765,88 @@ export class WorldScene extends Phaser.Scene {
   // ─── World Drawing ───────────────────────────────────────────────────────────
 
   private drawBackground() {
-    const g = this.add.graphics().setDepth(-10);
-    g.fillStyle(COLORS.BG);
-    g.fillRect(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
-
-    // Stars (random dots in sky area)
-    g.fillStyle(0xFFFFFF, 0.6);
-    const seed = 42;
-    for (let i = 0; i < 200; i++) {
-      const sx = ((seed * (i * 137 + 1)) % WORLD.WIDTH);
-      const sy = ((seed * (i * 97 + 3)) % 600);
-      g.fillCircle(sx, sy, Math.random() < 0.2 ? 1.5 : 1);
-    }
+    drawBackgroundLayer(this, { colors: COLORS, world: WORLD });
   }
 
   private drawStreet() {
-    const g = this.add.graphics().setDepth(1);
-
-    // North sidewalk base
-    g.fillStyle(COLORS.SIDEWALK);
-    g.fillRect(0, ZONES.NORTH_SIDEWALK_Y, WORLD.WIDTH, ZONES.NORTH_SIDEWALK_H);
-
-    // Street base
-    g.fillStyle(COLORS.STREET);
-    g.fillRect(0, ZONES.STREET_Y, WORLD.WIDTH, ZONES.STREET_H);
-
-    // Faux tile / pattern para que el asfalto no sea un plano liso
-    g.lineStyle(1, 0x191922, 0.45);
-    const tileSize = 32;
-    for (let x = 0; x < WORLD.WIDTH; x += tileSize) {
-      g.lineBetween(x, ZONES.STREET_Y, x, ZONES.STREET_Y + ZONES.STREET_H);
-    }
-    for (let y = ZONES.STREET_Y; y <= ZONES.STREET_Y + ZONES.STREET_H; y += tileSize) {
-      g.lineBetween(0, y, WORLD.WIDTH, y);
-    }
-
-    // Center dashes
-    const dashY = ZONES.STREET_Y + ZONES.STREET_H / 2;
-    g.fillStyle(0xF5E6A8, 0.22);
-    for (let dx = 0; dx < WORLD.WIDTH; dx += 90) {
-      g.fillRect(dx, dashY - 2, 42, 3);
-    }
-
-    // Crosswalks to help the street read around the venues
-    const crossings = [
-      BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2,
-      BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2,
-      BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2,
-      BUILDINGS.CASINO.x + BUILDINGS.CASINO.w / 2,
-    ];
-    g.fillStyle(0xD9DEE8, 0.18);
-    crossings.forEach((centerX) => {
-      for (let i = -3; i <= 3; i++) {
-        g.fillRect(centerX - 38 + i * 12, ZONES.NORTH_SIDEWALK_Y + 8, 8, ZONES.SOUTH_SIDEWALK_Y - ZONES.NORTH_SIDEWALK_Y - 16);
-      }
+    drawStreetLayer(this, {
+      buildings: BUILDINGS,
+      colors: COLORS,
+      world: WORLD,
+      zones: ZONES,
     });
-
-    // South sidewalk base
-    g.fillStyle(COLORS.SIDEWALK);
-    g.fillRect(0, ZONES.SOUTH_SIDEWALK_Y, WORLD.WIDTH, ZONES.SOUTH_SIDEWALK_H);
-
-    // Textura sutil en veredas
-    g.lineStyle(1, 0x20202C, 0.35);
-    for (let x = 0; x < WORLD.WIDTH; x += tileSize * 2) {
-      g.lineBetween(x, ZONES.NORTH_SIDEWALK_Y, x, ZONES.NORTH_SIDEWALK_Y + ZONES.NORTH_SIDEWALK_H);
-      g.lineBetween(x, ZONES.SOUTH_SIDEWALK_Y, x, ZONES.SOUTH_SIDEWALK_Y + ZONES.SOUTH_SIDEWALK_H);
-    }
-
-    // Curb lines
-    g.lineStyle(2, 0x262636, 0.9);
-    g.strokeRect(0, ZONES.NORTH_SIDEWALK_Y, WORLD.WIDTH, ZONES.NORTH_SIDEWALK_H);
-    g.strokeRect(0, ZONES.SOUTH_SIDEWALK_Y, WORLD.WIDTH, ZONES.SOUTH_SIDEWALK_H);
-
-    // Vecindad gate on the far left, leading to the dedicated barrio map.
-    const vecindadGuideX = 112;
-    g.fillStyle(0x2b2016, 1);
-    g.fillRect(56, ZONES.SOUTH_SIDEWALK_Y - 18, 16, 114);
-    g.fillRect(152, ZONES.SOUTH_SIDEWALK_Y - 18, 16, 114);
-    g.fillStyle(0x5f4a34, 0.95);
-    g.fillRoundedRect(34, ZONES.SOUTH_SIDEWALK_Y - 48, 156, 40, 10);
-    g.lineStyle(2, COLORS.GOLD, 0.75);
-    g.strokeRoundedRect(34, ZONES.SOUTH_SIDEWALK_Y - 48, 156, 40, 10);
-    g.fillStyle(0x5f4a34, 0.9);
-    g.fillRoundedRect(42, ZONES.SOUTH_SIDEWALK_Y + 18, 148, 42, 12);
-    g.strokeRoundedRect(42, ZONES.SOUTH_SIDEWALK_Y + 18, 148, 42, 12);
-
-    this.add.text(vecindadGuideX, ZONES.SOUTH_SIDEWALK_Y - 28, 'LA VECINDAD', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(2);
-    this.add.text(vecindadGuideX, ZONES.SOUTH_SIDEWALK_Y + 38, 'SPACE ENTRAR', {
-      fontSize: '7px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#C8D6B7',
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(2);
   }
 
   private drawPlaza() {
-    const g = this.add.graphics().setDepth(0);
+    const g = drawPlazaLayer(this, {
+      colors: COLORS,
+      world: WORLD,
+      zones: ZONES,
+    }) as Phaser.GameObjects.Graphics;
 
-    // Grass area
-    g.fillStyle(COLORS.GRASS);
-    g.fillRect(0, ZONES.PLAZA_Y, WORLD.WIDTH, WORLD.HEIGHT - ZONES.PLAZA_Y);
+    // Healing platform stays local until plaza overlays get their own module.
+    const healingX = 900;
+    const healingY = ZONES.PLAZA_Y + 170;
+    const healingWidth = 180;
+    const healingHeight = 130;
+
+    g.fillStyle(0x00ff88, 0.04);
+    g.fillRoundedRect(healingX - 14, healingY - 14, healingWidth + 28, healingHeight + 28, 22);
+
+    g.fillStyle(0x0d1f16, 1);
+    g.fillRoundedRect(healingX, healingY, healingWidth, healingHeight, 14);
+    g.lineStyle(2, 0x1aff7a, 0.55);
+    g.strokeRoundedRect(healingX, healingY, healingWidth, healingHeight, 14);
+
+    g.lineStyle(1, 0x152e1e, 0.6);
+    for (let ix = healingX + 16; ix < healingX + healingWidth - 8; ix += 20) {
+      g.lineBetween(ix, healingY + 8, ix, healingY + healingHeight - 8);
+    }
+    for (let iy = healingY + 12; iy < healingY + healingHeight - 8; iy += 20) {
+      g.lineBetween(healingX + 8, iy, healingX + healingWidth - 8, iy);
+    }
+
+    const healingCenterX = healingX + healingWidth / 2;
+    const healingCenterY = healingY + healingHeight / 2 + 8;
+    g.fillStyle(0x1aff7a, 0.7);
+    g.fillRoundedRect(healingCenterX - 18, healingCenterY - 6, 36, 12, 3);
+    g.fillRoundedRect(healingCenterX - 6, healingCenterY - 18, 12, 36, 3);
+
+    const healingDots = [
+      [healingX + 14, healingY + 14], [healingX + healingWidth - 14, healingY + 14],
+      [healingX + 14, healingY + healingHeight - 14], [healingX + healingWidth - 14, healingY + healingHeight - 14],
+    ] as const;
+    healingDots.forEach(([dx, dy]) => {
+      g.fillStyle(0x1aff7a, 0.5);
+      g.fillCircle(dx, dy, 4);
+    });
+
+    this.add.text(healingCenterX, healingY + 14, 'HEALING ZONE', {
+      fontSize: '6px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#1aff7a',
+      stroke: '#000000',
+      strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(2);
+
+    this.add.text(healingCenterX, healingY + healingHeight - 14, '+3 HP / seg', {
+      fontSize: '5px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#66ffaa',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(2);
+
+    this.drawGunShopBuilding();
+
+    const plazaLabelX = 1600;
+    this.add.text(plazaLabelX, ZONES.PLAZA_Y + 20, 'PLAZA', {
+      fontSize: '8px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#334455',
+    }).setOrigin(0.5).setDepth(2);
+
+    return;
 
     // Plaza stone area
     g.fillStyle(0x101018);
@@ -3143,60 +3136,25 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private refreshParcelVisuals() {
-    for (const parcel of VECINDAD_PARCELS) {
-      const visuals = this.parcelVisuals.get(parcel.id);
-      if (!visuals) continue;
-      const shared = this.sharedParcelState.get(parcel.id);
-      const ownedByMe = this.vecindadState.ownedParcelId === parcel.id;
-      const occupiedByAnother = Boolean(shared && !ownedByMe);
-      const playerOwnsAnother = Boolean(this.vecindadState.ownedParcelId && !ownedByMe);
-      const buildStage = ownedByMe
-        ? Math.max(1, this.vecindadState.buildStage)
-        : shared?.buildStage ?? 0;
-
-      visuals.status.setText(
-        ownedByMe
-          ? 'TU PARCELA'
-          : occupiedByAnother
-            ? 'OCUPADA'
-            : 'FOR SALE'
-      );
-      visuals.status.setColor(
-        ownedByMe
-          ? '#39FF14'
-          : occupiedByAnother
-            ? '#46B3FF'
-            : '#E6E1C8'
-      );
-      visuals.detail.setText(
-        ownedByMe
-          ? `STAGE ${buildStage} / MATS ${this.vecindadState.materials}`
-          : occupiedByAnother
-            ? `${shared?.ownerUsername ?? 'VECINO'} · STAGE ${buildStage}`
-            : playerOwnsAnother
-              ? 'YA TENES OTRA PARCELA'
-              : 'COMPRA Y CONSTRUYE'
-      );
-      visuals.detail.setColor(
-        ownedByMe
-          ? '#B9FF9E'
-          : occupiedByAnother
-            ? '#9EDCFF'
-            : playerOwnsAnother
-              ? '#FFB36A'
-              : '#9EB09A'
-      );
-      visuals.badge.setText(
-        ownedByMe
-          ? 'OWNED'
-          : occupiedByAnother
-            ? `@${(shared?.ownerUsername ?? 'vecino').slice(0, 10)}`
-            : `${parcel.cost}T`
-      );
-      visuals.badge.setColor(ownedByMe ? '#39FF14' : occupiedByAnother ? '#46B3FF' : '#F5C842');
-      this.drawParcelStructure(parcel, visuals.structure, buildStage);
-    }
-    this.renderVecindadHud();
+    refreshVecindadParcelVisuals({
+      parcelVisuals: this.parcelVisuals,
+      sharedParcelState: this.sharedParcelState,
+      vecindadState: {
+        buildStage: this.vecindadState.buildStage ?? 0,
+        cannabisFarmUnlocked: this.vecindadState.cannabisFarmUnlocked ?? false,
+        farmPlants: this.vecindadState.farmPlants ?? [],
+        materials: this.vecindadState.materials ?? 0,
+        ownedParcelId: this.vecindadState.ownedParcelId,
+      },
+    }, VECINDAD_PARCELS, {
+      drawParcelStructure: (parcel, graphics, buildStage) => {
+        this.drawParcelStructure(parcel as VecindadParcelConfig, graphics as Phaser.GameObjects.Graphics, buildStage);
+      },
+      maxStage: MAX_VECINDAD_STAGE,
+      onAfterRefresh: () => {
+        this.renderVecindadHud();
+      },
+    });
   }
 
   private drawParcelStructure(parcel: VecindadParcelConfig, graphics: Phaser.GameObjects.Graphics, buildStage: number) {
@@ -3278,57 +3236,32 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private renderVecindadHud() {
-    const parcel = this.vecindadState.ownedParcelId ? `PARCELA ${this.vecindadState.ownedParcelId}` : 'SIN PARCELA';
-    const stage = Math.max(0, this.vecindadState.buildStage);
-    const nextCost = stage >= MAX_VECINDAD_STAGE ? 0 : getBuildCost(Math.max(stage, 1));
-    const text = [
-      'LA VECINDAD',
-      parcel,
-      `MATS ${this.vecindadState.materials}`,
-      `STAGE ${stage}/${MAX_VECINDAD_STAGE}${stage >= MAX_VECINDAD_STAGE ? ' MAX' : ` NEXT ${nextCost}`}`,
-    ];
-
-    if (!this.vecindadHud) {
-      this.vecindadHud = this.add.text(8, 92, text, {
-        fontSize: '8px',
-        fontFamily: '"Press Start 2P", monospace',
-        color: '#B9FF9E',
-        lineSpacing: 6,
-        stroke: '#000000',
-        strokeThickness: 3,
-      }).setScrollFactor(0).setDepth(9999);
-      this.vecindadHud.setVisible(this.isInsideVecindadDistrict());
-      return;
-    }
-
-    this.vecindadHud.setText(text);
-    this.vecindadHud.setVisible(this.isInsideVecindadDistrict());
+    this.vecindadHud = renderVecindadHudState({
+      add: this.add,
+      vecindadHud: this.vecindadHud,
+      vecindadState: {
+        buildStage: this.vecindadState.buildStage ?? 0,
+        cannabisFarmUnlocked: this.vecindadState.cannabisFarmUnlocked ?? false,
+        farmPlants: this.vecindadState.farmPlants ?? [],
+        materials: this.vecindadState.materials ?? 0,
+        ownedParcelId: this.vecindadState.ownedParcelId,
+      },
+    }, {
+      getBuildCost,
+      isInsideDistrict: this.isInsideVecindadDistrict(),
+      maxStage: MAX_VECINDAD_STAGE,
+    }) as Phaser.GameObjects.Text | undefined;
   }
 
   private isInsideVecindadDistrict() {
-    return this.px >= ZONES.VECINDAD_X
-      && this.px <= ZONES.VECINDAD_X + ZONES.VECINDAD_W
-      && this.py >= ZONES.VECINDAD_Y
-      && this.py <= ZONES.VECINDAD_Y + ZONES.VECINDAD_H;
+    return isInsideVecindadDistrictArea({ px: this.px, py: this.py }, ZONES);
   }
 
   private drawVignette() {
-    // Keep a subtle edge vignette so the world stays readable on all displays.
-    const { width, height } = this.cameras.main;
-    const vignette = this.add.graphics().setDepth(9999);
-    const centerX = width / 2;
-    const centerY = height / 2;
-
-    const radius = Math.max(width, height) * 1.08;
-    const steps = 5;
-    for (let i = 0; i < steps; i++) {
-      const t = i / (steps - 1);
-      const alpha = Phaser.Math.Linear(0.0, 0.18, t);
-      vignette.fillStyle(0x000000, alpha);
-      vignette.fillCircle(centerX, centerY, radius * (0.55 + t * 0.45));
-    }
-
-    vignette.setScrollFactor(0);
+    drawVignetteLayer(this, {
+      width: this.cameras.main.width,
+      height: this.cameras.main.height,
+    }).setScrollFactor(0);
   }
 
   private drawBench(g: Phaser.GameObjects.Graphics, x: number, y: number) {
@@ -3446,24 +3379,7 @@ export class WorldScene extends Phaser.Scene {
 
   /** Permanent floor marker + chevron in front of each entrance — always visible, subtle */
   private drawBuildingEntranceMarkers() {
-    const markerG = this.add.graphics().setDepth(1.8);
-    const doors: Array<{ cx: number; floorY: number; color: number }> = [
-      { cx: BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2, floorY: BUILDINGS.ARCADE.y + BUILDINGS.ARCADE.h, color: 0x46B3FF },
-      { cx: BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2,  floorY: BUILDINGS.STORE.y + BUILDINGS.STORE.h,  color: 0xF5C842 },
-      { cx: BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2,    floorY: BUILDINGS.CAFE.y + BUILDINGS.CAFE.h,    color: 0xFF8B3D },
-      { cx: BUILDINGS.CASINO.x + BUILDINGS.CASINO.w / 2, floorY: BUILDINGS.CASINO.y + BUILDINGS.CASINO.h, color: 0xF5C842 },
-      { cx: BUILDINGS.GYM.x + BUILDINGS.GYM.w / 2,      floorY: BUILDINGS.GYM.y + BUILDINGS.GYM.h,      color: 0xFF2222 },
-    ];
-    doors.forEach(({ cx, floorY, color }) => {
-      // Soft colored floor zone in front of door
-      markerG.fillStyle(color, 0.07);
-      markerG.fillRoundedRect(cx - 48, floorY + 2, 96, 34, 6);
-      markerG.lineStyle(1, color, 0.22);
-      markerG.strokeRoundedRect(cx - 48, floorY + 2, 96, 34, 6);
-      // Small downward chevron pointing into the door
-      markerG.fillStyle(color, 0.4);
-      markerG.fillTriangle(cx, floorY + 30, cx - 11, floorY + 16, cx + 11, floorY + 16);
-    });
+    drawBuildingEntranceMarkerLayer(this, { buildings: BUILDINGS });
   }
 
   private drawArcadeBuilding() {
@@ -6252,34 +6168,23 @@ export class WorldScene extends Phaser.Scene {
     this.bridgeCleanupFns.push(eventBus.on(EVENTS.PLAYER_ACTION_REPORT, () => {}));
     this.bridgeCleanupFns.push(eventBus.on(EVENTS.PARCEL_STATE_CHANGED, (payload: unknown) => {
       if (!payload || typeof payload !== 'object') return;
-      this.vecindadState = {
-        ownedParcelId: typeof (payload as Record<string, unknown>).ownedParcelId === 'string'
-          ? (payload as Record<string, string>).ownedParcelId
-          : undefined,
-        buildStage: typeof (payload as Record<string, unknown>).buildStage === 'number'
-          ? (payload as Record<string, number>).buildStage
-          : 0,
-        materials: typeof (payload as Record<string, unknown>).materials === 'number'
-          ? (payload as Record<string, number>).materials
-          : 0,
-        cannabisFarmUnlocked: typeof (payload as Record<string, unknown>).cannabisFarmUnlocked === 'boolean'
-          ? (payload as Record<string, boolean>).cannabisFarmUnlocked
-          : false,
-        farmPlants: Array.isArray((payload as Record<string, unknown>).farmPlants)
-          ? ((payload as Record<string, unknown>).farmPlants as VecindadState['farmPlants'])
-          : [],
+      const parcelStateScene = {
+        parcelVisuals: this.parcelVisuals,
+        refreshParcelVisuals: () => this.refreshParcelVisuals(),
+        renderVecindadHud: () => this.renderVecindadHud(),
+        vecindadState: this.vecindadState,
       };
-      this.refreshParcelVisuals();
+      applyWorldParcelState(parcelStateScene, payload as Record<string, unknown>);
+      this.vecindadState = parcelStateScene.vecindadState as VecindadState;
     }));
     this.bridgeCleanupFns.push(eventBus.on(EVENTS.VECINDAD_SHARED_STATE_CHANGED, (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
-      const parcels = Array.isArray((payload as { parcels?: unknown[] }).parcels)
-        ? (payload as { parcels: SharedParcelState[] }).parcels
-        : [];
-      this.applySharedVecindadParcels(parcels);
-      if ((payload as { broadcast?: boolean }).broadcast) {
-        this.broadcastVecindadState(parcels);
-      }
+      applyWorldSharedParcelsEvent({
+        applySharedVecindadParcels: (parcels) => this.applySharedVecindadParcels(parcels),
+        broadcastVecindadState: (parcels) => this.broadcastVecindadState(parcels),
+        refreshParcelVisuals: () => this.refreshParcelVisuals(),
+        renderVecindadHud: () => this.renderVecindadHud(),
+        sharedParcelState: this.sharedParcelState,
+      }, payload);
     }));
 
     // Apply avatar partial updates (e.g. smoke on/off) and persist in localStorage
@@ -6399,60 +6304,37 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private loadVecindadState() {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = window.localStorage.getItem('waspi_player_state');
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as { vecindad?: Partial<VecindadState> };
-      this.vecindadState = {
-        ownedParcelId: typeof parsed.vecindad?.ownedParcelId === 'string' ? parsed.vecindad.ownedParcelId : undefined,
-        buildStage: typeof parsed.vecindad?.buildStage === 'number' ? parsed.vecindad.buildStage : 0,
-        materials: typeof parsed.vecindad?.materials === 'number' ? parsed.vecindad.materials : 0,
-        cannabisFarmUnlocked: typeof parsed.vecindad?.cannabisFarmUnlocked === 'boolean' ? parsed.vecindad.cannabisFarmUnlocked : false,
-        farmPlants: Array.isArray(parsed.vecindad?.farmPlants) ? parsed.vecindad.farmPlants : [],
-      };
-    } catch {
-      this.vecindadState = {
-        ownedParcelId: undefined,
-        buildStage: 0,
-        materials: 0,
-        cannabisFarmUnlocked: false,
-        farmPlants: [],
-      };
-    }
+    const raw = typeof window === 'undefined'
+      ? null
+      : window.localStorage.getItem('waspi_player_state');
+    this.vecindadState = loadVecindadStateFromStorage(raw) as VecindadState;
   }
 
   private async loadSharedVecindadState() {
-    const res = await fetch('/api/vecindad').catch(() => null);
-    if (!res?.ok) return;
-    const json = await res.json().catch(() => null) as { parcels?: SharedParcelState[] } | null;
-    if (!json?.parcels) return;
-    this.applySharedVecindadParcels(json.parcels);
+    await loadWorldSharedVecindadState({
+      applySharedVecindadParcels: (parcels) => this.applySharedVecindadParcels(parcels),
+      refreshParcelVisuals: () => this.refreshParcelVisuals(),
+      renderVecindadHud: () => this.renderVecindadHud(),
+      sharedParcelState: this.sharedParcelState,
+    });
   }
 
   private applySharedVecindadParcels(parcels: SharedParcelState[]) {
-    this.sharedParcelState.clear();
-    parcels.forEach((parcel) => {
-      this.sharedParcelState.set(parcel.parcelId, parcel);
-    });
+    applySharedVecindadParcelState({ sharedParcelState: this.sharedParcelState }, parcels);
     this.refreshParcelVisuals();
   }
 
   private broadcastVecindadState(parcels: SharedParcelState[]) {
-    if (!this.channel) return;
-    this.channel.send({
-      type: 'broadcast',
-      event: 'vecindad:update',
-      payload: { parcels },
-    });
+    broadcastWorldVecindadState({ channel: this.channel }, parcels);
   }
 
   private handleRemoteVecindadUpdate(payload: unknown) {
-    if (!payload || typeof payload !== 'object') return;
-    const parcels = Array.isArray((payload as { parcels?: unknown[] }).parcels)
-      ? (payload as { parcels: SharedParcelState[] }).parcels
-      : [];
-    this.applySharedVecindadParcels(parcels);
+    handleWorldRemoteVecindadUpdate({
+      applySharedVecindadParcels: (parcels) => this.applySharedVecindadParcels(parcels),
+      refreshParcelVisuals: () => this.refreshParcelVisuals(),
+      renderVecindadHud: () => this.renderVecindadHud(),
+      sharedParcelState: this.sharedParcelState,
+    }, payload);
   }
 
   private updateMaterialNodes() {
@@ -6474,37 +6356,42 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private collectMaterial(node: MaterialNode) {
-    node.available = false;
-    node.respawnAt = this.time.now + 14000;
-    node.crate.setVisible(false);
-    node.band.setVisible(false);
-    node.label.setVisible(false);
-
-    const nextState: VecindadState = {
-      ...this.vecindadState,
-      materials: this.vecindadState.materials + node.value,
-    };
-    this.vecindadState = nextState;
-    this.refreshParcelVisuals();
-    eventBus.emit(EVENTS.VECINDAD_UPDATE_REQUEST, {
-      vecindad: nextState,
-      notice: `Cache personal +${node.value} materiales`,
-    });
+    this.vecindadState = collectVecindadMaterial({
+      refreshParcelVisuals: () => this.refreshParcelVisuals(),
+      vecindadState: {
+        buildStage: this.vecindadState.buildStage ?? 0,
+        cannabisFarmUnlocked: this.vecindadState.cannabisFarmUnlocked ?? false,
+        farmPlants: this.vecindadState.farmPlants ?? [],
+        materials: this.vecindadState.materials ?? 0,
+        ownedParcelId: this.vecindadState.ownedParcelId,
+      },
+    }, node, {
+      nextRespawnAt: this.time.now + 14000,
+      onCollected: (nextState, nodeValue) => {
+        eventBus.emit(EVENTS.VECINDAD_UPDATE_REQUEST, {
+          vecindad: nextState,
+          notice: `Cache personal +${nodeValue} materiales`,
+        });
+      },
+    }) as VecindadState;
   }
 
   private buildOwnedParcel() {
-    if (!this.vecindadState.ownedParcelId) return;
-    const currentStage = Math.max(1, this.vecindadState.buildStage);
-    if (currentStage >= MAX_VECINDAD_STAGE) {
+    const attempt = resolveOwnedParcelBuildAttempt(this.vecindadState, {
+      getBuildCost,
+      maxStage: MAX_VECINDAD_STAGE,
+    });
+
+    if (attempt.reason === 'no-owned-parcel') return;
+    if (attempt.reason === 'max-stage') {
       eventBus.emit(EVENTS.UI_NOTICE, 'Tu casa ya esta al maximo.');
       return;
     }
-
-    const cost = getBuildCost(currentStage);
-    if (this.vecindadState.materials < cost) {
-      eventBus.emit(EVENTS.UI_NOTICE, `Necesitas ${cost} materiales para seguir construyendo.`);
+    if (attempt.reason === 'insufficient-materials' && attempt.cost !== null) {
+      eventBus.emit(EVENTS.UI_NOTICE, `Necesitas ${attempt.cost} materiales para seguir construyendo.`);
       return;
     }
+
     eventBus.emit(EVENTS.PARCEL_BUILD_REQUEST);
   }
 
@@ -6604,8 +6491,9 @@ export class WorldScene extends Phaser.Scene {
     this.vecindadHud?.setVisible(showVecindadOverlay);
     this.parcelPrompt?.setVisible(showVecindadOverlay);
     this.runFrameStep('training combat', () => this.updateDummies());
-    this.runFrameStep('interaction highlight', () => this.updateInteractionHighlight());
-    this.handleInteraction();
+    this.runFrameStep('interaction frame/input', () => {
+      this.runInteractionFrameInput();
+    });
     this.updateCamaraDelTiempo(delta);
     if (this.inTraining && this.time.now - this.trainingHudLastRefreshAt >= 1000) {
       this.trainingHudLastRefreshAt = this.time.now;
@@ -6784,232 +6672,100 @@ export class WorldScene extends Phaser.Scene {
 
   // ─── Interaction ───────────────────────────────────────────────────────────────
 
-  private getInteractionTarget(): InteractionTarget | null {
-    const gunShopBounds = WorldScene.GUN_SHOP_BOUNDS;
-    const { x: gunDealerX, y: gunDealerY } = this.getGunDealerPosition();
-    const arcadeDoorX = BUILDINGS.ARCADE.x + BUILDINGS.ARCADE.w / 2;
-    const storeDoorX = BUILDINGS.STORE.x + BUILDINGS.STORE.w / 2;
-    const cafeDoorX = BUILDINGS.CAFE.x + BUILDINGS.CAFE.w / 2;
-    const casinoDoorX = BUILDINGS.CASINO.x + BUILDINGS.CASINO.w / 2;
-    const nearCasino = Math.abs(this.px - casinoDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
-    const nearVecindad = this.px < 220 && this.py > ZONES.SOUTH_SIDEWALK_Y - 30 && this.py < ZONES.PLAZA_Y + 120;
-    const nearPvpBooth = this.px >= 900 && this.px <= 1080 && this.py >= ZONES.PLAZA_Y + 420 && this.py <= ZONES.PLAZA_Y + 550;
-    const zombiesPadX = 640;
-    const zombiesPadY = ZONES.PLAZA_Y + 430;
-    const nearZombiesPad = Math.abs(this.px - zombiesPadX) < 90 && Math.abs(this.py - zombiesPadY) < 80;
-    const basementDoorX = BUILDINGS.HOUSE.x + BUILDINGS.HOUSE.w / 2;
-    const basementDoorY = BUILDINGS.HOUSE.y + BUILDINGS.HOUSE.h - 32;
-    const nearBasement = Math.abs(this.px - basementDoorX) < 90
-      && this.py >= BUILDINGS.HOUSE.y + BUILDINGS.HOUSE.h - 90
-      && this.py <= BUILDINGS.HOUSE.y + BUILDINGS.HOUSE.h + 70;
-    const nearArcade = Math.abs(this.px - arcadeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
-    const nearStore = Math.abs(this.px - storeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
-    const nearCafe = Math.abs(this.px - cafeDoorX) < 60 && this.py < ZONES.BUILDING_BOTTOM;
-    const nearGunShop = Math.abs(this.px - gunDealerX) < 92
-      && this.py >= gunShopBounds.y + gunShopBounds.h - 108
-      && this.py <= gunShopBounds.y + gunShopBounds.h + 52;
-    const gymDoorX = BUILDINGS.GYM.x + BUILDINGS.GYM.w / 2;
-    const nearGym = Math.abs(this.px - gymDoorX) < 70
-      && this.py >= BUILDINGS.GYM.y + BUILDINGS.GYM.h - 80
-      && this.py <= BUILDINGS.GYM.y + BUILDINGS.GYM.h + 60;
-
-    if (nearVecindad) {
-      return { x: 120, y: ZONES.PLAZA_Y + 40, w: 140, h: 80, label: 'SPACE ENTRAR VECINDAD', color: 0xF5C842, sceneKey: 'VecindadScene' };
-    }
-    if (nearBasement) {
-      return { x: basementDoorX, y: basementDoorY, w: BUILDINGS.HOUSE.w + 20, h: BUILDINGS.HOUSE.h + 10, label: 'SPACE ENTRAR BASEMENT', color: 0xB48BFF, sceneKey: 'BasementScene' };
-    }
-    if (nearZombiesPad) {
-      return { x: zombiesPadX, y: zombiesPadY, w: 200, h: 90, label: 'SPACE ENTRAR MODO ZOMBIES', color: 0xFF6EA8, sceneKey: 'ZombiesScene' };
-    }
-    if (nearPvpBooth) {
-      return { x: 990, y: ZONES.PLAZA_Y + 485, w: 180, h: 90, label: 'SPACE ENTRAR PVP PIT', color: 0xFF4DA6, sceneKey: 'PvpArenaScene' };
-    }
-    if (nearArcade) {
-      return { x: arcadeDoorX, y: BUILDINGS.ARCADE.y + BUILDINGS.ARCADE.h - 28, w: 110, h: 76, label: 'SPACE ENTRAR ARCADE', color: 0x46B3FF, sceneKey: 'ArcadeInterior' };
-    }
-    if (nearStore) {
-      return { x: storeDoorX, y: BUILDINGS.STORE.y + BUILDINGS.STORE.h - 28, w: 110, h: 76, label: 'SPACE ENTRAR SHOP', color: 0x39FF14, sceneKey: 'StoreInterior' };
-    }
-    if (nearCafe) {
-      return { x: cafeDoorX, y: BUILDINGS.CAFE.y + BUILDINGS.CAFE.h - 28, w: 110, h: 76, label: 'SPACE ENTRAR CAFE', color: 0xFF8B3D, sceneKey: 'CafeInterior' };
-    }
-    if (nearCasino) {
-      return { x: casinoDoorX, y: BUILDINGS.CASINO.y + BUILDINGS.CASINO.h - 28, w: 120, h: 80, label: 'SPACE ENTRAR CASINO', color: 0xF5C842, sceneKey: 'CasinoInterior' };
-    }
-    if (nearGunShop) {
-      return { x: gunDealerX, y: gunDealerY, w: 164, h: 76, label: 'SPACE ENTRAR GUN SHOP', color: 0x46B3FF, sceneKey: 'GunShopInterior' };
-    }
-    if (nearGym) {
-      return { x: gymDoorX, y: BUILDINGS.GYM.y + BUILDINGS.GYM.h - 28, w: 110, h: 76, label: 'SPACE ENTRAR GYM', color: 0xFF2222, sceneKey: 'GymInterior' };
-    }
-
-    const MENTOR_X = 1200;
-    const MENTOR_Y = 558;
-    const nearMentor = Math.abs(this.px - MENTOR_X) < 90 && Math.abs(this.py - MENTOR_Y) < 90;
-    if (nearMentor && !this.mentorDialog?.isActive()) {
-      return { x: MENTOR_X, y: MENTOR_Y - 36, w: 180, h: 70, label: 'SPACE HABLAR CON EL MENTOR', color: 0x4ECDC4, npcKey: 'mentor' };
-    }
-
-    const COTTENKS_X = 1615;
-    const COTTENKS_Y = 558;
-    const nearCottenks = Math.abs(this.px - COTTENKS_X) < 100 && Math.abs(this.py - COTTENKS_Y) < 100;
-    if (nearCottenks && !this.cottenksDialog?.isActive()) {
-      return { x: COTTENKS_X, y: COTTENKS_Y - 36, w: 180, h: 70, label: 'SPACE HABLAR CON COTTENKS', color: 0xF5C842, npcKey: 'cottenks' };
-    }
-
-    const BARBER_X = 820;
-    const BARBER_Y = 558;
-    const nearBarber = Math.abs(this.px - BARBER_X) < 90 && Math.abs(this.py - BARBER_Y) < 90;
-    if (nearBarber && !this.barberPanelOpen) {
-      return { x: BARBER_X, y: BARBER_Y - 36, w: 160, h: 70, label: 'SPACE BARBERÍA', color: 0xFF88CC, npcKey: 'barber' };
-    }
-
-    return null;
+  private getWorldInteractionDependencies() {
+    return {
+      buildings: BUILDINGS,
+      emitPrompt: (payload: { color: string; text: string; visible: boolean }) => {
+        eventBus.emit(EVENTS.WORLD_INTERACTION_PROMPT, payload);
+      },
+      getColorRgbString: (color: number) => {
+        const rgb = Phaser.Display.Color.IntegerToRGB(color);
+        return `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+      },
+      getGunDealerPosition: () => this.getGunDealerPosition(),
+      gunShopBounds: WorldScene.GUN_SHOP_BOUNDS,
+      zones: ZONES,
+    };
   }
 
-  private updateInteractionHighlight() {
-    if (!this.interactionHighlight) return;
-    const target = this.getInteractionTarget();
-    this.interactionHighlight.clear();
-    if (!target) {
-      if (this.lastInteractionPromptLabel !== null) {
-        this.lastInteractionPromptLabel = null;
-        eventBus.emit(EVENTS.WORLD_INTERACTION_PROMPT, { text: '', visible: false, color: '#F5C842' });
-      }
-      return;
-    }
+  private getWorldInteractionProbes() {
+    return {
+      getNearbyMaterial: () => this.getNearbyMaterialNode() ?? null,
+      getNearbyParcel: () => this.getNearbyParcel() ?? null,
+    };
+  }
 
-    const pulse = 0.3 + ((Math.sin(this.time.now / 180) + 1) * 0.16);
-    this.interactionHighlight.lineStyle(3, target.color, 0.88);
-    this.interactionHighlight.strokeRoundedRect(target.x - target.w / 2, target.y - target.h / 2, target.w, target.h, 10);
-    this.interactionHighlight.fillStyle(target.color, pulse * 0.2);
-    this.interactionHighlight.fillRoundedRect(target.x - target.w / 2, target.y - target.h / 2, target.w, target.h, 10);
+  private getWorldResolvedInteractionCallbacks() {
+    return {
+      buildOwnedParcel: () => this.buildOwnedParcel(),
+      closeBarberPanel: () => this.closeBarberPanel(),
+      closeGunShopPanel: () => this.closeGunShopPanel(),
+      collectMaterialNode: (node: { value: number }) => this.collectMaterial(node as MaterialNode),
+      isInteractJustDown: () => this.controls.isActionJustDown('interact'),
+      openBarberPanel: () => this.openBarberPanel(),
+      openCottenksDialog: () => this.openCottenksDialog(),
+      openMentorDialog: () => this.openMentorDialog(),
+      requestParcelBuy: (parcelId: string, cost: number) => {
+        eventBus.emit(EVENTS.PARCEL_BUY_REQUEST, { parcelId, cost });
+      },
+      sharedParcelOccupied: (parcelId: string) => this.sharedParcelState.has(parcelId),
+      transitionToScene: (sceneKey: string) => this.transitionToScene(sceneKey),
+    };
+  }
 
-    if (this.lastInteractionPromptLabel !== target.label) {
-      this.lastInteractionPromptLabel = target.label;
-      const rgb = Phaser.Display.Color.IntegerToRGB(target.color);
-      eventBus.emit(EVENTS.WORLD_INTERACTION_PROMPT, {
-        text: target.label,
-        visible: true,
-        color: `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`,
-      });
-    }
+  private runInteractionFrameInput() {
+    return resolveAndHandleWorldInteractionFrame({
+      barberPanelOpen: this.barberPanelOpen,
+      cottenksDialog: this.cottenksDialog,
+      gunDealerDialog: this.gunDealerDialog,
+      gunShopOpen: this.gunShopOpen,
+      inTransition: this.inTransition,
+      interactionHighlight: this.interactionHighlight,
+      lastInteractionPromptLabel: this.lastInteractionPromptLabel,
+      mentorDialog: this.mentorDialog,
+      px: this.px,
+      py: this.py,
+      time: this.time,
+      vecindadState: this.vecindadState,
+    }, this.getWorldInteractionDependencies(), this.getWorldInteractionProbes(), this.getWorldResolvedInteractionCallbacks());
+  }
+
+  private getInteractionTarget(): InteractionTarget | null {
+    return resolveWorldInteractionTarget({
+      barberPanelOpen: this.barberPanelOpen,
+      cottenksDialog: this.cottenksDialog,
+      mentorDialog: this.mentorDialog,
+      px: this.px,
+      py: this.py,
+    }, {
+      buildings: BUILDINGS,
+      getGunDealerPosition: () => this.getGunDealerPosition(),
+      gunShopBounds: WorldScene.GUN_SHOP_BOUNDS,
+      zones: ZONES,
+    });
   }
 
   private handleInteraction() {
-    if (this.inTransition) return;
-    if (!this.controls.isActionJustDown('interact')) return;
-
-    // Advance gun dealer dialog if active
-    if (this.gunDealerDialog?.isActive()) {
-      this.gunDealerDialog.advance();
-      return;
-    }
-
-    // Advance / confirm MENTOR dialog
-    if (this.mentorDialog?.isActive()) {
-      this.mentorDialog.advance();
-      return;
-    }
-
-    // Advance / confirm COTTENKS dialog
-    if (this.cottenksDialog?.isActive()) {
-      this.cottenksDialog.advance();
-      return;
-    }
-
-    // Close gun shop on SPACE if open
-    if (this.gunShopOpen) {
-      this.closeGunShopPanel();
-      return;
-    }
-
-    const target = this.getInteractionTarget();
-    if (target?.sceneKey) {
-      this.transitionToScene(target.sceneKey);
-      return;
-    }
-    if (target?.npcKey === 'mentor') {
-      this.openMentorDialog();
-      return;
-    }
-    if (target?.npcKey === 'cottenks') {
-      this.openCottenksDialog();
-      return;
-    }
-    if (target?.npcKey === 'barber') {
-      this.openBarberPanel();
-      return;
-    }
-
-    // Close barber panel on SPACE if open
-    if (this.barberPanelOpen) {
-      this.closeBarberPanel();
-      return;
-    }
-
-    // Vecindad: material node collection
-    const nearMaterial = this.getNearbyMaterialNode();
-    if (nearMaterial) {
-      this.collectMaterial(nearMaterial);
-      return;
-    }
-
-    // Vecindad: parcel buy or build
-    const nearParcel = this.getNearbyParcel();
-    if (nearParcel) {
-      if (this.vecindadState.ownedParcelId === nearParcel.id) {
-        this.buildOwnedParcel();
-      } else if (!this.vecindadState.ownedParcelId && !this.sharedParcelState.has(nearParcel.id)) {
-        eventBus.emit(EVENTS.PARCEL_BUY_REQUEST, { parcelId: nearParcel.id, cost: nearParcel.cost });
-      }
-    }
+    this.runInteractionFrameInput();
   }
 
   private updateParcelPrompt() {
-    if (!this.parcelPrompt) return;
-    const materialNode = this.getNearbyMaterialNode();
-    if (materialNode) {
-      this.parcelPrompt.setText(`E RECOGER TU CACHE +${materialNode.value} MATS`);
-      this.parcelPrompt.setColor('#B9FF9E');
-      return;
-    }
-
-    const parcel = this.getNearbyParcel();
-    if (!parcel) {
-      this.parcelPrompt.setText('');
-      return;
-    }
-
-    if (this.vecindadState.ownedParcelId === parcel.id) {
-      const currentStage = Math.max(1, this.vecindadState.buildStage);
-      if (currentStage >= MAX_VECINDAD_STAGE) {
-        this.parcelPrompt.setText(`PARCELA ${parcel.id} COMPLETA`);
-        this.parcelPrompt.setColor('#39FF14');
-        return;
-      }
-      const cost = getBuildCost(currentStage);
-      this.parcelPrompt.setText(`E CONSTRUIR STAGE ${currentStage + 1} - ${cost} MATS`);
-      this.parcelPrompt.setColor('#39FF14');
-      return;
-    }
-
-    const shared = this.sharedParcelState.get(parcel.id);
-    if (shared) {
-      this.parcelPrompt.setText(`PARCELA ${parcel.id} OCUPADA POR ${shared.ownerUsername.toUpperCase()}`);
-      this.parcelPrompt.setColor('#46B3FF');
-      return;
-    }
-
-    if (this.vecindadState.ownedParcelId) {
-      this.parcelPrompt.setText('YA TENES UNA PARCELA EN LA VECINDAD');
-      this.parcelPrompt.setColor('#FFB36A');
-      return;
-    }
-
-    this.parcelPrompt.setText(`E COMPRAR PARCELA ${parcel.id} - ${parcel.cost} TENKS`);
-    this.parcelPrompt.setColor('#F5C842');
+    updateVecindadParcelPrompt({
+      parcelPrompt: this.parcelPrompt,
+      sharedParcelState: this.sharedParcelState,
+      vecindadState: {
+        buildStage: this.vecindadState.buildStage ?? 0,
+        cannabisFarmUnlocked: this.vecindadState.cannabisFarmUnlocked ?? false,
+        farmPlants: this.vecindadState.farmPlants ?? [],
+        materials: this.vecindadState.materials ?? 0,
+        ownedParcelId: this.vecindadState.ownedParcelId,
+      },
+    }, {
+      getBuildCost,
+      maxStage: MAX_VECINDAD_STAGE,
+      nearbyMaterial: this.getNearbyMaterialNode() ?? null,
+      nearbyParcel: this.getNearbyParcel() ?? null,
+    });
   }
 
   private getNearbyParcel() {
@@ -7418,5 +7174,4 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 }
-
 

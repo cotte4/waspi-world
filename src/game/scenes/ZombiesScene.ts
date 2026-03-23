@@ -53,6 +53,38 @@ import {
   type ZombiesSectionId,
   type ZombiesWeaponId,
 } from '../config/zombies';
+import {
+  broadcastZombiesRealtimeSharedInteract,
+  broadcastZombiesRealtimeSharedShot,
+  broadcastZombiesRealtimeSharedWeaponGrant,
+  broadcastZombiesRealtimeSharedSnapshot,
+  connectZombiesRealtimeChannel,
+  createZombiesRealtimeSharedSnapshotAdapter,
+  handleRealtimeRemoteLeave,
+  handleRealtimeRemoteState,
+  type ZombiesRealtimeChannel,
+  handleZombiesRealtimeSharedInteractRequest,
+  handleZombiesRealtimeSharedReset,
+  handleZombiesRealtimeSharedShot,
+  handleZombiesRealtimeSharedSnapshot,
+  handleZombiesRealtimeSharedWeaponGrant,
+  maybeBroadcastZombiesRealtimeSharedSnapshot,
+  scheduleZombiesRealtimeSharedReset,
+  teardownZombiesRealtimeSession,
+  stepZombiesRealtimeFrame,
+} from './zombies/realtime';
+import {
+  applyZombiesPickupRuntimeState,
+  applySharedMaxAmmoToZombiesLoadout,
+  buildZombiesPickupSnapshots,
+  createZombiesPickupRuntimeState,
+  createZombiesPickupSceneAdapter,
+  type ZombiesPickupRuntimeState,
+  runAndSyncZombiesPickupCycle,
+  runZombiesPickupDropCycle,
+  syncZombiesPickupRuntimeState,
+  syncZombiesPickupsFromSnapshots,
+} from './zombies/pickups';
 
 const BOX_POS = { x: 435, y: 698 } as const;
 const PACK_POS = { x: 1278, y: 610 } as const;
@@ -1569,6 +1601,126 @@ export class ZombiesScene extends Phaser.Scene {
     return Math.min(36, getRoundConcurrentCap(round) + Math.floor(round / 4) + pressure);
   }
 
+  private createPickupRuntimeState(): ZombiesPickupRuntimeState {
+    return createZombiesPickupRuntimeState({
+      doublePointsUntil: this.doublePointsUntil,
+      instaKillUntil: this.instaKillUntil,
+      pickupIdSeq: this.pickupIdSeq,
+    });
+  }
+
+  private syncPickupRuntimeState(runtimeState: ZombiesPickupRuntimeState) {
+    const target = {
+      doublePointsUntil: this.doublePointsUntil,
+      instaKillUntil: this.instaKillUntil,
+      pickupIdSeq: this.pickupIdSeq,
+    };
+    applyZombiesPickupRuntimeState(target, runtimeState);
+    this.doublePointsUntil = target.doublePointsUntil;
+    this.instaKillUntil = target.instaKillUntil;
+    this.pickupIdSeq = target.pickupIdSeq;
+  }
+
+  private scheduleSharedReset() {
+    const scene = {
+      channel: this.channel,
+      isSharedRunHost: () => this.isSharedRunHost(),
+      playerId: this.playerId,
+      restartRun: () => this.restartRun(),
+      sharedRunPlayers: this.sharedRunPlayers,
+      showNotice: (text: string, color: string) => this.showNotice(text, color),
+      time: this.time,
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
+    const resetBridge = {
+      ...scene,
+      get sharedResetPending() {
+        return self.sharedResetPending;
+      },
+      set sharedResetPending(value: boolean) {
+        self.sharedResetPending = value;
+      },
+    };
+    return scheduleZombiesRealtimeSharedReset(resetBridge);
+  }
+
+  private createPickupSceneContext() {
+    return createZombiesPickupSceneAdapter({
+      add: this.add,
+      doublePointsUntil: this.doublePointsUntil,
+      instaKillUntil: this.instaKillUntil,
+      pickupIdSeq: this.pickupIdSeq,
+      pickups: this.pickups,
+      time: this.time,
+      tweens: this.tweens,
+      weaponInventory: this.weaponInventory,
+      weaponOrder: this.weaponOrder,
+    }, {
+      broadcastSharedMaxAmmo: () => {
+        this.channel?.send({
+          type: 'broadcast',
+          event: 'shared:max_ammo',
+          payload: { host_id: this.playerId },
+        });
+      },
+      getAliveSharedTargets: () => this.getAliveSharedTargets(),
+      getWeaponStats: (weaponId: ZombiesWeaponId) => this.getWeaponStats(weaponId),
+      isSharedRunHost: () => this.isSharedRunHost(),
+      showFloatingText: (text: string, x: number, y: number, color: string) => this.showFloatingText(text, x, y, color),
+      showNotice: (text: string, color: string) => this.showNotice(text, color),
+      showPowerupBanner: (text: string, color: string) => this.showPowerupBanner(text, color),
+      triggerNuke: () => this.triggerNuke(),
+    });
+  }
+
+  private createRealtimeSharedSnapshotScene() {
+    return createZombiesRealtimeSharedSnapshotAdapter({
+      add: this.add,
+      bossAlive: this.bossAlive,
+      bossRoundActive: this.bossRoundActive,
+      bossSpawnedThisRound: this.bossSpawnedThisRound,
+      boxRollingUntil: this.boxRollingUntil,
+      depthsUnlocked: this.depthsUnlocked,
+      doors: this.doors,
+      doublePointsUntil: this.doublePointsUntil,
+      instaKillUntil: this.instaKillUntil,
+      mysteryBoxCooldownUntil: this.mysteryBoxCooldownUntil,
+      nextSpawnAt: this.nextSpawnAt,
+      pickupIdSeq: this.pickupIdSeq,
+      pickups: this.pickups,
+      points: this.points,
+      round: this.round,
+      roundBreakUntil: this.roundBreakUntil,
+      roundTarget: this.roundTarget,
+      sharedRunHostId: this.sharedRunHostId ?? null,
+      sharedRunPlayers: this.sharedRunPlayers,
+      spawnNodes: this.spawnNodes,
+      spawnedThisRound: this.spawnedThisRound,
+      time: this.time,
+      tweens: this.tweens,
+      zombieIdSeq: this.zombieIdSeq,
+      zombieProjectileSeq: this.zombieProjectileSeq,
+      zombieProjectiles: this.zombieProjectiles,
+      zombies: this.zombies,
+    }, {
+      applySharedPlayerStateToLocal: () => this.applySharedPlayerStateToLocal(),
+      createZombieEntity: (snapshot: unknown) => this.createZombieEntity(snapshot as Parameters<typeof this.createZombieEntity>[0]),
+      createZombieProjectileEntity: (snapshot) => this.createZombieProjectileEntity(snapshot),
+      destroyZombieProjectile: (id: string) => this.destroyZombieProjectile(id),
+      isSharedCoopEnabled: () => this.isSharedCoopEnabled(),
+      isSharedRunHost: () => this.isSharedRunHost(),
+      refreshSpawnNodeVisual: (node: unknown, healthDelta: number, occupied: boolean) =>
+        this.refreshSpawnNodeVisual(node as Parameters<typeof this.refreshSpawnNodeVisual>[0], healthDelta, occupied),
+      renderZombieHp: (zombie: unknown) => this.renderZombieHp(zombie as Parameters<typeof this.renderZombieHp>[0]),
+      safeDestroyZombieVisual: (zombie: unknown) => this.safeDestroyZombieVisual(zombie as Parameters<typeof this.safeDestroyZombieVisual>[0]),
+      setZombieState: (zombie: unknown, state: unknown) =>
+        this.setZombieState(zombie as Parameters<typeof this.setZombieState>[0], state as Parameters<typeof this.setZombieState>[1]),
+      updateDepthsAccessVisual: () => this.updateDepthsAccessVisual(),
+    });
+  }
+
   update(_time: number, delta: number) {
     if (this.controls.isActionJustDown('back')) {
       this.requestExit();
@@ -1594,14 +1746,73 @@ export class ZombiesScene extends Phaser.Scene {
       this.handleRoundFlow();
       this.updateZombies(delta);
       this.updateZombieProjectiles(delta);
-      this.updatePickups();
-      this.maybeBroadcastSharedSnapshot();
+      const pickupScene = this.createPickupSceneContext();
+      const pickupRuntimeState = this.createPickupRuntimeState();
+      runAndSyncZombiesPickupCycle(
+        pickupRuntimeState,
+        pickupScene,
+      );
+      this.syncPickupRuntimeState(pickupRuntimeState);
+      const broadcastedSnapshot = maybeBroadcastZombiesRealtimeSharedSnapshot({
+        bossAlive: this.bossAlive,
+        bossRoundActive: this.bossRoundActive,
+        bossSpawnedThisRound: this.bossSpawnedThisRound,
+        boxRollingUntil: this.boxRollingUntil,
+        channel: this.channel,
+        doors: this.doors,
+        doublePointsUntil: this.doublePointsUntil,
+        depthsUnlocked: this.depthsUnlocked,
+        instaKillUntil: this.instaKillUntil,
+        isSharedRunHost: () => this.isSharedRunHost(),
+        lastSharedSnapshotSentAt: this.lastSharedSnapshotSentAt,
+        mysteryBoxCooldownUntil: this.mysteryBoxCooldownUntil,
+        nextSpawnAt: this.nextSpawnAt,
+        pickupIdSeq: this.pickupIdSeq,
+        pickups: this.pickups,
+        playerId: this.playerId,
+        points: this.points,
+        px: this.px,
+        py: this.py,
+        round: this.round,
+        roundBreakUntil: this.roundBreakUntil,
+        roundTarget: this.roundTarget,
+        sharedRunPlayers: this.sharedRunPlayers,
+        spawnNodes: this.spawnNodes,
+        spawnedThisRound: this.spawnedThisRound,
+        time: this.time,
+        zombieIdSeq: this.zombieIdSeq,
+        zombieProjectileSeq: this.zombieProjectileSeq,
+        zombieProjectiles: this.zombieProjectiles,
+        zombies: this.zombies,
+      });
+      if (broadcastedSnapshot) {
+        this.lastSharedSnapshotSentAt = this.time.now;
+      }
     }
 
     this.updatePromptHud(this.getNearbyInteraction());
-    this.syncPosition();
-    this.updateRemotePlayers();
-    this.applySharedPlayerStateToLocal();
+    const realtimeFrame = {
+      avatarConfig: this.avatarConfig,
+      channel: this.channel,
+      gameOver: this.gameOver,
+      hp: this.hp,
+      isSharedCoopEnabled: () => this.isSharedCoopEnabled(),
+      lastIsMoving: this.lastIsMoving,
+      lastMoveDx: this.lastMoveDx,
+      lastMoveDy: this.lastMoveDy,
+      lastPosSent: this.lastPosSent,
+      playerId: this.playerId,
+      playerUsername: this.playerUsername,
+      px: this.px,
+      py: this.py,
+      remotePlayers: this.remotePlayers,
+      sharedRunPlayers: this.sharedRunPlayers,
+      syncLocalSharedPlayerState: () => this.syncLocalSharedPlayerState(),
+    };
+    stepZombiesRealtimeFrame(realtimeFrame);
+    this.lastPosSent = realtimeFrame.lastPosSent;
+    this.hp = realtimeFrame.hp;
+    this.gameOver = realtimeFrame.gameOver;
     this.player.update(this.lastIsMoving, this.input.activePointer.worldX - this.px, this.lastMoveDy);
     this.player.setPosition(this.px, this.py);
     this.player.setDepth(Math.floor(this.py / 10));
@@ -2681,7 +2892,7 @@ export class ZombiesScene extends Phaser.Scene {
     this.sharedRunPlayers.set(playerId, player);
     if (this.isSharedRunHost()) {
       this.lastSharedSnapshotSentAt = 0;
-      this.maybeScheduleSharedReset();
+      this.scheduleSharedReset();
     }
   }
 
@@ -3231,145 +3442,17 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private tryDropPickup(x: number, y: number) {
-    if (this.pickups.size >= 2) return;
-    const dropRoll = Phaser.Math.FloatBetween(0, 1);
-    let kind: PickupKind | null = null;
-    if (dropRoll <= 0.035) kind = 'max_ammo';
-    else if (dropRoll <= 0.052) kind = 'insta_kill';
-    else if (dropRoll <= 0.07) kind = 'double_points';
-    else if (dropRoll <= 0.08) kind = 'nuke';
-    if (!kind) return;
-
-    const glowColor = kind === 'max_ammo'
-      ? 0x46B3FF
-      : kind === 'insta_kill'
-        ? 0xFF3344
-        : kind === 'double_points'
-          ? 0xF5C842
-          : 0x9BFF4F;
-    const labelColor = kind === 'max_ammo'
-      ? '#7CC9FF'
-      : kind === 'insta_kill'
-        ? '#FF6A6A'
-        : kind === 'double_points'
-          ? '#FFD36A'
-          : '#C9FF89';
-    const labelText = kind === 'max_ammo'
-      ? 'MAX AMMO'
-      : kind === 'insta_kill'
-        ? 'INSTA-KILL'
-        : kind === 'double_points'
-          ? 'DOUBLE PTS'
-          : 'NUKE';
-    const id = `pickup_${++this.pickupIdSeq}`;
-    this.pickups.set(id, this.createPickupEntity({
-      id,
-      kind,
-      x,
-      y,
-      expiresAt: this.time.now + 12000,
-    }, glowColor, labelColor, labelText));
-  }
-
-  private createPickupEntity(
-    snapshot: Omit<PickupState, 'glow' | 'body' | 'label'>,
-    glowColor: number,
-    labelColor: string,
-    labelText: string,
-  ) {
-    const glow = this.add.ellipse(snapshot.x, snapshot.y + 6, 52, 20, glowColor, 0.12).setDepth(90);
-    glow.setStrokeStyle(1, glowColor, 0.45);
-    const body = this.add.rectangle(snapshot.x, snapshot.y - 8, 24, 24, glowColor, 0.8).setDepth(91);
-    body.setStrokeStyle(2, 0xffffff, 0.7);
-    const label = this.add.text(snapshot.x, snapshot.y - 32, labelText, {
-      fontSize: '6px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: labelColor,
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5).setDepth(92);
-
-    this.tweens.add({
-      targets: [glow, body],
-      alpha: { from: 0.82, to: 1 },
-      scaleX: { from: 0.96, to: 1.05 },
-      scaleY: { from: 0.96, to: 1.05 },
-      yoyo: true,
-      repeat: -1,
-      duration: 620,
-      ease: 'Sine.easeInOut',
-    });
-
-    return {
-      ...snapshot,
-      glow,
-      body,
-      label,
-    };
-  }
-
-  private updatePickups() {
-    for (const pickup of [...this.pickups.values()]) {
-      const pulse = Math.sin(this.time.now / 140 + pickup.x * 0.01) * 3;
-      pickup.body.setY(pickup.y - 8 + pulse);
-      pickup.label.setY(pickup.y - 32 + pulse * 0.5);
-      pickup.glow.setY(pickup.y + 6);
-
-      if (this.time.now >= pickup.expiresAt) {
-        this.destroyPickup(pickup.id);
-        continue;
-      }
-
-      const collector = this.getAliveSharedTargets().find((player) =>
-        Phaser.Math.Distance.Between(player.x, player.y, pickup.x, pickup.y) <= 34
-      );
-      if (collector) {
-        this.collectPickup(pickup);
-      }
-    }
-  }
-
-  private collectPickup(pickup: PickupState) {
-    if (pickup.kind === 'max_ammo') {
-      for (const weaponId of this.weaponOrder) {
-        const weapon = this.getWeaponStats(weaponId);
-        const ammo = this.weaponInventory[weaponId];
-        ammo.ammoInMag = weapon.magazineSize;
-        ammo.reserveAmmo = Math.max(ammo.reserveAmmo, weapon.reserveAmmo);
-      }
-      if (this.isSharedRunHost()) {
-        this.broadcastSharedMaxAmmo();
-      }
-      this.showNotice('MAX AMMO', '#46B3FF');
-    } else if (pickup.kind === 'insta_kill') {
-      this.instaKillUntil = this.time.now + 12000;
-      this.showNotice('INSTA-KILL', '#FF6A6A');
-      this.showPowerupBanner('INSTA KILL', '#FF6A6A');
-    } else if (pickup.kind === 'double_points') {
-      this.doublePointsUntil = this.time.now + 15000;
-      this.showNotice('DOUBLE POINTS', '#F5C842');
-      this.showPowerupBanner('DOUBLE POINTS', '#F5C842');
-    } else if (pickup.kind === 'nuke') {
-      this.triggerNuke();
-      this.showNotice('NUKE', '#9BFF4F');
-    }
-
-    const pickupLabel = pickup.kind === 'max_ammo'
-      ? 'MAX AMMO'
-      : pickup.kind === 'insta_kill'
-        ? 'INSTA-KILL'
-        : pickup.kind === 'double_points'
-          ? 'DOUBLE PTS'
-          : 'NUKE';
-    const pickupColor = pickup.kind === 'max_ammo'
-      ? '#7CC9FF'
-      : pickup.kind === 'insta_kill'
-        ? '#FF6A6A'
-        : pickup.kind === 'double_points'
-          ? '#FFD36A'
-          : '#C9FF89';
-    this.showFloatingText(pickupLabel, pickup.x, pickup.y - 26, pickupColor);
-    this.destroyPickup(pickup.id);
+    const pickupScene = this.createPickupSceneContext();
+    const pickupRuntimeState = this.createPickupRuntimeState();
+    runZombiesPickupDropCycle(
+      pickupScene,
+      { x, y },
+    );
+    syncZombiesPickupRuntimeState(
+      pickupRuntimeState,
+      pickupScene,
+    );
+    this.syncPickupRuntimeState(pickupRuntimeState);
   }
 
   private triggerNuke() {
@@ -3380,14 +3463,6 @@ export class ZombiesScene extends Phaser.Scene {
     this.cameras.main.flash(180, 180, 255, 180, false);
   }
 
-  private destroyPickup(id: string) {
-    const pickup = this.pickups.get(id);
-    if (!pickup) return;
-    pickup.glow.destroy();
-    pickup.body.destroy();
-    pickup.label.destroy();
-    this.pickups.delete(id);
-  }
 
   private rollMysteryWeapon(): ZombiesWeaponId {
     const pool = Object.values(ZOMBIES_WEAPONS).filter((weapon) => weapon.mysteryWeight > 0);
@@ -3480,47 +3555,98 @@ export class ZombiesScene extends Phaser.Scene {
       },
     });
 
-    this.channel
-      .on('presence', { event: 'sync' }, () => {
-        this.handleSharedPresenceSync();
-      })
-      .on('broadcast', { event: 'player:join' }, ({ payload }) => {
-        this.handleRemoteState(payload);
-      })
-      .on('broadcast', { event: 'player:move' }, ({ payload }) => {
-        this.handleRemoteState(payload);
-      })
-      .on('broadcast', { event: 'player:leave' }, ({ payload }) => {
-        this.handleRemoteLeave(payload);
-      })
-      .on('broadcast', { event: 'shared:snapshot' }, ({ payload }) => {
-        this.handleSharedSnapshot(payload);
-      })
-      .on('broadcast', { event: 'shared:shot' }, ({ payload }) => {
-        this.handleSharedShot(payload);
-      })
-      .on('broadcast', { event: 'shared:interact' }, ({ payload }) => {
-        this.handleSharedInteractRequest(payload);
-      })
-      .on('broadcast', { event: 'shared:weapon' }, ({ payload }) => {
-        this.handleSharedWeaponGrant(payload);
-      })
-      .on('broadcast', { event: 'shared:max_ammo' }, () => {
-        this.applyMaxAmmoToLocalLoadout();
-      })
-      .on('broadcast', { event: 'shared:reset' }, () => {
-        this.restartRun();
-      })
-      .subscribe(() => {
-        if (this.isSharedCoopEnabled()) {
-          this.channel?.track({
-            player_id: this.playerId,
-            username: this.playerUsername,
-            joined_at: Date.now(),
-          }).catch(() => undefined);
-        }
-        this.broadcastSelfState('player:join');
-      });
+    const realtimeChannel = this.channel as unknown as ZombiesRealtimeChannel;
+
+    connectZombiesRealtimeChannel({
+      avatarConfig: this.avatarConfig,
+      channel: this.channel,
+      isSharedCoopEnabled: () => this.isSharedCoopEnabled(),
+      lastIsMoving: this.lastIsMoving,
+      lastMoveDx: this.lastMoveDx,
+      lastMoveDy: this.lastMoveDy,
+      playerId: this.playerId,
+      playerUsername: this.playerUsername,
+      px: this.px,
+      py: this.py,
+    }, realtimeChannel, {
+      onPresenceSync: () => this.handleSharedPresenceSync(),
+      onRemoteLeave: (payload) => {
+        const playerId = this.readStringField(payload, 'player_id', 'playerId');
+        if (!playerId) return;
+        handleRealtimeRemoteLeave({
+          isSharedRunHost: () => this.isSharedRunHost(),
+          lastSharedSnapshotSentAt: this.lastSharedSnapshotSentAt,
+          maybeScheduleSharedReset: () => { this.scheduleSharedReset(); },
+          remotePlayers: this.remotePlayers,
+          sharedRunPlayers: this.sharedRunPlayers,
+        }, playerId);
+        this.lastSharedSnapshotSentAt = 0;
+      },
+      onRemoteState: (payload) => this.handleRemoteState(payload),
+      onSharedInteract: (payload) => {
+        handleZombiesRealtimeSharedInteractRequest({
+          channel: this.channel,
+          doors: this.doors,
+          isSharedCoopEnabled: () => this.isSharedCoopEnabled(),
+          isSharedRunHost: () => this.isSharedRunHost(),
+          lastSharedSnapshotSentAt: this.lastSharedSnapshotSentAt,
+          playerId: this.playerId,
+          px: this.px,
+          py: this.py,
+          rollSharedMysteryBoxForPlayer: (playerId: string) => this.rollSharedMysteryBoxForPlayer(playerId),
+          sharedRunPlayers: this.sharedRunPlayers,
+          spawnNodes: this.spawnNodes,
+          tryRepairBarricade: (nodeId: string) => this.tryRepairBarricade(nodeId),
+          tryUnlockDoor: (sectionId: string) => this.tryUnlockDoor(sectionId as ZombiesSectionId),
+          upgradeSharedWeaponForPlayer: (playerId: string, weaponId: string) =>
+            this.upgradeSharedWeaponForPlayer(playerId, weaponId as ZombiesWeaponId),
+        }, payload);
+      },
+      onSharedMaxAmmo: () => applySharedMaxAmmoToZombiesLoadout({
+        getWeaponStats: (weaponId: ZombiesWeaponId) => this.getWeaponStats(weaponId),
+        weaponInventory: this.weaponInventory,
+        weaponOrder: this.weaponOrder,
+      }),
+      onSharedReset: () => {
+        handleZombiesRealtimeSharedReset({
+          restartRun: () => this.restartRun(),
+        });
+      },
+      onSharedShot: (payload) => {
+        handleZombiesRealtimeSharedShot({
+          channel: this.channel,
+          fireShotBurst: (
+            playerId,
+            username,
+            originX,
+            originY,
+            targetX,
+            targetY,
+            weapon,
+            isHost,
+          ) => this.fireShotBurst(playerId, username, originX, originY, targetX, targetY, weapon as SharedRunShotPayload, isHost),
+          isSharedCoopEnabled: () => this.isSharedCoopEnabled(),
+          isSharedRunHost: () => this.isSharedRunHost(),
+          playerId: this.playerId,
+          playerUsername: this.playerUsername,
+          px: this.px,
+          py: this.py,
+        }, payload);
+      },
+      onSharedSnapshot: (payload) => this.handleSharedSnapshot(payload),
+      onSharedWeapon: (payload) => {
+        handleZombiesRealtimeSharedWeaponGrant({
+          channel: this.channel,
+          currentWeapon: this.currentWeapon,
+          getWeaponStats: (weaponId: string) => this.getWeaponStats(weaponId as ZombiesWeaponId),
+          isSharedCoopEnabled: () => this.isSharedCoopEnabled(),
+          playerId: this.playerId,
+          showNotice: (text: string, color: string) => this.showNotice(text, color),
+          weaponInventory: this.weaponInventory,
+          weaponOrder: this.weaponOrder,
+        }, payload);
+      },
+    });
   }
 
   private broadcastSelfState(event: 'player:join' | 'player:move') {
@@ -3582,319 +3708,33 @@ export class ZombiesScene extends Phaser.Scene {
     }
   }
 
-  private maybeBroadcastSharedSnapshot(force = false) {
-    if (!this.isSharedRunHost() || !this.channel) return;
-    if (!force && this.time.now - this.lastSharedSnapshotSentAt < 110) return;
-    this.lastSharedSnapshotSentAt = this.time.now;
-    this.channel.send({
-      type: 'broadcast',
-      event: 'shared:snapshot',
-      payload: this.buildSharedSnapshot(),
-    });
-  }
-
-  private buildSharedSnapshot(): SharedRunStateSnapshot {
-    return {
-      host_id: this.playerId,
-      round: this.round,
-      roundTarget: this.roundTarget,
-      spawnedThisRound: this.spawnedThisRound,
-      nextSpawnInMs: Math.max(0, this.nextSpawnAt - this.time.now),
-      roundBreakInMs: Math.max(0, this.roundBreakUntil - this.time.now),
-      bossRoundActive: this.bossRoundActive,
-      bossSpawnedThisRound: this.bossSpawnedThisRound,
-      bossAlive: this.bossAlive,
-      depthsUnlocked: this.depthsUnlocked,
-      points: this.points,
-      zombieIdSeq: this.zombieIdSeq,
-      zombieProjectileSeq: this.zombieProjectileSeq,
-      pickupIdSeq: this.pickupIdSeq,
-      mysteryBoxCooldownInMs: Math.max(0, this.mysteryBoxCooldownUntil - this.time.now),
-      boxRollingInMs: Math.max(0, this.boxRollingUntil - this.time.now),
-      instaKillInMs: Math.max(0, this.instaKillUntil - this.time.now),
-      doublePointsInMs: Math.max(0, this.doublePointsUntil - this.time.now),
-      players: [...this.sharedRunPlayers.values()].map((player) => ({
-        ...player,
-        x: player.player_id === this.playerId ? this.px : player.x,
-        y: player.player_id === this.playerId ? this.py : player.y,
-      })),
-      doors: [...this.doors.values()].map((door) => ({ id: door.id, unlocked: door.unlocked })),
-      spawnNodes: [...this.spawnNodes.values()].map((node) => ({
-        id: node.id,
-        occupiedBy: node.occupiedBy,
-        boardHealth: node.boardHealth,
-        lastUsedAgoMs: Math.max(0, this.time.now - node.lastUsedAt),
-      })),
-      zombies: [...this.zombies.values()].map((zombie) => ({
-        id: zombie.id,
-        type: zombie.type,
-        assetFolder: zombie.assetFolder,
-        displayLabel: zombie.displayLabel,
-        isBoss: zombie.isBoss,
-        x: zombie.x,
-        y: zombie.y,
-        hp: zombie.hp,
-        maxHp: zombie.maxHp,
-        speed: zombie.speed,
-        damage: zombie.damage,
-        attackRange: zombie.attackRange,
-        attackCooldownMs: zombie.attackCooldownMs,
-        hitReward: zombie.hitReward,
-        killReward: zombie.killReward,
-        radius: zombie.radius,
-        state: zombie.state,
-        phase: zombie.phase,
-        alive: zombie.alive,
-        spawnNodeId: zombie.spawnNodeId,
-        breachInMs: Math.max(0, zombie.breachEndsAt - this.time.now),
-        attackCooldownLeftMs: Math.max(0, zombie.attackCooldownMs - (this.time.now - zombie.lastAttackAt)),
-        specialCooldownLeftMs: Math.max(0, 1500 - (this.time.now - zombie.lastSpecialAt)),
-        stompCooldownLeftMs: Math.max(0, 220 - (this.time.now - zombie.lastStompAt)),
-      })),
-      projectiles: [...this.zombieProjectiles.values()].map((projectile) => ({
-        id: projectile.id,
-        x: projectile.x,
-        y: projectile.y,
-        vx: projectile.vx,
-        vy: projectile.vy,
-        damage: projectile.damage,
-        radius: projectile.radius,
-        expiresInMs: Math.max(0, projectile.expiresAt - this.time.now),
-      })),
-      pickups: [...this.pickups.values()].map((pickup) => ({
-        id: pickup.id,
-        kind: pickup.kind,
-        x: pickup.x,
-        y: pickup.y,
-        expiresInMs: Math.max(0, pickup.expiresAt - this.time.now),
-      })),
-    };
-  }
-
   private handleSharedSnapshot(payload: unknown) {
-    if (!this.isSharedCoopEnabled() || this.isSharedRunHost()) return;
-    if (!payload || typeof payload !== 'object') return;
-    const snapshot = payload as SharedRunStateSnapshot;
-    if (!snapshot.host_id) return;
-    this.sharedRunHostId = snapshot.host_id;
-    this.round = snapshot.round;
-    this.roundTarget = snapshot.roundTarget;
-    this.spawnedThisRound = snapshot.spawnedThisRound;
-    this.nextSpawnAt = this.time.now + Math.max(0, snapshot.nextSpawnInMs);
-    this.roundBreakUntil = this.time.now + Math.max(0, snapshot.roundBreakInMs);
-    this.bossRoundActive = snapshot.bossRoundActive;
-    this.bossSpawnedThisRound = snapshot.bossSpawnedThisRound;
-    this.bossAlive = snapshot.bossAlive;
-    this.depthsUnlocked = snapshot.depthsUnlocked;
-    this.points = snapshot.points;
-    this.zombieIdSeq = snapshot.zombieIdSeq;
-    this.zombieProjectileSeq = snapshot.zombieProjectileSeq;
-    this.pickupIdSeq = snapshot.pickupIdSeq;
-    this.mysteryBoxCooldownUntil = this.time.now + Math.max(0, snapshot.mysteryBoxCooldownInMs);
-    this.boxRollingUntil = this.time.now + Math.max(0, snapshot.boxRollingInMs);
-    this.instaKillUntil = this.time.now + Math.max(0, snapshot.instaKillInMs);
-    this.doublePointsUntil = this.time.now + Math.max(0, snapshot.doublePointsInMs);
+    const realtimeSnapshotScene = this.createRealtimeSharedSnapshotScene();
 
-    this.sharedRunPlayers = new Map(snapshot.players.map((player) => ([
-      player.player_id,
-      {
-        ...player,
-        lastDamageAt: player.lastDamageAt ?? 0,
-      },
-    ])));
-    this.applySharedDoors(snapshot.doors);
-    this.applySharedSpawnNodes(snapshot.spawnNodes);
-    this.applySharedZombies(snapshot.zombies);
-    this.applySharedProjectiles(snapshot.projectiles);
-    this.applySharedPickups(snapshot.pickups);
-    this.applySharedPlayerStateToLocal();
-  }
+    const handled = handleZombiesRealtimeSharedSnapshot(
+      realtimeSnapshotScene,
+      payload,
+    );
+    if (!handled) return;
 
-  private applySharedDoors(doors: SharedRunDoorSnapshot[]) {
-    const doorStates = new Map(doors.map((door) => [door.id, door.unlocked]));
-    for (const door of this.doors.values()) {
-      const unlocked = doorStates.get(door.id) ?? false;
-      door.unlocked = unlocked;
-      if (unlocked) {
-        door.panel.setFillStyle(0x1A3525, 0.88);
-        door.panel.setStrokeStyle(2, 0x39FF14, 0.72);
-        door.label.setText('ABIERTO');
-        door.label.setColor('#9EFFB7');
-        door.costText.setText('ACCESO');
-        door.costText.setColor('#39FF14');
-        door.rect = undefined;
-      }
-    }
-    this.updateDepthsAccessVisual();
-  }
-
-  private applySharedSpawnNodes(nodes: SharedRunSpawnNodeSnapshot[]) {
-    const nextNodes = new Map(nodes.map((node) => [node.id, node]));
-    for (const node of this.spawnNodes.values()) {
-      const snapshot = nextNodes.get(node.id);
-      if (!snapshot) continue;
-      node.occupiedBy = snapshot.occupiedBy;
-      node.boardHealth = snapshot.boardHealth;
-      node.lastUsedAt = this.time.now - snapshot.lastUsedAgoMs;
-      this.refreshSpawnNodeVisual(node, 0, Boolean(snapshot.occupiedBy));
-    }
-  }
-
-  private applySharedZombies(zombies: SharedRunZombieSnapshot[]) {
-    const seen = new Set<string>();
-    for (const snapshot of zombies) {
-      seen.add(snapshot.id);
-      let zombie = this.zombies.get(snapshot.id);
-      if (!zombie) {
-        zombie = this.createZombieEntity({
-          id: snapshot.id,
-          type: snapshot.type,
-          assetFolder: snapshot.assetFolder,
-          displayLabel: snapshot.displayLabel,
-          hp: snapshot.hp,
-          maxHp: snapshot.maxHp,
-          speed: snapshot.speed,
-          damage: snapshot.damage,
-          attackRange: snapshot.attackRange,
-          attackCooldownMs: snapshot.attackCooldownMs,
-          hitReward: snapshot.hitReward,
-          killReward: snapshot.killReward,
-          radius: snapshot.radius,
-          isBoss: snapshot.isBoss,
-          x: snapshot.x,
-          y: snapshot.y,
-          phase: snapshot.phase,
-          alive: snapshot.alive,
-          spawnNodeId: snapshot.spawnNodeId,
-          breachEndsAt: this.time.now + snapshot.breachInMs,
-          lastAttackAt: this.time.now - Math.max(0, snapshot.attackCooldownMs - snapshot.attackCooldownLeftMs),
-          lastSpecialAt: this.time.now - Math.max(0, 1500 - snapshot.specialCooldownLeftMs),
-          lastStompAt: this.time.now - Math.max(0, 220 - snapshot.stompCooldownLeftMs),
-          state: snapshot.state,
-        });
-        this.zombies.set(snapshot.id, zombie);
-      }
-      zombie.type = snapshot.type;
-      zombie.assetFolder = snapshot.assetFolder;
-      zombie.displayLabel = snapshot.displayLabel;
-      zombie.isBoss = snapshot.isBoss;
-      zombie.x = snapshot.x;
-      zombie.y = snapshot.y;
-      zombie.hp = snapshot.hp;
-      zombie.maxHp = snapshot.maxHp;
-      zombie.speed = snapshot.speed;
-      zombie.damage = snapshot.damage;
-      zombie.attackRange = snapshot.attackRange;
-      zombie.attackCooldownMs = snapshot.attackCooldownMs;
-      zombie.hitReward = snapshot.hitReward;
-      zombie.killReward = snapshot.killReward;
-      zombie.radius = snapshot.radius;
-      zombie.state = snapshot.state;
-      zombie.phase = snapshot.phase;
-      zombie.alive = snapshot.alive;
-      zombie.spawnNodeId = snapshot.spawnNodeId;
-      zombie.breachEndsAt = this.time.now + snapshot.breachInMs;
-      zombie.lastAttackAt = this.time.now - Math.max(0, snapshot.attackCooldownMs - snapshot.attackCooldownLeftMs);
-      zombie.lastSpecialAt = this.time.now - Math.max(0, 1500 - snapshot.specialCooldownLeftMs);
-      zombie.lastStompAt = this.time.now - Math.max(0, 220 - snapshot.stompCooldownLeftMs);
-      zombie.container.setPosition(zombie.x, zombie.y);
-      zombie.shadow.setPosition(zombie.x, zombie.y + zombie.radius + 8);
-      zombie.container.setDepth(Math.floor(zombie.y / 10));
-      zombie.shadow.setDepth(zombie.container.depth - 1);
-      this.renderZombieHp(zombie);
-      this.setZombieState(zombie, zombie.state);
-    }
-
-    for (const zombie of [...this.zombies.values()]) {
-      if (seen.has(zombie.id)) continue;
-      this.safeDestroyZombieVisual(zombie);
-      this.zombies.delete(zombie.id);
-    }
-  }
-
-  private applySharedProjectiles(projectiles: SharedRunProjectileSnapshot[]) {
-    const seen = new Set<string>();
-    for (const snapshot of projectiles) {
-      seen.add(snapshot.id);
-      let projectile = this.zombieProjectiles.get(snapshot.id);
-      if (!projectile) {
-        projectile = this.createZombieProjectileEntity({
-          id: snapshot.id,
-          x: snapshot.x,
-          y: snapshot.y,
-          vx: snapshot.vx,
-          vy: snapshot.vy,
-          damage: snapshot.damage,
-          radius: snapshot.radius,
-          expiresAt: this.time.now + snapshot.expiresInMs,
-        });
-        this.zombieProjectiles.set(snapshot.id, projectile);
-      }
-      projectile.x = snapshot.x;
-      projectile.y = snapshot.y;
-      projectile.vx = snapshot.vx;
-      projectile.vy = snapshot.vy;
-      projectile.damage = snapshot.damage;
-      projectile.radius = snapshot.radius;
-      projectile.expiresAt = this.time.now + snapshot.expiresInMs;
-      projectile.body.setPosition(projectile.x, projectile.y);
-      projectile.glow.setPosition(projectile.x, projectile.y);
-    }
-
-    for (const projectile of [...this.zombieProjectiles.values()]) {
-      if (seen.has(projectile.id)) continue;
-      this.destroyZombieProjectile(projectile.id);
-    }
-  }
-
-  private applySharedPickups(pickups: SharedRunPickupSnapshot[]) {
-    const seen = new Set<string>();
-    for (const snapshot of pickups) {
-      seen.add(snapshot.id);
-      let pickup = this.pickups.get(snapshot.id);
-      const glowColor = snapshot.kind === 'max_ammo'
-        ? 0x46B3FF
-        : snapshot.kind === 'insta_kill'
-          ? 0xFF3344
-          : snapshot.kind === 'double_points'
-            ? 0xF5C842
-            : 0x9BFF4F;
-      const labelColor = snapshot.kind === 'max_ammo'
-        ? '#7CC9FF'
-        : snapshot.kind === 'insta_kill'
-          ? '#FF6A6A'
-          : snapshot.kind === 'double_points'
-            ? '#FFD36A'
-            : '#C9FF89';
-      const labelText = snapshot.kind === 'max_ammo'
-        ? 'MAX AMMO'
-        : snapshot.kind === 'insta_kill'
-          ? 'INSTA-KILL'
-          : snapshot.kind === 'double_points'
-            ? 'DOUBLE PTS'
-            : 'NUKE';
-      if (!pickup) {
-        pickup = this.createPickupEntity({
-          id: snapshot.id,
-          kind: snapshot.kind,
-          x: snapshot.x,
-          y: snapshot.y,
-          expiresAt: this.time.now + snapshot.expiresInMs,
-        }, glowColor, labelColor, labelText);
-        this.pickups.set(snapshot.id, pickup);
-      }
-      pickup.x = snapshot.x;
-      pickup.y = snapshot.y;
-      pickup.expiresAt = this.time.now + snapshot.expiresInMs;
-      pickup.body.setPosition(pickup.x, pickup.y - 8);
-      pickup.label.setPosition(pickup.x, pickup.y - 32);
-      pickup.glow.setPosition(pickup.x, pickup.y + 6);
-    }
-
-    for (const pickup of [...this.pickups.values()]) {
-      if (seen.has(pickup.id)) continue;
-      this.destroyPickup(pickup.id);
-    }
+    this.bossAlive = realtimeSnapshotScene.bossAlive;
+    this.bossRoundActive = realtimeSnapshotScene.bossRoundActive;
+    this.bossSpawnedThisRound = realtimeSnapshotScene.bossSpawnedThisRound;
+    this.boxRollingUntil = realtimeSnapshotScene.boxRollingUntil;
+    this.depthsUnlocked = realtimeSnapshotScene.depthsUnlocked;
+    this.doublePointsUntil = realtimeSnapshotScene.doublePointsUntil;
+    this.mysteryBoxCooldownUntil = realtimeSnapshotScene.mysteryBoxCooldownUntil;
+    this.nextSpawnAt = realtimeSnapshotScene.nextSpawnAt;
+    this.pickupIdSeq = realtimeSnapshotScene.pickupIdSeq;
+    this.points = realtimeSnapshotScene.points;
+    this.round = realtimeSnapshotScene.round;
+    this.roundBreakUntil = realtimeSnapshotScene.roundBreakUntil;
+    this.roundTarget = realtimeSnapshotScene.roundTarget;
+    this.sharedRunHostId = realtimeSnapshotScene.sharedRunHostId ?? null;
+    this.sharedRunPlayers = realtimeSnapshotScene.sharedRunPlayers;
+    this.spawnedThisRound = realtimeSnapshotScene.spawnedThisRound;
+    this.zombieIdSeq = realtimeSnapshotScene.zombieIdSeq;
+    this.zombieProjectileSeq = realtimeSnapshotScene.zombieProjectileSeq;
   }
 
   private broadcastSharedShot(payload: SharedRunShotPayload) {
@@ -3906,22 +3746,6 @@ export class ZombiesScene extends Phaser.Scene {
     });
   }
 
-  private handleSharedShot(payload: unknown) {
-    if (!this.isSharedCoopEnabled() || !payload || typeof payload !== 'object') return;
-    const shot = payload as SharedRunShotPayload;
-    if (!shot.player_id || shot.player_id === this.playerId) return;
-    this.fireShotBurst(
-      shot.player_id,
-      shot.username,
-      shot.originX,
-      shot.originY,
-      shot.targetX,
-      shot.targetY,
-      shot,
-      this.isSharedRunHost(),
-    );
-  }
-
   private broadcastSharedInteract(payload: SharedRunInteractPayload) {
     if (!this.isSharedCoopEnabled() || !this.channel) return;
     this.channel.send({
@@ -3929,46 +3753,6 @@ export class ZombiesScene extends Phaser.Scene {
       event: 'shared:interact',
       payload,
     });
-  }
-
-  private handleSharedInteractRequest(payload: unknown) {
-    if (!this.isSharedRunHost() || !payload || typeof payload !== 'object') return;
-    const request = payload as SharedRunInteractPayload;
-    const actor = this.sharedRunPlayers.get(request.player_id);
-    if (!actor || !actor.alive) return;
-
-    // Prefer position from payload (fresh) over stored position (up to 66ms stale)
-    const ax = request.px ?? actor.x;
-    const ay = request.py ?? actor.y;
-
-    if (request.kind === 'door' && request.sectionId) {
-      const door = this.doors.get(request.sectionId);
-      if (!door?.rect || door.unlocked) return;
-      const expandedDoor = new Phaser.Geom.Rectangle(door.rect.x - 35, door.rect.y - 35, door.rect.width + 70, door.rect.height + 70);
-      if (!Phaser.Geom.Rectangle.Contains(expandedDoor, ax, ay)) return;
-      this.tryUnlockDoor(request.sectionId);
-      this.lastSharedSnapshotSentAt = 0;
-      return;
-    }
-
-    if (request.kind === 'repair' && request.nodeId) {
-      const node = this.spawnNodes.get(request.nodeId);
-      if (!node || Phaser.Math.Distance.Between(ax, ay, node.x, node.y) > 78) return;
-      this.tryRepairBarricade(request.nodeId);
-      this.lastSharedSnapshotSentAt = 0;
-      return;
-    }
-
-    if (request.kind === 'box') {
-      if (Phaser.Math.Distance.Between(ax, ay, BOX_POS.x, BOX_POS.y) > 74) return;
-      this.rollSharedMysteryBoxForPlayer(request.player_id);
-      return;
-    }
-
-    if (request.kind === 'upgrade' && request.weaponId) {
-      if (Phaser.Math.Distance.Between(ax, ay, PACK_POS.x, PACK_POS.y) > 76) return;
-      this.upgradeSharedWeaponForPlayer(request.player_id, request.weaponId);
-    }
   }
 
   private rollSharedMysteryBoxForPlayer(playerId: string) {
@@ -4037,11 +3821,6 @@ export class ZombiesScene extends Phaser.Scene {
     });
   }
 
-  private handleSharedWeaponGrant(payload: unknown) {
-    if (!payload || typeof payload !== 'object') return;
-    this.applySharedWeaponGrant(payload as SharedRunWeaponGrantPayload);
-  }
-
   private applySharedWeaponGrant(payload: SharedRunWeaponGrantPayload) {
     if (payload.player_id !== this.playerId) return;
     if (!payload.ok) {
@@ -4073,40 +3852,6 @@ export class ZombiesScene extends Phaser.Scene {
     }
   }
 
-  private broadcastSharedMaxAmmo() {
-    if (!this.isSharedCoopEnabled() || !this.channel) return;
-    this.channel.send({
-      type: 'broadcast',
-      event: 'shared:max_ammo',
-      payload: { host_id: this.playerId },
-    });
-  }
-
-  private applyMaxAmmoToLocalLoadout() {
-    for (const weaponId of this.weaponOrder) {
-      const weapon = this.getWeaponStats(weaponId);
-      const ammo = this.weaponInventory[weaponId];
-      ammo.ammoInMag = weapon.magazineSize;
-      ammo.reserveAmmo = Math.max(ammo.reserveAmmo, weapon.reserveAmmo);
-    }
-  }
-
-  private maybeScheduleSharedReset() {
-    if (!this.isSharedRunHost() || this.sharedResetPending) return;
-    if ([...this.sharedRunPlayers.values()].some((player) => player.alive)) return;
-    this.sharedResetPending = true;
-    this.showNotice('TEAM WIPE - REINICIANDO', '#FF6A6A');
-    this.time.delayedCall(2200, () => {
-      this.sharedResetPending = false;
-      this.channel?.send({
-        type: 'broadcast',
-        event: 'shared:reset',
-        payload: { host_id: this.playerId },
-      });
-      this.restartRun();
-    });
-  }
-
   private updateRemotePlayers() {
     for (const [playerId, remote] of this.remotePlayers.entries()) {
       remote.x = Phaser.Math.Linear(remote.x, remote.targetX, 0.18);
@@ -4123,47 +3868,17 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private handleRemoteState(payload: unknown) {
-    const next = this.parseRemoteState(payload);
-    if (!next || next.player_id === this.playerId) return;
-    if (!this.remotePlayers.has(next.player_id)) {
-      this.spawnRemotePlayer(next.player_id, next.username, next.x, next.y, next.avatar ?? {});
-    }
-    const remote = this.remotePlayers.get(next.player_id)!;
-    remote.targetX = next.x;
-    remote.targetY = next.y;
-    remote.moveDx = next.dir ?? 0;
-    remote.moveDy = next.dy ?? 0;
-    remote.isMoving = next.moving ?? false;
-    remote.username = next.username;
-    remote.nameplate.setText(next.username);
-    if (this.isSharedCoopEnabled()) {
-      const current = this.sharedRunPlayers.get(next.player_id);
-      this.sharedRunPlayers.set(next.player_id, {
-        player_id: next.player_id,
-        username: next.username,
-        x: next.x,
-        y: next.y,
-        hp: current?.hp ?? ZOMBIES_PLAYER.maxHp,
-        alive: current?.alive ?? true,
-        joinedAt: current?.joinedAt ?? Date.now(),
-        lastDamageAt: current?.lastDamageAt ?? 0,
-      });
-    }
-  }
-
-  private handleRemoteLeave(payload: unknown) {
-    const playerId = this.readStringField(payload, 'player_id', 'playerId');
-    if (!playerId) return;
-    const remote = this.remotePlayers.get(playerId);
-    if (!remote) return;
-    remote.avatar.destroy();
-    remote.nameplate.destroy();
-    this.remotePlayers.delete(playerId);
-    this.sharedRunPlayers.delete(playerId);
-    if (this.isSharedRunHost()) {
-      this.lastSharedSnapshotSentAt = 0;
-      this.maybeScheduleSharedReset();
-    }
+    handleRealtimeRemoteState({
+      isSharedCoopEnabled: () => this.isSharedCoopEnabled(),
+      playerId: this.playerId,
+      readBooleanField: (nextPayload: unknown, ...keys: string[]) => this.readBooleanField(nextPayload, ...keys),
+      readNumberField: (nextPayload: unknown, ...keys: string[]) => this.readNumberField(nextPayload, ...keys),
+      readStringField: (nextPayload: unknown, ...keys: string[]) => this.readStringField(nextPayload, ...keys),
+      remotePlayers: this.remotePlayers,
+      sharedRunPlayers: this.sharedRunPlayers,
+      spawnRemotePlayer: (playerId: string, username: string, x: number, y: number, avatarConfig: AvatarConfig) =>
+        this.spawnRemotePlayer(playerId, username, x, y, avatarConfig),
+    }, payload);
   }
 
   private spawnRemotePlayer(playerId: string, username: string, x: number, y: number, avatarConfig: AvatarConfig) {
@@ -4294,20 +4009,13 @@ export class ZombiesScene extends Phaser.Scene {
       this.input.off('pointerdown', this.pointerDownHandler);
       this.pointerDownHandler = undefined;
     }
-    if (this.channel) {
-      this.channel.send({
-        type: 'broadcast',
-        event: 'player:leave',
-        payload: { player_id: this.playerId },
-      });
-      this.channel.unsubscribe();
-      this.channel = null;
-    }
-    this.remotePlayers.forEach((remote) => {
-      remote.avatar.destroy();
-      remote.nameplate.destroy();
-    });
-    this.remotePlayers.clear();
+    const realtimeSession = {
+      channel: this.channel,
+      playerId: this.playerId,
+      remotePlayers: this.remotePlayers,
+    };
+    teardownZombiesRealtimeSession(realtimeSession);
+    this.channel = realtimeSession.channel;
     this.chatSystem?.destroy();
     this.chatSystem = undefined;
     this.cleanupFns.forEach((cleanup) => cleanup());

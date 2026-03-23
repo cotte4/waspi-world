@@ -1,69 +1,26 @@
-'use client';
+﻿'use client';
 
 import dynamic from 'next/dynamic';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 import { CHAT } from '@/src/game/config/constants';
-import { CATALOG, getItem as getCatalogItem, type CatalogItem } from '@/src/game/config/catalog';
-import { getInventory, equipItem, hasUtilityEquipped, replaceInventory } from '@/src/game/systems/InventorySystem';
-import { loadAudioSettings, saveAudioSettings, type AudioSettings } from '@/src/game/systems/AudioSettings';
-import { applyOutputSinkToSfxContext } from '@/src/game/systems/AudioManager';
-import {
-  applySinkIdToAudioContext,
-  getStoredAudioOutputDeviceId,
-  setStoredAudioOutputDeviceId,
-} from '@/src/game/systems/audioOutputSink';
-import { loadHudSettings, saveHudSettings, type HudSettings } from '@/src/game/systems/HudSettings';
-import {
-  assignActionBinding,
-  assignMovementBinding,
-  clearVirtualJoystickState,
-  formatMovementBindingLabel,
-  isSupportedActionBindingCode,
-  isSupportedMovementBindingCode,
-  loadControlSettings,
-  saveControlSettings,
-  type ActionBinding,
-  type ControlSettings,
-  type MovementDirection,
-} from '@/src/game/systems/ControlSettings';
+import { CATALOG, type CatalogItem } from '@/src/game/config/catalog';
+import { loadAudioSettings } from '@/src/game/systems/AudioSettings';
+import { applySinkIdToAudioContext, getStoredAudioOutputDeviceId } from '@/src/game/systems/audioOutputSink';
+import { clearVirtualJoystickState } from '@/src/game/systems/ControlSettings';
 import { getLevelFloorXp, getMaxProgressionLevel, loadProgressionState, type ProgressionState } from '@/src/game/systems/ProgressionSystem';
-import { initStatsSystem, getStats, type PlayerStats } from '@/src/game/systems/StatsSystem';
-import { supabase } from '@/src/lib/supabase';
-import { getTenksBalance, initTenks, initTenksFromServer } from '@/src/game/systems/TenksSystem';
-import { mutePlayer, normalizePlayerState, grantInventoryItem, type PlayerState } from '@/src/lib/playerState';
-import { reconcileInventoryFromDB } from '@/src/lib/commercePersistence';
-import { track } from '@/src/lib/analytics';
-import { CHAT_SCENES, INTERIOR_SOCIAL_SCENES, JOYSTICK_SCENES, MAGIC_LINK_COOLDOWN_KEY, MAGIC_LINK_COOLDOWN_MS, VOICE_MIC_DEVICE_KEY } from '@/app/play/lib/playPageConstants';
-import {
-  getInitialCheckoutState,
-  getInitialMagicLinkCooldownUntil,
-  getInitialSelectedMicDeviceId,
-  loadStoredAvatarConfig,
-  loadStoredMutedPlayers,
-  loadStoredPlayerState,
-  mergeHydratedPlayerState,
-  saveStoredAvatarConfig,
-  saveStoredPlayerState,
-} from '@/app/play/lib/playPageStorage';
+import { usePlayPageSceneEvents } from '@/app/play/hooks/usePlayPageSceneEvents';
+import { usePlayPageAuth } from '@/app/play/hooks/usePlayPageAuth';
+import { usePlayPageChat } from '@/app/play/hooks/usePlayPageChat';
+import { usePlayPageMobileControls } from '@/app/play/hooks/usePlayPageMobileControls';
+import { usePlayPagePlayerState } from '@/app/play/hooks/usePlayPagePlayerState';
+import { usePlayPageShop } from '@/app/play/hooks/usePlayPageShop';
+import { usePlayPageSettings } from '@/app/play/hooks/usePlayPageSettings';
+import { usePlayPageStats } from '@/app/play/hooks/usePlayPageStats';
+import { loadStoredMutedPlayers } from '@/app/play/lib/playPageStorage';
 import type {
-  ChatMsg,
   CombatStats,
-  FarmActionRequestPayload,
-  OrderRow,
-  ParcelBuyPayload,
-  PenaltyResultPayload,
-  PlayerActionsPayload,
-  PlayerInfo,
-  PresencePlayer,
-  SettingsTab,
-  ShopOpenPayload,
-  ShopTab,
-  VecindadSharedPayload,
-  VecindadUpdatePayload,
 } from '@/app/play/types';
-import type { SharedParcelState } from '@/src/lib/vecindad';
 
 const PhaserGame = dynamic(() => import('@/app/components/PhaserGame'), { ssr: false });
 const JukeboxOverlay = dynamic(() => import('@/app/components/JukeboxOverlay'), { ssr: false });
@@ -96,56 +53,17 @@ const PvpHUD = dynamic(() => import('@/app/components/PvpHUD'), { ssr: false });
 const WorldHUD = dynamic(() => import('@/app/components/WorldHUD'), { ssr: false });
 
 export default function PlayPage() {
-  const initialInventory = useMemo(() => getInventory(), []);
-  const initialCheckout = useMemo(() => getInitialCheckoutState(), []);
-  const initialAudioSettings = useMemo(() => loadAudioSettings(), []);
-  const initialHudSettings = useMemo(() => loadHudSettings(), []);
-  const initialControlSettings = useMemo(() => loadControlSettings(), []);
   const initialProgression = useMemo(() => loadProgressionState(), []);
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [input, setInput] = useState('');
-  const [lastSent, setLastSent] = useState(0);
-  const [playerInfo, setPlayerInfo] = useState<PlayerInfo | null>(null);
   const [, setConnected] = useState(false);
-  const [presencePlayers, setPresencePlayers] = useState<PresencePlayer[]>([]);
   const [, setCombatStats] = useState<CombatStats>({ kills: 0, deaths: 0 });
   const [progression, setProgression] = useState<ProgressionState>(initialProgression);
-  const [playerState, setPlayerState] = useState<PlayerState | null>(null);
-  const [tenks, setTenks] = useState<number | null>(null);
   const [, setTenksAnimating] = useState(false);
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [smoking, setSmoking] = useState(false);
-  const [owned, setOwned] = useState<string[]>(initialInventory.owned);
-  const [equipped, setEquipped] = useState<{ top?: string; bottom?: string }>(initialInventory.equipped);
-  const [gunOn, setGunOn] = useState((initialInventory.equipped.utility ?? []).includes('UTIL-GUN-01'));
-  const [ballOn, setBallOn] = useState((initialInventory.equipped.utility ?? []).includes('UTIL-BALL-01'));
   const [activeScene, setActiveScene] = useState('');
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingSlide, setOnboardingSlide] = useState(0);
-  const [authEmail, setAuthEmail] = useState<string | null>(null);
-  const [emailInput, setEmailInput] = useState('');
-  const [authBusy, setAuthBusy] = useState(false);
-  const [authStatus, setAuthStatus] = useState('');
-  const [magicLinkCooldownUntil, setMagicLinkCooldownUntil] = useState(getInitialMagicLinkCooldownUntil);
   const [uiNotice, setUiNotice] = useState<{ msg: string; color?: string } | null>(null);
-  const [shopOpen, setShopOpen] = useState(initialCheckout.open);
-  const [shopSource, setShopSource] = useState(initialCheckout.open ? 'checkout_return' : '');
-  const [shopTab, setShopTab] = useState<ShopTab>(initialCheckout.tab);
-  const [shopItems, setShopItems] = useState<CatalogItem[]>([]);
-  const [checkoutBusyId, setCheckoutBusyId] = useState<string | null>(null);
-  const [shopStatus, setShopStatus] = useState(initialCheckout.status);
-  const [selectedSize, setSelectedSize] = useState<string>('');
-  const [discountCodeInput, setDiscountCodeInput] = useState('');
-  const [checkoutRedirecting, setCheckoutRedirecting] = useState(false);
-  const [orders, setOrders] = useState<OrderRow[]>([]);
-  const [ordersLoading, setOrdersLoading] = useState(false);
-  const [ordersLoaded, setOrdersLoaded] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-  const [isPortrait, setIsPortrait] = useState(false);
-  const [showMobileHint, setShowMobileHint] = useState(false);
-  const [playerActions, setPlayerActions] = useState<PlayerActionsPayload | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [statsOpen, setStatsOpen] = useState(false);
   const [leaderboardOpen, setLeaderboardOpen] = useState(false);
   const [skillTreeOpen, setSkillTreeOpen] = useState(false);
   const [zombiesHudActive, setZombiesHudActive] = useState(false);
@@ -156,46 +74,39 @@ export default function PlayPage() {
   const [flappyHudActive, setFlappyHudActive] = useState(false);
   const [dinoHudActive, setDinoHudActive] = useState(false);
   const [pvpHudActive, setPvpHudActive] = useState(false);
-  const [statsData, setStatsData] = useState<PlayerStats | null>(null);
-  const [statsLoading, setStatsLoading] = useState(false);
-  const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
-  const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedMicDeviceId, setSelectedMicDeviceId] = useState<string>(getInitialSelectedMicDeviceId);
-  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(() =>
-    typeof window !== 'undefined' && window.localStorage.getItem('waspi_voice_pref') === 'on'
-  );
-  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<string>(() =>
-    typeof window !== 'undefined' ? getStoredAudioOutputDeviceId() : ''
-  );
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>('audio');
   const [jukeboxOpen, setJukeboxOpen] = useState(false);
-  const [audioSettings, setAudioSettings] = useState<AudioSettings>(initialAudioSettings);
-  const [hudSettings, setHudSettings] = useState<HudSettings>(initialHudSettings);
-  const [controlSettings, setControlSettings] = useState<ControlSettings>(initialControlSettings);
-  const [bindingCaptureDirection, setBindingCaptureDirection] = useState<MovementDirection | null>(null);
-  const [bindingCaptureAction, setBindingCaptureAction] = useState<ActionBinding | null>(null);
   const [rescueArmed, setRescueArmed] = useState(false);
   const [activeActivities, setActiveActivities] = useState<ReadonlySet<string>>(new Set());
   const audioCtxRef = useRef<AudioContext | null>(null);
   const tokenRef = useRef<string | null>(null);
-  const playerStateRef = useRef<PlayerState | null>(null);
   const activeSceneRef = useRef('');
   /** Escena Phaser anterior (para no re-abrir onboarding al volver del interior con ESC). */
   const previousPhaserSceneRef = useRef('');
-  const suppressSyncRef = useRef(false);
   const mutedPlayersRef = useRef<string[]>(loadStoredMutedPlayers());
-  const lastInteriorChatSentRef = useRef(0);
-  const logRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   const rescueTimeoutRef = useRef<number | null>(null);
-  const [chatEnabled, setChatEnabled] = useState(true);
-  const chatVisible = chatEnabled && CHAT_SCENES.has(activeScene);
-  const isAuthenticated = Boolean(authEmail);
 
-  const clothingItems = useMemo(
-    () => (shopItems.length ? shopItems : CATALOG).filter((item) => item.slot !== 'utility' && item.priceTenks > 0),
-    [shopItems]
-  );
+  const {
+    applyPlayerState,
+    ballOn,
+    equipped,
+    gunOn,
+    handleEquipOwnedItem,
+    hydratePlayerState,
+    owned,
+    playerState,
+    refreshPlayerState,
+    setBallOn,
+    setEquipped,
+    setGunOn,
+    setOwned,
+    setTenks,
+    syncPlayerState,
+    tenks,
+  } = usePlayPagePlayerState({
+    tokenRef,
+    mutedPlayersRef,
+    activeScene,
+  });
 
   const playUiSfx = useCallback((freq: number, duration: number, sweep?: number) => {
     try {
@@ -224,526 +135,174 @@ export default function PlayPage() {
     } catch { /* silent fail */ }
   }, []);
 
-  const applyPlayerState = useCallback((player: PlayerState) => {
-    suppressSyncRef.current = true;
-    playerStateRef.current = player;
-    saveStoredAvatarConfig({
-      ...loadStoredAvatarConfig(),
-      ...player.avatar,
-    });
-    saveStoredPlayerState(player);
-    replaceInventory(player.inventory);
-    initTenks(player.tenks);
-    mutedPlayersRef.current = player.mutedPlayers ?? [];
-    setPlayerState(player);
-    setOwned(player.inventory.owned);
-    setEquipped(player.inventory.equipped);
-    setGunOn((player.inventory.equipped.utility ?? []).includes('UTIL-GUN-01'));
-    setBallOn((player.inventory.equipped.utility ?? []).includes('UTIL-BALL-01'));
-    setTenks(player.tenks);
-    eventBus.emit(EVENTS.PARCEL_STATE_CHANGED, player.vecindad);
-    queueMicrotask(() => {
-      suppressSyncRef.current = false;
-    });
-  }, []);
+  const {
+    authBusy,
+    authStatus,
+    emailInput,
+    isAuthenticated,
+    sendMagicLink,
+    setEmailInput,
+    signInWithGoogle,
+  } = usePlayPageAuth({
+    hydratePlayerState,
+  });
 
-  const syncPlayerState = useCallback(async (overridePlayerState?: PlayerState) => {
-    if (suppressSyncRef.current && !overridePlayerState) return;
-    const token = tokenRef.current;
-    if (!token) return;
+  const {
+    buyShopItem,
+    checkoutBusyId,
+    checkoutRedirecting,
+    closeShop,
+    clothingItems,
+    discountCodeInput,
+    loadOrders,
+    openShop,
+    orders,
+    ordersLoaded,
+    ordersLoading,
+    selectedSize,
+    setDiscountCodeInput,
+    setSelectedSize,
+    setCheckoutRedirecting,
+    setShopOpen,
+    setShopSource,
+    setShopStatus,
+    setShopTab,
+    shopOpen,
+    shopStatus,
+    shopTab,
+    startStripeCheckout,
+  } = usePlayPageShop({
+    tokenRef,
+    applyPlayerState,
+    refreshPlayerState,
+    isAuthenticated,
+    activeScene,
+  });
 
-    const base = overridePlayerState ?? playerStateRef.current;
-    const nextPlayer: PlayerState = {
-      ...(base ?? {
-        tenks: getTenksBalance(),
-        inventory: getInventory(),
-        avatar: loadStoredAvatarConfig(),
-        mutedPlayers: mutedPlayersRef.current,
-        vecindad: {
-          ownedParcelId: undefined,
-          buildStage: 0,
-          materials: 0,
-        },
-      }),
-      tenks: getTenksBalance(),
-      inventory: getInventory(),
-      avatar: loadStoredAvatarConfig(),
-      mutedPlayers: base?.mutedPlayers ?? mutedPlayersRef.current,
-      vecindad: base?.vecindad ?? {
-        ownedParcelId: undefined,
-        buildStage: 0,
-        materials: 0,
-      },
-    };
+  const {
+    audioSettings,
+    bindingCaptureAction,
+    bindingCaptureDirection,
+    closeSettings,
+    controlSettings,
+    hudSettings,
+    micDevices,
+    onAudioChange,
+    onControlChange,
+    onHudChange,
+    onVoiceEnabledChange,
+    openSettings,
+    outputDevices,
+    selectedMicDeviceId,
+    selectedOutputDeviceId,
+    setBindingCaptureAction,
+    setBindingCaptureDirection,
+    setSelectedMicDeviceId,
+    setSelectedOutputDeviceId,
+    setSettingsTab,
+    settingsOpen,
+    settingsTab,
+    voiceEnabled,
+  } = usePlayPageSettings({
+    audioCtxRef,
+    jukeboxOpen,
+    setUiNotice,
+  });
 
-    await fetch('/api/player', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        player: {
-          ...nextPlayer,
-      } satisfies PlayerState,
-      }),
-    }).catch(() => undefined);
-  }, []);
+  const {
+    chatEnabled,
+    chatVisible,
+    handleInputBlur,
+    handleInputFocus,
+    handleInputKeyDown,
+    handleMutePlayer,
+    handleReportPlayer,
+    input,
+    inputRef,
+    isChatScene,
+    logRef,
+    messages,
+    playerActions,
+    playerInfo,
+    presencePlayers,
+    setInput,
+    setMessages,
+    setPlayerActions,
+    setPlayerInfo,
+    setPresencePlayers,
+  } = usePlayPageChat({
+    activeScene,
+    applyPlayerState,
+    chatBinding: controlSettings.actionBindings.chat,
+    inventoryBinding: controlSettings.actionBindings.inventory,
+    jukeboxOpen,
+    mutedPlayersRef,
+    playUiSfx,
+    playerState,
+    setShopStatus,
+    syncPlayerState,
+    tokenRef,
+  });
 
-  const persistInventoryState = useCallback((inventory = getInventory()) => {
-    setOwned(inventory.owned);
-    setEquipped(inventory.equipped);
-    setGunOn((inventory.equipped.utility ?? []).includes('UTIL-GUN-01'));
-    setBallOn((inventory.equipped.utility ?? []).includes('UTIL-BALL-01'));
+  const {
+    closeStats,
+    openStats,
+    statsData,
+    statsLoading,
+    statsOpen,
+  } = usePlayPageStats({
+    tokenRef,
+  });
 
-    const currentPlayer = playerStateRef.current;
-    if (!currentPlayer) return;
+  const {
+    isMobile,
+    isPortrait,
+    joystickVisible,
+    showMobileHint,
+  } = usePlayPageMobileControls({
+    activeScene,
+    showVirtualJoystick: controlSettings.showVirtualJoystick,
+  });
 
-    const equippedTop = inventory.equipped.top ? getCatalogItem(inventory.equipped.top) : null;
-    const equippedBottom = inventory.equipped.bottom ? getCatalogItem(inventory.equipped.bottom) : null;
-
-    const nextPlayer = normalizePlayerState({
-      ...currentPlayer,
-      inventory,
-      avatar: {
-        ...currentPlayer.avatar,
-        ...(equippedTop ? { topColor: equippedTop.color ?? currentPlayer.avatar.topColor } : {}),
-        ...(equippedBottom ? { bottomColor: equippedBottom.color ?? currentPlayer.avatar.bottomColor } : {}),
-      },
-    });
-
-    playerStateRef.current = nextPlayer;
-    saveStoredAvatarConfig({
-      ...loadStoredAvatarConfig(),
-      ...nextPlayer.avatar,
-    });
-    saveStoredPlayerState(nextPlayer);
-    setPlayerState(nextPlayer);
-    void syncPlayerState(nextPlayer);
-  }, [syncPlayerState]);
-
-  const handleEquipOwnedItem = useCallback((itemId: string) => {
-    equipItem(itemId);
-    persistInventoryState(getInventory());
-  }, [persistInventoryState]);
-
-  const loadVecindadSharedState = useCallback(async (session?: Session | null) => {
-    const headers: HeadersInit = {};
-    const token = session?.access_token ?? tokenRef.current;
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    const res = await fetch('/api/vecindad', {
-      method: 'GET',
-      headers,
-    }).catch(() => null);
-
-    if (!res?.ok) return null;
-    const json = await res.json().catch(() => null) as { parcels?: SharedParcelState[] } | null;
-    if (json?.parcels) {
-      eventBus.emit(EVENTS.VECINDAD_SHARED_STATE_CHANGED, {
-        parcels: json.parcels,
-        broadcast: false,
-      } satisfies VecindadSharedPayload);
-    }
-    return json;
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const update = () => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      setIsMobile(w <= 768);
-      setIsPortrait(w < h);
-    };
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, []);
-
-  useEffect(() => {
-    const unsubChat = eventBus.on(EVENTS.CHAT_RECEIVED, (msg: unknown) => {
-      const m = msg as Omit<ChatMsg, 'id'>;
-      if (!m.isMe && mutedPlayersRef.current.includes(m.playerId)) return;
-      setMessages((prev) => [
-        ...prev.slice(-19),
-        { ...m, id: `${Date.now()}-${Math.random()}` },
-      ]);
-    });
-
-    const unsubInfo = eventBus.on(EVENTS.PLAYER_INFO, (info: unknown) => {
-      const next = info as PlayerInfo;
-      setPlayerInfo(next);
-      setPresencePlayers((prev) => {
-        const filtered = prev.filter((player) => player.playerId !== next.playerId);
-        return [{ playerId: next.playerId, username: next.username }, ...filtered];
-      });
-      setConnected(true);
-      // Persist player identity for game systems that read it (e.g. JukeboxSystem)
-      try {
-        localStorage.setItem('waspi_player_info', JSON.stringify({ playerId: next.playerId, username: next.username }));
-      } catch { /* silent */ }
-    });
-
-    const unsubPresence = eventBus.on(EVENTS.PLAYER_PRESENCE, (payload: unknown) => {
-      const players = Array.isArray(payload)
-        ? (payload as PresencePlayer[])
-        : [];
-      setPresencePlayers(players);
-    });
-
-    const unsubCombatStats = eventBus.on(EVENTS.PLAYER_COMBAT_STATS, (payload: unknown) => {
-      const next = payload as Partial<CombatStats> | null;
-      setCombatStats({
-        kills: typeof next?.kills === 'number' ? next.kills : 0,
-        deaths: typeof next?.deaths === 'number' ? next.deaths : 0,
-      });
-    });
-
-    const unsubProgression = eventBus.on(EVENTS.PLAYER_PROGRESSION, (payload: unknown) => {
-      const next = payload as Partial<ProgressionState> | null;
-      setProgression((prev) => {
-        const nextLevel = typeof next?.level === 'number' ? next.level : 1;
-        if (nextLevel > prev.level) playUiSfx(392, 0.40, 784);
-        return {
-          kills: typeof next?.kills === 'number' ? next.kills : 0,
-          xp: typeof next?.xp === 'number' ? next.xp : 0,
-          level: nextLevel,
-          nextLevelAt: typeof next?.nextLevelAt === 'number' || next?.nextLevelAt === null
-            ? next.nextLevelAt
-            : null,
-        };
-      });
-    });
-
-    const unsubTenks = eventBus.on(EVENTS.TENKS_CHANGED, (payload: unknown) => {
-      const p = payload as { balance: number; delta?: number; reason?: string };
-      setTenks(p.balance);
-      if (p.reason !== 'init') {
-        setTenksAnimating(true);
-        window.setTimeout(() => setTenksAnimating(false), 400);
-        if (typeof p.delta === 'number') {
-          if (p.delta > 0) playUiSfx(440, 0.12, 660);
-          else if (p.delta < 0) playUiSfx(330, 0.10, 220);
-        }
-      }
-    });
-
-    const unsubScene = eventBus.on(EVENTS.SCENE_CHANGED, (sceneName: unknown) => {
-      if (typeof sceneName !== 'string') return;
-      const prev = previousPhaserSceneRef.current;
-      previousPhaserSceneRef.current = sceneName;
-      setActiveScene(sceneName);
-      track('scene_enter', { scene: sceneName });
-      if (sceneName === 'WorldScene') {
-        // Evita overlay oscuro “pegado” al salir de interiores (shop / Stripe) si React no sincronizó.
-        setShopOpen(false);
-        setShopSource('');
-        setCheckoutRedirecting(false);
-        setJukeboxOpen(false);
-        // Onboarding es casi fullscreen oscuro: solo al primer ingreso (Creator / boot), no al salir con ESC de una tienda.
-        if (!localStorage.getItem('waspi_onboarding_v1')) {
-          const firstWorldEntry = prev === '' || prev === 'CreatorScene';
-          if (firstWorldEntry) {
-            setShowOnboarding(true);
-          }
-        }
-      }
-    });
-
-    const unsubInv = eventBus.on(EVENTS.INVENTORY_TOGGLE, () => {
-      setInventoryOpen((v) => !v);
-    });
-
-    const unsubInvChanged = eventBus.on(EVENTS.INVENTORY_CHANGED, (payload: unknown) => {
-      const p = payload as { owned: string[]; equipped: { top?: string; bottom?: string } };
-      setOwned(p.owned ?? []);
-      setEquipped(p.equipped ?? {});
-      setGunOn(hasUtilityEquipped('UTIL-GUN-01'));
-      setBallOn(hasUtilityEquipped('UTIL-BALL-01'));
-      playUiSfx(660, 0.18, 990);
-    });
-
-    const unsubShopOpen = eventBus.on(EVENTS.SHOP_OPEN, (payload: unknown) => {
-      const next = (payload as ShopOpenPayload | undefined) ?? {};
-      setShopSource(next.source ?? 'scene');
-      setShopOpen(true);
-      setShopStatus(next.source === 'store_interior' ? 'Compra ropa con TENKS y equipala al instante.' : '');
-      track('shop_open', { source: next.source ?? 'scene' });
-    });
-
-    const unsubShopClose = eventBus.on(EVENTS.SHOP_CLOSE, () => {
-      setShopSource('');
-      setShopOpen(false);
-    });
-
-    const unsubJukeboxOpen  = eventBus.on(EVENTS.JUKEBOX_OPEN,  () => setJukeboxOpen(true));
-    const unsubJukeboxClose = eventBus.on(EVENTS.JUKEBOX_CLOSE, () => setJukeboxOpen(false));
-
-    const unsubPlayerActions = eventBus.on(EVENTS.PLAYER_ACTIONS_OPEN, (payload: unknown) => {
-      const next = payload as PlayerActionsPayload | null;
-      setPlayerActions(next);
-    });
-
-    const unsubPenalty = eventBus.on(EVENTS.PENALTY_RESULT, (payload: unknown) => {
-      const result = payload as PenaltyResultPayload;
-      if (!result?.won) return;
-      if (!tokenRef.current) {
-        setUiNotice({ msg: 'Ganaste el minijuego. Inicia sesion para acreditar TENKS.', color: '#46B3FF' });
-        return;
-      }
-
-      void (async () => {
-        const res = await fetch('/api/minigames/penalty/reward', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${tokenRef.current}`,
-          },
-          body: JSON.stringify({
-            goals: result.goals,
-            shots: result.shots,
-          }),
-        }).catch(() => null);
-
-        if (!res?.ok) {
-          setShopStatus('Ganaste el minijuego, pero no pude guardar el premio todavia.');
-          setUiNotice({ msg: 'Ganaste el minijuego, pero el premio no se guardo todavia.', color: '#FF4444' });
-          return;
-        }
-
-        const json = await res.json();
-        if (json.player) {
-          applyPlayerState(json.player as PlayerState);
-        }
-        const earned = typeof json.tenksEarned === 'number' ? json.tenksEarned : 0;
-        setUiNotice({ msg: earned > 0 ? `Premio guardado: +${earned} TENKS` : 'Partida registrada.' });
-      })();
-    });
-
-    const unsubParcelBuy = eventBus.on(EVENTS.PARCEL_BUY_REQUEST, (payload: unknown) => {
-      const next = payload as ParcelBuyPayload | null;
-      if (!next?.parcelId) return;
-
-      void (async () => {
-        if (!tokenRef.current) {
-          setUiNotice({ msg: 'Inicia sesion para comprar una parcela unica en La Vecindad.', color: '#46B3FF' });
-          return;
-        }
-
-        const res = await fetch('/api/vecindad', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${tokenRef.current}`,
-          },
-          body: JSON.stringify({
-            action: 'buy',
-            parcelId: next.parcelId,
-          }),
-        }).catch(() => null);
-
-        const json = await res?.json().catch(() => null) as {
-          error?: string;
-          notice?: string;
-          player?: PlayerState;
-          parcels?: SharedParcelState[];
-        } | null;
-
-        if (!res?.ok || !json?.player) {
-          setUiNotice({ msg: json?.error ?? 'No pude comprar esa parcela.', color: '#FF4444' });
-          return;
-        }
-
-        applyPlayerState(normalizePlayerState(json.player));
-        if (json.parcels) {
-          eventBus.emit(EVENTS.VECINDAD_SHARED_STATE_CHANGED, {
-            parcels: json.parcels,
-            broadcast: true,
-          } satisfies VecindadSharedPayload);
-        }
-        setUiNotice({ msg: json.notice ?? `Compraste la parcela ${next.parcelId}.` });
-      })();
-    });
-
-    const unsubParcelBuild = eventBus.on(EVENTS.PARCEL_BUILD_REQUEST, () => {
-      void (async () => {
-        if (!tokenRef.current) {
-          setUiNotice({ msg: 'Inicia sesion para construir en tu parcela.', color: '#46B3FF' });
-          return;
-        }
-
-        const res = await fetch('/api/vecindad', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${tokenRef.current}`,
-          },
-          body: JSON.stringify({ action: 'build' }),
-        }).catch(() => null);
-
-        const json = await res?.json().catch(() => null) as {
-          error?: string;
-          notice?: string;
-          player?: PlayerState;
-          parcels?: SharedParcelState[];
-        } | null;
-
-        if (!res?.ok || !json?.player) {
-          setUiNotice({ msg: json?.error ?? 'No pude mejorar la casa.', color: '#FF4444' });
-          return;
-        }
-
-        applyPlayerState(normalizePlayerState(json.player));
-        if (json.parcels) {
-          eventBus.emit(EVENTS.VECINDAD_SHARED_STATE_CHANGED, {
-            parcels: json.parcels,
-            broadcast: true,
-          } satisfies VecindadSharedPayload);
-        }
-        setUiNotice({ msg: json.notice ?? 'Casa mejorada.' });
-      })();
-    });
-
-    const unsubVecindadUpdate = eventBus.on(EVENTS.VECINDAD_UPDATE_REQUEST, (payload: unknown) => {
-      const next = payload as VecindadUpdatePayload | null;
-      if (!next?.vecindad || !playerState) return;
-
-      const updatedPlayer: PlayerState = {
-        ...playerState,
-        tenks: getTenksBalance(),
-        vecindad: next.vecindad,
-      };
-
-      applyPlayerState(updatedPlayer);
-      void syncPlayerState(updatedPlayer);
-      if (next.notice) setUiNotice({ msg: next.notice });
-    });
-
-    const unsubFarmAction = eventBus.on(EVENTS.FARM_ACTION_REQUEST, (payload: unknown) => {
-      const next = payload as FarmActionRequestPayload | null;
-      if (!next?.action) return;
-      void (async () => {
-        if (!tokenRef.current) {
-          setUiNotice({ msg: 'Inicia sesion para usar Cannabis Farm.', color: '#46B3FF' });
-          return;
-        }
-        const res = await fetch('/api/vecindad', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${tokenRef.current}`,
-          },
-          body: JSON.stringify(next),
-        }).catch(() => null);
-
-        const json = await res?.json().catch(() => null) as {
-          error?: string;
-          notice?: string;
-          player?: PlayerState;
-          parcels?: SharedParcelState[];
-          reward?: number;
-        } | null;
-
-        if (!res?.ok || !json?.player) {
-          setUiNotice({ msg: json?.error ?? 'No pude procesar la accion del farm.', color: '#FF4444' });
-          return;
-        }
-
-        applyPlayerState(normalizePlayerState(json.player));
-        if (json.parcels) {
-          eventBus.emit(EVENTS.VECINDAD_SHARED_STATE_CHANGED, {
-            parcels: json.parcels,
-            broadcast: true,
-          } satisfies VecindadSharedPayload);
-        }
-        if (next.action === 'farm_unlock') {
-          eventBus.emit(EVENTS.FARM_UNLOCKED, {});
-        } else if (next.action === 'farm_plant') {
-          eventBus.emit(EVENTS.FARM_PLANTED, { slotIndex: next.slotIndex, seedType: next.seedType });
-        } else if (next.action === 'farm_water') {
-          eventBus.emit(EVENTS.FARM_WATERED, { slotIndex: next.slotIndex });
-        } else if (next.action === 'farm_harvest') {
-          eventBus.emit(EVENTS.FARM_HARVESTED, { slotIndex: next.slotIndex, reward: json.reward });
-        }
-        setUiNotice({ msg: json.notice ?? 'Accion de farm completada.' });
-      })();
-    });
-
-    const unsubUiNotice = eventBus.on(EVENTS.UI_NOTICE, (payload: unknown) => {
-      if (typeof payload === 'string' && payload.trim()) {
-        setUiNotice({ msg: payload });
-      } else if (payload && typeof payload === 'object' && typeof (payload as { msg?: unknown }).msg === 'string') {
-        const p = payload as { msg: string; color?: string };
-        if (p.msg.trim()) setUiNotice({ msg: p.msg, color: p.color });
-      }
-    });
-
-    const unsubZombiesActive = eventBus.on(EVENTS.ZOMBIES_SCENE_ACTIVE, (payload: unknown) => {
-      setZombiesHudActive(payload as boolean);
-    });
-
-    const unsubBasketActive = eventBus.on(EVENTS.BASKET_SCENE_ACTIVE, (payload: unknown) => {
-      setBasketHudActive(payload as boolean);
-    });
-
-    const unsubPenaltyActive = eventBus.on(EVENTS.PENALTY_SCENE_ACTIVE, (payload: unknown) => {
-      setPenaltyHudActive(payload as boolean);
-    });
-
-    const unsubDartsActive = eventBus.on(EVENTS.DARTS_SCENE_ACTIVE, (payload: unknown) => {
-      setDartsHudActive(payload as boolean);
-    });
-
-    const unsubBosqueActive = eventBus.on(EVENTS.BOSQUE_SCENE_ACTIVE, (payload: unknown) => {
-      setBosqueHudActive(payload as boolean);
-    });
-
-    const unsubFlappyActive = eventBus.on(EVENTS.FLAPPY_SCENE_ACTIVE, (payload: unknown) => {
-      setFlappyHudActive(payload as boolean);
-    });
-
-    const unsubDinoActive = eventBus.on(EVENTS.DINO_SCENE_ACTIVE, (payload: unknown) => {
-      setDinoHudActive(payload as boolean);
-    });
-
-    const unsubPvpActive = eventBus.on(EVENTS.PVP_SCENE_ACTIVE, (payload: unknown) => {
-      setPvpHudActive(payload as boolean);
-    });
-
-    return () => {
-      unsubChat();
-      unsubInfo();
-      unsubPresence();
-      unsubCombatStats();
-      unsubProgression();
-      unsubTenks();
-      unsubScene();
-      unsubInv();
-      unsubInvChanged();
-      unsubShopOpen();
-      unsubShopClose();
-      unsubJukeboxOpen();
-      unsubJukeboxClose();
-      unsubPlayerActions();
-      unsubPenalty();
-      unsubParcelBuy();
-      unsubParcelBuild();
-      unsubVecindadUpdate();
-      unsubFarmAction();
-      unsubUiNotice();
-      unsubZombiesActive();
-      unsubBasketActive();
-      unsubPenaltyActive();
-      unsubDartsActive();
-      unsubBosqueActive();
-      unsubFlappyActive();
-      unsubDinoActive();
-      unsubPvpActive();
-    };
-  }, [applyPlayerState, playUiSfx, playerState, syncPlayerState]);
+  usePlayPageSceneEvents({
+    mutedPlayersRef,
+    previousPhaserSceneRef,
+    tokenRef,
+    playerState,
+    applyPlayerState,
+    playUiSfx,
+    syncPlayerState,
+    setMessages,
+    setPlayerInfo,
+    setPresencePlayers,
+    setConnected,
+    setCombatStats,
+    setProgression,
+    setTenks,
+    setTenksAnimating,
+    setActiveScene,
+    setShopOpen,
+    setShopSource,
+    setCheckoutRedirecting,
+    setJukeboxOpen,
+    setShowOnboarding,
+    setInventoryOpen,
+    setOwned,
+    setEquipped,
+    setGunOn,
+    setBallOn,
+    setPlayerActions,
+    setUiNotice,
+    setShopStatus,
+    setZombiesHudActive,
+    setBasketHudActive,
+    setPenaltyHudActive,
+    setDartsHudActive,
+    setBosqueHudActive,
+    setFlappyHudActive,
+    setDinoHudActive,
+    setPvpHudActive,
+  });
 
   useEffect(() => {
     if (!uiNotice) return;
@@ -752,81 +311,8 @@ export default function PlayPage() {
   }, [uiNotice]);
 
   useEffect(() => {
-    saveAudioSettings(audioSettings);
-    eventBus.emit(EVENTS.AUDIO_SETTINGS_CHANGED, audioSettings);
-  }, [audioSettings]);
-
-  useEffect(() => {
-    saveHudSettings(hudSettings);
-    eventBus.emit(EVENTS.HUD_SETTINGS_CHANGED, hudSettings);
-  }, [hudSettings]);
-
-  useEffect(() => {
-    saveControlSettings(controlSettings);
-    eventBus.emit(EVENTS.CONTROL_SETTINGS_CHANGED, controlSettings);
-    if (!controlSettings.showVirtualJoystick) {
-      clearVirtualJoystickState();
-    }
-  }, [controlSettings]);
-
-  useEffect(() => {
-    if (!settingsOpen) return;
-    navigator.mediaDevices?.enumerateDevices().then((devices) => {
-      const inputs = devices.filter((d) => d.kind === 'audioinput');
-      setMicDevices(inputs);
-      setSelectedMicDeviceId((prev) => {
-        if (inputs.length === 0) return prev;
-        if (prev && inputs.some((d) => d.deviceId === prev)) return prev;
-        return inputs[0].deviceId;
-      });
-      const outputs = devices.filter((d) => d.kind === 'audiooutput');
-      setOutputDevices(outputs);
-      setSelectedOutputDeviceId((prev) => {
-        if (!prev) return prev;
-        if (outputs.some((d) => d.deviceId === prev)) return prev;
-        return '';
-      });
-    }).catch(() => {});
-  }, [settingsOpen]);
-
-  useEffect(() => {
-    setStoredAudioOutputDeviceId(selectedOutputDeviceId);
-  }, [selectedOutputDeviceId]);
-
-  useEffect(() => {
-    eventBus.emit(EVENTS.AUDIO_OUTPUT_SINK_CHANGED, selectedOutputDeviceId);
-    void applyOutputSinkToSfxContext(selectedOutputDeviceId);
-    const ctx = audioCtxRef.current;
-    if (ctx) void applySinkIdToAudioContext(ctx, selectedOutputDeviceId);
-  }, [selectedOutputDeviceId]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      if (selectedMicDeviceId) {
-        window.localStorage.setItem(VOICE_MIC_DEVICE_KEY, selectedMicDeviceId);
-      } else {
-        window.localStorage.removeItem(VOICE_MIC_DEVICE_KEY);
-      }
-    } catch {
-      // noop
-    }
-  }, [selectedMicDeviceId]);
-
-  useEffect(() => {
     activeSceneRef.current = activeScene;
   }, [activeScene]);
-
-  useEffect(() => {
-    if (isMobile && activeScene === 'WorldScene' && !localStorage.getItem('waspi_mobile_hint_v1')) {
-      setShowMobileHint(true);
-      const t = window.setTimeout(() => {
-        setShowMobileHint(false);
-        localStorage.setItem('waspi_mobile_hint_v1', 'done');
-      }, 5000);
-      return () => window.clearTimeout(t);
-    }
-  }, [isMobile, activeScene]);
 
   useEffect(() => () => {
     clearVirtualJoystickState();
@@ -836,642 +322,7 @@ export default function PlayPage() {
     }
   }, []);
 
-  useEffect(() => {
-    if ((!bindingCaptureDirection && !bindingCaptureAction) || !settingsOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (jukeboxOpen) return;
-      if (event.repeat) return;
-      event.preventDefault();
-      event.stopPropagation();
-
-      if (event.code === 'Escape') {
-        setBindingCaptureDirection(null);
-        setBindingCaptureAction(null);
-        setUiNotice({ msg: 'Remapeo cancelado.' });
-        return;
-      }
-
-      if (bindingCaptureDirection && !isSupportedMovementBindingCode(event.code)) {
-        setUiNotice({ msg: 'Tecla no soportada para movimiento.', color: '#FF4444' });
-        return;
-      }
-
-      if (bindingCaptureAction && !isSupportedActionBindingCode(event.code)) {
-        setUiNotice({ msg: 'Tecla no soportada para accion.', color: '#FF4444' });
-        return;
-      }
-
-      if (bindingCaptureDirection) {
-        setControlSettings((current) => ({
-          ...current,
-          movementScheme: 'custom',
-          movementBindings: assignMovementBinding(current.movementBindings, bindingCaptureDirection, event.code),
-        }));
-        setBindingCaptureDirection(null);
-        setUiNotice({ msg: `Movimiento ${directionLabel(bindingCaptureDirection)}: ${formatMovementBindingLabel(event.code)}` });
-        return;
-      }
-
-      if (bindingCaptureAction) {
-        setControlSettings((current) => ({
-          ...current,
-          actionBindings: assignActionBinding(current.actionBindings, bindingCaptureAction, event.code),
-        }));
-        setBindingCaptureAction(null);
-        setUiNotice({ msg: `Accion ${actionLabel(bindingCaptureAction)}: ${formatMovementBindingLabel(event.code)}` });
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [bindingCaptureAction, bindingCaptureDirection, jukeboxOpen, settingsOpen]);
-
-  useEffect(() => {
-    if (!magicLinkCooldownUntil || magicLinkCooldownUntil <= Date.now()) return;
-    const timer = window.setInterval(() => {
-      if (Date.now() >= magicLinkCooldownUntil) {
-        setMagicLinkCooldownUntil(0);
-        window.localStorage.removeItem(MAGIC_LINK_COOLDOWN_KEY);
-      }
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [magicLinkCooldownUntil]);
-
-  const hydratePlayerState = useCallback(async (session: Session | null) => {
-    if (!session?.access_token) {
-      tokenRef.current = null;
-      setAuthEmail(session?.user?.email ?? null);
-      void loadVecindadSharedState(null);
-      return;
-    }
-
-    tokenRef.current = session.access_token;
-    setAuthEmail(session.user.email ?? null);
-    void initStatsSystem(session.user.id);
-
-    const res = await fetch('/api/player', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-      },
-    });
-    if (!res.ok) return;
-    const json = await res.json();
-    const remotePlayer = json.player as PlayerState | undefined;
-    const localPlayer = loadStoredPlayerState();
-    await loadVecindadSharedState(session);
-
-    if (remotePlayer) {
-      const merged = mergeHydratedPlayerState(
-        localPlayer,
-        normalizePlayerState(remotePlayer)
-      );
-      applyPlayerState(merged);
-      if (JSON.stringify(merged) !== JSON.stringify(normalizePlayerState(remotePlayer))) {
-        void syncPlayerState(merged);
-      }
-    }
-
-    // Sync TENKS from the authoritative player_tenks_balance table.
-    // This overwrites any local or user_metadata value with the DB truth.
-    void initTenksFromServer(session.user.id, session.access_token);
-
-    // Hydrate username: if the session carries a username in user_metadata,
-    // write it to localStorage so WorldScene picks it up immediately.
-    const serverUsername = session.user.user_metadata?.username;
-    if (typeof serverUsername === 'string' && serverUsername.trim()) {
-      const storedUsername = typeof window !== 'undefined'
-        ? window.localStorage.getItem('waspi_username')
-        : null;
-      if (storedUsername !== serverUsername.trim()) {
-        if (typeof window !== 'undefined') {
-          window.localStorage.setItem('waspi_username', serverUsername.trim());
-        }
-      }
-    }
-  }, [applyPlayerState, loadVecindadSharedState, syncPlayerState]);
-
-  const refreshPlayerState = useCallback(async () => {
-    let token = tokenRef.current;
-    let playerId: string | null = null;
-    if (!token && supabase) {
-      const { data } = await supabase.auth.getSession();
-      token = data.session?.access_token ?? null;
-      if (data.session) {
-        tokenRef.current = data.session.access_token;
-        setAuthEmail(data.session.user.email ?? null);
-        playerId = data.session.user.id;
-      }
-    } else if (supabase) {
-      const { data } = await supabase.auth.getSession();
-      playerId = data.session?.user.id ?? null;
-    }
-    if (!token) return;
-
-    const res = await fetch('/api/player', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }).catch(() => null);
-
-    if (!res?.ok) return;
-    const json = await res.json();
-    const player = json.player as PlayerState | undefined;
-
-    if (player) {
-      let normalized = normalizePlayerState(player);
-
-      // Reconcile: if the webhook wrote to DB but user_metadata update failed,
-      // items will be in player_inventory but missing from the player state.
-      // Merge them back in so the player gets their purchases.
-      if (playerId && supabase) {
-        const reconciledOwned = await reconcileInventoryFromDB(supabase, playerId, normalized.inventory.owned);
-        if (reconciledOwned.length > normalized.inventory.owned.length) {
-          const newItemIds = reconciledOwned.filter((id) => !normalized.inventory.owned.includes(id));
-          let reconciledState = normalized;
-          for (const itemId of newItemIds) {
-            reconciledState = grantInventoryItem(reconciledState, itemId);
-          }
-          normalized = reconciledState;
-        }
-      }
-
-      applyPlayerState(normalized);
-    }
-
-    // Clean up transient query params (checkout, OAuth code) from URL
-    if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href);
-      let changed = false;
-      for (const key of ['checkout', 'code', 'error', 'error_description']) {
-        if (url.searchParams.has(key)) { url.searchParams.delete(key); changed = true; }
-      }
-      if (changed) window.history.replaceState({}, '', url.toString());
-    }
-
-    await loadVecindadSharedState();
-  }, [applyPlayerState, loadVecindadSharedState]);
-
-  useEffect(() => {
-    if (!supabase) return;
-    const supabaseClient = supabase;
-
-    let active = true;
-    const bootstrap = async () => {
-      const { data } = await supabaseClient.auth.getSession();
-      if (!active) return;
-      await hydratePlayerState(data.session ?? null);
-    };
-    bootstrap();
-
-    const { data } = supabaseClient.auth.onAuthStateChange((event: AuthChangeEvent, session) => {
-      void hydratePlayerState(session);
-      setAuthBusy(false);
-      if (event === 'SIGNED_IN') {
-        setAuthStatus('Sesion iniciada.');
-      } else if (event === 'SIGNED_OUT') {
-        setAuthStatus('Sesion cerrada.');
-      }
-    });
-
-    return () => {
-      active = false;
-      data.subscription.unsubscribe();
-    };
-  }, [hydratePlayerState]);
-
-  useEffect(() => {
-    if (!initialCheckout.status) return;
-    const delays = [1500, 5000, 12000];
-    const timers = delays.map((delay) => window.setTimeout(() => {
-      void refreshPlayerState();
-    }, delay));
-    return () => {
-      timers.forEach((timer) => window.clearTimeout(timer));
-    };
-  }, [initialCheckout.status, refreshPlayerState]);
-
-  const sendMagicLink = useCallback(async () => {
-    if (!supabase) {
-      setAuthStatus('Supabase no esta configurado.');
-      return;
-    }
-
-    const email = emailInput.trim().toLowerCase();
-    if (!email) {
-      setAuthStatus('Escribi tu email primero.');
-      return;
-    }
-
-    const remainingMs = magicLinkCooldownUntil - Date.now();
-    if (remainingMs > 0) {
-      setAuthStatus(`Ya te mandamos un link. Espera ${Math.ceil(remainingMs / 1000)}s o usa el ultimo mail.`);
-      return;
-    }
-
-    const { data: currentSession } = await supabase.auth.getSession();
-    if (currentSession.session?.user?.email?.toLowerCase() === email) {
-      setAuthStatus('Ese mail ya tiene una sesion iniciada.');
-      return;
-    }
-
-    setAuthBusy(true);
-    setAuthStatus('');
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, '');
-    const redirectTo = appUrl
-      ? `${appUrl}/play`
-      : typeof window !== 'undefined'
-        ? `${window.location.origin}/play`
-        : undefined;
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: redirectTo },
-    });
-    setAuthBusy(false);
-    if (error) {
-      const lowered = error.message.toLowerCase();
-      if (lowered.includes('rate limit') || lowered.includes('security purposes')) {
-        const cooldownUntil = Date.now() + MAGIC_LINK_COOLDOWN_MS;
-        setMagicLinkCooldownUntil(cooldownUntil);
-        if (typeof window !== 'undefined') {
-          window.localStorage.setItem(MAGIC_LINK_COOLDOWN_KEY, String(cooldownUntil));
-        }
-        setAuthStatus('Tu mail ya puede entrar. Usa el ultimo link recibido o espera 60s para pedir otro.');
-        return;
-      }
-      setAuthStatus(error.message);
-      return;
-    }
-
-    const cooldownUntil = Date.now() + MAGIC_LINK_COOLDOWN_MS;
-    setMagicLinkCooldownUntil(cooldownUntil);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(MAGIC_LINK_COOLDOWN_KEY, String(cooldownUntil));
-    }
-    setAuthStatus('Magic link enviado. Si tu mail ya esta verificado, entra con el ultimo link del correo.');
-  }, [emailInput, magicLinkCooldownUntil]);
-
-  const signInWithGoogle = useCallback(async () => {
-    if (!supabase) {
-      setAuthStatus('Supabase no esta configurado.');
-      return;
-    }
-    setAuthBusy(true);
-    setAuthStatus('');
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, '');
-    const redirectTo = appUrl
-      ? `${appUrl}/play`
-      : typeof window !== 'undefined'
-        ? `${window.location.origin}/play`
-        : undefined;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo },
-    });
-    setAuthBusy(false);
-    if (error) {
-      setAuthStatus(error.message);
-    }
-  }, []);
-
-  const buyShopItem = useCallback(async (item: CatalogItem) => {
-    if (!tokenRef.current) {
-      setShopStatus('Inicia sesion para comprar ropa con TENKS.');
-      return;
-    }
-
-    setCheckoutBusyId(item.id);
-    setShopStatus('');
-
-    const res = await fetch('/api/shop/buy', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${tokenRef.current}`,
-      },
-      body: JSON.stringify({ itemId: item.id }),
-    }).catch(() => null);
-
-    if (!res?.ok) {
-      const json = await res?.json().catch(() => null);
-      setCheckoutBusyId(null);
-      setShopStatus(json?.error ?? 'No pude completar la compra.');
-      return;
-    }
-
-    const json = await res.json();
-    if (json.player) {
-      applyPlayerState(normalizePlayerState(json.player as PlayerState));
-    }
-    track('shop_purchase', { item_id: item.id, price_tenks: item.priceTenks });
-    setCheckoutBusyId(null);
-    setShopStatus(
-      (json.notice as string | undefined)
-      ?? `${item.name} comprado por ${item.priceTenks.toLocaleString('es-AR')} TENKS y equipado.`
-    );
-  }, [applyPlayerState]);
-
-  const loadOrders = useCallback(async () => {
-    if (!tokenRef.current || ordersLoading) return;
-    setOrdersLoading(true);
-    try {
-      const res = await fetch('/api/player/orders', {
-        headers: { Authorization: `Bearer ${tokenRef.current}` },
-      });
-      if (!res.ok) return;
-      const data = await res.json() as { orders?: OrderRow[] };
-      setOrders(data.orders ?? []);
-      setOrdersLoaded(true);
-    } catch { /* silent */ } finally {
-      setOrdersLoading(false);
-    }
-  }, [ordersLoading]);
-
-  const startStripeCheckout = useCallback(async (
-    type: 'product' | 'tenks_pack',
-    payload: { itemId?: string; size?: string; discountCode?: string; packId?: string }
-  ) => {
-    if (!tokenRef.current) {
-      setShopStatus('Iniciá sesión para comprar.');
-      return;
-    }
-    setCheckoutRedirecting(true);
-    setShopStatus('');
-
-    const body = type === 'product'
-      ? { type: 'product', itemId: payload.itemId, size: payload.size, discountCode: payload.discountCode || undefined }
-      : { type: 'tenks_pack', packId: payload.packId };
-
-    const res = await fetch('/api/checkout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenRef.current}` },
-      body: JSON.stringify(body),
-    }).catch(() => null);
-
-    if (!res?.ok) {
-      const json = await res?.json().catch(() => null);
-      setCheckoutRedirecting(false);
-      setShopStatus((json as { error?: string } | null)?.error ?? 'No se pudo iniciar el checkout.');
-      return;
-    }
-
-    const json = await res.json() as { url?: string };
-    if (json.url) {
-      window.location.href = json.url;
-    } else {
-      setCheckoutRedirecting(false);
-      setShopStatus('Error al obtener la URL de pago.');
-    }
-  }, []);
-
-  const handleMutePlayer = useCallback(() => {
-    if (!playerActions || !playerState) return;
-    const next = mutePlayer(playerState, playerActions.playerId);
-    applyPlayerState(next);
-    void syncPlayerState();
-    setMessages((prev) => prev.filter((msg) => msg.playerId !== playerActions.playerId));
-    setPlayerActions(null);
-    setShopStatus(`${playerActions.username} silenciado.`);
-    eventBus.emit(EVENTS.PLAYER_ACTION_MUTE, { playerId: playerActions.playerId });
-  }, [applyPlayerState, playerActions, playerState, syncPlayerState]);
-
-  const handleReportPlayer = useCallback(() => {
-    if (!playerActions) return;
-
-    void (async () => {
-      if (!tokenRef.current) {
-        setShopStatus('Inicia sesion para enviar reportes.');
-        setPlayerActions(null);
-        return;
-      }
-
-      const target = playerActions;
-      setPlayerActions(null);
-
-      const res = await fetch('/api/chat/report', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${tokenRef.current}`,
-        },
-        body: JSON.stringify({
-          playerId: target.playerId,
-          username: target.username,
-          reason: 'manual_report',
-          zone: activeScene || null,
-        }),
-      }).catch(() => null);
-
-      if (!res?.ok) {
-        const json = await res?.json().catch(() => null);
-        setShopStatus(json?.error ?? `No pude enviar el reporte para ${target.username}.`);
-        return;
-      }
-
-      setShopStatus(`Reporte enviado para ${target.username}.`);
-      eventBus.emit(EVENTS.PLAYER_ACTION_REPORT, { playerId: target.playerId, username: target.username });
-    })();
-  }, [activeScene, playerActions]);
-
-  useEffect(() => {
-    const unsubTenks = eventBus.on(EVENTS.TENKS_CHANGED, () => {
-      void syncPlayerState();
-    });
-    const unsubInventory = eventBus.on(EVENTS.INVENTORY_CHANGED, () => {
-      void syncPlayerState();
-    });
-    const unsubAvatar = eventBus.on(EVENTS.AVATAR_SET, () => {
-      void syncPlayerState();
-    });
-
-    return () => {
-      unsubTenks();
-      unsubInventory();
-      unsubAvatar();
-    };
-  }, [syncPlayerState]);
-
-  useEffect(() => {
-    if (!CHAT_SCENES.has(activeScene)) return;
-    void syncPlayerState();
-  }, [activeScene, syncPlayerState]);
-
-  useEffect(() => {
-    let active = true;
-    const run = async () => {
-      const res = await fetch('/api/shop').catch(() => null);
-      if (!res?.ok) return;
-      const json = await res.json();
-      if (!active) return;
-      const items = (json.items ?? []) as CatalogItem[];
-      setShopItems(items);
-    };
-    run();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (jukeboxOpen) return;
-      // Toggle chat visibility (keeps ENTER for focusing the input)
-      if (CHAT_SCENES.has(activeScene) && e.code === 'KeyT' && document.activeElement !== inputRef.current) {
-        e.preventDefault();
-        setChatEnabled((v) => !v);
-        if (chatEnabled) {
-          inputRef.current?.blur();
-        }
-        return;
-      }
-
-      if (!chatVisible) return;
-      if (e.code === controlSettings.actionBindings.chat && document.activeElement !== inputRef.current) {
-        e.preventDefault();
-        inputRef.current?.focus();
-      }
-      if (e.code === controlSettings.actionBindings.inventory && document.activeElement !== inputRef.current) {
-        e.preventDefault();
-        eventBus.emit(EVENTS.INVENTORY_TOGGLE);
-      }
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [activeScene, chatEnabled, chatVisible, controlSettings.actionBindings.chat, controlSettings.actionBindings.inventory, jukeboxOpen]);
-
-  useEffect(() => {
-    if (!chatVisible) {
-      inputRef.current?.blur();
-    }
-  }, [chatVisible]);
-
-  useEffect(() => {
-    if (shopTab === 'orders' && !ordersLoaded && isAuthenticated) {
-      void loadOrders();
-    }
-  }, [shopTab, ordersLoaded, isAuthenticated, loadOrders]);
-
-  useEffect(() => {
-    if (shopSource !== 'store_interior') return;
-    if (activeScene === 'StoreInterior') return;
-    const closeTimer = window.setTimeout(() => {
-      eventBus.emit(EVENTS.SHOP_CLOSE);
-      setShopOpen(false);
-      setShopSource('');
-    }, 0);
-    return () => window.clearTimeout(closeTimer);
-  }, [activeScene, shopSource]);
-
-  useEffect(() => {
-    if (!playerInfo || !INTERIOR_SOCIAL_SCENES.has(activeScene)) return;
-
-    if (!supabase) {
-      const fallbackTimer = window.setTimeout(() => {
-        setPresencePlayers([playerInfo]);
-      }, 0);
-      return () => window.clearTimeout(fallbackTimer);
-    }
-
-    const channel = supabase.channel(`waspi-interior:${activeScene}`, {
-      config: {
-        presence: { key: playerInfo.playerId },
-        broadcast: { self: false },
-      },
-    });
-
-    const syncPresence = () => {
-      const rawState = channel.presenceState();
-      const nextPlayers = new Map<string, PresencePlayer>();
-      Object.values(rawState).forEach((entries) => {
-        const list = Array.isArray(entries) ? entries : [];
-        list.forEach((entry) => {
-          if (!entry || typeof entry !== 'object') return;
-          const safeEntry = entry as Record<string, unknown>;
-          const playerId = typeof safeEntry.playerId === 'string'
-            ? safeEntry.playerId
-            : '';
-          const username = typeof safeEntry.username === 'string'
-            ? safeEntry.username
-            : '';
-          if (!playerId || !username) return;
-          nextPlayers.set(playerId, { playerId, username });
-        });
-      });
-      nextPlayers.set(playerInfo.playerId, playerInfo);
-      setPresencePlayers(Array.from(nextPlayers.values()));
-    };
-
-    channel
-      .on('presence', { event: 'sync' }, syncPresence)
-      .on('broadcast', { event: 'player:chat' }, ({ payload }) => {
-        const next = payload as { playerId?: string; username?: string; message?: string } | null;
-        const playerId = next?.playerId;
-        const username = next?.username;
-        const message = next?.message;
-        if (!playerId || !message || !username) return;
-        if (mutedPlayersRef.current.includes(playerId)) return;
-        setMessages((prev) => [
-          ...prev.slice(-19),
-          {
-            id: `${Date.now()}-${Math.random()}`,
-            playerId,
-            username,
-            message,
-            isMe: false,
-          },
-        ]);
-      })
-      .subscribe(async (status) => {
-        if (status !== 'SUBSCRIBED') return;
-        await channel.track({
-          playerId: playerInfo.playerId,
-          username: playerInfo.username,
-          scene: activeScene,
-        });
-        syncPresence();
-      });
-
-    const unsubscribeInteriorChat = eventBus.on(EVENTS.CHAT_SEND, (rawMessage: unknown) => {
-      if (typeof rawMessage !== 'string') return;
-      const now = Date.now();
-      const trimmed = rawMessage.trim().slice(0, CHAT.MAX_CHARS);
-      if (!trimmed || now - lastInteriorChatSentRef.current < CHAT.RATE_LIMIT_MS) return;
-
-      const safeMessage = trimmed.replace(/\b(boludo|pelotudo|idiota|mierda|puta|puto)\b/gi, '***');
-      eventBus.emit(EVENTS.CHAT_RECEIVED, {
-        playerId: playerInfo.playerId,
-        username: playerInfo.username,
-        message: safeMessage,
-        isMe: true,
-      });
-      lastInteriorChatSentRef.current = now;
-      channel.send({
-        type: 'broadcast',
-        event: 'player:chat',
-        payload: {
-          playerId: playerInfo.playerId,
-          username: playerInfo.username,
-          message: safeMessage,
-        },
-      });
-    });
-
-    return () => {
-      unsubscribeInteriorChat();
-      void channel.untrack();
-      void channel.unsubscribe();
-    };
-  }, [activeScene, playerInfo]);
-
-  // ── Combo HUD: track simultaneous active skills ────────────────────────────
+  // Combo HUD: track simultaneous active skills
   useEffect(() => {
     const onStart = (payload: unknown) => {
       const p = payload as { activity?: string };
@@ -1500,17 +351,6 @@ export default function PlayPage() {
     };
   }, []);
 
-  const sendMessage = useCallback(() => {
-    const now = Date.now();
-    const trimmed = input.trim().slice(0, CHAT.MAX_CHARS);
-    if (!chatVisible || !trimmed || now - lastSent < CHAT.RATE_LIMIT_MS) return;
-
-    playUiSfx(880, 0.08);
-    eventBus.emit(EVENTS.CHAT_SEND, trimmed);
-    setInput('');
-    setLastSent(now);
-  }, [chatVisible, input, lastSent, playUiSfx]);
-
   const currentLevelFloorXp = getLevelFloorXp(progression.level);
   const nextLevelDelta = progression.nextLevelAt === null
     ? 0
@@ -1521,7 +361,6 @@ export default function PlayPage() {
   const progressPct = progression.nextLevelAt === null
     ? 1
     : Math.max(0, Math.min(1, (progression.xp - currentLevelFloorXp) / levelSpanXp));
-  const joystickVisible = controlSettings.showVirtualJoystick && JOYSTICK_SCENES.has(activeScene);
   const comboCount = activeActivities.size;
   const comboMultiplier = comboCount >= 3 ? '2.0' : comboCount === 2 ? '1.5' : null;
   const armSafeReset = useCallback(() => {
@@ -1531,54 +370,6 @@ export default function PlayPage() {
       setRescueArmed(false);
     }, 4000);
   }, []);
-  const openStats = useCallback(async () => {
-    setStatsOpen(true);
-    setStatsLoading(true);
-    let token = tokenRef.current;
-    if (!token && supabase) {
-      const { data } = await supabase.auth.getSession();
-      token = data.session?.access_token ?? null;
-      tokenRef.current = token;
-      setAuthEmail(data.session?.user?.email ?? null);
-    }
-
-    if (token) {
-      const res = await fetch('/api/player/stats', {
-        headers: { Authorization: `Bearer ${token}` },
-      }).catch(() => null);
-      if (res?.ok) {
-        const json = await res.json() as { stats?: PlayerStats };
-        if (json.stats) {
-          setStatsData(json.stats);
-        } else {
-          // Defensive fallback: keep panel useful even with malformed payload.
-          setStatsData(getStats() as PlayerStats);
-        }
-      } else {
-        // If the API fails while authenticated, avoid showing "not logged in".
-        setStatsData(getStats() as PlayerStats);
-      }
-    } else {
-      // Guest: show in-memory session stats
-      setStatsData(getStats() as PlayerStats);
-    }
-    setStatsLoading(false);
-  }, []);
-
-  const closeStats = useCallback(() => {
-    setStatsOpen(false);
-    setStatsData(null);
-  }, []);
-
-  const openSettings = useCallback(() => {
-    setSettingsOpen(true);
-  }, []);
-  const closeSettings = useCallback(() => {
-    setBindingCaptureDirection(null);
-    setBindingCaptureAction(null);
-    setSettingsOpen(false);
-  }, []);
-
   const confirmSafeReset = useCallback(() => {
     setRescueArmed(false);
     closeSettings();
@@ -1613,17 +404,17 @@ export default function PlayPage() {
   const ONBOARDING_SLIDES = [
     {
       title: 'BIENVENIDO A WASPI WORLD',
-      body: 'Un mundo abierto donde la ropa que usás es real.\nExplorá, jugá y vestí a tu waspi.',
+      body: 'Un mundo abierto donde la ropa que usas es real.\nExplora, juega y viste a tu waspi.',
       icon: '👋',
     },
     {
       title: 'TENKS',
-      body: 'Ganás TENKS jugando minijuegos y en combate.\nUsalos para comprar ropa y parcelas.',
+      body: 'Ganas TENKS jugando minijuegos y en combate.\nUsalos para comprar ropa y parcelas.',
       icon: '🪙',
     },
     {
-      title: 'EMPEZÁ POR COTTENKS',
-      body: 'Hablá con COTTENKS en la plaza.\nTe explica todo lo que necesitás saber.',
+      title: 'EMPEZA POR COTTENKS',
+      body: 'Habla con COTTENKS en la plaza.\nTe explica todo lo que necesitas saber.',
       icon: '🗣️',
     },
   ];
@@ -1751,7 +542,7 @@ export default function PlayPage() {
           animation: wwComboIn 280ms cubic-bezier(0.22, 1, 0.36, 1) both,
                      wwComboPulse 1.6s ease-in-out 280ms infinite;
         }
-        /* ── Right toolbar ── */
+        /* Right toolbar */
         .ww-toolbar {
           display: flex;
           flex-direction: column;
@@ -1810,7 +601,7 @@ export default function PlayPage() {
           background: rgba(255,255,255,0.07);
           margin: 1px 0;
         }
-        /* ── Stripe redirect spinner ── */
+        /* Stripe redirect spinner */
         @keyframes wwSpin {
           from { transform: rotate(0deg); }
           to   { transform: rotate(360deg); }
@@ -1827,7 +618,7 @@ export default function PlayPage() {
           border-radius: 50%;
           animation: wwSpin 0.7s linear infinite;
         }
-        /* ── Shop status banner ── */
+        /* Shop status banner */
         @keyframes wwStatusIn {
           from { opacity: 0; transform: translateY(6px); }
           to   { opacity: 1; transform: translateY(0); }
@@ -1835,7 +626,7 @@ export default function PlayPage() {
         .ww-shop-status {
           animation: wwStatusIn 220ms ease-out both;
         }
-        /* ── TENKS pack cards ── */
+        /* TENKS pack cards */
         .ww-pack-card {
           transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
         }
@@ -1846,7 +637,7 @@ export default function PlayPage() {
         .ww-pack-card:hover .ww-pack-popular {
           border-color: rgba(245,200,66,0.9);
         }
-        /* ── Tab bar ── */
+        /* Tab bar */
         .ww-tab-bar {
           display: flex;
           border-bottom: 1px solid rgba(255,255,255,0.08);
@@ -1855,7 +646,7 @@ export default function PlayPage() {
           scrollbar-width: none;
         }
         .ww-tab-bar::-webkit-scrollbar { display: none; }
-        /* ── Controls hint ── */
+        /* Controls hint */
         .ww-ctrl-wrap {
           position: relative;
           display: inline-block;
@@ -1994,7 +785,7 @@ export default function PlayPage() {
                   CONECTADOS {presencePlayers.length}
                 </div>
                 <button
-                  onClick={() => setHudSettings((current) => ({ ...current, socialCollapsed: !current.socialCollapsed }))}
+                  onClick={() => onHudChange({ socialCollapsed: !hudSettings.socialCollapsed })}
                   style={hudCollapseButtonStyle()}
                 >
                   {hudSettings.socialCollapsed ? '+' : '-'}
@@ -2058,7 +849,7 @@ export default function PlayPage() {
                   PROGRESO
                 </div>
                 <button
-                  onClick={() => setHudSettings((current) => ({ ...current, progressCollapsed: !current.progressCollapsed }))}
+                  onClick={() => onHudChange({ progressCollapsed: !hudSettings.progressCollapsed })}
                   style={hudCollapseButtonStyle()}
                 >
                   {hudSettings.progressCollapsed ? '+' : '-'}
@@ -2109,17 +900,17 @@ export default function PlayPage() {
             <div className="ww-ctrl-panel">
               WASD / FLECHAS MOVER<br />
               {chatVisible ? 'ENTER CHATEAR' : 'ENTER CHAT OFF'}<br />
-              {CHAT_SCENES.has(activeScene) ? (chatEnabled ? 'T CHAT OFF' : 'T CHAT ON') : ''}<br />
+                    {isChatScene ? (chatEnabled ? 'T CHAT OFF' : 'T CHAT ON') : ''}<br />
               I INVENTARIO
             </div>
           </div>
         )}
 
-        {/* ── Right toolbar ── */}
+        {/* Right toolbar */}
         <div className="ww-toolbar absolute right-2 top-12">
-          {/* SHOP — primary action */}
+          {/* SHOP primary action */}
           <button
-            onClick={() => { setShopSource('hud'); setShopOpen(true); }}
+            onClick={() => { openShop('hud'); }}
             title="Tienda"
             style={{
               width: 34,
@@ -2139,7 +930,7 @@ export default function PlayPage() {
 
           <div className="ww-toolbar-divider" />
 
-          {/* Settings — SVG (el PNG era RGB sin alpha; el “tablero” quedaba como fondo gris) */}
+          {/* Settings SVG: the PNG was RGB without alpha, so the board looked gray */}
           <button type="button" onClick={openSettings} className="ww-toolbar-btn" title="Ajustes" aria-label="Ajustes">
             <svg className="ww-toolbar-icon" viewBox="0 0 24 24" aria-hidden>
               <path
@@ -2162,7 +953,7 @@ export default function PlayPage() {
 
           <div className="ww-toolbar-divider" />
 
-          {/* Rescue — dormant strip, activates on arm */}
+          {/* Rescue dormant strip, activates on arm */}
           <button
             onClick={handleSafeReset}
             title={rescueArmed ? 'Confirmar vuelta a plaza' : 'Volver a plaza'}
@@ -2211,13 +1002,7 @@ export default function PlayPage() {
             isMobile={isMobile}
             shopTab={shopTab}
             onTabChange={setShopTab}
-            onClose={() => {
-              setShopSource('');
-              setShopOpen(false);
-              setOrdersLoaded(false);
-              setOrders([]);
-              eventBus.emit(EVENTS.SHOP_CLOSE);
-            }}
+            onClose={closeShop}
             clothingItems={clothingItems}
             owned={owned}
             equipped={equipped}
@@ -2304,19 +1089,9 @@ export default function PlayPage() {
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  if (e.key === 'Enter') {
-                    sendMessage();
-                    e.preventDefault();
-                  }
-                  if (e.key === 'Escape') {
-                    setInput('');
-                    inputRef.current?.blur();
-                  }
-                }}
-                onFocus={() => eventBus.emit(EVENTS.CHAT_INPUT_FOCUS)}
-                onBlur={() => eventBus.emit(EVENTS.CHAT_INPUT_BLUR)}
+                onKeyDown={handleInputKeyDown}
+                onFocus={handleInputFocus}
+                onBlur={handleInputBlur}
                 maxLength={CHAT.MAX_CHARS}
                 placeholder="Presiona ENTER para chatear..."
                 autoComplete="off"
@@ -2344,27 +1119,20 @@ export default function PlayPage() {
             onTabChange={setSettingsTab}
             onClose={closeSettings}
             audioSettings={audioSettings}
-            onAudioChange={(patch) => setAudioSettings((current) => ({ ...current, ...patch }))}
+            onAudioChange={onAudioChange}
             outputDevices={outputDevices}
             selectedOutputDeviceId={selectedOutputDeviceId}
             onOutputDeviceChange={setSelectedOutputDeviceId}
             hudSettings={hudSettings}
-            onHudChange={(patch) => setHudSettings((current) => ({ ...current, ...patch }))}
+            onHudChange={onHudChange}
             controlSettings={controlSettings}
-            onControlChange={(patch) => setControlSettings((current) => ({ ...current, ...patch }))}
+            onControlChange={onControlChange}
             bindingCaptureDirection={bindingCaptureDirection}
             onCaptureDirection={setBindingCaptureDirection}
             bindingCaptureAction={bindingCaptureAction}
             onCaptureAction={setBindingCaptureAction}
             voiceEnabled={voiceEnabled}
-            onVoiceEnabledChange={(enabled) => {
-              setVoiceEnabled(enabled);
-              if (enabled) {
-                eventBus.emit(EVENTS.VOICE_ENABLE);
-              } else {
-                eventBus.emit(EVENTS.VOICE_DISABLE);
-              }
-            }}
+            onVoiceEnabledChange={onVoiceEnabledChange}
             micDevices={micDevices}
             selectedMicDeviceId={selectedMicDeviceId}
             onMicDeviceChange={setSelectedMicDeviceId}
@@ -2401,38 +1169,38 @@ export default function PlayPage() {
           />
         )}
 
-        {/* Casino overlay — self-manages visibility via CASINO_OPEN/CLOSE events */}
+        {/* Casino overlay self-manages visibility via CASINO_OPEN/CLOSE events */}
         <CasinoOverlay isMobile={isMobile} />
 
-        {/* Gun Shop overlay — self-manages visibility via GUN_SHOP_OPEN/CLOSE events */}
+        {/* Gun Shop overlay self-manages visibility via GUN_SHOP_OPEN/CLOSE events */}
         <GunShopOverlay isMobile={isMobile} />
 
-        {/* Zombies HUD — shown only when ZombiesScene is active */}
+        {/* Zombies HUD shown only when ZombiesScene is active */}
         {zombiesHudActive && <ZombiesHUD />}
 
-        {/* Minigame HUDs — shown only when their respective scene is active */}
+        {/* Minigame HUDs shown only when their respective scene is active */}
         {basketHudActive && <BasketHUD />}
         {penaltyHudActive && <PenaltyHUD />}
         {dartsHudActive && <DartsHUD />}
         {flappyHudActive && <FlappyHUD />}
         {dinoHudActive && <DinoHUD />}
 
-        {/* Vecindad HUD — shown only when VecindadScene is active */}
+        {/* Vecindad HUD shown only when VecindadScene is active */}
         <VecindadHUD />
 
-        {/* Bosque HUD — shown only when BosqueMaterialesScene is active */}
+        {/* Bosque HUD shown only when BosqueMaterialesScene is active */}
         {bosqueHudActive && <BosqueHUD />}
 
-        {/* Gym HUD — self-manages visibility via GYM_SCENE_ACTIVE event */}
+        {/* Gym HUD self-manages visibility via GYM_SCENE_ACTIVE event */}
         <GymHUD />
 
-        {/* Arcade HUD — self-manages visibility via ARCADE_SCENE_ACTIVE event */}
+        {/* Arcade HUD self-manages visibility via ARCADE_SCENE_ACTIVE event */}
         <ArcadeHUD />
 
-        {/* PVP Arena HUD — shown only when PvpArenaScene is active */}
+        {/* PVP Arena HUD shown only when PvpArenaScene is active */}
         {pvpHudActive && <PvpHUD />}
 
-        {/* Quest Tracker — always mounted when in-game, self-manages visibility */}
+        {/* Quest Tracker always mounted when in-game, self-manages visibility */}
         {activeScene !== 'CreatorScene' && (
           <QuestTracker isAuthenticated={isAuthenticated} isMobile={isMobile} />
         )}
@@ -2553,38 +1321,6 @@ export default function PlayPage() {
   );
 }
 
-function directionLabel(direction: MovementDirection) {
-  switch (direction) {
-    case 'up':
-      return 'ARRIBA';
-    case 'left':
-      return 'IZQ';
-    case 'down':
-      return 'ABAJO';
-    case 'right':
-      return 'DER';
-    default:
-      return 'DIR';
-  }
-}
-
-function actionLabel(action: ActionBinding) {
-  switch (action) {
-    case 'interact':
-      return 'INTERACT';
-    case 'shoot':
-      return 'DISPARAR';
-    case 'inventory':
-      return 'INVENTARIO';
-    case 'chat':
-      return 'CHAT';
-    case 'back':
-      return 'VOLVER';
-    default:
-      return 'ACCION';
-  }
-}
-
 function hudCollapseButtonStyle() {
   return {
     fontFamily: '"Press Start 2P", monospace',
@@ -2597,3 +1333,4 @@ function hudCollapseButtonStyle() {
     lineHeight: 1,
   } as const;
 }
+
