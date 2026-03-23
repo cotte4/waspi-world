@@ -1738,6 +1738,39 @@ export class VecindadScene extends Phaser.Scene {
     return Phaser.Math.Distance.Between(this.px, this.py, doorX, doorY) < 74;
   }
 
+  private resolveParcelCollisions(px: number, py: number): { x: number; y: number } {
+    const PLAYER_RADIUS = 18;
+    let x = px;
+    let y = py;
+    for (const parcel of VECINDAD_PARCELS) {
+      const stage = parcel.id === this.vecindadState.ownedParcelId
+        ? this.vecindadState.buildStage
+        : (this.sharedParcels.get(parcel.id)?.buildStage ?? 0);
+      if (stage <= 0) continue;
+      // House bounds matching drawParcelStructure()
+      const hx = parcel.x + 78;
+      const hy = parcel.y + 52;
+      const hw = parcel.w - 156;
+      const hh = parcel.h - 96;
+      // Circle vs AABB nearest-point check
+      const nearX = Phaser.Math.Clamp(x, hx, hx + hw);
+      const nearY = Phaser.Math.Clamp(y, hy, hy + hh);
+      const distSq = (x - nearX) ** 2 + (y - nearY) ** 2;
+      if (distSq >= PLAYER_RADIUS * PLAYER_RADIUS) continue;
+      // Push out via nearest face
+      const overlapLeft = x - hx;
+      const overlapRight = hx + hw - x;
+      const overlapTop = y - hy;
+      const overlapBottom = hy + hh - y;
+      const minOverlap = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom);
+      if (minOverlap === overlapLeft) x = hx - PLAYER_RADIUS;
+      else if (minOverlap === overlapRight) x = hx + hw + PLAYER_RADIUS;
+      else if (minOverlap === overlapTop) y = hy - PLAYER_RADIUS;
+      else y = hy + hh + PLAYER_RADIUS;
+    }
+    return { x, y };
+  }
+
   private isNearExitGate() {
     return this.px < 240 && this.py > 790 && this.py < 1110;
   }
@@ -1776,8 +1809,11 @@ export class VecindadScene extends Phaser.Scene {
       dy *= 0.707;
     }
 
-    this.px = Phaser.Math.Clamp(this.px + dx * speed, 84, VECINDAD_MAP.WIDTH - 84);
-    this.py = Phaser.Math.Clamp(this.py + dy * speed, 84, VECINDAD_MAP.HEIGHT - 84);
+    const rawX = Phaser.Math.Clamp(this.px + dx * speed, 84, VECINDAD_MAP.WIDTH - 84);
+    const rawY = Phaser.Math.Clamp(this.py + dy * speed, 84, VECINDAD_MAP.HEIGHT - 84);
+    const resolved = this.resolveParcelCollisions(rawX, rawY);
+    this.px = resolved.x;
+    this.py = resolved.y;
 
     this.player.update(dx !== 0 || dy !== 0, dx, dy);
     this.player.setPosition(this.px, this.py);

@@ -81,8 +81,10 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ parcels, player });
   } catch (error) {
+    // Return empty parcels gracefully — missing migrations shouldn't hard-crash the scene
     const message = error instanceof Error ? error.message : 'Vecindad load failed.';
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error('[api/vecindad] GET error:', message);
+    return NextResponse.json({ parcels: [], player: null });
   }
 }
 

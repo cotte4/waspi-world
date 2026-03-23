@@ -52,7 +52,9 @@ export async function GET() {
     .returns<GlobalEvent[]>();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    // Return empty gracefully — table may not be migrated in all environments
+    console.error('[api/events] Supabase error:', error.message);
+    return NextResponse.json({ events: [] });
   }
 
   return NextResponse.json({ events: data ?? [] });

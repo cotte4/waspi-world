@@ -522,8 +522,8 @@ function SlotsPanel({
 
   useEffect(() => {
     onBusyChange(state.spinning);
-    return () => onBusyChange(false);
   }, [state.spinning, onBusyChange]);
+  useEffect(() => () => { onBusyChange(false); }, [onBusyChange]);
 
   useEffect(() => () => {
     spinGuardRef.current = false;
@@ -654,8 +654,8 @@ function RoulettePanel({
 
   useEffect(() => {
     onBusyChange(state.spinning);
-    return () => onBusyChange(false);
   }, [state.spinning, onBusyChange]);
+  useEffect(() => () => { onBusyChange(false); }, [onBusyChange]);
 
   useEffect(() => () => {
     spinGuardRef.current = false;
@@ -830,8 +830,8 @@ function BlackjackPanel({
     stateRef.current = state;
     const busy = state.phase === 'player' || state.phase === 'dealer';
     onBusyChange(busy);
-    return () => onBusyChange(false);
   }, [state, onBusyChange]);
+  useEffect(() => () => { onBusyChange(false); }, [onBusyChange]);
 
   useEffect(() => () => {
     if (dealerStepRef.current !== null) {
@@ -1068,8 +1068,8 @@ function PokerPanel({
     stateRef.current = state;
     const busy = state.phase !== 'ante' && state.phase !== 'showdown';
     onBusyChange(busy);
-    return () => onBusyChange(false);
   }, [state, onBusyChange]);
+  useEffect(() => () => { onBusyChange(false); }, [onBusyChange]);
 
   useEffect(() => () => {
     dealGuardRef.current = false;

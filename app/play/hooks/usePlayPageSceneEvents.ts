@@ -170,20 +170,24 @@ export function usePlayPageSceneEvents({
       if (typeof sceneName !== 'string') return;
       const prev = previousPhaserSceneRef.current;
       previousPhaserSceneRef.current = sceneName;
-      setActiveScene(sceneName);
-      track('scene_enter', { scene: sceneName });
-      if (sceneName === 'WorldScene') {
-        setShopOpen(false);
-        setShopSource('');
-        setCheckoutRedirecting(false);
-        setJukeboxOpen(false);
-        if (!localStorage.getItem('waspi_onboarding_v1')) {
-          const firstWorldEntry = prev === '' || prev === 'CreatorScene';
-          if (firstWorldEntry) {
-            setShowOnboarding(true);
+      // Defer setState to avoid "Cannot update during render" — Phaser fires this
+      // synchronously from its RAF loop, which can coincide with React's render phase.
+      queueMicrotask(() => {
+        setActiveScene(sceneName);
+        track('scene_enter', { scene: sceneName });
+        if (sceneName === 'WorldScene') {
+          setShopOpen(false);
+          setShopSource('');
+          setCheckoutRedirecting(false);
+          setJukeboxOpen(false);
+          if (!localStorage.getItem('waspi_onboarding_v1')) {
+            const firstWorldEntry = prev === '' || prev === 'CreatorScene';
+            if (firstWorldEntry) {
+              setShowOnboarding(true);
+            }
           }
         }
-      }
+      });
     });
 
     const unsubInv = eventBus.on(EVENTS.INVENTORY_TOGGLE, () => {
