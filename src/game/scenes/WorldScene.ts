@@ -55,6 +55,13 @@ import {
   drawVignetteLayer,
 } from './world/renderWorld';
 import {
+  setupMinimap as setupMinimapModule,
+  renderMinimap as renderMinimapModule,
+  updateMinimapVisibility,
+  type MinimapBuildingDef,
+  type MinimapRefs,
+} from './world/minimap';
+import {
   resolveAndHandleWorldInteractionFrame,
   resolveWorldInteractionTarget,
   syncWorldInteractionPrompt,
@@ -608,11 +615,7 @@ export class WorldScene extends Phaser.Scene {
   private camaraHud?: Phaser.GameObjects.Text;
 
   // Minimap
-  private minimapGraphics?: Phaser.GameObjects.Graphics;
-  private minimapPlayerDot?: Phaser.GameObjects.Arc;
-  private minimapRemoteDots = new Map<string, Phaser.GameObjects.Arc>();
-  private minimapContainer?: Phaser.GameObjects.Container;
-  private minimapTitle?: Phaser.GameObjects.Text;
+  private minimapRefs: MinimapRefs = { remoteDots: new Map() };
 
   constructor() {
     super({ key: 'WorldScene' });
@@ -1818,8 +1821,7 @@ export class WorldScene extends Phaser.Scene {
     this.levelBadgeText?.setVisible(false);
     this.weaponCooldownBar?.setVisible(visible && this.gunEnabled);
     // Minimap follows arena HUD toggle
-    this.minimapContainer?.setVisible(visible);
-    this.minimapTitle?.setVisible(visible);
+    updateMinimapVisibility(this.minimapRefs, visible);
   }
 
   private getEnemyNameColor(archetype: EnemyArchetype) {
@@ -7051,111 +7053,29 @@ export class WorldScene extends Phaser.Scene {
   // ─── Minimap ──────────────────────────────────────────────────────────────────
 
   private setupMinimap() {
-    const mapW = 160;
-    const mapH = 100;
-    const marginRight = 10;
-    const marginTop = 10;
-    const x = this.scale.width - marginRight - mapW;
-    const y = marginTop;
-
-    // Static background + building rects drawn once
-    this.minimapGraphics = this.add.graphics()
-      .setScrollFactor(0)
-      .setDepth(9990);
-    this.minimapGraphics.fillStyle(0x000000, 0.72);
-    this.minimapGraphics.fillRect(x, y, mapW, mapH);
-    this.minimapGraphics.lineStyle(1.5, 0x46B3FF, 0.6);
-    this.minimapGraphics.strokeRect(x, y, mapW, mapH);
-
-    const scaleX = mapW / WORLD.WIDTH;
-    const scaleY = mapH / WORLD.HEIGHT;
-
-    // Buildings
-    const buildingDefs: Array<{ b: { x: number; y: number; w: number; h: number }; color: number }> = [
-      { b: BUILDINGS.ARCADE, color: 0x46B3FF },
-      { b: BUILDINGS.STORE,  color: 0xF5C842 },
-      { b: BUILDINGS.CAFE,   color: 0xFF8B3D },
-      { b: BUILDINGS.CASINO, color: 0xB74DFF },
+    const layout = { width: 160, height: 100, worldWidth: WORLD.WIDTH, worldHeight: WORLD.HEIGHT };
+    const buildings: MinimapBuildingDef[] = [
+      { rect: BUILDINGS.ARCADE, color: 0x46B3FF },
+      { rect: BUILDINGS.STORE,  color: 0xF5C842 },
+      { rect: BUILDINGS.CAFE,   color: 0xFF8B3D },
+      { rect: BUILDINGS.CASINO, color: 0xB74DFF },
     ];
-    for (const { b, color } of buildingDefs) {
-      this.minimapGraphics.fillStyle(color, 0.55);
-      this.minimapGraphics.fillRect(
-        x + b.x * scaleX,
-        y + b.y * scaleY,
-        b.w * scaleX,
-        b.h * scaleY,
-      );
-    }
-
-    // Player dot (will be repositioned each frame)
-    this.minimapPlayerDot = this.add.circle(x, y, 2.5, 0xF5C842, 1)
-      .setScrollFactor(0)
-      .setDepth(9993) as Phaser.GameObjects.Arc;
-
-    // "MAP" title label
-    this.minimapTitle = this.add.text(x + mapW / 2, y + 3, 'MAP', {
-      fontSize: '5px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#46B3FF',
-    }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(9994);
-
-    // Container for easy show/hide (graphics & title)
-    this.minimapContainer = this.add.container(0, 0, [
-      this.minimapGraphics,
-      this.minimapPlayerDot,
-      this.minimapTitle,
-    ]).setScrollFactor(0).setDepth(9990);
-
-    // Apply initial visibility
-    const visible = this.hudSettings.showArenaHud;
-    this.minimapContainer.setVisible(visible);
-    this.minimapTitle.setVisible(visible);
+    setupMinimapModule(this, { layout, buildings, visible: this.hudSettings.showArenaHud }, this.minimapRefs);
   }
 
   private renderMinimap() {
-    if (!this.minimapContainer || !this.minimapPlayerDot) return;
-    if (!this.minimapContainer.visible) return;
-
-    const mapW = 160;
-    const mapH = 100;
-    const marginRight = 10;
-    const marginTop = 10;
-    const originX = this.scale.width - marginRight - mapW;
-    const originY = marginTop;
-    const scaleX = mapW / WORLD.WIDTH;
-    const scaleY = mapH / WORLD.HEIGHT;
-
-    // Update local player dot
-    this.minimapPlayerDot.setPosition(
-      originX + this.px * scaleX,
-      originY + this.py * scaleY,
-    );
-
-    // Sync remote player dots
-    const activeIds = new Set<string>();
-    for (const [id, rp] of this.remotePlayers) {
-      activeIds.add(id);
-      let dot = this.minimapRemoteDots.get(id);
-      if (!dot || !dot.active) {
-        dot = this.add.circle(0, 0, 2, 0x46B3FF, 1)
-          .setScrollFactor(0)
-          .setDepth(9992) as Phaser.GameObjects.Arc;
-        this.minimapRemoteDots.set(id, dot);
-      }
-      dot.setPosition(
-        originX + rp.x * scaleX,
-        originY + rp.y * scaleY,
-      );
-      dot.setVisible(this.minimapContainer.visible);
-    }
-
-    // Remove dots for players that have left
-    for (const [id, dot] of this.minimapRemoteDots) {
-      if (!activeIds.has(id)) {
-        dot.destroy();
-        this.minimapRemoteDots.delete(id);
-      }
-    }
+    const layout = { width: 160, height: 100, worldWidth: WORLD.WIDTH, worldHeight: WORLD.HEIGHT };
+    renderMinimapModule({
+      scene: this,
+      refs: this.minimapRefs,
+      state: {
+        px: this.px,
+        py: this.py,
+        remotePlayers: this.remotePlayers as Map<string, { x: number; y: number }>,
+        visible: this.minimapRefs.container?.visible ?? false,
+      },
+      layout,
+    });
   }
 
   private parseRemoteHit(payload: unknown): RemoteHitEvent | null {
