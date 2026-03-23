@@ -5,8 +5,7 @@ import {
   hasServiceRole,
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
-
-const DEFAULT_BALANCE = 5000;
+import { getAuthoritativeBalance } from '@/src/lib/tenksBalance';
 
 // GET /api/player/tenks
 // Returns the server-authoritative TENKS balance for the authenticated player.
@@ -26,32 +25,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Admin client unavailable.' }, { status: 500 });
   }
 
-  const { data, error } = await admin
-    .from('player_tenks_balance')
-    .select('balance')
-    .eq('player_id', user.id)
-    .single<{ balance: number }>();
-
-  if (error && error.code === 'PGRST116') {
-    // Row not found — seed with default balance for new players.
-    const seedBalance = DEFAULT_BALANCE;
-
-    const { data: created, error: insertError } = await admin
-      .from('player_tenks_balance')
-      .insert({ player_id: user.id, balance: seedBalance })
-      .select('balance')
-      .single<{ balance: number }>();
-
-    if (insertError) {
-      return NextResponse.json({ error: insertError.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ balance: created?.balance ?? seedBalance });
+  try {
+    const balance = await getAuthoritativeBalance(admin, { playerId: user.id });
+    return NextResponse.json({ balance });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to resolve TENKS balance.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ balance: data.balance });
 }

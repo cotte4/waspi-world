@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { SAFE_PLAZA_RETURN } from '../config/constants';
+import { SAFE_PLAZA_RETURN, WORLD_EXITS } from '../config/constants';
 import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToWorldScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { SceneControls } from '../systems/SceneControls';
@@ -10,8 +10,8 @@ import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
 
 // ── Return coordinates in WorldScene ────────────────────────────────────────
 // GYM is in the plaza zone; player exits to the front of the building.
-const GYM_RETURN_X = 1620;
-const GYM_RETURN_Y = 1110;
+const GYM_RETURN_X = WORLD_EXITS.GYM.x;
+const GYM_RETURN_Y = WORLD_EXITS.GYM.y;
 
 // ── Minigame constants ────────────────────────────────────────────────────────
 const BAG_XP          = 5;

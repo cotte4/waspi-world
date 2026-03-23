@@ -942,6 +942,70 @@ export function handleZombiesRealtimeSharedSnapshot(
   return applyZombiesRealtimeSharedSnapshotCollections(scene, snapshot);
 }
 
+export function applyZombiesRealtimeSharedSnapshotAdapterState(
+  target: Pick<
+    ZombiesRealtimeSharedSnapshotStateScene,
+    | 'bossAlive'
+    | 'bossRoundActive'
+    | 'bossSpawnedThisRound'
+    | 'boxRollingUntil'
+    | 'depthsUnlocked'
+    | 'doublePointsUntil'
+    | 'mysteryBoxCooldownUntil'
+    | 'nextSpawnAt'
+    | 'pickupIdSeq'
+    | 'points'
+    | 'round'
+    | 'roundBreakUntil'
+    | 'roundTarget'
+    | 'sharedRunHostId'
+    | 'sharedRunPlayers'
+    | 'spawnedThisRound'
+    | 'zombieIdSeq'
+    | 'zombieProjectileSeq'
+  >,
+  source: Pick<
+    ZombiesRealtimeSharedSnapshotStateScene,
+    | 'bossAlive'
+    | 'bossRoundActive'
+    | 'bossSpawnedThisRound'
+    | 'boxRollingUntil'
+    | 'depthsUnlocked'
+    | 'doublePointsUntil'
+    | 'mysteryBoxCooldownUntil'
+    | 'nextSpawnAt'
+    | 'pickupIdSeq'
+    | 'points'
+    | 'round'
+    | 'roundBreakUntil'
+    | 'roundTarget'
+    | 'sharedRunHostId'
+    | 'sharedRunPlayers'
+    | 'spawnedThisRound'
+    | 'zombieIdSeq'
+    | 'zombieProjectileSeq'
+  >,
+) {
+  target.bossAlive = source.bossAlive;
+  target.bossRoundActive = source.bossRoundActive;
+  target.bossSpawnedThisRound = source.bossSpawnedThisRound;
+  target.boxRollingUntil = source.boxRollingUntil;
+  target.depthsUnlocked = source.depthsUnlocked;
+  target.doublePointsUntil = source.doublePointsUntil;
+  target.mysteryBoxCooldownUntil = source.mysteryBoxCooldownUntil;
+  target.nextSpawnAt = source.nextSpawnAt;
+  target.pickupIdSeq = source.pickupIdSeq;
+  target.points = source.points;
+  target.round = source.round;
+  target.roundBreakUntil = source.roundBreakUntil;
+  target.roundTarget = source.roundTarget;
+  target.sharedRunHostId = source.sharedRunHostId;
+  target.sharedRunPlayers = source.sharedRunPlayers;
+  target.spawnedThisRound = source.spawnedThisRound;
+  target.zombieIdSeq = source.zombieIdSeq;
+  target.zombieProjectileSeq = source.zombieProjectileSeq;
+}
+
 export function handleRealtimeRemoteLeave(
   scene: Pick<ZombiesRealtimeScene, 'remotePlayers' | 'sharedRunPlayers' | 'isSharedRunHost' | 'maybeScheduleSharedReset'> & {
     lastSharedSnapshotSentAt?: number;
@@ -1093,6 +1157,46 @@ export function connectZombiesRealtimeChannel(
   return setupZombiesRealtimeBridge(scene, channel, handlers);
 }
 
+export function syncZombiesRealtimePresenceState(
+  scene: Pick<ZombiesRealtimeScene, 'isSharedCoopEnabled' | 'channel' | 'sharedRunPlayers' | 'px' | 'py'> & {
+    sharedRunHostId: string | null;
+    lastSharedSnapshotSentAt: number;
+    isSharedRunHost: () => boolean;
+  },
+  presence: Record<string, Array<{ player_id?: string; username?: string; joined_at?: number }>>,
+) {
+  if (!scene.isSharedCoopEnabled() || !scene.channel) return false;
+
+  const players = new Map<string, ZombiesRealtimeSharedPlayerState>();
+  for (const entries of Object.values(presence)) {
+    for (const entry of entries) {
+      const playerId = typeof entry.player_id === 'string' ? entry.player_id : '';
+      if (!playerId) continue;
+      const existing = scene.sharedRunPlayers.get(playerId);
+      players.set(playerId, {
+        player_id: playerId,
+        username: typeof entry.username === 'string' && entry.username.trim() ? entry.username.trim() : existing?.username ?? 'waspi_guest',
+        x: existing?.x ?? scene.px,
+        y: existing?.y ?? scene.py,
+        hp: existing?.hp ?? ZOMBIES_PLAYER.maxHp,
+        alive: existing?.alive ?? true,
+        joinedAt: typeof entry.joined_at === 'number' && Number.isFinite(entry.joined_at) ? entry.joined_at : existing?.joinedAt ?? Date.now(),
+        lastDamageAt: existing?.lastDamageAt ?? 0,
+      });
+    }
+  }
+
+  scene.sharedRunPlayers = players;
+  scene.sharedRunHostId = [...players.values()]
+    .sort((a, b) => (a.joinedAt - b.joinedAt) || a.player_id.localeCompare(b.player_id))[0]?.player_id ?? null;
+
+  if (scene.isSharedRunHost()) {
+    scene.lastSharedSnapshotSentAt = 0;
+  }
+
+  return true;
+}
+
 export function teardownZombiesRealtimeChannel(
   scene: Pick<ZombiesRealtimeScene, 'channel' | 'playerId'>,
 ) {
@@ -1126,7 +1230,11 @@ export type ZombiesRealtimeSharedShotPayload = {
   originY: number;
   targetX: number;
   targetY: number;
-  weapon: unknown;
+  pellets: number;
+  spread: number;
+  range: number;
+  damage: number;
+  color: number;
 };
 
 export type ZombiesRealtimeSharedShotScene = Pick<
@@ -1173,7 +1281,7 @@ export function handleZombiesRealtimeSharedShot(
     shot.originY ?? scene.py,
     shot.targetX ?? scene.px,
     shot.targetY ?? scene.py,
-    shot.weapon,
+    shot,
     scene.isSharedRunHost(),
   );
   return true;

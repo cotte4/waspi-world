@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getAuthenticatedUser, hasServiceRole, isServerSupabaseConfigured } from '@/src/lib/supabaseServer';
 import { DEFAULT_PLAYER_STATE, normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
-import { ensureCatalogSeeded, ensurePlayerRow, syncPlayerInventory } from '@/src/lib/commercePersistence';
+import { ensureCatalogSeeded, ensurePlayerRow, resolveAuthoritativeTenksBalance, syncPlayerInventory } from '@/src/lib/commercePersistence';
 import { mergePlayerWithVecindad } from '@/src/lib/vecindadPersistence';
 
 const PLAYER_METADATA_KEY = 'waspiPlayer';
@@ -23,6 +23,13 @@ export async function GET(request: NextRequest) {
     const admin = createSupabaseAdminClient();
     if (admin) {
       try {
+        player = {
+          ...player,
+          tenks: await resolveAuthoritativeTenksBalance(admin, {
+            playerId: user.id,
+            fallbackBalance: player.tenks,
+          }),
+        };
         await ensureCatalogSeeded(admin);
         await ensurePlayerRow(admin, user, player);
         player = await mergePlayerWithVecindad(admin, user.id, player);

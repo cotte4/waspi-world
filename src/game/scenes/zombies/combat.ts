@@ -2,9 +2,7 @@ import Phaser from 'phaser';
 import { getShootTargetWorld } from '../../systems/shootingAim';
 import { ZOMBIES_PLAYER, ZOMBIES_WORLD, type ZombiesWeaponId } from '../../config/zombies';
 import type { ProgressionState } from '../../systems/ProgressionSystem';
-
-const ZOMBIES_MUZZLE_FORWARD = 20;
-const ZOMBIES_MUZZLE_UP = 12;
+import { ZOMBIES_MUZZLE_FORWARD, ZOMBIES_MUZZLE_UP } from './constants';
 
 export type ZombiesCombatWeaponStats = {
   color: number;

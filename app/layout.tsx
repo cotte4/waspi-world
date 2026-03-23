@@ -11,6 +11,7 @@ export const metadata: Metadata = {
 // Set NEXT_PUBLIC_PLAUSIBLE_DOMAIN in Vercel env vars (e.g. "waspi.world")
 // to activate Plausible analytics. If unset, the script is not injected.
 const plausibleDomain = process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN;
+const analyticsEnabled = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
 
 export default function RootLayout({
   children,
@@ -31,7 +32,7 @@ export default function RootLayout({
       </head>
       <body>
         {children}
-        <Analytics />
+        {analyticsEnabled && <Analytics />}
       </body>
     </html>
   );

@@ -6,13 +6,12 @@ import {
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
 import { appendTenksTransaction } from '@/src/lib/commercePersistence';
+import { debitBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
 
 const SKIP_COST = 500;
 const SKIP_THRESHOLD = 1;
 
 type SkipBody = { videoId: string; queueId: string };
-type BalanceRow = { balance: number };
-type PlayerRow = { tenks: number };
 type ExistingVoteRow = { id: string };
 
 export async function POST(request: NextRequest) {
@@ -69,34 +68,12 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Server-validated TENKS balance ---
-  const { data: balanceRow, error: balanceError } = await admin
-    .from('player_tenks_balance')
-    .select('balance')
-    .eq('player_id', user.id)
-    .single<BalanceRow>();
-
-  const { data: playerRow } = await admin
-    .from('players')
-    .select('tenks')
-    .eq('id', user.id)
-    .maybeSingle<PlayerRow>();
-
   let serverBalance: number;
-
-  if (balanceError && balanceError.code === 'PGRST116') {
-    serverBalance = playerRow?.tenks ?? 0;
-    await admin
-      .from('player_tenks_balance')
-      .insert({ player_id: user.id, balance: serverBalance });
-  } else if (balanceError) {
-    return NextResponse.json({ error: balanceError.message }, { status: 500 });
-  } else {
-    serverBalance = Math.max(balanceRow.balance, playerRow?.tenks ?? balanceRow.balance);
-    if (serverBalance !== balanceRow.balance) {
-      await admin
-        .from('player_tenks_balance')
-        .upsert({ player_id: user.id, balance: serverBalance });
-    }
+  try {
+    serverBalance = await getAuthoritativeBalance(admin, { playerId: user.id });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to resolve TENKS balance.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
   if (serverBalance < SKIP_COST) {
@@ -105,8 +82,6 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
-
-  const newBalance = serverBalance - SKIP_COST;
 
   // --- Register vote first so we never charge twice for the same vote ---
   const { error: voteError } = await admin
@@ -118,18 +93,24 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Deduct TENKS ---
-  const { error: deductError } = await admin
-    .from('player_tenks_balance')
-    .upsert({ player_id: user.id, balance: newBalance });
+  const debit = await debitBalance(admin, {
+    playerId: user.id,
+    amount: SKIP_COST,
+    fallbackBalance: serverBalance,
+  });
 
-  if (deductError) {
+  if (!debit.ok) {
     await admin
       .from('jukebox_skip_votes')
       .delete()
       .eq('queue_id', body.queueId)
       .eq('player_id', user.id);
-    return NextResponse.json({ error: deductError.message }, { status: 500 });
+    return NextResponse.json(
+      { error: `Necesitás ${SKIP_COST} TENKS para votar skip. Tenés ${debit.previousBalance}.`, balance: debit.previousBalance },
+      { status: 400 }
+    );
   }
+  const newBalance = debit.newBalance;
 
   // --- Count total votes ---
   const { count: voteCount, error: countError } = await admin

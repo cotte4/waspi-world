@@ -4,6 +4,7 @@
 // All economy actions (add/skip) go through server-validated API routes.
 
 import { supabase, isConfigured } from '../../lib/supabase';
+import { preferSupabaseHttpBroadcast } from '../../lib/supabaseRealtime';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { getAuthHeaders } from './authHelper';
 import { applyTenksBalanceFromServer } from './TenksSystem';
@@ -133,12 +134,12 @@ class JukeboxSystem {
     this.playerId = playerId;
     this.playerName = playerName;
 
-    this.channel = supabase.channel('cafe_jukebox', {
+    this.channel = preferSupabaseHttpBroadcast(supabase.channel('cafe_jukebox', {
       config: {
         broadcast: { self: false },
         presence: { key: playerId },
       },
-    });
+    }));
 
     this.channel
       .on('broadcast', { event: '*' }, ({ event, payload }: { event: string; payload: unknown }) => {

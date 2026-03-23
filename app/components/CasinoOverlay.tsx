@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 import { applyTenksBalanceFromServer, getTenksBalance, spendTenks, addTenks } from '@/src/game/systems/TenksSystem';
+import { getAuthHeaders } from '@/src/game/systems/authHelper';
 import { supabase } from '@/src/lib/supabase';
 
 /* ─── Types ────────────────────────────────────────────────────────────────── */
@@ -40,6 +41,10 @@ interface BlackjackState {
   currentBet: number;
   deck: number[];
   settled: boolean;
+  runId: string | null;
+  authRound: boolean;
+  payout: number;
+  settlementStatus: 'idle' | 'pending' | 'done';
 }
 
 interface HoldemState {
@@ -55,6 +60,10 @@ interface HoldemState {
   actionIndex: number;
   cpuLastAction: string;
   cpuBetPending: boolean;
+  runId?: string | null;
+  authRound?: boolean;
+  showdownPayout?: number;
+  settlementStatus?: 'idle' | 'pending' | 'done';
 }
 
 interface RouletteBetOption {
@@ -69,6 +78,18 @@ interface PokerResult {
   rank: number;
   tiebreak: number[];
 }
+
+type CasinoSettlementInput = {
+  game: GameId;
+  runId: string;
+  wager: number;
+  payout: number;
+  score?: number;
+};
+
+type CasinoSettlementResult =
+  | { ok: true; newBalance: number; status: string }
+  | { ok: false; error: string; balance?: number };
 
 export interface CasinoOverlayProps {
   isMobile: boolean;
@@ -293,6 +314,14 @@ function comparePokerResults(a: PokerResult, b: PokerResult): number {
   return 0;
 }
 
+function createCasinoRunId(game: GameId) {
+  return `casino_${game}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function hasAuthSession(headers: Record<string, string>) {
+  return typeof headers.Authorization === 'string' && headers.Authorization.length > 0;
+}
+
 function pokerCardLabel(card: number): string {
   const rank = ((card - 1) % 13) + 1;
   const rl = rank === 1 ? 'A' : rank === 11 ? 'J' : rank === 12 ? 'Q' : rank === 13 ? 'K' : String(rank);
@@ -504,10 +533,12 @@ function SlotsPanel({
   balance,
   onToast,
   onBusyChange,
+  settleRound,
 }: {
   balance: number;
   onToast: (msg: string) => void;
   onBusyChange: (busy: boolean) => void;
+  settleRound: (input: CasinoSettlementInput) => Promise<CasinoSettlementResult>;
 }) {
   const [state, setState] = useState<SlotsState>({
     betIndex: 0,
@@ -518,7 +549,7 @@ function SlotsPanel({
   const spinIdRef = useRef(0);
   const spinGuardRef = useRef(false);
   const timerIdsRef = useRef<number[]>([]);
-  const pendingBetRef = useRef(0);
+  const pendingRoundRef = useRef<{ wager: number; authRound: boolean } | null>(null);
 
   useEffect(() => {
     onBusyChange(state.spinning);
@@ -529,25 +560,37 @@ function SlotsPanel({
     spinGuardRef.current = false;
     timerIdsRef.current.forEach((id) => window.clearTimeout(id));
     timerIdsRef.current = [];
-    if (pendingBetRef.current > 0) {
-      addTenks(pendingBetRef.current, 'casino_slots_refund_abort');
-      pendingBetRef.current = 0;
+    const pendingRound = pendingRoundRef.current;
+    if (pendingRound && pendingRound.wager > 0 && !pendingRound.authRound) {
+      addTenks(pendingRound.wager, 'casino_slots_refund_abort');
     }
-  }, []);
+    pendingRoundRef.current = null;
+  }, [onToast]);
 
-  const spin = useCallback(() => {
+  const spin = useCallback(async () => {
     if (spinGuardRef.current || state.spinning) return;
     spinGuardRef.current = true;
     const bet = SLOT_BETS[state.betIndex];
-    if (!spendTenks(bet, 'casino_slots_bet')) {
+    if (balance < bet) {
       spinGuardRef.current = false;
       setState((s) => ({ ...s, resultText: 'NO TENES TENKS SUFICIENTES.' }));
       onToast('NO ALCANZA PARA GIRAR.');
       return;
     }
+
+    const headers = await getAuthHeaders();
+    const authRound = hasAuthSession(headers);
+    if (!authRound && !spendTenks(bet, 'casino_slots_bet')) {
+      spinGuardRef.current = false;
+      setState((s) => ({ ...s, resultText: 'NO TENES TENKS SUFICIENTES.' }));
+      onToast('NO ALCANZA PARA GIRAR.');
+      return;
+    }
+
     const outcome = rollSlotsOutcome();
     const myToken = ++spinIdRef.current;
-    pendingBetRef.current = bet;
+    const runId = createCasinoRunId('slots');
+    pendingRoundRef.current = { wager: bet, authRound };
     timerIdsRef.current.forEach((id) => window.clearTimeout(id));
     timerIdsRef.current = [];
     setState((s) => ({ ...s, spinning: true, resultText: 'GIRANDO...' }));
@@ -560,20 +603,41 @@ function SlotsPanel({
         const isLast = t === totalTicks - 1;
         if (isLast) {
           spinGuardRef.current = false;
-          pendingBetRef.current = 0;
           const payout = Math.round(bet * outcome.payoutMultiplier);
-          if (payout > 0) {
-            addTenks(payout, 'casino_slots_payout');
-            onToast(`+${payout} TENKS`);
-          } else {
-            onToast('SIN PAGO');
-          }
-          setState({
-            betIndex: state.betIndex,
-            reels: outcome.reels,
-            resultText: payout > 0 ? `${outcome.label} COBRAS ${payout} TENKS.` : 'MALA SUERTE. OTRA MAS.',
-            spinning: false,
-          });
+          pendingRoundRef.current = null;
+          void (async () => {
+            if (authRound) {
+              const settled = await settleRound({
+                game: 'slots',
+                runId,
+                wager: bet,
+                payout,
+                score: Math.round(outcome.payoutMultiplier * 100),
+              });
+              if (!settled.ok) {
+                onToast(settled.error);
+                setState({
+                  betIndex: state.betIndex,
+                  reels: outcome.reels,
+                  resultText: 'LA TIRADA SALIO, PERO NO SE PUDO LIQUIDAR.',
+                  spinning: false,
+                });
+                return;
+              }
+            } else if (payout > 0) {
+              addTenks(payout, 'casino_slots_payout');
+            }
+
+            if (payout > 0) onToast(`+${payout} TENKS`);
+            else onToast('SIN PAGO');
+
+            setState({
+              betIndex: state.betIndex,
+              reels: outcome.reels,
+              resultText: payout > 0 ? `${outcome.label} COBRAS ${payout} TENKS.` : 'MALA SUERTE. OTRA MAS.',
+              spinning: false,
+            });
+          })();
         } else {
           setState((s) =>
             s.spinning
@@ -584,7 +648,7 @@ function SlotsPanel({
       }, 80 * t);
       timerIdsRef.current.push(timerId);
     }
-  }, [state, onToast]);
+  }, [balance, onToast, settleRound, state]);
 
   const bet = SLOT_BETS[state.betIndex];
   const isPositive = state.resultText.includes('COBRAS');
@@ -634,10 +698,12 @@ function RoulettePanel({
   balance,
   onToast,
   onBusyChange,
+  settleRound,
 }: {
   balance: number;
   onToast: (msg: string) => void;
   onBusyChange: (busy: boolean) => void;
+  settleRound: (input: CasinoSettlementInput) => Promise<CasinoSettlementResult>;
 }) {
   const [state, setState] = useState<RouletteState>({
     betIndex: 0,
@@ -650,7 +716,7 @@ function RoulettePanel({
   const spinIdRef = useRef(0);
   const spinGuardRef = useRef(false);
   const timerIdsRef = useRef<number[]>([]);
-  const pendingBetRef = useRef(0);
+  const pendingRoundRef = useRef<{ wager: number; authRound: boolean } | null>(null);
 
   useEffect(() => {
     onBusyChange(state.spinning);
@@ -661,17 +727,26 @@ function RoulettePanel({
     spinGuardRef.current = false;
     timerIdsRef.current.forEach((id) => window.clearTimeout(id));
     timerIdsRef.current = [];
-    if (pendingBetRef.current > 0) {
-      addTenks(pendingBetRef.current, 'casino_roulette_refund_abort');
-      pendingBetRef.current = 0;
+    const pendingRound = pendingRoundRef.current;
+    if (pendingRound && pendingRound.wager > 0 && !pendingRound.authRound) {
+      addTenks(pendingRound.wager, 'casino_roulette_refund_abort');
     }
-  }, []);
+    pendingRoundRef.current = null;
+  }, [onToast]);
 
-  const spin = useCallback(() => {
+  const spin = useCallback(async () => {
     if (spinGuardRef.current || state.spinning) return;
     spinGuardRef.current = true;
     const bet = ROULETTE_BETS[state.betIndex];
-    if (!spendTenks(bet, 'casino_roulette_bet')) {
+    if (balance < bet) {
+      spinGuardRef.current = false;
+      setState((s) => ({ ...s, resultText: 'NO TENES TENKS SUFICIENTES.' }));
+      onToast('NO ALCANZA PARA GIRAR.');
+      return;
+    }
+    const headers = await getAuthHeaders();
+    const authRound = hasAuthSession(headers);
+    if (!authRound && !spendTenks(bet, 'casino_roulette_bet')) {
       spinGuardRef.current = false;
       setState((s) => ({ ...s, resultText: 'NO TENES TENKS SUFICIENTES.' }));
       onToast('NO ALCANZA PARA GIRAR.');
@@ -679,7 +754,8 @@ function RoulettePanel({
     }
     const winningNumber = Math.floor(Math.random() * 37);
     const myToken = ++spinIdRef.current;
-    pendingBetRef.current = bet;
+    const runId = createCasinoRunId('roulette');
+    pendingRoundRef.current = { wager: bet, authRound };
     timerIdsRef.current.forEach((id) => window.clearTimeout(id));
     timerIdsRef.current = [];
     setState((s) => ({ ...s, spinning: true, resultText: 'LA BOLA ESTA GIRANDO...' }));
@@ -694,7 +770,6 @@ function RoulettePanel({
         const color = getRouletteColor(number);
         if (isLast) {
           spinGuardRef.current = false;
-          pendingBetRef.current = 0;
           const option = ROULETTE_OPTIONS[state.optionIndex];
           const isEven = number !== 0 && number % 2 === 0;
           const won =
@@ -704,28 +779,51 @@ function RoulettePanel({
             (option.id === 'odd'    && number !== 0 && !isEven) ||
             (option.id === 'lucky7' && number === 7);
           const payout = won ? bet * option.payout : 0;
-          if (payout > 0) {
-            addTenks(payout, 'casino_roulette_payout');
-            onToast(`+${payout} TENKS`);
-          } else {
-            onToast('LA CASA GANA');
-          }
-          setState((s) => ({
-            ...s,
-            spinning: false,
-            lastNumber: number,
-            lastColor: color,
-            resultText: payout > 0
-              ? `SALIO ${number} ${color.toUpperCase()}. GANASTE ${payout} TENKS.`
-              : `SALIO ${number} ${color.toUpperCase()}. NO COBRAS ESTA.`,
-          }));
+          pendingRoundRef.current = null;
+          void (async () => {
+            if (authRound) {
+              const settled = await settleRound({
+                game: 'roulette',
+                runId,
+                wager: bet,
+                payout,
+                score: number,
+              });
+              if (!settled.ok) {
+                onToast(settled.error);
+                setState((s) => ({
+                  ...s,
+                  spinning: false,
+                  lastNumber: number,
+                  lastColor: color,
+                  resultText: 'LA BOLA CERRO, PERO NO SE PUDO LIQUIDAR.',
+                }));
+                return;
+              }
+            } else if (payout > 0) {
+              addTenks(payout, 'casino_roulette_payout');
+            }
+
+            if (payout > 0) onToast(`+${payout} TENKS`);
+            else onToast('LA CASA GANA');
+
+            setState((s) => ({
+              ...s,
+              spinning: false,
+              lastNumber: number,
+              lastColor: color,
+              resultText: payout > 0
+                ? `SALIO ${number} ${color.toUpperCase()}. GANASTE ${payout} TENKS.`
+                : `SALIO ${number} ${color.toUpperCase()}. NO COBRAS ESTA.`,
+            }));
+          })();
         } else {
           setState((s) => s.spinning ? { ...s, lastNumber: number, lastColor: color } : s);
         }
       }, 90 * t);
       timerIdsRef.current.push(timerId);
     }
-  }, [state, onToast]);
+  }, [balance, onToast, settleRound, state]);
 
   const { betIndex, optionIndex, spinning, lastNumber, lastColor, resultText } = state;
   const numColor = lastNumber === null ? S.muted : lastColor === 'red' ? S.red : lastColor === 'green' ? S.green : '#DDDDDD';
@@ -804,10 +902,12 @@ function BlackjackPanel({
   balance,
   onToast,
   onBusyChange,
+  settleRound,
 }: {
   balance: number;
   onToast: (msg: string) => void;
   onBusyChange: (busy: boolean) => void;
+  settleRound: (input: CasinoSettlementInput) => Promise<CasinoSettlementResult>;
 }) {
   const [state, setState] = useState<BlackjackState>({
     phase: 'bet',
@@ -820,11 +920,16 @@ function BlackjackPanel({
     currentBet: 0,
     deck: [],
     settled: false,
+    runId: null,
+    authRound: false,
+    payout: 0,
+    settlementStatus: 'idle',
   });
 
   const dealerStepRef = useRef<number | null>(null);
   const dealGuardRef = useRef(false);
   const stateRef = useRef(state);
+  const settlementRunRef = useRef<string | null>(null);
 
   useEffect(() => {
     stateRef.current = state;
@@ -840,20 +945,16 @@ function BlackjackPanel({
     }
     dealGuardRef.current = false;
     const s = stateRef.current;
-    if (!s.settled && s.currentBet > 0 && s.phase !== 'bet') {
+    if (!s.authRound && !s.settled && s.currentBet > 0 && s.phase !== 'bet') {
       addTenks(s.currentBet, 'casino_blackjack_refund_abort');
     }
-  }, []);
+  }, [onToast]);
 
   const resolveBlackjack = useCallback((
     playerCards: number[],
     dealerCards: number[],
     currentBet: number,
-    fromInitialDeal: boolean,
-    settled: boolean,
-    betIndex: number,
   ) => {
-    if (settled && !fromInitialDeal) return null;
     const playerTotal = getHandTotal(playerCards);
     const dealerTotal = getHandTotal(dealerCards);
     const playerBJ = playerCards.length === 2 && playerTotal === 21;
@@ -867,22 +968,31 @@ function BlackjackPanel({
     else if (playerTotal > dealerTotal) { payout = currentBet * 2; resultText = `GANASTE. COBRAS ${payout} TENKS.`; }
     else if (playerTotal < dealerTotal) resultText = 'LA CASA GANA.';
     else { payout = currentBet; resultText = `EMPATE. TE DEVUELVEN ${payout} TENKS.`; }
-    if (fromInitialDeal && playerBJ && dealerBJ) { payout = currentBet; resultText = `DOBLE BLACKJACK. EMPATE, ${currentBet} TENKS DEVUELTOS.`; }
-    if (payout > 0) { addTenks(payout, 'casino_blackjack_payout'); onToast(`+${payout} TENKS`); }
-    else onToast(resultText);
-    return { payout, resultText, betIndex };
-  }, [onToast]);
+    if (playerBJ && dealerBJ) { payout = currentBet; resultText = `DOBLE BLACKJACK. EMPATE, ${currentBet} TENKS DEVUELTOS.`; }
+    return { payout, resultText };
+  }, []);
 
-  const startHand = useCallback(() => {
+  const startHand = useCallback(async () => {
     if (dealGuardRef.current || state.phase !== 'bet') return;
     dealGuardRef.current = true;
     const bet = BLACKJACK_BETS[state.betIndex];
-    if (!spendTenks(bet, 'casino_blackjack_bet')) {
+    if (balance < bet) {
       dealGuardRef.current = false;
       setState((s) => ({ ...s, resultText: 'NO TENES TENKS SUFICIENTES.' }));
       onToast('NO ALCANZA PARA JUGAR.');
       return;
     }
+
+    const headers = await getAuthHeaders();
+    const authRound = hasAuthSession(headers);
+    if (!authRound && !spendTenks(bet, 'casino_blackjack_bet')) {
+      dealGuardRef.current = false;
+      setState((s) => ({ ...s, resultText: 'NO TENES TENKS SUFICIENTES.' }));
+      onToast('NO ALCANZA PARA JUGAR.');
+      return;
+    }
+
+    const runId = createCasinoRunId('blackjack');
     const deckInit = createBlackjackDeck();
     const card1 = deckInit.pop()!;
     const deck1 = [...deckInit];
@@ -897,24 +1007,22 @@ function BlackjackPanel({
     const playerTotal = getHandTotal(playerCards);
     const dealerTotal = getHandTotal(dealerCards);
     if (playerTotal === 21 || dealerTotal === 21) {
-      const resolved = resolveBlackjack(playerCards, dealerCards, bet, true, false, state.betIndex);
-      if (resolved) {
-        setState({
-          phase: 'result', betIndex: state.betIndex, playerCards, dealerCards,
-          dealerHidden: false, actionIndex: 0, resultText: resolved.resultText,
-          currentBet: bet, deck, settled: true,
-        });
-      }
+      const resolved = resolveBlackjack(playerCards, dealerCards, bet);
+      setState({
+        phase: 'result', betIndex: state.betIndex, playerCards, dealerCards,
+        dealerHidden: false, actionIndex: 0, resultText: resolved.resultText,
+        currentBet: bet, deck, settled: true, runId, authRound, payout: resolved.payout, settlementStatus: 'idle',
+      });
       window.setTimeout(() => { dealGuardRef.current = false; }, 0);
       return;
     }
     setState({
       phase: 'player', betIndex: state.betIndex, playerCards, dealerCards,
       dealerHidden: true, actionIndex: 0, resultText: 'TU MANO. HIT O STAND.',
-      currentBet: bet, deck, settled: false,
+      currentBet: bet, deck, settled: false, runId, authRound, payout: 0, settlementStatus: 'idle',
     });
     window.setTimeout(() => { dealGuardRef.current = false; }, 0);
-  }, [state.betIndex, state.phase, resolveBlackjack, onToast]);
+  }, [balance, state.betIndex, state.phase, resolveBlackjack, onToast]);
 
   const hit = useCallback(() => {
     setState((s) => {
@@ -923,12 +1031,21 @@ function BlackjackPanel({
       const playerCards = [...s.playerCards, newCard];
       const total = getHandTotal(playerCards);
       if (total > 21) {
-        onToast('PERDISTE LA MANO');
-        return { ...s, playerCards, deck: newDeck, dealerHidden: false, settled: true, phase: 'result', resultText: 'TE PASASTE. LA CASA GANA.' };
+        return {
+          ...s,
+          playerCards,
+          deck: newDeck,
+          dealerHidden: false,
+          settled: true,
+          phase: 'result',
+          resultText: 'TE PASASTE. LA CASA GANA.',
+          payout: 0,
+          settlementStatus: 'idle',
+        };
       }
       return { ...s, playerCards, deck: newDeck };
     });
-  }, [onToast]);
+  }, []);
 
   const stand = useCallback(() => {
     setState((s) => ({
@@ -948,14 +1065,60 @@ function BlackjackPanel({
           const [newCard, newDeck] = [s.deck.pop() ?? Math.ceil(Math.random() * 13), [...s.deck]];
           return { ...s, dealerCards: [...s.dealerCards, newCard], deck: newDeck };
         }
-        const resolved = resolveBlackjack(s.playerCards, s.dealerCards, s.currentBet, false, s.settled, s.betIndex);
-        if (!resolved) return s;
-        return { ...s, phase: 'result', settled: true, dealerHidden: false, resultText: resolved.resultText };
+        const resolved = resolveBlackjack(s.playerCards, s.dealerCards, s.currentBet);
+        return {
+          ...s,
+          phase: 'result',
+          settled: true,
+          dealerHidden: false,
+          resultText: resolved.resultText,
+          payout: resolved.payout,
+          settlementStatus: 'idle',
+        };
       });
     };
     dealerStepRef.current = window.setTimeout(tick, 320);
     return () => { if (dealerStepRef.current !== null) window.clearTimeout(dealerStepRef.current); };
   }, [state.phase, state.dealerCards, resolveBlackjack]);
+
+  useEffect(() => {
+    if (state.phase !== 'result' || !state.runId) return;
+    if (settlementRunRef.current === state.runId) return;
+
+    const runId = state.runId;
+    let cancelled = false;
+    settlementRunRef.current = runId;
+
+    void (async () => {
+      if (state.authRound) {
+        const settled = await settleRound({
+          game: 'blackjack',
+          runId,
+          wager: state.currentBet,
+          payout: state.payout,
+          score: getHandTotal(state.playerCards),
+        });
+        if (cancelled) return;
+
+        if (!settled.ok) {
+          onToast(settled.error);
+          setState((s) => s.runId === runId ? { ...s, settlementStatus: 'done', resultText: `${s.resultText} ERROR AL LIQUIDAR.` } : s);
+          return;
+        }
+      } else if (state.payout > 0) {
+        addTenks(state.payout, 'casino_blackjack_payout');
+      }
+
+      if (cancelled) return;
+      if (state.payout > 0) onToast(`+${state.payout} TENKS`);
+      else onToast(state.resultText);
+      setState((s) => s.runId === runId ? { ...s, settlementStatus: 'done' } : s);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onToast, settleRound, state]);
 
   const playerTotal = getHandTotal(state.playerCards);
   const dealerVisibleTotal = state.dealerHidden
@@ -1030,7 +1193,7 @@ function BlackjackPanel({
         <div style={{ fontFamily: S.fontBody, fontSize: 8, color: S.muted }}>LA CASA ESTA JUGANDO...</div>
       )}
       {state.phase === 'result' && (
-        <Btn label="JUGAR OTRA" active onClick={() => setState({ phase: 'bet', betIndex: state.betIndex, playerCards: [], dealerCards: [], dealerHidden: true, actionIndex: 0, resultText: 'ELEGI UNA APUESTA Y REPARTE.', currentBet: 0, deck: [], settled: false })} color={S.green} />
+        <Btn label="JUGAR OTRA" active onClick={() => setState({ phase: 'bet', betIndex: state.betIndex, playerCards: [], dealerCards: [], dealerHidden: true, actionIndex: 0, resultText: 'ELEGI UNA APUESTA Y REPARTE.', currentBet: 0, deck: [], settled: false, runId: null, authRound: false, payout: 0, settlementStatus: 'idle' })} color={S.green} />
       )}
     </div>
   );
@@ -1042,10 +1205,12 @@ function PokerPanel({
   balance,
   onToast,
   onBusyChange,
+  settleRound,
 }: {
   balance: number;
   onToast: (msg: string) => void;
   onBusyChange: (busy: boolean) => void;
+  settleRound: (input: CasinoSettlementInput) => Promise<CasinoSettlementResult>;
 }) {
   const [state, setState] = useState<HoldemState>({
     phase: 'ante',
@@ -1060,9 +1225,14 @@ function PokerPanel({
     actionIndex: 1,
     cpuLastAction: '',
     cpuBetPending: false,
+    runId: null,
+    authRound: false,
+    showdownPayout: 0,
+    settlementStatus: 'idle',
   });
   const stateRef = useRef(state);
   const dealGuardRef = useRef(false);
+  const settlementRunRef = useRef<string | null>(null);
 
   useEffect(() => {
     stateRef.current = state;
@@ -1074,7 +1244,7 @@ function PokerPanel({
   useEffect(() => () => {
     dealGuardRef.current = false;
     const s = stateRef.current;
-    if (s.phase !== 'ante' && s.phase !== 'showdown' && s.playerPaid > 0) {
+    if (!s.authRound && s.phase !== 'ante' && s.phase !== 'showdown' && s.playerPaid > 0) {
       addTenks(s.playerPaid, 'casino_holdem_refund_abort');
     }
   }, []);
@@ -1112,11 +1282,19 @@ function PokerPanel({
     return false;
   }, []);
 
-  const startHand = useCallback(() => {
+  const startHand = useCallback(async () => {
     if (dealGuardRef.current || state.phase !== 'ante') return;
     dealGuardRef.current = true;
     const ante = HOLDEM_ANTES[state.anteIndex];
-    if (!spendTenks(ante, 'casino_holdem_ante')) {
+    if (balance < ante) {
+      dealGuardRef.current = false;
+      setState((s) => ({ ...s, resultText: 'NO TENES TENKS SUFICIENTES.' }));
+      onToast('SIN TENKS PARA EL ANTE');
+      return;
+    }
+    const headers = await getAuthHeaders();
+    const authRound = hasAuthSession(headers);
+    if (!authRound && !spendTenks(ante, 'casino_holdem_ante')) {
       dealGuardRef.current = false;
       setState((s) => ({ ...s, resultText: 'NO TENÉS TENKS SUFICIENTES.' }));
       onToast('SIN TENKS PARA EL ANTE');
@@ -1125,13 +1303,15 @@ function PokerPanel({
     const deck = createShuffledDeck52();
     const playerHole = [deck.pop()!, deck.pop()!];
     const cpuHole    = [deck.pop()!, deck.pop()!];
+    const runId = createCasinoRunId('poker');
     setState((s) => ({
       ...s, phase: 'preflop', playerHole, cpuHole, community: [],
       pot: ante * 2, playerPaid: ante, deck,
+      runId, authRound, showdownPayout: 0, settlementStatus: 'idle',
       resultText: 'TU TURNO — ELEGÍ UNA ACCIÓN.', actionIndex: 1, cpuLastAction: 'ENTRA', cpuBetPending: false,
     }));
     window.setTimeout(() => { dealGuardRef.current = false; }, 0);
-  }, [state.anteIndex, state.phase, onToast]);
+  }, [balance, state.anteIndex, state.phase, onToast]);
 
   const advancePhase = useCallback((s: HoldemState): HoldemState => {
     const deck = [...s.deck];
@@ -1149,19 +1329,18 @@ function PokerPanel({
       const cpuBest    = bestAvailableHand(s.cpuHole,    s.community);
       const cmp = comparePokerResults(playerBest, cpuBest);
       let resultText: string;
+      let showdownPayout = 0;
       if (cmp > 0) {
-        addTenks(s.pot, 'casino_holdem_win');
-        onToast(`+${s.pot} TENKS`);
+        showdownPayout = s.pot;
         resultText = `GANASTE CON ${playerBest.label}! +${s.pot} TENKS`;
       } else if (cmp < 0) {
         onToast('LA CASA GANA');
         resultText = `CPU GANA CON ${cpuBest.label}. PERDÉS ${s.playerPaid} T.`;
       } else {
-        addTenks(s.playerPaid, 'casino_holdem_tie');
-        onToast('EMPATE');
+        showdownPayout = s.playerPaid;
         resultText = `EMPATE. TE DEVUELVEN ${s.playerPaid} TENKS.`;
       }
-      return { ...s, phase: 'showdown', resultText };
+      return { ...s, phase: 'showdown', resultText, showdownPayout, settlementStatus: 'idle' };
     }
     return s;
   }, [onToast]);
@@ -1169,21 +1348,18 @@ function PokerPanel({
   const playerAction = useCallback((action: 'fold' | 'check' | 'raise') => {
     setState((s) => {
       if (action === 'fold') {
-        onToast('FOLD');
         return { ...s, phase: 'showdown', cpuBetPending: false, resultText: `TE FUISTE. PERDÉS ${s.playerPaid} TENKS.`, cpuLastAction: 'GANA' };
       }
       if (action === 'raise') {
         const ante = HOLDEM_ANTES[s.anteIndex];
-        if (!spendTenks(ante, 'casino_holdem_raise')) {
+        const newPaid = s.playerPaid + ante;
+        if (s.authRound ? balance < newPaid : !spendTenks(ante, 'casino_holdem_raise')) {
           onToast('SIN TENKS PARA SUBIR');
           return { ...s, resultText: 'NO TENÉS TENKS PARA SUBIR.' };
         }
         const newPot = s.pot + ante * 2;
-        const newPaid = s.playerPaid + ante;
         const cpuFolds = cpuDecideOnRaise(s.cpuHole, s.community, s.phase);
         if (cpuFolds) {
-          addTenks(newPot, 'casino_holdem_win');
-          onToast(`+${newPot} TENKS`);
           return { ...s, pot: newPot, playerPaid: newPaid, phase: 'showdown', cpuBetPending: false, resultText: `CPU FOLDEA. GANÁS ${newPot} TENKS!`, cpuLastAction: 'FOLD' };
         }
         return advancePhase({ ...s, pot: newPot, playerPaid: newPaid, cpuLastAction: 'CALL', cpuBetPending: false });
@@ -1191,11 +1367,12 @@ function PokerPanel({
       // 'check' — if CPU has a pending river bet, this is a CALL
       if (s.cpuBetPending) {
         const ante = HOLDEM_ANTES[s.anteIndex];
-        if (!spendTenks(ante, 'casino_holdem_call')) {
+        const newPaid = s.playerPaid + ante;
+        if (s.authRound ? balance < newPaid : !spendTenks(ante, 'casino_holdem_call')) {
           onToast('SIN TENKS PARA CALL');
           return { ...s, resultText: 'NO TENÉS TENKS PARA CALL.' };
         }
-        return advancePhase({ ...s, pot: s.pot + ante, playerPaid: s.playerPaid + ante, cpuLastAction: 'APUESTA', cpuBetPending: false });
+        return advancePhase({ ...s, pot: s.pot + ante, playerPaid: newPaid, cpuLastAction: 'APUESTA', cpuBetPending: false });
       }
       // Normal check — CPU may bet on the river after player checks
       if (s.phase === 'river') {
@@ -1207,7 +1384,58 @@ function PokerPanel({
       }
       return advancePhase({ ...s, cpuLastAction: 'CHECK', cpuBetPending: false });
     });
-  }, [cpuDecideOnRaise, onToast, advancePhase]);
+  }, [advancePhase, balance, cpuDecideOnRaise, onToast]);
+
+  useEffect(() => {
+    if (state.phase !== 'showdown' || !state.runId) return;
+    if (settlementRunRef.current === state.runId) return;
+
+    const runId = state.runId;
+    let cancelled = false;
+    const showdownPayout = state.showdownPayout ?? 0;
+    const derivedPayout = showdownPayout > 0
+      ? showdownPayout
+      : state.resultText.includes('CPU FOLDEA')
+        ? state.pot
+        : state.resultText.includes('EMPATE')
+          ? state.playerPaid
+          : 0;
+    settlementRunRef.current = runId;
+
+    void (async () => {
+      if (state.authRound) {
+        const settled = await settleRound({
+          game: 'poker',
+          runId,
+          wager: state.playerPaid,
+          payout: derivedPayout,
+          score: state.pot,
+        });
+        if (cancelled) return;
+        if (!settled.ok) {
+          onToast(settled.error);
+          setState((s) => s.runId === runId ? { ...s, settlementStatus: 'done', resultText: `${s.resultText} ERROR AL LIQUIDAR.` } : s);
+          return;
+        }
+      } else if (derivedPayout > 0) {
+        const reason = derivedPayout === state.playerPaid ? 'casino_holdem_tie' : 'casino_holdem_win';
+        addTenks(derivedPayout, reason);
+      }
+
+      if (cancelled) return;
+      if (derivedPayout > 0) {
+        if (derivedPayout === state.playerPaid) onToast('EMPATE');
+        else onToast(`+${derivedPayout} TENKS`);
+      } else {
+        onToast('LA CASA GANA');
+      }
+      setState((s) => s.runId === runId ? { ...s, settlementStatus: 'done', showdownPayout: derivedPayout } : s);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onToast, settleRound, state]);
 
   const HOLDEM_PHASES: HoldemPhase[] = ['ante', 'preflop', 'flop', 'turn', 'river', 'showdown'];
   const phaseLabels = ['ANTE', 'PRE-FLOP', 'FLOP', 'TURN', 'RIVER', 'SHOWDOWN'];
@@ -1375,6 +1603,42 @@ export default function CasinoOverlay({ isMobile }: CasinoOverlayProps) {
     }
   }, []);
 
+  const settleRound = useCallback(async (input: CasinoSettlementInput): Promise<CasinoSettlementResult> => {
+    try {
+      const headers = await getAuthHeaders();
+      if (!hasAuthSession(headers)) {
+        return { ok: false, error: 'No hay sesion activa.' };
+      }
+
+      const res = await fetch('/api/casino/settle', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify(input),
+      });
+
+      const json = await res.json().catch(() => null) as { error?: string; balance?: number; newBalance?: number; status?: string } | null;
+      if (!res.ok) {
+        if (typeof json?.balance === 'number') {
+          applyTenksBalanceFromServer(json.balance, `casino_${input.game}_settle_error`);
+          setBalance(getTenksBalance());
+        }
+        return { ok: false, error: json?.error ?? 'No se pudo liquidar la apuesta.', balance: json?.balance };
+      }
+
+      if (typeof json?.newBalance === 'number') {
+        applyTenksBalanceFromServer(json.newBalance, `casino_${input.game}_settle`);
+        setBalance(getTenksBalance());
+      }
+
+      return { ok: true, newBalance: json?.newBalance ?? getTenksBalance(), status: json?.status ?? 'settled' };
+    } catch {
+      return { ok: false, error: 'Fallo la liquidacion del casino.' };
+    }
+  }, []);
+
   useEffect(() => {
     const off = eventBus.on(EVENTS.CASINO_OPEN, (payload: unknown) => {
       const p = payload as { game?: GameId } | null;
@@ -1537,10 +1801,10 @@ export default function CasinoOverlay({ isMobile }: CasinoOverlayProps) {
         </div>
 
         <div style={{ padding: '20px 16px', overflowY: 'auto', flex: 1 }}>
-          {activeGame === 'slots'     && <SlotsPanel     balance={balance} onToast={showToast} onBusyChange={setRoundBusy} />}
-          {activeGame === 'roulette'  && <RoulettePanel  balance={balance} onToast={showToast} onBusyChange={setRoundBusy} />}
-          {activeGame === 'blackjack' && <BlackjackPanel balance={balance} onToast={showToast} onBusyChange={setRoundBusy} />}
-          {activeGame === 'poker'     && <PokerPanel     balance={balance} onToast={showToast} onBusyChange={setRoundBusy} />}
+          {activeGame === 'slots'     && <SlotsPanel     balance={balance} onToast={showToast} onBusyChange={setRoundBusy} settleRound={settleRound} />}
+          {activeGame === 'roulette'  && <RoulettePanel  balance={balance} onToast={showToast} onBusyChange={setRoundBusy} settleRound={settleRound} />}
+          {activeGame === 'blackjack' && <BlackjackPanel balance={balance} onToast={showToast} onBusyChange={setRoundBusy} settleRound={settleRound} />}
+          {activeGame === 'poker'     && <PokerPanel     balance={balance} onToast={showToast} onBusyChange={setRoundBusy} settleRound={settleRound} />}
         </div>
 
         <div style={{
@@ -1558,5 +1822,3 @@ export default function CasinoOverlay({ isMobile }: CasinoOverlayProps) {
     </div>
   );
 }
-
-

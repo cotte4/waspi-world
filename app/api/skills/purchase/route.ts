@@ -5,7 +5,9 @@ import {
   hasServiceRole,
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
-import { appendTenksTransaction } from '@/src/lib/commercePersistence';
+import { DEFAULT_PLAYER_STATE } from '@/src/lib/playerState';
+import { appendTenksTransaction, resolveAuthoritativeTenksBalance } from '@/src/lib/commercePersistence';
+import { debitBalance } from '@/src/lib/tenksBalance';
 
 // ---------------------------------------------------------------------------
 // Skill shop catalog — defined inline, never in a separate file
@@ -114,43 +116,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // --- Server-validated TENKS balance (mirrors shop/buy pattern) ---
-  // Read from player_tenks_balance and reconcile with players.tenks.
-  const { data: balanceRow, error: balanceError } = await admin
-    .from('player_tenks_balance')
-    .select('balance')
-    .eq('player_id', user.id)
-    .single<{ balance: number }>();
-
-  const { data: playerRow, error: playerError } = await admin
-    .from('players')
-    .select('tenks')
-    .eq('id', user.id)
-    .maybeSingle<{ tenks: number }>();
-
-  if (playerError) {
-    return NextResponse.json({ error: playerError.message }, { status: 500 });
-  }
-
   let serverBalance: number;
-
-  if (balanceError && balanceError.code === 'PGRST116') {
-    // Row missing — seed from players.tenks or fall back to 0
-    serverBalance = playerRow?.tenks ?? 0;
-
-    await admin
-      .from('player_tenks_balance')
-      .insert({ player_id: user.id, balance: serverBalance });
-  } else if (balanceError) {
-    return NextResponse.json({ error: balanceError.message }, { status: 500 });
-  } else {
-    // Reconcile stale balance table rows against players.tenks
-    serverBalance = Math.max(balanceRow.balance, playerRow?.tenks ?? balanceRow.balance);
-    if (serverBalance !== balanceRow.balance) {
-      await admin
-        .from('player_tenks_balance')
-        .upsert({ player_id: user.id, balance: serverBalance });
-    }
+  try {
+    serverBalance = await resolveAuthoritativeTenksBalance(admin, {
+      playerId: user.id,
+      fallbackBalance: DEFAULT_PLAYER_STATE.tenks,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to resolve TENKS balance.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
   if (serverBalance < skillItem.cost) {
@@ -164,16 +138,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const newBalance = serverBalance - skillItem.cost;
-
-  // --- Deduct TENKS atomically before granting the item ---
-  const { error: deductError } = await admin
-    .from('player_tenks_balance')
-    .upsert({ player_id: user.id, balance: newBalance });
-
-  if (deductError) {
-    return NextResponse.json({ error: deductError.message }, { status: 500 });
+  const debit = await debitBalance(admin, {
+    playerId: user.id,
+    amount: skillItem.cost,
+    fallbackBalance: serverBalance,
+  });
+  if (!debit.ok) {
+    return NextResponse.json(
+      {
+        error: `Necesitas ${skillItem.cost.toLocaleString('es-AR')} TENKS para comprar ${skillItem.name}.`,
+        balance: debit.previousBalance,
+        required: skillItem.cost,
+      },
+      { status: 400 },
+    );
   }
+  const newBalance = debit.newBalance;
 
   // --- Insert into player_skill_items ---
   const { error: insertError } = await admin

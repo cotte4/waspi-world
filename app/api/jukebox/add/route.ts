@@ -6,6 +6,7 @@ import {
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
 import { appendTenksTransaction } from '@/src/lib/commercePersistence';
+import { debitBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
 
 const MAX_SONGS_PER_PLAYER = 3;
 const COST_CATALOG = 0;
@@ -19,9 +20,6 @@ type AddSongBody = {
   cost: 0 | 150;
   addedByName: string;
 };
-
-type BalanceRow = { balance: number };
-type PlayerRow = { tenks: number };
 
 export async function POST(request: NextRequest) {
   if (!isServerSupabaseConfigured || !hasServiceRole) {
@@ -77,34 +75,12 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Server-validated TENKS balance ---
-  const { data: balanceRow, error: balanceError } = await admin
-    .from('player_tenks_balance')
-    .select('balance')
-    .eq('player_id', user.id)
-    .single<BalanceRow>();
-
-  const { data: playerRow } = await admin
-    .from('players')
-    .select('tenks')
-    .eq('id', user.id)
-    .maybeSingle<PlayerRow>();
-
   let serverBalance: number;
-
-  if (balanceError && balanceError.code === 'PGRST116') {
-    serverBalance = playerRow?.tenks ?? 0;
-    await admin
-      .from('player_tenks_balance')
-      .insert({ player_id: user.id, balance: serverBalance });
-  } else if (balanceError) {
-    return NextResponse.json({ error: balanceError.message }, { status: 500 });
-  } else {
-    serverBalance = Math.max(balanceRow.balance, playerRow?.tenks ?? balanceRow.balance);
-    if (serverBalance !== balanceRow.balance) {
-      await admin
-        .from('player_tenks_balance')
-        .upsert({ player_id: user.id, balance: serverBalance });
-    }
+  try {
+    serverBalance = await getAuthoritativeBalance(admin, { playerId: user.id });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to resolve TENKS balance.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
   if (serverBalance < cost) {
@@ -114,17 +90,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const newBalance = serverBalance - cost;
-
+  let newBalance = serverBalance;
   if (cost > 0) {
-    // --- Deduct TENKS atomically ---
-    const { error: deductError } = await admin
-      .from('player_tenks_balance')
-      .upsert({ player_id: user.id, balance: newBalance });
+    const debit = await debitBalance(admin, {
+      playerId: user.id,
+      amount: cost,
+      fallbackBalance: serverBalance,
+    });
 
-    if (deductError) {
-      return NextResponse.json({ error: deductError.message }, { status: 500 });
+    if (!debit.ok) {
+      return NextResponse.json(
+        { error: `Necesitás ${cost} TENKS para agregar una canción. Tenés ${debit.previousBalance}.`, balance: debit.previousBalance },
+        { status: 400 }
+      );
     }
+
+    newBalance = debit.newBalance;
   }
 
   // --- Insert into queue ---

@@ -108,11 +108,28 @@ export const BUILDINGS = {
     w: 360,
     h: 220,
   },
+  GUN_SHOP: {
+    x: 2100,
+    y: ZONES.PLAZA_Y + 190,
+    w: 280,
+    h: 210,
+  },
   GYM: {
     x: 1550,
     y: 1450,
     w: 300,
     h: 180,
+  },
+} as const;
+
+export const WORLD_EXITS = {
+  GUN_SHOP: {
+    x: 2240,
+    y: ZONES.PLAZA_Y + 428,
+  },
+  GYM: {
+    x: 1620,
+    y: 1110,
   },
 } as const;
 

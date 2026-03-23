@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
-import { addTenks } from '../systems/TenksSystem';
+import { addTenks, applyTenksBalanceFromServer } from '../systems/TenksSystem';
 import { getAuthHeaders } from '../systems/authHelper';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -38,6 +38,10 @@ const COL_BG = 0x0e0e14;
 const COL_GOLD = '#F5C842';
 const COL_GREEN = '#39FF14';
 const COL_GREEN_N = 0x39ff14;
+
+function createFlappyRunId() {
+  return `flappy_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
 const COL_PIPE_FILL = 0x1a1a2e;
 
 // ─── TENKS reward table ────────────────────────────────────────────────────────
@@ -60,6 +64,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   private canRetry = false;
   private inTransition = false;
   private shuttingDown = false;
+  private currentRunId = createFlappyRunId();
 
   // Bird
   private bird!: Phaser.GameObjects.Rectangle;
@@ -245,6 +250,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
   private startGame(): void {
     if (this.shuttingDown) return;
     this.gameState = 'playing';
+    this.currentRunId = createFlappyRunId();
     // Re-enable gravity on bird
     this.birdBody.setGravityY(1100);
     // Hide idle screen
@@ -498,7 +504,7 @@ export class FlappyWaspiScene extends Phaser.Scene {
       const tenksBase = calcTenks(this.score);
       const tenksBonus = isNewBest ? 100 : 0;
       const tenksTotal = tenksBase + tenksBonus;
-      addTenks(tenksTotal, `flappy_waspi_score_${this.score}`);
+      void this.grantReward(tenksTotal);
       eventBus.emit(EVENTS.UI_NOTICE, `+${tenksTotal} TENKS — Flappy Waspi`);
       eventBus.emit(EVENTS.FLAPPY_GAME_OVER, { score: this.score, highScore: this.bestScore });
 
@@ -645,6 +651,38 @@ export class FlappyWaspiScene extends Phaser.Scene {
       });
     } catch {
       // Non-fatal — score stays in localStorage
+    }
+  }
+
+  private async grantReward(reward: number): Promise<void> {
+    if (reward <= 0) return;
+
+    const authH = await getAuthHeaders();
+    if (!authH.Authorization) {
+      addTenks(reward, `flappy_waspi_score_${this.score}`);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/minigames/reward', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authH },
+        body: JSON.stringify({
+          game: 'flappy',
+          score: this.score,
+          runId: this.currentRunId,
+        }),
+      });
+      if (!res.ok) {
+        eventBus.emit(EVENTS.UI_NOTICE, 'No pude guardar la recompensa de Flappy Waspi.');
+        return;
+      }
+      const json = await res.json().catch(() => null) as { newBalance?: number } | null;
+      if (typeof json?.newBalance === 'number') {
+        applyTenksBalanceFromServer(json.newBalance, 'flappy_reward_server');
+      }
+    } catch {
+      eventBus.emit(EVENTS.UI_NOTICE, 'No pude guardar la recompensa de Flappy Waspi.');
     }
   }
 }

@@ -14,6 +14,7 @@ import {
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
 import { appendTenksTransaction } from '@/src/lib/commercePersistence';
+import { creditBalance } from '@/src/lib/tenksBalance';
 
 // ---------------------------------------------------------------------------
 // Constants — server-authoritative, never trust the client for amounts
@@ -113,26 +114,16 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Fetch current TENKS balance ────────────────────────────────────────────
-  const { data: balanceRow, error: balanceErr } = await admin
-    .from('player_tenks_balance')
-    .select('balance')
-    .eq('player_id', user.id)
-    .maybeSingle<{ balance: number }>();
-
-  if (balanceErr) {
-    return NextResponse.json({ error: balanceErr.message }, { status: 500 });
-  }
-
-  const currentBalance = balanceRow?.balance ?? 5000;
-  const newBalance = currentBalance + tenksEarned;
-
-  // ── Upsert new TENKS balance ───────────────────────────────────────────────
-  const { error: upsertErr } = await admin
-    .from('player_tenks_balance')
-    .upsert({ player_id: user.id, balance: newBalance });
-
-  if (upsertErr) {
-    return NextResponse.json({ error: upsertErr.message }, { status: 500 });
+  let newBalance: number;
+  try {
+    const credited = await creditBalance(admin, {
+      playerId: user.id,
+      amount: tenksEarned,
+    });
+    newBalance = credited.newBalance;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to credit TENKS.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
   // ── Record cooldown ────────────────────────────────────────────────────────

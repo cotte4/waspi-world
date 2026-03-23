@@ -4,6 +4,7 @@ import { createSupabaseAdminClient } from '@/src/lib/supabaseServer';
 import { stripe, stripeWebhookSecret, isStripeConfigured, isStripeWebhookConfigured } from '@/src/lib/stripe';
 import { DEFAULT_PLAYER_STATE, normalizePlayerState, creditTenks, grantInventoryItem } from '@/src/lib/playerState';
 import { ensureCatalogSeeded, ensurePlayerRow, createOrderRecord, addInventoryFromOrder, appendTenksTransaction, markDiscountCodeUsed } from '@/src/lib/commercePersistence';
+import { toArsFromStripeAmount } from '@/src/lib/commercePricing';
 import { resend, isResendConfigured, buildProductConfirmationEmail, buildTenksConfirmationEmail } from '@/src/lib/resend';
 import { getItem } from '@/src/game/config/catalog';
 import { getTenksPack } from '@/src/lib/tenksPacks';
@@ -33,6 +34,8 @@ export async function POST(request: NextRequest) {
     const sessionId = session.id;
     const userId = session.metadata?.customerUserId;
     const purchaseType = session.metadata?.purchaseType;
+    const checkoutCurrency = session.currency ?? session.metadata?.paymentCurrency ?? 'usd';
+    const arsPerUsd = Number(session.metadata?.arsPerUsd ?? 1300) || 1300;
 
     if (sessionId && userId) {
       const admin = createSupabaseAdminClient();
@@ -80,7 +83,9 @@ export async function POST(request: NextRequest) {
           const subtotalArs = Number(session.metadata?.subtotalArs ?? 0);
           const discountCode = session.metadata?.discountCode || null;
           const discountPercent = Number(session.metadata?.discountPercent ?? 0) || null;
-          const totalArs = session.amount_total ? Math.round(session.amount_total / 100) : subtotalArs;
+          const totalArs = session.amount_total
+            ? toArsFromStripeAmount(session.amount_total, checkoutCurrency, arsPerUsd)
+            : subtotalArs;
           const shippingAddress = session.customer_details?.address
             ? ({
                 name: session.customer_details?.name ?? null,
@@ -144,7 +149,9 @@ export async function POST(request: NextRequest) {
             const itemId = session.metadata?.itemId;
             const item = itemId ? getItem(itemId) : null;
             if (item) {
-              const totalArs = session.amount_total ? Math.round(session.amount_total / 100) : 0;
+              const totalArs = session.amount_total
+                ? toArsFromStripeAmount(session.amount_total, checkoutCurrency, arsPerUsd)
+                : 0;
               const emailData = buildProductConfirmationEmail({
                 customerEmail: email,
                 customerName: name,
@@ -166,7 +173,10 @@ export async function POST(request: NextRequest) {
             const packId = session.metadata?.packId;
             const pack = packId ? getTenksPack(packId) : null;
             if (pack) {
-              const totalArs = session.amount_total ? Math.round(session.amount_total / 100) : pack.priceArs;
+              const subtotalArs = Number(session.metadata?.subtotalArs ?? pack.priceArs);
+              const totalArs = session.amount_total
+                ? toArsFromStripeAmount(session.amount_total, checkoutCurrency, arsPerUsd)
+                : subtotalArs;
               const emailData = buildTenksConfirmationEmail({
                 customerEmail: email,
                 customerName: name,

@@ -5,6 +5,7 @@ import { ChatSystem } from '../systems/ChatSystem';
 import { WORLD, PLAYER, COLORS, ZONES, BUILDINGS, CHAT, SAFE_PLAZA_RETURN } from '../config/constants';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
+import { preferSupabaseHttpBroadcast } from '../../lib/supabaseRealtime';
 import { addTenks, initTenks, getTenksBalance } from '../systems/TenksSystem';
 import { ensureItemEquipped, getEquippedColors, hasUtilityEquipped, ownItem, getInventory, replaceInventory, initInventoryFromServer } from '../systems/InventorySystem';
 import { DialogSystem } from '../systems/DialogSystem';
@@ -64,7 +65,6 @@ import {
 import {
   resolveAndHandleWorldInteractionFrame,
   resolveWorldInteractionTarget,
-  syncWorldInteractionPrompt,
   type InteractionTarget as WorldInteractionTarget,
 } from './world/interaction';
 import {
@@ -79,12 +79,34 @@ import {
   updateVecindadParcelPrompt,
 } from './world/vecindad';
 import {
-  applyWorldParcelState,
-  applyWorldSharedParcelsEvent,
   broadcastWorldVecindadState,
   handleWorldRemoteVecindadUpdate,
   loadWorldSharedVecindadState,
 } from './world/realtimeVecindad';
+import {
+  activateWorldVoice,
+  buildWorldVoicePeerPositions,
+  closeWorldVoicePrompt,
+  connectWorldVoicePeersInRoom,
+  disableWorldVoice,
+  getVoicePeerIdsForPlayer,
+  handleWorldVoicePresenceJoin,
+  handleWorldVoicePresenceLeave,
+  handleWorldVoicePresenceSync,
+  setupWorldVoiceHud,
+  showWorldVoicePrompt,
+  tryAutoInitWorldVoice,
+  type PresenceVoice,
+  type WorldVoiceSceneLike,
+} from './world/voice';
+import {
+  attachWorldSceneLifecycle,
+  bootstrapWorldSceneState,
+  createSafeWorldAvatarRenderer,
+  runWorldBootStep,
+  safeSetupWorldRealtime,
+} from './world/boot';
+import { setupWorldReactBridge } from './world/reactBridge';
 
 /** Al entrar desde el mundo, se pasan returnX/returnY (posición actual) para reaparecer al salir. */
 const WORLD_SCENES_WITH_PLAYER_RETURN = new Set([
@@ -165,8 +187,6 @@ type RemoteHitEvent = {
 
 type WeaponMode = 'pistol' | 'shotgun' | 'smg' | 'rifle' | 'deagle' | 'cannon' | 'raygun';
 type EnemyArchetype = 'rusher' | 'shooter' | 'tank' | 'boss';
-/** Shape of each entry in the Supabase Presence state for voice chat. */
-type PresenceVoice = { voice_peer_id?: string; [key: string]: unknown };
 
 type WeaponStats = {
   label: string;
@@ -417,16 +437,18 @@ const WEAPON_FALLBACK_TEXTURE = 'weapon_fallback_rect';
 
 export class WorldScene extends Phaser.Scene {
   private static readonly GUN_SHOP_BOUNDS = {
-    x: 2100,
-    y: ZONES.PLAZA_Y + 190,
-    w: 280,
-    h: 210,
+    x: BUILDINGS.GUN_SHOP.x,
+    y: BUILDINGS.GUN_SHOP.y,
+    w: BUILDINGS.GUN_SHOP.w,
+    h: BUILDINGS.GUN_SHOP.h,
   } as const;
 
   // Player
   private px: number = PLAYER.SPAWN_X;
   private py: number = PLAYER.SPAWN_Y;
   private playerId = '';
+  private sessionPlayerId = '';
+  private authUserId: string | null = null;
   private playerUsername = '';
   private playerAvatar!: AvatarRenderer;
   private playerNameplate!: Phaser.GameObjects.Text;
@@ -622,19 +644,11 @@ export class WorldScene extends Phaser.Scene {
   }
 
   init(data?: { returnX?: number; returnY?: number }) {
-    this.inTransition = false;
-    this.inputBlocked = false;
-    this.px = data?.returnX ?? PLAYER.SPAWN_X;
-    this.py = data?.returnY ?? PLAYER.SPAWN_Y;
-    this.runtimeFailures.clear();
+    bootstrapWorldSceneState(this as unknown as Parameters<typeof bootstrapWorldSceneState>[0], data);
   }
 
   private runBootStep(label: string, fn: () => void) {
-    try {
-      fn();
-    } catch (error) {
-      console.error(`[Waspi][WorldScene] Boot step failed: ${label}`, error);
-    }
+    runWorldBootStep(this, label, fn);
   }
 
   private runFrameStep(label: string, fn: () => void) {
@@ -650,24 +664,11 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private safeSetupRealtime(): 'multiplayer' | 'solo' {
-    try {
-      return this.setupRealtime();
-    } catch (error) {
-      console.error('[Waspi][WorldScene] Boot step failed: realtime', error);
-      return 'solo';
-    }
+    return safeSetupWorldRealtime(this as unknown as Parameters<typeof safeSetupWorldRealtime>[0], () => this.setupRealtime());
   }
 
   private createSafeAvatarRenderer(x: number, y: number, config: AvatarConfig, label: string) {
-    try {
-      return new AvatarRenderer(this, x, y, config);
-    } catch (error) {
-      console.error(`[Waspi][WorldScene] Avatar rebuild failed: ${label}`, error);
-      return new AvatarRenderer(this, x, y, {
-        ...config,
-        avatarKind: 'procedural',
-      });
-    }
+    return createSafeWorldAvatarRenderer(this, x, y, config, label);
   }
 
   private recreateCombatHud() {
@@ -719,16 +720,13 @@ export class WorldScene extends Phaser.Scene {
     this.input.enabled = true;
     this.controls = new SceneControls(this);
     this.shiftKey = this.input.keyboard?.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
-    this.events.on(Phaser.Scenes.Events.WAKE, () => {
-      this.inTransition = false;
-      this.inputBlocked = false;
-      this.input.enabled = true;
-      if (this.input.keyboard) this.input.keyboard.enabled = true;
-    });
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.handleSceneShutdown, this);
+    this.bridgeCleanupFns.push(attachWorldSceneLifecycle(this as unknown as Parameters<typeof attachWorldSceneLifecycle>[0], {
+      onShutdown: () => this.handleSceneShutdown(),
+    }));
 
     // Generate player ID and username
-    this.playerId = this.getOrCreatePlayerId();
+    this.sessionPlayerId = this.getOrCreatePlayerId();
+    this.playerId = this.sessionPlayerId;
     this.playerUsername = this.getOrCreateUsername();
     this.loadMutedPlayers();
     this.loadVecindadState();
@@ -737,6 +735,7 @@ export class WorldScene extends Phaser.Scene {
     if (supabase && isConfigured) {
       void supabase.auth.getSession().then(async ({ data }) => {
         const uid = data.session?.user?.id;
+        this.authUserId = uid ?? null;
         if (uid) void initStatsSystem(uid);
 
         // Server-authoritative username: hydrate localStorage so getOrCreateUsername()
@@ -766,6 +765,10 @@ export class WorldScene extends Phaser.Scene {
           const updatedCombat = applyCombatStatsFromServer(serverProgression.deaths);
           this.combatStats = updatedCombat;
           eventBus.emit(EVENTS.PLAYER_COMBAT_STATS, this.combatStats);
+        }
+
+        if (this.getVoicePref() === 'on') {
+          void this.tryAutoInitVoice();
         }
       });
     }
@@ -1094,6 +1097,8 @@ export class WorldScene extends Phaser.Scene {
   // ─── Voice Chat HUD ─────────────────────────────────────────────────────────
 
   private setupVoiceHud() {
+    setupWorldVoiceHud(this as unknown as WorldVoiceSceneLike);
+    return;
     const camH = this.cameras.main.height;
     // Y offset: 118px above bottom keeps buttons above the React chat overlay
     const BY = camH - 118;
@@ -1121,7 +1126,7 @@ export class WorldScene extends Phaser.Scene {
 
     // ── Button handler ────────────────────────────────────────────────────────
 
-    this.voiceMuteBtn.on('pointerdown', async () => {
+    this.voiceMuteBtn?.on('pointerdown', async () => {
       const vc = getVoiceChat();
       if (!vc.connected) {
         const pref = this.getVoicePref();
@@ -1243,6 +1248,8 @@ export class WorldScene extends Phaser.Scene {
    * AND the browser already has mic permission (no prompt needed).
    */
   private async tryAutoInitVoice() {
+    await tryAutoInitWorldVoice(this as unknown as WorldVoiceSceneLike);
+    return;
     if (this.getVoicePref() !== 'on') return;
     try {
       if (!await this.isMicGranted()) return;
@@ -1257,6 +1264,8 @@ export class WorldScene extends Phaser.Scene {
    * Only calls getUserMedia AFTER the user explicitly accepts.
    */
   private showVoicePrompt() {
+    showWorldVoicePrompt(this as unknown as WorldVoiceSceneLike);
+    return;
     if (this.voicePromptObjects.length > 0) return;
 
     const camW = this.cameras.main.width;
@@ -1323,6 +1332,8 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private closeVoicePrompt() {
+    closeWorldVoicePrompt(this as unknown as WorldVoiceSceneLike);
+    return;
     this.voicePromptObjects.forEach((o) => o.destroy());
     this.voicePromptObjects = [];
   }
@@ -1333,6 +1344,8 @@ export class WorldScene extends Phaser.Scene {
    * Separated so it can be called from prompt, auto-init, and button.
    */
   private async activateVoice() {
+    await activateWorldVoice(this as unknown as WorldVoiceSceneLike);
+    return;
     // Guard: prevent concurrent init calls (double-click, race with auto-init)
     if (this.isActivatingVoice) return;
     const vc = getVoiceChat();
@@ -1343,13 +1356,13 @@ export class WorldScene extends Phaser.Scene {
       const preferredMicId = this.getPreferredMicDeviceId();
       this.voiceMuteBtn?.setText('[MIC ...]').setStyle({ color: '#F5C842' });
       try {
-        await vc.init(this.playerId, preferredMicId ?? undefined);
+        await vc.init({ userId: this.playerId, sessionId: this.playerId, deviceId: preferredMicId ?? undefined });
       } catch (err) {
         const name = (err as DOMException)?.name;
         // Selected mic can become stale (unplugged/renamed). Retry with default.
         if (preferredMicId && (name === 'NotFoundError' || name === 'OverconstrainedError')) {
           this.clearPreferredMicDeviceId();
-          await vc.init(this.playerId);
+          await vc.init({ userId: this.playerId, sessionId: this.playerId });
         } else {
           throw err;
         }
@@ -1404,19 +1417,24 @@ export class WorldScene extends Phaser.Scene {
    * Guards against the case where presence.sync fired before vc was ready.
    */
   private connectToVoicePeersInRoom() {
+    connectWorldVoicePeersInRoom(this as unknown as WorldVoiceSceneLike);
+    return;
     const vc = getVoiceChat();
     if (!vc.connected) return;
     const state = this.channel?.presenceState<PresenceVoice>() ?? {};
     for (const presences of Object.values(state)) {
       for (const p of presences) {
-        if (p.voice_peer_id && p.voice_peer_id !== vc.peerId) {
-          vc.callPeer(p.voice_peer_id);
+        const peerId = p.voice_peer_id;
+        if (typeof peerId === 'string' && peerId !== vc.peerId) {
+          vc.callPeer(String(peerId));
         }
       }
     }
   }
 
   private async disableVoice() {
+    await disableWorldVoice(this as unknown as WorldVoiceSceneLike);
+    return;
     this.closeVoicePrompt();
     const vc = getVoiceChat();
     if (!vc.connected) return;
@@ -1438,13 +1456,16 @@ export class WorldScene extends Phaser.Scene {
    * Connect to every peer that already has voice enabled.
    */
   private handleVoicePresenceSync() {
+    handleWorldVoicePresenceSync(this as unknown as WorldVoiceSceneLike);
+    return;
     const vc = getVoiceChat();
     if (!vc.connected) return;
     const state = this.channel?.presenceState<PresenceVoice>() ?? {};
     for (const presences of Object.values(state)) {
       for (const p of presences) {
-        if (p.voice_peer_id && p.voice_peer_id !== vc.peerId) {
-          vc.callPeer(p.voice_peer_id);
+        const peerId = p.voice_peer_id;
+        if (typeof peerId === 'string' && peerId !== vc.peerId) {
+          vc.callPeer(String(peerId));
         }
       }
     }
@@ -1454,11 +1475,14 @@ export class WorldScene extends Phaser.Scene {
    * Fires when a peer enters the channel and has a voice_peer_id tracked.
    */
   private handleVoicePresenceJoin(newPresences: PresenceVoice[]) {
+    handleWorldVoicePresenceJoin(this as unknown as WorldVoiceSceneLike, newPresences);
+    return;
     const vc = getVoiceChat();
     if (!vc.connected) return;
     for (const p of newPresences) {
-      if (p.voice_peer_id && p.voice_peer_id !== vc.peerId) {
-        vc.callPeer(p.voice_peer_id);
+      const peerId = p.voice_peer_id;
+      if (typeof peerId === 'string' && peerId !== vc.peerId) {
+        vc.callPeer(String(peerId));
       }
     }
   }
@@ -1468,10 +1492,12 @@ export class WorldScene extends Phaser.Scene {
    * Supabase handles this automatically — no manual cleanup needed from the leaving peer.
    */
   private handleVoicePresenceLeave(leftPresences: PresenceVoice[]) {
+    handleWorldVoicePresenceLeave(this as unknown as WorldVoiceSceneLike, leftPresences);
+    return;
     const vc = getVoiceChat();
     if (!vc.connected) return;
     for (const p of leftPresences) {
-      if (p.voice_peer_id) vc.disconnectPeer(p.voice_peer_id);
+      if (typeof p.voice_peer_id === 'string') vc.disconnectPeer(String(p.voice_peer_id));
     }
   }
 
@@ -5696,12 +5722,12 @@ export class WorldScene extends Phaser.Scene {
       return 'solo';
     }
 
-    this.channel = supabase.channel('waspi-world', {
+    this.channel = preferSupabaseHttpBroadcast(supabase.channel('waspi-world', {
       config: {
         broadcast: { self: false },
         presence: { key: this.playerId },
       },
-    });
+    }));
 
     this.channel
       .on('broadcast', { event: 'player:move' }, ({ payload }) => {
@@ -5740,6 +5766,9 @@ export class WorldScene extends Phaser.Scene {
       })
       .subscribe(() => {
         this.broadcastSelfState('player:join');
+        if (this.getVoicePref() === 'on') {
+          void this.tryAutoInitVoice();
+        }
       });
     return 'multiplayer';
   }
@@ -5828,8 +5857,10 @@ export class WorldScene extends Phaser.Scene {
       this.chatSystem.clearBubble(playerId);
       this.emitPresence();
     }
-    // Voice chat: disconnect this peer
-    getVoiceChat().disconnectPeer(`waspi-${playerId}`);
+    // Voice chat: disconnect every voice peer tied to this world player/session
+    for (const peerId of getVoicePeerIdsForPlayer(this as unknown as WorldVoiceSceneLike, playerId)) {
+      getVoiceChat().disconnectPeer(peerId);
+    }
     // Destroy speaking indicator
     this.speakingIndicators.get(playerId)?.destroy();
     this.speakingIndicators.delete(playerId);
@@ -6122,93 +6153,7 @@ export class WorldScene extends Phaser.Scene {
   // ─── Chat Bridge (React ↔ Phaser) ───────────────────────────────────────────
 
   private setupReactBridge() {
-    this.bridgeCleanupFns.push(eventBus.on(EVENTS.CHAT_SEND, async (message: unknown) => {
-      if (typeof message !== 'string') return;
-      const trimmed = message.trim();
-      if (!trimmed) return;
-
-      const now = Date.now();
-      if (now - this.lastChatSent < CHAT.RATE_LIMIT_MS) return;
-      this.lastChatSent = now;
-
-      const moderated = await this.moderateChat(trimmed);
-      if (!moderated) return;
-
-      // Show bubble on own player
-      this.chatSystem.showBubble('__player__', moderated, this.px, this.py, true);
-
-      // Broadcast to others
-      this.channel?.send({
-        type: 'broadcast',
-        event: 'player:chat',
-        payload: {
-          player_id: this.playerId,
-          username: this.playerUsername,
-          message: moderated,
-          x: Math.round(this.px),
-          y: Math.round(this.py),
-        },
-      });
-
-      // Notify React log
-      eventBus.emit(EVENTS.CHAT_RECEIVED, {
-        playerId: this.playerId,
-        username: this.playerUsername,
-        message: moderated,
-        isMe: true,
-      });
-    }));
-
-    this.bridgeCleanupFns.push(eventBus.on(EVENTS.CHAT_INPUT_FOCUS, () => { this.inputBlocked = true; }));
-    this.bridgeCleanupFns.push(eventBus.on(EVENTS.CHAT_INPUT_BLUR, () => { this.inputBlocked = false; }));
-    this.bridgeCleanupFns.push(eventBus.on(EVENTS.PLAYER_ACTION_MUTE, (payload: unknown) => {
-      const playerId = (payload as { playerId?: string } | null)?.playerId;
-      if (!playerId) return;
-      this.mutedPlayerIds.add(playerId);
-      this.chatSystem.clearBubble(playerId);
-    }));
-    this.bridgeCleanupFns.push(eventBus.on(EVENTS.PLAYER_ACTION_REPORT, () => {}));
-    this.bridgeCleanupFns.push(eventBus.on(EVENTS.PARCEL_STATE_CHANGED, (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
-      const parcelStateScene = {
-        parcelVisuals: this.parcelVisuals,
-        refreshParcelVisuals: () => this.refreshParcelVisuals(),
-        renderVecindadHud: () => this.renderVecindadHud(),
-        vecindadState: this.vecindadState,
-      };
-      applyWorldParcelState(parcelStateScene, payload as Record<string, unknown>);
-      this.vecindadState = parcelStateScene.vecindadState as VecindadState;
-    }));
-    this.bridgeCleanupFns.push(eventBus.on(EVENTS.VECINDAD_SHARED_STATE_CHANGED, (payload: unknown) => {
-      applyWorldSharedParcelsEvent({
-        applySharedVecindadParcels: (parcels) => this.applySharedVecindadParcels(parcels),
-        broadcastVecindadState: (parcels) => this.broadcastVecindadState(parcels),
-        refreshParcelVisuals: () => this.refreshParcelVisuals(),
-        renderVecindadHud: () => this.renderVecindadHud(),
-        sharedParcelState: this.sharedParcelState,
-      }, payload);
-    }));
-
-    // Apply avatar partial updates (e.g. smoke on/off) and persist in localStorage
-    this.bridgeCleanupFns.push(eventBus.on(EVENTS.AVATAR_SET, (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return;
-
-      const next = {
-        ...loadStoredAvatarConfig(),
-        ...(payload as AvatarConfig),
-      };
-      this.rebuildLocalAvatar(next);
-      this.refreshUtilitiesFromInventory();
-
-      // Broadcast avatar update so other players see smoke/clothing changes
-      this.broadcastSelfState('player:update');
-    }));
-
-    // Open creator from inventory
-    this.bridgeCleanupFns.push(eventBus.on(EVENTS.OPEN_CREATOR, () => {
-      if (this.inTransition) return;
-      this.transitionToScene('CreatorScene');
-    }));
+    setupWorldReactBridge(this as unknown as Parameters<typeof setupWorldReactBridge>[0]);
   }
 
   // ─── Emote Broadcast ─────────────────────────────────────────────────────
@@ -6636,10 +6581,9 @@ export class WorldScene extends Phaser.Scene {
     if (this.voiceFrameCount % 5 === 0) {
       const vc = getVoiceChat();
       if (vc.connected) {
-        const peerPositions = new Map<string, { x: number; y: number }>();
-        for (const [remoteId, rp] of this.remotePlayers) {
-          peerPositions.set(`waspi-${remoteId}`, { x: rp.x, y: rp.y });
-        }
+        const peerPositions = buildWorldVoicePeerPositions(this as unknown as WorldVoiceSceneLike & {
+          remotePlayers: Map<string, { x: number; y: number }>;
+        });
         vc.updateProximityVolumes({ x: this.px, y: this.py }, peerPositions);
 
         // Peer count
@@ -6659,7 +6603,8 @@ export class WorldScene extends Phaser.Scene {
           const arc = this.speakingIndicators.get(remoteId);
           if (!arc) continue;
           arc.setPosition(rp.x, rp.y - 56);
-          const level = vc.getSpeakingLevel(`waspi-${remoteId}`);
+          const peerId = getVoicePeerIdsForPlayer(this as unknown as WorldVoiceSceneLike, remoteId)[0] ?? '';
+          const level = peerId ? vc.getSpeakingLevel(peerId) : 0;
           arc.setAlpha(level > 0.04 ? 0.85 : 0);
         }
       } else {

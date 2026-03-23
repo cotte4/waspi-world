@@ -7,6 +7,7 @@ import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
 import { SceneControls } from '../systems/SceneControls';
 import { formatMovementBindingLabel } from '../systems/ControlSettings';
 import { supabase, isConfigured } from '../../lib/supabase';
+import { preferSupabaseHttpBroadcast } from '../../lib/supabaseRealtime';
 import { eventBus, EVENTS } from '../config/eventBus';
 import type { PvpHudPayload } from '../../../app/components/PvpHUD';
 
@@ -441,9 +442,9 @@ export class PvpArenaScene extends Phaser.Scene {
       return;
     }
 
-    this.channel = supabase.channel('waspi-room-pvp-pit', {
+    this.channel = preferSupabaseHttpBroadcast(supabase.channel('waspi-room-pvp-pit', {
       config: { broadcast: { self: false } },
-    });
+    }));
 
     this.channel
       .on('broadcast', { event: 'player:join' }, ({ payload }) => this.handleRemoteState(payload))

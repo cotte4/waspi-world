@@ -21,6 +21,7 @@ import {
   type ControlSettings,
   type MovementDirection,
 } from '@/src/game/systems/ControlSettings';
+import type { VoiceStatusPayload } from '@/src/game/systems/voiceShared';
 import { VOICE_MIC_DEVICE_KEY } from '@/app/play/lib/playPageConstants';
 import { getInitialSelectedMicDeviceId } from '@/app/play/lib/playPageStorage';
 import type { SettingsTab } from '@/app/play/types';
@@ -86,6 +87,11 @@ export function usePlayPageSettings({
   const [controlSettings, setControlSettings] = useState<ControlSettings>(() => loadControlSettings());
   const [bindingCaptureDirection, setBindingCaptureDirection] = useState<MovementDirection | null>(null);
   const [bindingCaptureAction, setBindingCaptureAction] = useState<ActionBinding | null>(null);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatusPayload>({
+    state: 'disconnected',
+    label: '[MIC]',
+    detail: '',
+  });
 
   useEffect(() => {
     saveAudioSettings(audioSettings);
@@ -200,6 +206,19 @@ export function usePlayPageSettings({
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [bindingCaptureAction, bindingCaptureDirection, jukeboxOpen, setUiNotice, settingsOpen]);
 
+  useEffect(() => eventBus.on(EVENTS.VOICE_STATUS_CHANGED, (payload: unknown) => {
+    if (!payload || typeof payload !== 'object') return;
+    const next = payload as Partial<VoiceStatusPayload>;
+    if (typeof next.state !== 'string' || typeof next.label !== 'string') return;
+    setVoiceStatus({
+      state: next.state,
+      label: next.label,
+      detail: typeof next.detail === 'string' ? next.detail : '',
+      peerCount: typeof next.peerCount === 'number' ? next.peerCount : undefined,
+      technicalDetail: typeof next.technicalDetail === 'string' ? next.technicalDetail : undefined,
+    });
+  }), []);
+
   const openSettings = useCallback(() => {
     setSettingsOpen(true);
   }, []);
@@ -255,5 +274,6 @@ export function usePlayPageSettings({
     settingsOpen,
     settingsTab,
     voiceEnabled,
+    voiceStatus,
   };
 }

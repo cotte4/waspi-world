@@ -5,6 +5,7 @@ import {
   hasServiceRole,
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
+import { debitBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
 
 // ─── Style catalogue (server-authoritative) ───────────────────────────────────
 // style_id maps to the HairStyle values in AvatarRenderer.ts
@@ -50,17 +51,13 @@ export async function POST(request: NextRequest) {
   }
 
   // ── 1. Read current balance ────────────────────────────────────────────────
-  const { data: balRow, error: balError } = await admin
-    .from('player_tenks_balance')
-    .select('balance')
-    .eq('player_id', user.id)
-    .maybeSingle<{ balance: number }>();
-
-  if (balError) {
-    return NextResponse.json({ error: balError.message }, { status: 500 });
+  let currentBalance: number;
+  try {
+    currentBalance = await getAuthoritativeBalance(admin, { playerId: user.id });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to resolve TENKS balance.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const currentBalance = balRow?.balance ?? 0;
 
   if (currentBalance < cost) {
     return NextResponse.json(
@@ -70,15 +67,20 @@ export async function POST(request: NextRequest) {
   }
 
   // ── 2. Deduct TENKS ────────────────────────────────────────────────────────
-  const newBalance = currentBalance - cost;
+  const debit = await debitBalance(admin, {
+    playerId: user.id,
+    amount: cost,
+    fallbackBalance: currentBalance,
+  });
 
-  const { error: upsertError } = await admin
-    .from('player_tenks_balance')
-    .upsert({ player_id: user.id, balance: newBalance });
-
-  if (upsertError) {
-    return NextResponse.json({ error: upsertError.message }, { status: 500 });
+  if (!debit.ok) {
+    return NextResponse.json(
+      { error: 'Saldo insuficiente de TENKS.', current_balance: debit.previousBalance, cost },
+      { status: 402 },
+    );
   }
+
+  const newBalance = debit.newBalance;
 
   // ── 3. Persist hair style in user_metadata ─────────────────────────────────
   // We store it inside the existing waspiPlayer metadata blob so it loads on next

@@ -1,6 +1,7 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { DEFAULT_PLAYER_STATE, normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
 import { getSerializedCatalog, toProductRecord } from '@/src/lib/catalogServer';
+import { getAuthoritativeBalance } from '@/src/lib/tenksBalance';
 
 type Json = string | number | boolean | null | { [key: string]: Json } | Json[];
 
@@ -97,6 +98,17 @@ export async function ensurePlayerRow(
 
     if (tenksError) throw tenksError;
   }
+}
+
+export async function resolveAuthoritativeTenksBalance(
+  admin: SupabaseClient,
+  input: {
+    playerId: string;
+    fallbackBalance?: number;
+    defaultBalance?: number;
+  }
+) {
+  return getAuthoritativeBalance(admin, input);
 }
 
 export async function syncPlayerInventory(admin: SupabaseClient, playerId: string, playerState: PlayerState) {

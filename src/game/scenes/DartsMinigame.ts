@@ -1,13 +1,18 @@
 import Phaser from 'phaser';
-import { addTenks } from '../systems/TenksSystem';
+import { addTenks, applyTenksBalanceFromServer } from '../systems/TenksSystem';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { SceneControls } from '../systems/SceneControls';
+import { getAuthHeaders } from '../systems/authHelper';
 
 type DartsPhase = 'aiming' | 'result' | 'done' | 'exiting';
 
 const TOTAL_DARTS = 9;
 const BOARD_RADIUS = 160;
+
+function createRunId() {
+  return `darts_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
 
 export class DartsMinigame extends Phaser.Scene {
   private phase: DartsPhase = 'aiming';
@@ -20,6 +25,7 @@ export class DartsMinigame extends Phaser.Scene {
   private cursorDir = 1;
   private resultTimerMs = 0;
   private isFinished = false;
+  private currentRunId = createRunId();
 
   private boardX = 0;
   private boardY = 0;
@@ -41,6 +47,7 @@ export class DartsMinigame extends Phaser.Scene {
     this.score = 0;
     this.thrown = 0;
     this.bullseyes = 0;
+    this.currentRunId = createRunId();
   }
 
   create() {
@@ -281,9 +288,7 @@ export class DartsMinigame extends Phaser.Scene {
     this.phase = 'exiting';
     this.input.enabled = false;
     if (this.input.keyboard) this.input.keyboard.enabled = false;
-    if (reward > 0) {
-      addTenks(reward, 'darts_reward');
-    }
+    void this.grantReward(reward);
     eventBus.emit(EVENTS.DARTS_RESULT, {
       score: this.score,
       bullseyes: this.bullseyes,
@@ -299,6 +304,44 @@ export class DartsMinigame extends Phaser.Scene {
         tenksEarned: reward,
       },
     });
+  }
+
+  private async grantReward(reward: number) {
+    if (reward <= 0) return;
+
+    const authH = await getAuthHeaders();
+    if (!authH.Authorization) {
+      addTenks(reward, 'darts_reward');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/minigames/reward', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authH,
+        },
+        body: JSON.stringify({
+          game: 'darts',
+          score: this.score,
+          bullseyes: this.bullseyes,
+          runId: this.currentRunId,
+        }),
+      });
+
+      if (!res.ok) {
+        eventBus.emit(EVENTS.UI_NOTICE, 'No pude guardar la recompensa de dardos.');
+        return;
+      }
+
+      const json = await res.json().catch(() => null) as { newBalance?: number } | null;
+      if (typeof json?.newBalance === 'number') {
+        applyTenksBalanceFromServer(json.newBalance, 'darts_reward_server');
+      }
+    } catch {
+      eventBus.emit(EVENTS.UI_NOTICE, 'No pude guardar la recompensa de dardos.');
+    }
   }
 
   private handleShutdown() {

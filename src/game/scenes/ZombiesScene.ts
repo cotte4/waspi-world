@@ -2,7 +2,7 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { ChatSystem } from '../systems/ChatSystem';
-import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene, transitionToWorldScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToWorldScene } from '../systems/SceneUi';
 import {
   ensureFallbackRectTexture,
   getSafeAnimationDurationMs,
@@ -16,13 +16,11 @@ import {
 import { SceneControls } from '../systems/SceneControls';
 import type { AudioSettings } from '../systems/AudioSettings';
 import { startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
-import { getShootTargetWorld } from '../systems/shootingAim';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { getInventory } from '../systems/InventorySystem';
 import { SAFE_PLAZA_RETURN } from '../config/constants';
 import { SpecializationModal } from '../systems/SpecializationModal';
 import type { SkillId } from '../systems/SkillSystem';
-import { recordDistanceDelta } from '../systems/StatsSystem';
 import { getSkillSystem } from '../systems/SkillSystem';
 import { getQuestSystem } from '../systems/QuestSystem';
 import {
@@ -33,31 +31,25 @@ import {
   type ProgressionState,
 } from '../systems/ProgressionSystem';
 import { supabase, isConfigured } from '../../lib/supabase';
+import { preferSupabaseHttpBroadcast } from '../../lib/supabaseRealtime';
 import {
   ZOMBIES_PLAYER,
   ZOMBIES_POINTS,
   ZOMBIES_SECTIONS,
-  ZOMBIES_VIEWPORT,
   ZOMBIES_WEAPONS,
   ZOMBIES_WORLD,
   ZOMBIE_TYPES,
-  getEligibleZombieTypes,
-  getRoundConcurrentCap,
-  getRoundWarmupMs,
-  getRoundZombieCount,
-  getSpawnDelayForRound,
   getZombieBreachMs,
-  getZombieHpForRound,
-  getZombieSpeedForRound,
   type ZombieType,
   type ZombiesSectionId,
   type ZombiesWeaponId,
 } from '../config/zombies';
 import {
+  applyZombiesRealtimeSharedSnapshotAdapterState,
+  broadcastRealtimeSelfState,
   broadcastZombiesRealtimeSharedInteract,
   broadcastZombiesRealtimeSharedShot,
   broadcastZombiesRealtimeSharedWeaponGrant,
-  broadcastZombiesRealtimeSharedSnapshot,
   connectZombiesRealtimeChannel,
   createZombiesRealtimeSharedSnapshotAdapter,
   handleRealtimeRemoteLeave,
@@ -70,27 +62,87 @@ import {
   handleZombiesRealtimeSharedWeaponGrant,
   maybeBroadcastZombiesRealtimeSharedSnapshot,
   scheduleZombiesRealtimeSharedReset,
+  syncRealtimePosition,
+  syncZombiesRealtimePresenceState,
   teardownZombiesRealtimeSession,
   stepZombiesRealtimeFrame,
 } from './zombies/realtime';
 import {
   applyZombiesPickupRuntimeState,
   applySharedMaxAmmoToZombiesLoadout,
-  buildZombiesPickupSnapshots,
   createZombiesPickupRuntimeState,
   createZombiesPickupSceneAdapter,
   type ZombiesPickupRuntimeState,
   runAndSyncZombiesPickupCycle,
   runZombiesPickupDropCycle,
   syncZombiesPickupRuntimeState,
-  syncZombiesPickupsFromSnapshots,
 } from './zombies/pickups';
-
-const BOX_POS = { x: 435, y: 698 } as const;
-const PACK_POS = { x: 1278, y: 610 } as const;
-const EXIT_PAD = { x: 182, y: 878, radius: 42 } as const;
-const DEPTHS_PAD = { x: 1586, y: 918, radius: 46 } as const;
-const PLAYER_RETURN = { x: 1600, y: 1540 } as const;
+import {
+  ZOMBIES_BOX_POS as BOX_POS,
+  ZOMBIES_DEPTHS_PAD as DEPTHS_PAD,
+  ZOMBIES_EXIT_PAD as EXIT_PAD,
+  ZOMBIES_PACK_POS as PACK_POS,
+  ZOMBIES_PLAYER_RETURN as PLAYER_RETURN,
+} from './zombies/constants';
+import {
+  addZombiesWallCollider,
+  createZombiesArenaDoorVisual,
+  createZombiesObstacleVisual,
+  createZombiesSpawnVisual,
+  getZombiesArenaSectionById,
+  getZombiesArenaSectionDoorBounds,
+  getZombiesArenaSectionSpawnPoints,
+} from './zombies/arena';
+import {
+  createZombiesHud,
+  renderZombiesHud,
+  showZombiesBossIntro,
+  showZombiesNotice,
+  showZombiesPowerupBanner,
+  updateZombiesFuriaHud,
+  updateZombiesPromptHud,
+} from './zombies/hud';
+import {
+  beginZombiesRound,
+  countAliveZombies as countAliveSpawningZombies,
+  getZombiesAvailableSpawnNodes,
+  getZombiesPackCost,
+  getZombiesPointsMultiplier,
+  getZombiesPressureTier,
+  getZombiesScaledConcurrentCap,
+  getZombiesScaledRoundTarget,
+  getZombiesScaledRoundWarmupMs,
+  getZombiesScaledSpawnDelayMs,
+  getZombiesWeaponState,
+  getZombiesWeaponStats,
+  handleZombiesRoundFlow,
+  isZombiesBossRound,
+  pickZombiesType,
+  releaseZombiesSpawnNode,
+  spawnZombiesBossZombie,
+  spawnZombiesZombie,
+} from './zombies/spawning';
+import {
+  cleanupZombiesInput,
+  enterZombiesBasementDepths,
+  getNearbyZombiesInteraction,
+  getZombiesAimAngle as getPlayerZombiesAimAngle,
+  handleZombiesCombatInput,
+  handleZombiesContextInteraction,
+  handleZombiesMovement,
+  requestZombiesExit,
+  setupZombiesInput,
+  setupZombiesPlayer,
+  tryActivateZombiesFuria,
+  tryMoveZombiesPlayer,
+  tryShootZombies,
+} from './zombies/player';
+import {
+  drawShotFxFrom as drawZombiesShotFxFrom,
+  findZombieTargetFrom as findZombiesTargetFrom,
+  fireShotBurst as fireZombiesShotBurst,
+  tryReload as tryReloadZombiesCombat,
+} from './zombies/combat';
 // Arena visual bounds: (60, 120) → (1760, 1100). Player boundary = arena edge + radius.
 const ARENA_MIN_X = 60;
 const ARENA_MIN_Y = 120;
@@ -104,9 +156,6 @@ const PLAY_MIN_X = ARENA_MIN_X + WALL_SIDE_W;
 const PLAY_MAX_X = ARENA_MAX_X - WALL_SIDE_W;
 const PLAY_MIN_Y = ARENA_MIN_Y + WALL_TOP_H;
 const PLAY_MAX_Y = ARENA_MAX_Y - WALL_BOTTOM_H;
-/** Boca aproximada del arma (mismo origen para hitscan y FX). */
-const ZOMBIES_MUZZLE_FORWARD = 20;
-const ZOMBIES_MUZZLE_UP = 12;
 
 type ZombiesSceneInitData = {
   returnScene?: string;
@@ -257,91 +306,6 @@ type SharedRunPresenceMeta = {
   player_id?: string;
   username?: string;
   joined_at?: number;
-};
-
-type SharedRunZombieSnapshot = {
-  id: string;
-  type: ZombieType;
-  assetFolder: string;
-  displayLabel: string;
-  isBoss: boolean;
-  x: number;
-  y: number;
-  hp: number;
-  maxHp: number;
-  speed: number;
-  damage: number;
-  attackRange: number;
-  attackCooldownMs: number;
-  hitReward: number;
-  killReward: number;
-  radius: number;
-  state: ZombieAnimState;
-  phase: number;
-  alive: boolean;
-  spawnNodeId?: string;
-  breachInMs: number;
-  attackCooldownLeftMs: number;
-  specialCooldownLeftMs: number;
-  stompCooldownLeftMs: number;
-};
-
-type SharedRunProjectileSnapshot = {
-  id: string;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  damage: number;
-  radius: number;
-  expiresInMs: number;
-};
-
-type SharedRunPickupSnapshot = {
-  id: string;
-  kind: PickupKind;
-  x: number;
-  y: number;
-  expiresInMs: number;
-};
-
-type SharedRunSpawnNodeSnapshot = {
-  id: string;
-  occupiedBy?: string;
-  boardHealth: number;
-  lastUsedAgoMs: number;
-};
-
-type SharedRunDoorSnapshot = {
-  id: ZombiesSectionId;
-  unlocked: boolean;
-};
-
-type SharedRunStateSnapshot = {
-  host_id: string;
-  round: number;
-  roundTarget: number;
-  spawnedThisRound: number;
-  nextSpawnInMs: number;
-  roundBreakInMs: number;
-  bossRoundActive: boolean;
-  bossSpawnedThisRound: boolean;
-  bossAlive: boolean;
-  depthsUnlocked: boolean;
-  points: number;
-  zombieIdSeq: number;
-  zombieProjectileSeq: number;
-  pickupIdSeq: number;
-  mysteryBoxCooldownInMs: number;
-  boxRollingInMs: number;
-  instaKillInMs: number;
-  doublePointsInMs: number;
-  players: SharedRunPlayerState[];
-  doors: SharedRunDoorSnapshot[];
-  spawnNodes: SharedRunSpawnNodeSnapshot[];
-  zombies: SharedRunZombieSnapshot[];
-  projectiles: SharedRunProjectileSnapshot[];
-  pickups: SharedRunPickupSnapshot[];
 };
 
 type SharedRunShotPayload = {
@@ -1074,19 +1038,11 @@ export class ZombiesScene extends Phaser.Scene {
 
   // ─── OBSTACLE HELPERS ────────────────────────────────────────────────────
   private addObstacle(rx: number, ry: number, rw: number, rh: number, fillColor: number, strokeColor: number) {
-    const rect = new Phaser.Geom.Rectangle(rx, ry, rw, rh);
-    const fill = this.add.rectangle(rx + rw / 2, ry + rh / 2, rw, rh, fillColor, 1).setDepth(12);
-    const outline = this.add.rectangle(rx + rw / 2, ry + rh / 2, rw, rh)
-      .setDepth(13)
-      .setStrokeStyle(2, strokeColor, 0.5);
-    this.obstacles.push({ rect, fill, outline });
+    this.obstacles.push(createZombiesObstacleVisual(this, rx, ry, rw, rh, fillColor, strokeColor));
   }
 
   private addWallCollider(rx: number, ry: number, rw: number, rh: number) {
-    const rect = new Phaser.Geom.Rectangle(rx, ry, rw, rh);
-    const fill = this.add.rectangle(rx + rw / 2, ry + rh / 2, rw, rh, 0x000000, 0).setDepth(0);
-    const outline = this.add.rectangle(rx + rw / 2, ry + rh / 2, rw, rh).setDepth(0).setAlpha(0);
-    this.obstacles.push({ rect, fill, outline });
+    this.obstacles.push(addZombiesWallCollider(this, rx, ry, rw, rh));
   }
 
   private buildObstacles() {
@@ -1183,21 +1139,9 @@ export class ZombiesScene extends Phaser.Scene {
   private buildSpawnNodes() {
     let index = 0;
     for (const section of ZOMBIES_SECTIONS) {
-      for (const spawn of section.spawnPoints) {
+      for (const spawn of getZombiesArenaSectionSpawnPoints(section)) {
         index += 1;
-        const pulse = this.add.ellipse(spawn.x, spawn.y + 12, 56, 22, 0xFF6A6A, 0.06).setDepth(14);
-        pulse.setStrokeStyle(1, 0xFF6A6A, 0.22);
-        const frame = this.add.rectangle(spawn.x, spawn.y - 4, 42, 52, 0x0f1419, 0.86).setDepth(15);
-        frame.setStrokeStyle(2, 0x6C7A89, 0.6);
-        const glass = this.add.rectangle(spawn.x, spawn.y - 4, 34, 40, 0x203444, 0.55).setDepth(16);
-        const planks = [-12, 0, 12].map((offsetY) =>
-          this.add.rectangle(spawn.x, spawn.y + offsetY - 4, 38, 6, 0x7A4A21, 0.94).setDepth(17),
-        );
-        const warning = this.add.text(spawn.x, spawn.y - 42, 'BARRICADE', {
-          fontSize: '6px',
-          fontFamily: '"Press Start 2P", monospace',
-          color: '#B7C6D5',
-        }).setOrigin(0.5).setDepth(18);
+        const { frame, glass, planks, warning, pulse } = createZombiesSpawnVisual(this, spawn);
 
         const node: SpawnNode = {
           id: `spawn_${index}`,
@@ -1288,116 +1232,33 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private setupPlayer() {
-    this.player = new AvatarRenderer(this, this.px, this.py, this.avatarConfig);
-    this.player.setDepth(60);
-    this.playerName = this.add.text(this.px, this.py - 44, this.playerUsername, {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setOrigin(0.5, 1).setDepth(70);
+    setupZombiesPlayer(this as unknown as Parameters<typeof setupZombiesPlayer>[0]);
   }
 
   private setupInput() {
-    const keyboard = this.input.keyboard!;
-    this.keyW = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W);
-    this.keyA = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A);
-    this.keyS = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
-    this.keyD = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D);
-    this.keyI = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I);
-    this.keyJ = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.J);
-    this.keyK = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.K);
-    this.keyL = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.L);
-    this.keyE = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E);
-    this.keyQ = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
-    this.keyF = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
-    this.keyR = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
-    this.keyOne = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
-    this.keyTwo = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
-    this.keyThree = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.THREE);
-    this.keyFour = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.FOUR);
-    this.keyFive = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.FIVE);
-    this.keyEsc = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
-    this.keySpace = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-
-    this.pointerDownHandler = () => {
-      this.ensureAudioContext();
-      if (this.gameOver) return;
-      this.tryShoot();
-    };
-    this.input.on('pointerdown', this.pointerDownHandler);
+    setupZombiesInput(this as unknown as Parameters<typeof setupZombiesInput>[0]);
   }
 
   private setupHud() {
-    this.furiaHudText = this.add.text(18, 18, '', {
-      fontSize: '8px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FF4444',
-      stroke: '#000000',
-      strokeThickness: 3,
-    }).setScrollFactor(0).setDepth(1000);
-
-    this.noticeText = this.add.text(ZOMBIES_VIEWPORT.WIDTH / 2, 86, '', {
-      fontSize: '10px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-      stroke: '#000000',
-      strokeThickness: 4,
-      align: 'center',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(1200).setAlpha(0);
-
-    this.powerupBanner = this.add.text(ZOMBIES_VIEWPORT.WIDTH / 2, 132, '', {
-      fontSize: '11px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FFFFFF',
-      stroke: '#000000',
-      strokeThickness: 5,
-      align: 'center',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(1200).setAlpha(0);
-
-    this.bossIntroText = this.add.text(ZOMBIES_VIEWPORT.WIDTH / 2, ZOMBIES_VIEWPORT.HEIGHT / 2, '', {
-      fontSize: '18px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#FF6A6A',
-      stroke: '#000000',
-      strokeThickness: 6,
-      align: 'center',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(1300).setAlpha(0);
-
-    this.activePrompt = this.add.text(ZOMBIES_VIEWPORT.WIDTH / 2, ZOMBIES_VIEWPORT.HEIGHT - 38, '', {
-      fontSize: '9px',
-      fontFamily: '"Press Start 2P", monospace',
-      color: '#F5C842',
-      stroke: '#000000',
-      strokeThickness: 4,
-      align: 'center',
-    }).setOrigin(0.5, 1).setScrollFactor(0).setDepth(1200).setAlpha(0);
-
-    this.promptGlow = this.add.graphics().setScrollFactor(0).setDepth(1190);
-    this.reticle = this.add.graphics().setScrollFactor(0).setDepth(1100);
+    createZombiesHud(this as unknown as Parameters<typeof createZombiesHud>[0]);
     this.renderHud();
   }
 
   private setupDoors() {
     for (const section of ZOMBIES_SECTIONS) {
       if (section.unlockedByDefault) continue;
-      const panel = this.add.rectangle(section.doorX! + section.doorW! / 2, section.doorY! + section.doorH! / 2, section.doorW!, section.doorH!, 0x4A231F, 1).setDepth(24);
-      const label = this.add.text(panel.x, panel.y - 24, section.label, {
-        fontSize: '7px',
-        fontFamily: '"Press Start 2P", monospace',
-        color: '#FFB36A',
-      }).setOrigin(0.5).setDepth(25);
-      const costText = this.add.text(panel.x, panel.y + 18, `${section.unlockCost} PTS`, {
-        fontSize: '7px',
-        fontFamily: '"Press Start 2P", monospace',
-        color: '#F5C842',
-      }).setOrigin(0.5).setDepth(25);
+      const layoutSection = getZombiesArenaSectionById(ZOMBIES_SECTIONS, section.id);
+      if (!layoutSection) continue;
+      const rect = getZombiesArenaSectionDoorBounds(layoutSection);
+      const visual = createZombiesArenaDoorVisual(this, layoutSection);
+      if (!rect || !visual) continue;
+      const { panel, label, costText } = visual;
+      costText.setText(`${section.unlockCost} PTS`);
       this.doors.set(section.id, {
         id: section.id,
         unlocked: false,
         cost: section.unlockCost ?? 0,
-        rect: new Phaser.Geom.Rectangle(section.doorX!, section.doorY!, section.doorW!, section.doorH!),
+        rect,
         panel,
         label,
         costText,
@@ -1452,123 +1313,23 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private renderHud() {
-    const weapon = this.getWeaponStats(this.currentWeapon);
-    const ammo = this.weaponInventory[this.currentWeapon];
-    const now = this.time.now;
-    const doubleSeconds = this.doublePointsUntil > now
-      ? Math.ceil((this.doublePointsUntil - now) / 1000)
-      : 0;
-    const instaSeconds = this.instaKillUntil > now
-      ? Math.ceil((this.instaKillUntil - now) / 1000)
-      : 0;
-    const roundState = this.roundBreakUntil > now
-      ? `INTER ${Math.ceil((this.roundBreakUntil - now) / 1000)}s`
-      : this.nextSpawnAt > now && this.spawnedThisRound === 0
-        ? `WAVE ${Math.ceil((this.nextSpawnAt - now) / 1000)}s`
-        : this.boxRollingUntil > now
-          ? 'BOX GIRANDO'
-          : this.reloadEndsAt > now
-            ? 'RECARGANDO'
-            : 'EN PIE';
-    const statusLines = [
-      this.gameOver ? 'GAME OVER' : roundState,
-      `ZOMBIES ${this.countAliveZombies()}/${this.roundTarget}`,
-      `SPAWN ${this.spawnedThisRound}`,
-      `PRESSURE ${this.getPressureTier()}`,
-      this.allowDepthsGate && this.depthsUnlocked ? 'DEPTHS OPEN' : '',
-      this.bossAlive ? 'BOSS ACTIVE' : this.bossRoundActive && !this.bossSpawnedThisRound ? 'BOSS INCOMING' : '',
-    ].filter(Boolean).join('\n');
-    const weaponsStr = `ARMAS ${this.weaponOrder.map((id) => {
-      const label = this.getWeaponStats(id).displayLabel;
-      return id === this.currentWeapon ? `[${label}]` : label;
-    }).join('  ')}`;
-
-    eventBus.emit(EVENTS.ZOMBIES_HUD_UPDATE, {
-      wave: this.round,
-      totalWaves: this.round,
-      kills: this.killCount,
-      enemiesLeft: this.countAliveZombies(),
-      score: this.points,
-      hp: Math.max(0, Math.round(this.hp)),
-      maxHp: ZOMBIES_PLAYER.maxHp,
-      weapon: weapon.displayLabel,
-      ammoInMag: ammo.ammoInMag,
-      reserveAmmo: ammo.reserveAmmo,
-      doublePointsLeft: doubleSeconds,
-      instaKillLeft: instaSeconds,
-      status: statusLines,
-      weapons: weaponsStr,
-    });
-
-    if (this.reticle) {
-      this.reticle.clear();
-      const pointer = this.input.activePointer;
-      this.reticle.lineStyle(1, 0xFFFFFF, 0.75);
-      this.reticle.strokeCircle(pointer.x, pointer.y, 8);
-      this.reticle.lineBetween(pointer.x - 12, pointer.y, pointer.x + 12, pointer.y);
-      this.reticle.lineBetween(pointer.x, pointer.y - 12, pointer.x, pointer.y + 12);
-    }
+    renderZombiesHud(this as unknown as Parameters<typeof renderZombiesHud>[0]);
   }
 
   private showNotice(text: string, color = '#F5C842') {
-    if (!this.noticeText) return;
-    this.noticeText.setText(text);
-    this.noticeText.setColor(color);
-    this.noticeText.setAlpha(1);
-    this.noticeText.setScale(0.94);
-    this.tweens.killTweensOf(this.noticeText);
-    this.tweens.add({
-      targets: this.noticeText,
-      scaleX: 1,
-      scaleY: 1,
-      alpha: { from: 1, to: 0 },
-      duration: 1600,
-      ease: 'Sine.easeOut',
-    });
+    showZombiesNotice(this as unknown as Parameters<typeof showZombiesNotice>[0], text, color);
   }
 
   private showPowerupBanner(text: string, color = '#FFFFFF') {
-    if (!this.powerupBanner) return;
-    this.powerupBanner.setText(text);
-    this.powerupBanner.setColor(color);
-    this.powerupBanner.setAlpha(1);
-    this.powerupBanner.setScale(1.15);
-    this.tweens.killTweensOf(this.powerupBanner);
-    this.tweens.add({
-      targets: this.powerupBanner,
-      alpha: { from: 1, to: 0 },
-      scaleX: 1,
-      scaleY: 1,
-      duration: 1800,
-      ease: 'Sine.easeOut',
-    });
+    showZombiesPowerupBanner(this as unknown as Parameters<typeof showZombiesPowerupBanner>[0], text, color);
   }
 
   private beginRound() {
-    this.round += 1;
-    this.roundTarget = this.getScaledRoundTarget(this.round);
-    this.spawnedThisRound = 0;
-    this.nextSpawnAt = this.time.now + this.getScaledRoundWarmupMs(this.round);
-    this.roundBreakUntil = 0;
-    this.bossRoundActive = this.isBossRound(this.round);
-    this.bossSpawnedThisRound = false;
-    this.bossAlive = false;
-    this.showNotice(this.bossRoundActive ? `BOSS ROUND ${this.round}` : `ROUND ${this.round}`, this.bossRoundActive ? '#FF6A6A' : '#FFB36A');
-    if (this.bossRoundActive) {
-      this.triggerBossRoundIntro(`BOSS ROUND ${this.round}\nSURVIVE THE HUNT`);
-    }
-    if (!this.bossRoundActive) {
-      this.playZombiesSfx('round_start');
-    }
-    this.updateDepthsAccessVisual();
-    this.renderHud();
-    if (this.isSharedRunHost()) {
-      this.lastSharedSnapshotSentAt = 0;
-    }
+    beginZombiesRound(this as unknown as Parameters<typeof beginZombiesRound>[0]);
   }
 
   private isBossRound(round: number) {
-    return round >= 10 && round % 10 === 0;
+    return isZombiesBossRound(round);
   }
 
   private getRunElapsedMinutes() {
@@ -1577,28 +1338,23 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private getPressureTier() {
-    return Math.min(8, Math.floor(this.getRunElapsedMinutes() / 3.5));
+    return getZombiesPressureTier(this as unknown as Parameters<typeof getZombiesPressureTier>[0]);
   }
 
   private getScaledRoundTarget(round: number) {
-    const base = getRoundZombieCount(round);
-    const pressure = this.getPressureTier();
-    return Math.min(96, base + Math.floor(round * 1.4) + pressure * 4 + Math.floor(round * pressure * 0.35));
+    return getZombiesScaledRoundTarget(this as unknown as Parameters<typeof getZombiesScaledRoundTarget>[0], round);
   }
 
   private getScaledSpawnDelayMs(round: number) {
-    const pressure = this.getPressureTier();
-    return Math.max(120, getSpawnDelayForRound(round) - pressure * 55 - round * 6);
+    return getZombiesScaledSpawnDelayMs(this as unknown as Parameters<typeof getZombiesScaledSpawnDelayMs>[0], round);
   }
 
   private getScaledRoundWarmupMs(round: number) {
-    const pressure = this.getPressureTier();
-    return Math.max(650, getRoundWarmupMs(round) - pressure * 120);
+    return getZombiesScaledRoundWarmupMs(this as unknown as Parameters<typeof getZombiesScaledRoundWarmupMs>[0], round);
   }
 
   private getScaledConcurrentCap(round: number) {
-    const pressure = this.getPressureTier();
-    return Math.min(36, getRoundConcurrentCap(round) + Math.floor(round / 4) + pressure);
+    return getZombiesScaledConcurrentCap(this as unknown as Parameters<typeof getZombiesScaledConcurrentCap>[0], round);
   }
 
   private createPickupRuntimeState(): ZombiesPickupRuntimeState {
@@ -1824,152 +1580,35 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private handleMovement() {
-    let { dx, dy } = this.controls.readMovement(true);
-
-    if (dx !== 0 || dy !== 0) {
-      const len = Math.hypot(dx, dy) || 1;
-      dx /= len;
-      dy /= len;
-    }
-
-    const speed = ZOMBIES_PLAYER.speed * (this.reloadEndsAt > this.time.now ? 0.78 : 1);
-    const nextX = this.px + dx * speed * this.game.loop.delta / 1000;
-    const nextY = this.py + dy * speed * this.game.loop.delta / 1000;
-    const prevX = this.px;
-    const prevY = this.py;
-    const moved = this.tryMovePlayer(nextX, nextY);
-    if (moved) {
-      const dist = Math.hypot(this.px - prevX, this.py - prevY);
-      if (dist > 0.5) recordDistanceDelta(dist);
-    }
-    this.lastIsMoving = moved;
-    this.lastMoveDx = moved ? dx : 0;
-    this.lastMoveDy = moved ? dy : 0;
-    this.syncLocalSharedPlayerState();
+    handleZombiesMovement(this as unknown as Parameters<typeof handleZombiesMovement>[0]);
   }
 
   private tryMovePlayer(nextX: number, nextY: number) {
-    const radius = ZOMBIES_PLAYER.radius;
-    let moved = false;
-    if (!this.isBlocked(nextX, this.py, radius)) {
-      this.px = nextX;
-      moved = true;
-    }
-    if (!this.isBlocked(this.px, nextY, radius)) {
-      this.py = nextY;
-      moved = true;
-    }
-    return moved;
+    return tryMoveZombiesPlayer(
+      this as unknown as Parameters<typeof tryMoveZombiesPlayer>[0],
+      nextX,
+      nextY,
+    );
   }
 
   private handleCombatInput() {
-    if (this.reloadEndsAt > this.time.now) return;
-    if (this.boxRollingUntil > this.time.now) return;
-
-    if (this.controls.isActionDown('shoot')) {
-      this.tryShoot();
-    }
-
-    if (Phaser.Input.Keyboard.JustDown(this.keyQ)) {
-      this.cycleWeapon();
-    }
-    if (Phaser.Input.Keyboard.JustDown(this.keyF)) {
-      this.tryActivateFuria();
-    }
-    if (Phaser.Input.Keyboard.JustDown(this.keyR)) {
-      this.tryReload();
-    }
-
-    const directKeys: Array<[Phaser.Input.Keyboard.Key, ZombiesWeaponId]> = [
-      [this.keyOne, 'pistol'],
-      [this.keyTwo, 'shotgun'],
-      [this.keyThree, 'smg'],
-      [this.keyFour, 'rifle'],
-      [this.keyFive, 'raygun'],
-    ];
-    for (const [key, weaponId] of directKeys) {
-      if (Phaser.Input.Keyboard.JustDown(key) && this.weaponInventory[weaponId].owned) {
-        this.currentWeapon = weaponId;
-        this.showNotice(`ARMADO ${this.getWeaponStats(weaponId).displayLabel}`, '#7CC9FF');
-      }
-    }
+    handleZombiesCombatInput(this as unknown as Parameters<typeof handleZombiesCombatInput>[0]);
   }
 
   private getZombiesAimAngle(): number {
-    const p = this.input.activePointer;
-    const wp = this.cameras.main.getWorldPoint(p.x, p.y);
-    const d = Phaser.Math.Distance.Between(this.px, this.py, wp.x, wp.y);
-    if (d > 14) return Phaser.Math.Angle.Between(this.px, this.py, wp.x, wp.y);
-    if (Math.abs(this.lastMoveDx) + Math.abs(this.lastMoveDy) > 0.04) {
-      return Math.atan2(this.lastMoveDy, this.lastMoveDx);
-    }
-    return -Math.PI / 2;
+    return getPlayerZombiesAimAngle(
+      this as unknown as Parameters<typeof getPlayerZombiesAimAngle>[0],
+    );
   }
 
   private tryShoot() {
-    if (this.gameOver) return;
-    if (this.reloadEndsAt > this.time.now) return;
-    if (this.boxRollingUntil > this.time.now) return;
-
-    const weapon = this.getWeaponStats(this.currentWeapon);
-    const ammo = this.weaponInventory[this.currentWeapon];
-    if (this.time.now - this.lastShotAt < weapon.fireDelayMs) return;
-    if (ammo.ammoInMag <= 0) {
-      this.tryReload();
-      return;
-    }
-
-    ammo.ammoInMag -= 1;
-    this.lastShotAt = this.time.now;
-    this.player.playShoot();
-
-    const aim = this.getZombiesAimAngle();
-    const { x: targetX, y: targetY } = getShootTargetWorld(this, this.px, this.py, aim);
-    const baseAng = Phaser.Math.Angle.Between(this.px, this.py, targetX, targetY);
-    const originX = this.px + Math.cos(baseAng) * ZOMBIES_MUZZLE_FORWARD;
-    const originY = this.py - ZOMBIES_MUZZLE_UP + Math.sin(baseAng) * (ZOMBIES_MUZZLE_FORWARD * 0.35);
-
-    this.fireShotBurst(this.playerId, this.playerUsername, originX, originY, targetX, targetY, weapon, !this.isSharedCoopEnabled() || this.isSharedRunHost());
-    if (this.isSharedCoopEnabled()) {
-      this.broadcastSharedShot({
-        player_id: this.playerId,
-        username: this.playerUsername,
-        originX,
-        originY,
-        targetX,
-        targetY,
-        pellets: weapon.pellets,
-        spread: weapon.spread,
-        range: weapon.range,
-        damage: weapon.damage,
-        color: weapon.color,
-      });
-    }
-
-    if (ammo.ammoInMag <= 0 && ammo.reserveAmmo > 0) {
-      this.time.delayedCall(140, () => this.tryReload());
-    }
+    tryShootZombies(this as unknown as Parameters<typeof tryShootZombies>[0]);
   }
 
   private tryReload() {
-    const ammo = this.weaponInventory[this.currentWeapon];
-    const weapon = this.getWeaponStats(this.currentWeapon);
-    if (this.reloadEndsAt > this.time.now) return;
-    if (ammo.reserveAmmo <= 0 || ammo.ammoInMag >= weapon.magazineSize) return;
-
-    const reloadingWeaponId = this.currentWeapon;
-    this.reloadEndsAt = this.time.now + weapon.reloadMs;
-    this.showNotice(`RECARGANDO ${weapon.displayLabel}`, '#9EFFB7');
-    this.time.delayedCall(weapon.reloadMs, () => {
-      const currentAmmo = this.weaponInventory[reloadingWeaponId];
-      const currentWeapon = this.getWeaponStats(reloadingWeaponId);
-      const needed = currentWeapon.magazineSize - currentAmmo.ammoInMag;
-      const moved = Math.min(needed, currentAmmo.reserveAmmo);
-      currentAmmo.ammoInMag += moved;
-      currentAmmo.reserveAmmo -= moved;
-      this.reloadEndsAt = 0;
-      this.renderHud();
-    });
+    void tryReloadZombiesCombat(
+      this as unknown as Parameters<typeof tryReloadZombiesCombat>[0],
+    );
   }
 
   private cycleWeapon() {
@@ -1986,51 +1625,13 @@ export class ZombiesScene extends Phaser.Scene {
   private static readonly FURIA_COOLDOWN_MS  = 180_000; // 3 minutes
 
   private tryActivateFuria() {
-    if (!getSkillSystem().hasUnlocked('gym', 4)) {
-      this.showNotice('GYM LV4 REQUERIDO', '#888899');
-      return;
-    }
-    const now = this.time.now;
-    if (this.furiaActive && now < this.furiaUntil) return; // already active
-    if (now < this.furiaCooldownUntil) {
-      const secLeft = Math.ceil((this.furiaCooldownUntil - now) / 1000);
-      this.showNotice(`FURIA COOLDOWN ${secLeft}s`, '#888899');
-      return;
-    }
-    this.furiaActive = true;
-    // cuerpo_maquina sinergia: Furia dura +3s (10s→13s)
-    const furiaDuration = ZombiesScene.FURIA_DURATION_MS + (getSkillSystem().hasSynergy('cuerpo_maquina') ? 3000 : 0);
-    this.furiaUntil  = now + furiaDuration;
-    this.furiaCooldownUntil = now + ZombiesScene.FURIA_COOLDOWN_MS;
-    this.cameras.main.flash(200, 255, 60, 60, false);
-    const furiaLabel = getSkillSystem().getSpec('gym') === 'gym_fighter'
-      ? 'FURIA ACTIVA — +80% DAÑO [PELEADOR]'
-      : 'FURIA ACTIVA — +30% DAÑO';
-    this.showNotice(furiaLabel, '#FF4444');
+    tryActivateZombiesFuria(
+      this as unknown as Parameters<typeof tryActivateZombiesFuria>[0],
+    );
   }
 
   private updateFuria() {
-    const now = this.time.now;
-    if (!this.furiaHudText) return;
-    if (this.furiaActive && now < this.furiaUntil) {
-      const secLeft = Math.ceil((this.furiaUntil - now) / 1000);
-      this.furiaHudText.setText(`🔥 FURIA ${secLeft}s`).setColor('#FF4444');
-    } else {
-      if (this.furiaActive) {
-        this.furiaActive = false;
-        this.showNotice('FURIA TERMINADA', '#888899');
-      }
-      if (!getSkillSystem().hasUnlocked('gym', 4)) {
-        this.furiaHudText.setText('');
-        return;
-      }
-      if (now < this.furiaCooldownUntil) {
-        const secLeft = Math.ceil((this.furiaCooldownUntil - now) / 1000);
-        this.furiaHudText.setText(`[F] FURIA ${secLeft}s CD`).setColor('#555566');
-      } else {
-        this.furiaHudText.setText('[F] FURIA').setColor('#FF6666');
-      }
-    }
+    updateZombiesFuriaHud(this as unknown as Parameters<typeof updateZombiesFuriaHud>[0]);
   }
 
   private fireShotBurst(
@@ -2049,188 +1650,66 @@ export class ZombiesScene extends Phaser.Scene {
     },
     applyDamage: boolean,
   ) {
-    const baseAngle = Phaser.Math.Angle.Between(originX, originY, targetX, targetY);
-    for (let i = 0; i < weapon.pellets; i += 1) {
-      const angle = baseAngle + Phaser.Math.FloatBetween(-weapon.spread, weapon.spread);
-      const hit = this.findZombieTargetFrom(originX, originY, angle, weapon.range);
-      const endX = hit ? hit.x : originX + Math.cos(angle) * weapon.range;
-      const endY = hit ? hit.y : originY + Math.sin(angle) * weapon.range;
-      this.drawShotFxFrom(originX, originY, endX, endY, weapon.color);
-      if (applyDamage && hit) {
-        this.damageZombie(hit, weapon.damage);
-      }
-    }
+    fireZombiesShotBurst(
+      this as unknown as Parameters<typeof fireZombiesShotBurst>[0],
+      shooterId,
+      _username,
+      originX,
+      originY,
+      targetX,
+      targetY,
+      weapon,
+      applyDamage,
+    );
   }
 
   private drawShotFxFrom(originX: number, originY: number, endX: number, endY: number, color: number) {
-    type TracerCfg = { width: number; alpha: number; dur: number; flashR: number; glow: boolean };
-    const cfgMap: Partial<Record<ZombiesWeaponId, TracerCfg>> = {
-      pistol:  { width: 1.5, alpha: 0.75, dur: 80,  flashR: 7,  glow: false },
-      smg:     { width: 1,   alpha: 0.6,  dur: 50,  flashR: 6,  glow: false },
-      shotgun: { width: 2.5, alpha: 0.65, dur: 100, flashR: 11, glow: false },
-      rifle:   { width: 1,   alpha: 0.9,  dur: 120, flashR: 7,  glow: false },
-      deagle:  { width: 2,   alpha: 0.8,  dur: 100, flashR: 9,  glow: false },
-      cannon:  { width: 4,   alpha: 0.7,  dur: 130, flashR: 14, glow: false },
-      raygun:  { width: 2.5, alpha: 1.0,  dur: 180, flashR: 10, glow: true  },
-    };
-    const tc: TracerCfg = cfgMap[this.currentWeapon] ?? { width: 2, alpha: 0.9, dur: 90, flashR: 8, glow: false };
-
-    if (tc.glow) {
-      const glow = this.add.line(0, 0, originX, originY, endX, endY, color, 0.25)
-        .setOrigin(0, 0).setDepth(159).setLineWidth(tc.width * 4, tc.width * 4);
-      this.tweens.add({ targets: glow, alpha: 0, duration: tc.dur * 0.6, onComplete: () => glow.destroy() });
-    }
-    const tracer = this.add.line(0, 0, originX, originY, endX, endY, color, tc.alpha).setOrigin(0, 0).setDepth(160);
-    tracer.setLineWidth(tc.width, tc.width);
-    const flash = this.add.circle(originX, originY, tc.flashR, color, 0.85).setDepth(170);
-    this.tweens.add({ targets: tracer, alpha: 0, duration: tc.dur, onComplete: () => tracer.destroy() });
-    this.tweens.add({ targets: flash, alpha: 0, scale: 2.0, duration: tc.dur * 1.2, onComplete: () => flash.destroy() });
+    drawZombiesShotFxFrom(
+      this as unknown as Parameters<typeof drawZombiesShotFxFrom>[0],
+      originX,
+      originY,
+      endX,
+      endY,
+      color,
+    );
   }
 
   private findZombieTargetFrom(originX: number, originY: number, angle: number, maxRange: number) {
-    let best: ZombieState | null = null;
-    let bestAlong = Number.POSITIVE_INFINITY;
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-
-    for (const zombie of this.zombies.values()) {
-      if (!zombie.alive) continue;
-      const dx = zombie.x - originX;
-      const dy = zombie.y - originY;
-      const along = dx * cos + dy * sin;
-      if (along <= 0 || along > maxRange) continue;
-      const perp = Math.abs(-sin * dx + cos * dy);
-      if (perp > zombie.radius + 10) continue;
-      if (this.isLineBlocked(originX, originY, zombie.x, zombie.y)) continue;
-      if (along < bestAlong) {
-        best = zombie;
-        bestAlong = along;
-      }
-    }
-
-    return best;
+    return findZombiesTargetFrom(
+      this as unknown as Parameters<typeof findZombiesTargetFrom>[0],
+      originX,
+      originY,
+      angle,
+      maxRange,
+    ) as ZombieState | null;
   }
 
   private handleRoundFlow() {
-    const concurrentCap = this.getScaledConcurrentCap(this.round);
-    if (this.spawnedThisRound < this.roundTarget) {
-      if (this.time.now >= this.nextSpawnAt && this.countAliveZombies() < concurrentCap) {
-        const spawned = this.spawnZombie();
-        if (spawned) {
-          this.spawnedThisRound += 1;
-          this.nextSpawnAt = this.time.now + this.getScaledSpawnDelayMs(this.round) + Phaser.Math.Between(-60, 90);
-        } else {
-          this.nextSpawnAt = this.time.now + 180;
-        }
-      }
-      return;
-    }
-
-    const aliveZombies = this.countAliveZombies();
-
-    if (this.bossRoundActive && !this.bossSpawnedThisRound && !this.bossAlive && aliveZombies === 0) {
-      const spawnedBoss = this.spawnBossZombie();
-      if (spawnedBoss) {
-        this.bossSpawnedThisRound = true;
-        this.bossAlive = true;
-      }
-      return;
-    }
-
-    if (
-      !this.depthsUnlocked
-      && this.allowDepthsGate
-      && this.bossRoundActive
-      && this.bossSpawnedThisRound
-      && !this.bossAlive
-      && aliveZombies === 0
-      && this.zombieProjectiles.size === 0
-    ) {
-      this.depthsUnlocked = true;
-      this.updateDepthsAccessVisual();
-      this.showNotice('DEPTHS UNLOCKED', '#FF9DC8');
-    }
-
-    if (aliveZombies === 0 && !this.bossAlive && this.zombieProjectiles.size === 0 && this.roundBreakUntil === 0) {
-      this.roundBreakUntil = this.time.now + ZOMBIES_POINTS.roundBreakMs;
-      this.showNotice(`LIMPIASTE LA RONDA ${this.round}`, '#9EFFB7');
-      void getSkillSystem().addXp('gym', 10, 'wave_clear').then((r) => {
-        if (!this.scene?.isActive('ZombiesScene')) return;
-        if (r.leveled_up) this.maybeShowSpecModal('gym', r.new_level);
-      });
-    }
-
-    if (this.roundBreakUntil !== 0 && this.time.now >= this.roundBreakUntil) {
-      this.beginRound();
-    }
+    handleZombiesRoundFlow(this as unknown as Parameters<typeof handleZombiesRoundFlow>[0]);
   }
 
   private countAliveZombies() {
-    let alive = 0;
-    for (const zombie of this.zombies.values()) {
-      if (zombie.alive) alive += 1;
-    }
-    return alive;
+    return countAliveSpawningZombies(this as unknown as Parameters<typeof countAliveSpawningZombies>[0]);
   }
 
   private getPointsMultiplier() {
-    return this.doublePointsUntil > this.time.now ? 2 : 1;
+    return getZombiesPointsMultiplier(this as unknown as Parameters<typeof getZombiesPointsMultiplier>[0]);
   }
 
   private getWeaponState(weaponId: ZombiesWeaponId) {
-    return this.weaponInventory[weaponId];
+    return getZombiesWeaponState(this as unknown as Parameters<typeof getZombiesWeaponState>[0], weaponId);
   }
 
   private getWeaponStats(weaponId: ZombiesWeaponId) {
-    const base = ZOMBIES_WEAPONS[weaponId];
-    const state = this.getWeaponState(weaponId);
-
-    const stats = state.upgraded
-      ? {
-          ...base,
-          damage: Math.round(base.damage * (weaponId === 'raygun' ? 1.45 : 1.7)),
-          fireDelayMs: Math.max(
-            weaponId === 'smg' ? 70 : 90,
-            Math.round(base.fireDelayMs * 0.78),
-          ),
-          magazineSize: Math.round(base.magazineSize * (weaponId === 'shotgun' ? 1.6 : 1.5)),
-          reserveAmmo: Math.round(base.reserveAmmo * 1.35),
-          reloadMs: Math.max(800, Math.round(base.reloadMs * 0.8)),
-          displayLabel: `${base.label}*`,
-        }
-      : { ...base, displayLabel: base.label };
-
-    if (this.playerLevel <= 1) return stats;
-
-    const lvl = this.playerLevel - 1;
-    const dmgMult = 1 + lvl * 0.05;
-    const delayMult = Math.max(0.55, 1 - lvl * 0.03);
-    return {
-      ...stats,
-      damage: Math.round(stats.damage * dmgMult),
-      fireDelayMs: Math.max(
-        weaponId === 'smg' ? 60 : 80,
-        Math.round(stats.fireDelayMs * delayMult),
-      ),
-    };
+    return getZombiesWeaponStats(this as unknown as Parameters<typeof getZombiesWeaponStats>[0], weaponId);
   }
 
   private getPackCost(weaponId: ZombiesWeaponId) {
-    void weaponId;
-    return 5000;
+    return getZombiesPackCost(this as unknown as Parameters<typeof getZombiesPackCost>[0], weaponId);
   }
 
   private pickZombieType(): ZombieType {
-    const eligible = getEligibleZombieTypes(this.round);
-    const roll = Phaser.Math.Between(0, 99);
-    if (this.bossRoundActive) {
-      if (roll > 62) return 'brute';
-      if (roll > 28) return 'runner';
-      return 'walker';
-    }
-    if (this.round >= 6 && roll > 78) return 'brute';
-    if (this.round >= 3 && roll > 52) return 'runner';
-    return eligible.some((z) => z.type === 'walker') ? 'walker' : eligible[0].type;
+    return pickZombiesType(this as unknown as Parameters<typeof pickZombiesType>[0]);
   }
 
   private getUnlockedSections() {
@@ -2238,32 +1717,11 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private getAvailableSpawnNodes() {
-    const directedSectionIds = new Set(this.getSpawnSectionsForRound().map((section) => section.id));
-    const nodes = [...this.spawnNodes.values()].filter((node) => !node.occupiedBy && directedSectionIds.has(node.sectionId));
-    const distant = nodes.filter((node) => Phaser.Math.Distance.Between(this.px, this.py, node.x, node.y) >= 240);
-    const pool = distant.length ? distant : nodes;
-    return pool.sort((a, b) => {
-      const weightDiff = this.getSectionSpawnWeight(b.sectionId) - this.getSectionSpawnWeight(a.sectionId);
-      if (weightDiff !== 0) return weightDiff;
-      if (a.boardHealth !== b.boardHealth) return a.boardHealth - b.boardHealth;
-      return a.lastUsedAt - b.lastUsedAt;
-    });
+    return getZombiesAvailableSpawnNodes(this as unknown as Parameters<typeof getZombiesAvailableSpawnNodes>[0]);
   }
 
   private showBossIntro(text: string) {
-    if (!this.bossIntroText) return;
-    this.bossIntroText.setText(text);
-    this.bossIntroText.setAlpha(1);
-    this.bossIntroText.setScale(0.86);
-    this.tweens.killTweensOf(this.bossIntroText);
-    this.tweens.add({
-      targets: this.bossIntroText,
-      scaleX: 1,
-      scaleY: 1,
-      alpha: { from: 1, to: 0 },
-      duration: 1800,
-      ease: 'Sine.easeOut',
-    });
+    showZombiesBossIntro(this as unknown as Parameters<typeof showZombiesBossIntro>[0], text);
   }
 
   private triggerBossRoundIntro(text: string) {
@@ -2275,59 +1733,11 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private spawnZombie() {
-    const candidates = this.getAvailableSpawnNodes();
-    if (!candidates.length) return false;
-
-    const shortestAge = candidates[0]?.lastUsedAt ?? 0;
-    const freshestAllowed = shortestAge + 1600;
-    const filtered = candidates.filter((node) => node.lastUsedAt <= freshestAllowed);
-    const node = Phaser.Utils.Array.GetRandom(filtered.length ? filtered : candidates);
-    const type = this.pickZombieType();
-    const config = ZOMBIE_TYPES[type];
-    return this.spawnConfiguredZombie(node, {
-      type,
-      assetFolder: config.folder,
-      displayLabel: config.label,
-      hp: getZombieHpForRound(config.baseHp, this.round),
-      speed: getZombieSpeedForRound(config.speed, this.round),
-      damage: config.damage,
-      attackRange: config.attackRange,
-      attackCooldownMs: config.attackCooldownMs,
-      hitReward: config.hitReward,
-      killReward: config.killReward,
-      radius: type === 'brute' ? 22 : type === 'runner' ? 15 : 18,
-      breachMs: getZombieBreachMs(this.round, type),
-      isBoss: false,
-      noticeColor: '#FF8B3D',
-    });
+    return spawnZombiesZombie(this as unknown as Parameters<typeof spawnZombiesZombie>[0]);
   }
 
   private spawnBossZombie() {
-    const preferred = this.getAvailableSpawnNodes().filter((node) => node.sectionId === 'street' || node.sectionId === 'workshop');
-    const candidates = preferred.length ? preferred : this.getAvailableSpawnNodes();
-    if (!candidates.length) return false;
-    const node = Phaser.Utils.Array.GetRandom(candidates);
-    const hp = Math.round(getZombieHpForRound(420, this.round) * 1.35);
-    const spawned = this.spawnConfiguredZombie(node, {
-      type: 'brute',
-      assetFolder: 'boss',
-      displayLabel: 'BOSS',
-      hp,
-      speed: getZombieSpeedForRound(0.55, this.round),
-      damage: 42,
-      attackRange: 42,
-      attackCooldownMs: 760,
-      hitReward: 25,
-      killReward: 420,
-      radius: 28,
-      breachMs: Math.max(700, getZombieBreachMs(this.round, 'brute') + 500),
-      isBoss: true,
-      noticeColor: '#FF3344',
-    });
-    if (spawned) {
-      this.triggerBossRoundIntro('BOSS BREACHED\nTAKE COVER');
-    }
-    return spawned;
+    return spawnZombiesBossZombie(this as unknown as Parameters<typeof spawnZombiesBossZombie>[0]);
   }
 
   private createZombieEntity(config: {
@@ -2802,18 +2212,7 @@ export class ZombiesScene extends Phaser.Scene {
     const node = this.spawnNodes.get(zombie.spawnNodeId);
     zombie.spawnNodeId = undefined;
     if (!node) return;
-
-    node.occupiedBy = undefined;
-    if (resetBoards) {
-      this.refreshSpawnNodeVisual(node, 0, false);
-    } else {
-      this.refreshSpawnNodeVisual(node, 1, false);
-      safeSceneDelayedCall(this, 650, () => {
-        if (!node.occupiedBy) {
-          this.refreshSpawnNodeVisual(node, 0, false);
-        }
-      }, 'releaseSpawnNode reset');
-    }
+    releaseZombiesSpawnNode(this as unknown as Parameters<typeof releaseZombiesSpawnNode>[0], node, resetBoards);
   }
 
   private renderZombieHp(zombie: ZombieState) {
@@ -3072,159 +2471,22 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private handleContextInteraction() {
-    if (!this.controls.isActionJustDown('interact')) return;
-    const option = this.getNearbyInteraction();
-    if (!option) return;
-
-    if (option.kind === 'exit') {
-      this.requestExit();
-      return;
-    }
-    if (option.kind === 'door' && option.sectionId) {
-      if (this.isSharedCoopEnabled() && !this.isSharedRunHost()) {
-        this.broadcastSharedInteract({ player_id: this.playerId, kind: 'door', sectionId: option.sectionId, px: this.px, py: this.py });
-        return;
-      }
-      this.tryUnlockDoor(option.sectionId);
-      return;
-    }
-    if (option.kind === 'box') {
-      if (this.isSharedCoopEnabled() && !this.isSharedRunHost()) {
-        this.broadcastSharedInteract({ player_id: this.playerId, kind: 'box', px: this.px, py: this.py });
-        return;
-      }
-      this.tryRollMysteryBox();
-      return;
-    }
-    if (option.kind === 'upgrade') {
-      if (this.isSharedCoopEnabled() && !this.isSharedRunHost()) {
-        this.broadcastSharedInteract({ player_id: this.playerId, kind: 'upgrade', weaponId: this.currentWeapon, px: this.px, py: this.py });
-        return;
-      }
-      this.tryUpgradeCurrentWeapon();
-      return;
-    }
-    if (option.kind === 'depths') {
-      this.enterBasementDepths();
-      return;
-    }
-
-    if (option.kind === 'repair' && option.nodeId) {
-      if (this.isSharedCoopEnabled() && !this.isSharedRunHost()) {
-        this.broadcastSharedInteract({ player_id: this.playerId, kind: 'repair', nodeId: option.nodeId });
-        return;
-      }
-      this.tryRepairBarricade(option.nodeId);
-    }
+    handleZombiesContextInteraction(
+      this as unknown as Parameters<typeof handleZombiesContextInteraction>[0],
+    );
   }
 
   private getNearbyInteraction(): InteractionOption | null {
-    const options: InteractionOption[] = [];
-
-    if (Phaser.Math.Distance.Between(this.px, this.py, EXIT_PAD.x, EXIT_PAD.y) <= EXIT_PAD.radius + 24) {
-      options.push({ kind: 'exit', x: EXIT_PAD.x, y: EXIT_PAD.y, radius: EXIT_PAD.radius + 18, label: `E VOLVER A ${this.entryLabel}`, color: 0x39FF14 });
-    }
-
-    const boxRadius = 74;
-    if (Phaser.Math.Distance.Between(this.px, this.py, BOX_POS.x, BOX_POS.y) <= boxRadius) {
-      const cooldown = Math.max(0, Math.ceil((this.mysteryBoxCooldownUntil - this.time.now) / 1000));
-      options.push({
-        kind: 'box',
-        x: BOX_POS.x,
-        y: BOX_POS.y + 8,
-        radius: 56,
-        label: this.boxRollingUntil > this.time.now
-          ? 'BOX GIRANDO...'
-          : cooldown > 0
-            ? `BOX RECARGA ${cooldown}s`
-            : `E MYSTERY BOX ${ZOMBIES_POINTS.mysteryBoxCost} PTS`,
-        color: 0xFF7CCE,
-      });
-    }
-
-    const workshopUnlocked = this.doors.get('workshop')?.unlocked ?? false;
-    if (workshopUnlocked && Phaser.Math.Distance.Between(this.px, this.py, PACK_POS.x, PACK_POS.y) <= 76) {
-      const weaponState = this.weaponInventory[this.currentWeapon];
-      const weaponStats = this.getWeaponStats(this.currentWeapon);
-      options.push({
-        kind: 'upgrade',
-        x: PACK_POS.x,
-        y: PACK_POS.y,
-        radius: 58,
-        label: weaponState.upgraded
-          ? `${weaponStats.displayLabel} AL MAX`
-          : `E PACK ${weaponStats.displayLabel} ${this.getPackCost(this.currentWeapon)} PTS`,
-        color: 0x46B3FF,
-      });
-    }
-
-    const depthsOpen = this.allowDepthsGate && this.depthsUnlocked;
-    if (depthsOpen && Phaser.Math.Distance.Between(this.px, this.py, DEPTHS_PAD.x, DEPTHS_PAD.y) <= DEPTHS_PAD.radius + 34) {
-      options.push({
-        kind: 'depths',
-        x: DEPTHS_PAD.x,
-        y: DEPTHS_PAD.y,
-        radius: DEPTHS_PAD.radius + 18,
-        label: 'E BAJAR AL BASEMENT',
-        color: 0xFF6EA8,
-      });
-    }
-
-    for (const [sectionId, door] of this.doors.entries()) {
-      if (door.unlocked || !door.rect) continue;
-      const expandedDoor = new Phaser.Geom.Rectangle(door.rect.x - 35, door.rect.y - 35, door.rect.width + 70, door.rect.height + 70);
-      const nearDoor = Phaser.Geom.Rectangle.Contains(expandedDoor, this.px, this.py);
-      if (!nearDoor) continue;
-      options.push({
-        kind: 'door',
-        x: door.panel.x,
-        y: door.panel.y,
-        radius: Math.max(door.panel.width, door.panel.height) / 2,
-        label: `E ABRIR ${ZOMBIES_SECTIONS.find((section) => section.id === sectionId)?.label} ${door.cost} PTS`,
-        color: 0xF5C842,
-        sectionId,
-      });
-    }
-
-    for (const node of this.spawnNodes.values()) {
-      if (node.occupiedBy || node.boardHealth >= node.maxBoards) continue;
-      const distance = Phaser.Math.Distance.Between(this.px, this.py, node.x, node.y);
-      if (distance > 78) continue;
-      options.push({
-        kind: 'repair',
-        x: node.x,
-        y: node.y,
-        radius: 44,
-        label: `E REPAIR BARRICADE +20 PTS`,
-        color: 0x46B3FF,
-        nodeId: node.id,
-      });
-    }
-
-    if (!options.length) return null;
-    return options.sort((a, b) => Phaser.Math.Distance.Between(this.px, this.py, a.x, a.y) - Phaser.Math.Distance.Between(this.px, this.py, b.x, b.y))[0];
+    return getNearbyZombiesInteraction(
+      this as unknown as Parameters<typeof getNearbyZombiesInteraction>[0],
+    ) as InteractionOption | null;
   }
 
   private updatePromptHud(option: InteractionOption | null) {
-    if (!this.activePrompt || !this.promptGlow) return;
-    this.promptGlow.clear();
-    if (!option) {
-      this.activePrompt.setAlpha(0);
-      return;
-    }
-
-    const screen = this.cameras.main.worldView;
-    const screenX = option.x - screen.x;
-    const screenY = option.y - screen.y;
-    const pulse = 0.18 + ((Math.sin(this.time.now / 180) + 1) * 0.1);
-    this.promptGlow.lineStyle(2, option.color, 0.85);
-    this.promptGlow.strokeCircle(screenX, screenY, option.radius);
-    this.promptGlow.fillStyle(option.color, pulse);
-    this.promptGlow.fillCircle(screenX, screenY, option.radius - 6);
-    const color = Phaser.Display.Color.IntegerToColor(option.color);
-    this.activePrompt.setText(option.label);
-    this.activePrompt.setColor(`rgb(${color.red}, ${color.green}, ${color.blue})`);
-    this.activePrompt.setAlpha(1);
+    updateZombiesPromptHud(
+      this as unknown as Parameters<typeof updateZombiesPromptHud>[0],
+      option as unknown as Parameters<typeof updateZombiesPromptHud>[1],
+    );
   }
 
   private tryUnlockDoor(doorId: ZombiesSectionId) {
@@ -3521,39 +2783,26 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private requestExit() {
-    // UX: exiting the main ZombiesScene should always take the player
-    // back to the plaza in WorldScene, not bounce through BasementScene.
-    if (this.scene.key === 'ZombiesScene') {
-      transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
-      return;
-    }
-
-    transitionToScene(this, this.returnScene, {
-      returnX: this.returnX,
-      returnY: this.returnY,
-    });
+    requestZombiesExit(
+      this as unknown as Parameters<typeof requestZombiesExit>[0],
+    );
   }
 
   private enterBasementDepths() {
-    transitionToScene(this, 'BasementZombiesScene', {
-      returnScene: this.returnScene,
-      returnX: this.returnX,
-      returnY: this.returnY,
-      entryLabel: this.entryLabel,
-      allowDepthsGate: false,
-      modeLabel: 'BASEMENT DEPTHS',
-    });
+    enterZombiesBasementDepths(
+      this as unknown as Parameters<typeof enterZombiesBasementDepths>[0],
+    );
   }
 
   private setupRealtime() {
     if (!supabase || !isConfigured) return;
 
-    this.channel = supabase.channel(`waspi-room-${this.scene.key.toLowerCase()}`, {
+    this.channel = preferSupabaseHttpBroadcast(supabase.channel(`waspi-room-${this.scene.key.toLowerCase()}`, {
       config: {
         broadcast: { self: false },
         presence: this.isSharedCoopEnabled() ? { key: this.playerId } : undefined,
       },
-    });
+    }));
 
     const realtimeChannel = this.channel as unknown as ZombiesRealtimeChannel;
 
@@ -3650,62 +2899,19 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private broadcastSelfState(event: 'player:join' | 'player:move') {
-    if (!this.channel) return;
-    this.channel.send({
-      type: 'broadcast',
-      event,
-      payload: {
-        player_id: this.playerId,
-        username: this.playerUsername,
-        x: Math.round(this.px),
-        y: Math.round(this.py),
-        dir: this.lastMoveDx,
-        dy: this.lastMoveDy,
-        moving: this.lastIsMoving,
-        avatar: this.avatarConfig,
-      },
-    });
+    broadcastRealtimeSelfState(this as unknown as Parameters<typeof broadcastRealtimeSelfState>[0], event);
   }
 
   private syncPosition() {
-    if (!this.channel) return;
-    const now = Date.now();
-    if (now - this.lastPosSent < 66) return;
-    this.lastPosSent = now;
-    this.syncLocalSharedPlayerState();
-    this.broadcastSelfState('player:move');
+    syncRealtimePosition(this as unknown as Parameters<typeof syncRealtimePosition>[0]);
   }
 
   private handleSharedPresenceSync() {
     if (!this.isSharedCoopEnabled() || !this.channel) return;
-    const presence = this.channel.presenceState();
-    const players = new Map<string, SharedRunPlayerState>();
-
-    for (const entries of Object.values(presence) as SharedRunPresenceMeta[][]) {
-      for (const entry of entries) {
-        const playerId = typeof entry.player_id === 'string' ? entry.player_id : '';
-        if (!playerId) continue;
-        const existing = this.sharedRunPlayers.get(playerId);
-        players.set(playerId, {
-          player_id: playerId,
-          username: typeof entry.username === 'string' && entry.username.trim() ? entry.username.trim() : existing?.username ?? 'waspi_guest',
-          x: existing?.x ?? this.px,
-          y: existing?.y ?? this.py,
-          hp: existing?.hp ?? ZOMBIES_PLAYER.maxHp,
-          alive: existing?.alive ?? true,
-          joinedAt: typeof entry.joined_at === 'number' && Number.isFinite(entry.joined_at) ? entry.joined_at : existing?.joinedAt ?? Date.now(),
-          lastDamageAt: existing?.lastDamageAt ?? 0,
-        });
-      }
-    }
-
-    this.sharedRunPlayers = players;
-    const nextHost = [...players.values()]
-      .sort((a, b) => (a.joinedAt - b.joinedAt) || a.player_id.localeCompare(b.player_id))[0]?.player_id ?? null;
-    this.sharedRunHostId = nextHost;
-    if (this.isSharedRunHost()) {
-      this.lastSharedSnapshotSentAt = 0;
-    }
+    syncZombiesRealtimePresenceState(
+      this as unknown as Parameters<typeof syncZombiesRealtimePresenceState>[0],
+      this.channel.presenceState() as Record<string, SharedRunPresenceMeta[]>,
+    );
   }
 
   private handleSharedSnapshot(payload: unknown) {
@@ -3716,43 +2922,18 @@ export class ZombiesScene extends Phaser.Scene {
       payload,
     );
     if (!handled) return;
-
-    this.bossAlive = realtimeSnapshotScene.bossAlive;
-    this.bossRoundActive = realtimeSnapshotScene.bossRoundActive;
-    this.bossSpawnedThisRound = realtimeSnapshotScene.bossSpawnedThisRound;
-    this.boxRollingUntil = realtimeSnapshotScene.boxRollingUntil;
-    this.depthsUnlocked = realtimeSnapshotScene.depthsUnlocked;
-    this.doublePointsUntil = realtimeSnapshotScene.doublePointsUntil;
-    this.mysteryBoxCooldownUntil = realtimeSnapshotScene.mysteryBoxCooldownUntil;
-    this.nextSpawnAt = realtimeSnapshotScene.nextSpawnAt;
-    this.pickupIdSeq = realtimeSnapshotScene.pickupIdSeq;
-    this.points = realtimeSnapshotScene.points;
-    this.round = realtimeSnapshotScene.round;
-    this.roundBreakUntil = realtimeSnapshotScene.roundBreakUntil;
-    this.roundTarget = realtimeSnapshotScene.roundTarget;
-    this.sharedRunHostId = realtimeSnapshotScene.sharedRunHostId ?? null;
-    this.sharedRunPlayers = realtimeSnapshotScene.sharedRunPlayers;
-    this.spawnedThisRound = realtimeSnapshotScene.spawnedThisRound;
-    this.zombieIdSeq = realtimeSnapshotScene.zombieIdSeq;
-    this.zombieProjectileSeq = realtimeSnapshotScene.zombieProjectileSeq;
+    applyZombiesRealtimeSharedSnapshotAdapterState(
+      this as unknown as Parameters<typeof applyZombiesRealtimeSharedSnapshotAdapterState>[0],
+      realtimeSnapshotScene,
+    );
   }
 
   private broadcastSharedShot(payload: SharedRunShotPayload) {
-    if (!this.isSharedCoopEnabled() || !this.channel) return;
-    this.channel.send({
-      type: 'broadcast',
-      event: 'shared:shot',
-      payload,
-    });
+    broadcastZombiesRealtimeSharedShot(this as unknown as Parameters<typeof broadcastZombiesRealtimeSharedShot>[0], payload);
   }
 
   private broadcastSharedInteract(payload: SharedRunInteractPayload) {
-    if (!this.isSharedCoopEnabled() || !this.channel) return;
-    this.channel.send({
-      type: 'broadcast',
-      event: 'shared:interact',
-      payload,
-    });
+    broadcastZombiesRealtimeSharedInteract(this as unknown as Parameters<typeof broadcastZombiesRealtimeSharedInteract>[0], payload);
   }
 
   private rollSharedMysteryBoxForPlayer(playerId: string) {
@@ -3813,12 +2994,7 @@ export class ZombiesScene extends Phaser.Scene {
   }
 
   private broadcastSharedWeaponGrant(payload: SharedRunWeaponGrantPayload) {
-    if (!this.isSharedCoopEnabled() || !this.channel) return;
-    this.channel.send({
-      type: 'broadcast',
-      event: 'shared:weapon',
-      payload,
-    });
+    broadcastZombiesRealtimeSharedWeaponGrant(this as unknown as Parameters<typeof broadcastZombiesRealtimeSharedWeaponGrant>[0], payload);
   }
 
   private applySharedWeaponGrant(payload: SharedRunWeaponGrantPayload) {
@@ -4005,10 +3181,7 @@ export class ZombiesScene extends Phaser.Scene {
     } catch {
       // Scene is shutting down; ignore avatar cleanup failures.
     }
-    if (this.pointerDownHandler) {
-      this.input.off('pointerdown', this.pointerDownHandler);
-      this.pointerDownHandler = undefined;
-    }
+    cleanupZombiesInput(this as unknown as Parameters<typeof cleanupZombiesInput>[0]);
     const realtimeSession = {
       channel: this.channel,
       playerId: this.playerId,

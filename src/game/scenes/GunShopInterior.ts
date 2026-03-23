@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
-import { SAFE_PLAZA_RETURN, ZONES } from '../config/constants';
+import { SAFE_PLAZA_RETURN, WORLD_EXITS } from '../config/constants';
 import { announceScene, bindSafeResetToPlaza, createBackButton, showSceneTitle, transitionToWorldScene } from '../systems/SceneUi';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { SceneControls } from '../systems/SceneControls';
@@ -8,8 +8,8 @@ import { eventBus, EVENTS } from '../config/eventBus';
 import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
 
 export class GunShopInterior extends Phaser.Scene {
-  private static readonly RETURN_X = 2240;
-  private static readonly RETURN_Y = ZONES.PLAZA_Y + 428;
+  private static readonly RETURN_X = WORLD_EXITS.GUN_SHOP.x;
+  private static readonly RETURN_Y = WORLD_EXITS.GUN_SHOP.y;
 
   private player!: AvatarRenderer;
   private controls!: SceneControls;

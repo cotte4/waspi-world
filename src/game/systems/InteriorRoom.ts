@@ -3,6 +3,7 @@ import { AvatarRenderer, type AvatarConfig } from './AvatarRenderer';
 import { ChatSystem } from './ChatSystem';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
+import { preferSupabaseHttpBroadcast } from '../../lib/supabaseRealtime';
 
 type InteriorRemotePlayer = {
   avatar: AvatarRenderer;
@@ -87,9 +88,9 @@ export class InteriorRoom {
 
     if (!supabase || !isConfigured) return;
 
-    this.channel = supabase.channel(this.options.roomKey, {
+    this.channel = preferSupabaseHttpBroadcast(supabase.channel(this.options.roomKey, {
       config: { broadcast: { self: false } },
-    });
+    }));
 
     this.channel
       .on('broadcast', { event: 'player:move' }, ({ payload }) => {

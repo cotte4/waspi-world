@@ -3,6 +3,7 @@ import { CHAT } from '@/src/game/config/constants';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 import { mutePlayer, type PlayerState } from '@/src/lib/playerState';
 import { supabase } from '@/src/lib/supabase';
+import { preferSupabaseHttpBroadcast } from '@/src/lib/supabaseRealtime';
 import { CHAT_SCENES, INTERIOR_SOCIAL_SCENES } from '@/app/play/lib/playPageConstants';
 import type { ChatMsg, PlayerActionsPayload, PlayerInfo, PresencePlayer } from '@/app/play/types';
 
@@ -149,12 +150,12 @@ export function usePlayPageChat({
       return () => window.clearTimeout(fallbackTimer);
     }
 
-    const channel = supabase.channel(`waspi-interior:${activeScene}`, {
+    const channel = preferSupabaseHttpBroadcast(supabase.channel(`waspi-interior:${activeScene}`, {
       config: {
         presence: { key: playerInfo.playerId },
         broadcast: { self: false },
       },
-    });
+    }));
 
     const syncPresence = () => {
       const rawState = channel.presenceState();

@@ -4,6 +4,7 @@ import {
   getAuthenticatedUser,
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
+import { creditBalance } from '@/src/lib/tenksBalance';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -35,10 +36,6 @@ interface PlayerContractRow {
   progress: number;
   completed_at: string | null;
   reward_claimed_at: string | null;
-}
-
-interface TenksBalanceRow {
-  balance: number;
 }
 
 interface SkillRow {
@@ -131,25 +128,16 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Update TENKS balance ──────────────────────────────────────────────────
-  const { data: balanceRow, error: balanceError } = await admin
-    .from('player_tenks_balance')
-    .select('balance')
-    .eq('player_id', user.id)
-    .maybeSingle<TenksBalanceRow>();
-
-  if (balanceError) {
-    return NextResponse.json({ error: balanceError.message }, { status: 500 });
-  }
-
-  const currentBalance = balanceRow?.balance ?? 0;
-  const new_balance = currentBalance + contract.reward_tenks;
-
-  const { error: tenksError } = await admin
-    .from('player_tenks_balance')
-    .upsert({ player_id: user.id, balance: new_balance });
-
-  if (tenksError) {
-    return NextResponse.json({ error: tenksError.message }, { status: 500 });
+  let new_balance: number;
+  try {
+    const credited = await creditBalance(admin, {
+      playerId: user.id,
+      amount: contract.reward_tenks,
+    });
+    new_balance = credited.newBalance;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to credit TENKS.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
   // ── Update skill XP (if skill_id is valid) ────────────────────────────────

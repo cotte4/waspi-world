@@ -3,6 +3,7 @@ import { createSupabaseAdminClient, getAuthenticatedUser } from '@/src/lib/supab
 import { DEFAULT_PLAYER_STATE, creditTenks, normalizePlayerState } from '@/src/lib/playerState';
 import { appendTenksTransaction, ensureCatalogSeeded, ensurePlayerRow } from '@/src/lib/commercePersistence';
 import { calculateBasketReward } from '@/src/lib/basketRewards';
+import { creditBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
 
 const MAX_SCORE = 30;
 const MAX_SHOTS = 30;
@@ -123,8 +124,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Basket run is already being claimed.' }, { status: 409 });
   }
 
+  const baseBalance = await getAuthoritativeBalance(admin, {
+    playerId: user.id,
+    fallbackBalance: (user.user_metadata?.waspiPlayer as { tenks?: number } | undefined)?.tenks ?? DEFAULT_PLAYER_STATE.tenks,
+  });
   const current = normalizePlayerState(user.user_metadata?.waspiPlayer ?? DEFAULT_PLAYER_STATE);
-  const next = reward > 0 ? creditTenks(current, reward) : current;
+  const next = reward > 0 ? creditTenks({ ...current, tenks: baseBalance }, reward) : { ...current, tenks: baseBalance };
 
   try {
     const { error } = await admin.auth.admin.updateUserById(user.id, {
@@ -136,7 +141,15 @@ export async function POST(request: NextRequest) {
 
     if (error) throw error;
 
-    await ensurePlayerRow(admin, user, next, { syncTenksBalance: reward > 0 });
+    if (reward > 0) {
+      await creditBalance(admin, {
+        playerId: user.id,
+        amount: reward,
+        fallbackBalance: baseBalance,
+      });
+    }
+
+    await ensurePlayerRow(admin, user, next, { syncTenksBalance: true });
 
     if (reward > 0) {
       try {

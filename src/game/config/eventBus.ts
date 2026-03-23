@@ -70,6 +70,7 @@ export const EVENTS = {
   AUDIO_OUTPUT_SINK_CHANGED: 'audio:output:sink:changed',
   VOICE_DISABLE: 'voice:disable',
   VOICE_ENABLE: 'voice:enable',
+  VOICE_STATUS_CHANGED: 'voice:status:changed',
   SKILL_MILESTONE_UNLOCKED: 'skill:milestone:unlocked',
   ACTIVITY_STARTED: 'activity:started',
   ACTIVITY_STOPPED: 'activity:stopped',

@@ -8,6 +8,7 @@ import { ChatSystem } from '../systems/ChatSystem';
 import { DialogSystem } from '../systems/DialogSystem';
 import { SceneControls } from '../systems/SceneControls';
 import { supabase, isConfigured } from '../../lib/supabase';
+import { preferSupabaseHttpBroadcast } from '../../lib/supabaseRealtime';
 import type { AudioSettings } from '../systems/AudioSettings';
 import { startSceneMusic, stopSceneMusic } from '../systems/AudioManager';
 import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
@@ -702,9 +703,9 @@ export class StoreInterior extends Phaser.Scene {
   private setupRealtime() {
     if (!supabase || !isConfigured) return;
 
-    this.channel = supabase.channel('waspi-room-store', {
+    this.channel = preferSupabaseHttpBroadcast(supabase.channel('waspi-room-store', {
       config: { broadcast: { self: false } },
-    });
+    }));
 
     this.channel
       .on('broadcast', { event: 'player:move' }, ({ payload }) => {

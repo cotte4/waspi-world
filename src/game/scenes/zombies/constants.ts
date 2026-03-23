@@ -1,0 +1,9 @@
+export const ZOMBIES_PLAYER_RETURN = { x: 1600, y: 1540 } as const;
+export const ZOMBIES_EXIT_PAD = { x: 182, y: 878, radius: 42 } as const;
+export const ZOMBIES_BOX_POS = { x: 435, y: 698 } as const;
+export const ZOMBIES_PACK_POS = { x: 1278, y: 610 } as const;
+export const ZOMBIES_DEPTHS_PAD = { x: 1586, y: 918, radius: 46 } as const;
+export const ZOMBIES_MUZZLE_FORWARD = 20;
+export const ZOMBIES_MUZZLE_UP = 12;
+export const ZOMBIES_FURIA_DURATION_MS = 10_000;
+export const ZOMBIES_FURIA_COOLDOWN_MS = 180_000;

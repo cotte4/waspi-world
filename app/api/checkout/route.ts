@@ -4,6 +4,7 @@ import { createSupabaseAdminClient, getAuthenticatedUser } from '@/src/lib/supab
 import { getTenksPack } from '@/src/lib/tenksPacks';
 import { getCatalogItemWithStripe } from '@/src/lib/catalogServer';
 import { ensureCatalogSeeded, ensurePlayerRow, loadDiscountCode } from '@/src/lib/commercePersistence';
+import { getCheckoutPricingConfig, toStripeUnitAmountFromArs } from '@/src/lib/commercePricing';
 import { DEFAULT_PLAYER_STATE, normalizePlayerState } from '@/src/lib/playerState';
 
 function getBaseUrl(request: NextRequest) {
@@ -32,6 +33,7 @@ export async function POST(request: NextRequest) {
   }
 
   const playerState = normalizePlayerState(user.user_metadata?.waspiPlayer ?? DEFAULT_PLAYER_STATE);
+  const pricingConfig = getCheckoutPricingConfig();
   await ensureCatalogSeeded(admin);
   await ensurePlayerRow(admin, user, playerState);
 
@@ -60,9 +62,7 @@ export async function POST(request: NextRequest) {
       discountPercent = discount.percent_off;
     }
 
-    // TODO: switch to 'ars' once Stripe account is registered as AR business
-    // For now using USD with a ~1:1300 ARS/USD conversion for testing
-    const unitAmount = Math.round((item.priceArs / 1300) * 100);
+    const unitAmount = toStripeUnitAmountFromArs(item.priceArs, pricingConfig);
     const coupon = discountPercent
       ? await stripe.coupons.create({
           percent_off: discountPercent,
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
             ? { price: catalogEntry.stripePriceId }
             : {
                 price_data: {
-                  currency: 'usd',
+                  currency: pricingConfig.currency,
                   unit_amount: unitAmount,
                   product_data: {
                     name: item.name,
@@ -110,6 +110,8 @@ export async function POST(request: NextRequest) {
         subtotalArs: String(item.priceArs),
         discountCode: discountCode ?? '',
         discountPercent: discountPercent ? String(discountPercent) : '',
+        paymentCurrency: pricingConfig.currency,
+        arsPerUsd: String(pricingConfig.arsPerUsd),
         customerUserId: user.id,
       },
       customer_email: user.email ?? undefined,
@@ -133,9 +135,8 @@ export async function POST(request: NextRequest) {
         {
           quantity: 1,
           price_data: {
-            // TODO: switch to 'ars' once Stripe account is registered as AR business
-            currency: 'usd',
-            unit_amount: Math.round((pack.priceArs / 1300) * 100),
+            currency: pricingConfig.currency,
+            unit_amount: toStripeUnitAmountFromArs(pack.priceArs, pricingConfig),
             product_data: {
               name: pack.name,
               description: pack.description,
@@ -151,6 +152,9 @@ export async function POST(request: NextRequest) {
         purchaseType: 'tenks_pack',
         packId: pack.id,
         tenks: String(pack.tenks),
+        subtotalArs: String(pack.priceArs),
+        paymentCurrency: pricingConfig.currency,
+        arsPerUsd: String(pricingConfig.arsPerUsd),
         customerUserId: user.id,
       },
       customer_email: user.email ?? undefined,

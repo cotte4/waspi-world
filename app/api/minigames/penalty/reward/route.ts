@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getAuthenticatedUser } from '@/src/lib/supabaseServer';
 import { DEFAULT_PLAYER_STATE, creditTenks, normalizePlayerState } from '@/src/lib/playerState';
 import { appendTenksTransaction, ensureCatalogSeeded, ensurePlayerRow, recordGameSession } from '@/src/lib/commercePersistence';
+import { creditBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
 
 const PENALTY_TENKS_REWARD = 220;
 
@@ -22,17 +23,28 @@ export async function POST(request: NextRequest) {
   const won = goals >= 3;
 
   await ensureCatalogSeeded(admin);
+  const baseBalance = await getAuthoritativeBalance(admin, {
+    playerId: user.id,
+    fallbackBalance: (user.user_metadata?.waspiPlayer as { tenks?: number } | undefined)?.tenks ?? DEFAULT_PLAYER_STATE.tenks,
+  });
   const current = normalizePlayerState(user.user_metadata?.waspiPlayer ?? DEFAULT_PLAYER_STATE);
   let next = current;
 
   if (won) {
-    next = creditTenks(current, PENALTY_TENKS_REWARD);
+    next = creditTenks({ ...current, tenks: baseBalance }, PENALTY_TENKS_REWARD);
     await appendTenksTransaction(admin, {
       playerId: user.id,
       amount: PENALTY_TENKS_REWARD,
       reason: 'penalty_win',
       balanceAfter: next.tenks,
     });
+    await creditBalance(admin, {
+      playerId: user.id,
+      amount: PENALTY_TENKS_REWARD,
+      fallbackBalance: baseBalance,
+    });
+  } else {
+    next = { ...current, tenks: baseBalance };
   }
 
   await ensurePlayerRow(admin, user, next, { syncTenksBalance: won });

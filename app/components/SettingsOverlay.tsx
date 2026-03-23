@@ -12,6 +12,7 @@ import type {
 import { formatMovementBindingLabel } from '@/src/game/systems/ControlSettings';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 import { supportsAudioOutputDevicePicker } from '@/src/game/systems/audioOutputSink';
+import type { VoiceStatusPayload } from '@/src/game/systems/voiceShared';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ export interface SettingsOverlayProps {
   onCaptureAction: (action: ActionBinding | null) => void;
   // Voice
   voiceEnabled: boolean;
+  voiceStatus: VoiceStatusPayload;
   onVoiceEnabledChange: (enabled: boolean) => void;
   micDevices: MediaDeviceInfo[];
   selectedMicDeviceId: string;
@@ -528,6 +530,7 @@ export default function SettingsOverlay({
   bindingCaptureAction,
   onCaptureAction,
   voiceEnabled,
+  voiceStatus,
   onVoiceEnabledChange,
   micDevices,
   selectedMicDeviceId,
@@ -712,13 +715,30 @@ export default function SettingsOverlay({
             />
           )}
           {settingsTab === 'voice' && (
-            <VoiceTab
-              voiceEnabled={voiceEnabled}
-              onVoiceEnabledChange={onVoiceEnabledChange}
-              micDevices={micDevices}
-              selectedMicDeviceId={selectedMicDeviceId}
-              onMicDeviceChange={onMicDeviceChange}
-            />
+            <>
+              <div
+                style={{
+                  marginBottom: 10,
+                  padding: '8px 10px',
+                  border: '1px solid rgba(70,179,255,0.18)',
+                  background: 'rgba(70,179,255,0.06)',
+                  fontFamily: '"Silkscreen", monospace',
+                  fontSize: 10,
+                  color: 'rgba(255,255,255,0.82)',
+                  lineHeight: 1.5,
+                }}
+              >
+                <div style={{ color: '#46B3FF', marginBottom: 4 }}>ESTADO {voiceStatus.label}</div>
+                <div>{voiceStatus.detail || 'Voz desactivada.'}</div>
+              </div>
+              <VoiceTab
+                voiceEnabled={voiceEnabled}
+                onVoiceEnabledChange={onVoiceEnabledChange}
+                micDevices={micDevices}
+                selectedMicDeviceId={selectedMicDeviceId}
+                onMicDeviceChange={onMicDeviceChange}
+              />
+            </>
           )}
         </div>
       </div>

@@ -1,6 +1,5 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarConfig } from '../../systems/AvatarRenderer';
-import { getShootTargetWorld } from '../../systems/shootingAim';
 import { SAFE_PLAZA_RETURN } from '../../config/constants';
 import { transitionToScene, transitionToWorldScene } from '../../systems/SceneUi';
 import { getSkillSystem } from '../../systems/SkillSystem';
@@ -12,16 +11,28 @@ import {
   type ZombiesSectionId,
   type ZombiesWeaponId,
 } from '../../config/zombies';
+import {
+  ZOMBIES_BOX_POS,
+  ZOMBIES_DEPTHS_PAD,
+  ZOMBIES_EXIT_PAD,
+  ZOMBIES_FURIA_COOLDOWN_MS,
+  ZOMBIES_FURIA_DURATION_MS,
+  ZOMBIES_PACK_POS,
+} from './constants';
+import {
+  getZombiesAimAngle as getZombiesCombatAimAngle,
+  tryShoot as tryShootZombiesCombat,
+} from './combat';
 
-export const ZOMBIES_MUZZLE_FORWARD = 20;
-export const ZOMBIES_MUZZLE_UP = 12;
-export const ZOMBIES_FURIA_DURATION_MS = 10_000;
-export const ZOMBIES_FURIA_COOLDOWN_MS = 180_000;
-export const ZOMBIES_PLAYER_RETURN = { x: 1600, y: 1540 } as const;
-export const ZOMBIES_EXIT_PAD = { x: 182, y: 878, radius: 42 } as const;
-export const ZOMBIES_BOX_POS = { x: 435, y: 698 } as const;
-export const ZOMBIES_PACK_POS = { x: 1278, y: 610 } as const;
-export const ZOMBIES_DEPTHS_PAD = { x: 1586, y: 918, radius: 46 } as const;
+export {
+  ZOMBIES_BOX_POS,
+  ZOMBIES_DEPTHS_PAD,
+  ZOMBIES_EXIT_PAD,
+  ZOMBIES_FURIA_COOLDOWN_MS,
+  ZOMBIES_FURIA_DURATION_MS,
+  ZOMBIES_PACK_POS,
+} from './constants';
+export { ZOMBIES_PLAYER_RETURN } from './constants';
 
 export type ZombiesInteractionKind = 'exit' | 'door' | 'box' | 'repair' | 'upgrade' | 'depths';
 
@@ -318,68 +329,15 @@ export function handleZombiesCombatInput(scene: ZombiesPlayerSceneLike) {
 }
 
 export function getZombiesAimAngle(scene: ZombiesPlayerSceneLike): number {
-  const p = scene.input.activePointer;
-  const wp = scene.cameras.main.getWorldPoint(p.x, p.y);
-  const d = Phaser.Math.Distance.Between(scene.px, scene.py, wp.x, wp.y);
-  if (d > 14) return Phaser.Math.Angle.Between(scene.px, scene.py, wp.x, wp.y);
-  if (Math.abs(scene.lastMoveDx) + Math.abs(scene.lastMoveDy) > 0.04) {
-    return Math.atan2(scene.lastMoveDy, scene.lastMoveDx);
-  }
-  return -Math.PI / 2;
+  return getZombiesCombatAimAngle(scene);
 }
 
 export function tryShootZombies(scene: ZombiesPlayerSceneLike) {
-  if (scene.gameOver) return;
-  if (scene.reloadEndsAt > scene.time.now) return;
-  if (scene.boxRollingUntil > scene.time.now) return;
-
-  const weapon = scene.getWeaponStats(scene.currentWeapon);
-  const ammo = scene.weaponInventory[scene.currentWeapon];
-  if (scene.time.now - scene.lastShotAt < weapon.fireDelayMs) return;
-  if (ammo.ammoInMag <= 0) {
-    scene.tryReload();
-    return;
-  }
-
-  ammo.ammoInMag -= 1;
-  scene.lastShotAt = scene.time.now;
-  scene.player.playShoot();
-
-  const aim = getZombiesAimAngle(scene);
-  const { x: targetX, y: targetY } = getShootTargetWorld(scene, scene.px, scene.py, aim);
-  const baseAng = Phaser.Math.Angle.Between(scene.px, scene.py, targetX, targetY);
-  const originX = scene.px + Math.cos(baseAng) * ZOMBIES_MUZZLE_FORWARD;
-  const originY = scene.py - ZOMBIES_MUZZLE_UP + Math.sin(baseAng) * (ZOMBIES_MUZZLE_FORWARD * 0.35);
-
-  scene.fireShotBurst(
-    scene.playerId,
-    scene.playerUsername,
-    originX,
-    originY,
-    targetX,
-    targetY,
-    weapon,
-    !scene.isSharedCoopEnabled() || scene.isSharedRunHost(),
+  const result = tryShootZombiesCombat(
+    scene as unknown as Parameters<typeof tryShootZombiesCombat>[0],
   );
-
-  if (scene.isSharedCoopEnabled()) {
-    scene.broadcastSharedShot({
-      player_id: scene.playerId,
-      username: scene.playerUsername,
-      originX,
-      originY,
-      targetX,
-      targetY,
-      pellets: weapon.pellets,
-      spread: weapon.spread,
-      range: weapon.range,
-      damage: weapon.damage,
-      color: weapon.color,
-    });
-  }
-
-  if (ammo.ammoInMag <= 0 && ammo.reserveAmmo > 0) {
-    scene.time.delayedCall(140, () => scene.tryReload());
+  if (result === 'reload_needed') {
+    scene.tryReload();
   }
 }
 

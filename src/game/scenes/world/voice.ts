@@ -2,13 +2,17 @@ import Phaser from 'phaser';
 import { eventBus, EVENTS } from '../../config/eventBus';
 import { getVoiceChat, destroyVoiceChat } from '../../systems/voiceChatInstance';
 import { applySinkIdToAudioContext } from '../../systems/audioOutputSink';
+import type { VoiceStatusPayload, VoiceUiState } from '../../systems/voiceShared';
+import { supabase } from '../../../lib/supabase';
 
 const VOICE_PREF_KEY = 'waspi_voice_pref';
 const VOICE_MIC_DEVICE_KEY = 'waspi_voice_mic_device_id';
 const VOICE_MIC_GRANT_RELOAD_KEY = 'waspi_voice_mic_grant_reload_done';
 
 export type PresenceVoice = {
+  player_id?: string;
   voice_peer_id?: string;
+  voice_user_id?: string;
   [key: string]: unknown;
 };
 
@@ -28,6 +32,8 @@ type VoiceCleanup = () => void;
 export type WorldVoiceSceneLike = Phaser.Scene & {
   channel?: PresenceChannelLike | null;
   playerId: string;
+  sessionPlayerId?: string;
+  authUserId?: string | null;
   px: number;
   py: number;
   voiceMuteBtn?: Phaser.GameObjects.Text;
@@ -36,7 +42,9 @@ export type WorldVoiceSceneLike = Phaser.Scene & {
   localSpeakingIndicator?: Phaser.GameObjects.Arc;
   speakingIndicators: Map<string, Phaser.GameObjects.Arc>;
   isActivatingVoice: boolean;
+  mutedPlayerIds?: Set<string>;
   game?: Phaser.Game;
+  time: Phaser.Time.Clock;
 };
 
 function getVoicePref(): 'on' | 'off' | null {
@@ -107,18 +115,76 @@ function markMicGrantReloadDone() {
   }
 }
 
-function setVoiceIdleHud(scene: WorldVoiceSceneLike) {
-  scene.voiceMuteBtn?.setText('[MIC]').setStyle({ color: '#9999BB' });
-  scene.voiceStatusText?.setText('').setStyle({ color: '#7777AA' });
+function mapStatusLabel(state: VoiceUiState): string {
+  switch (state) {
+    case 'connecting':
+      return '[MIC ...]';
+    case 'active':
+      return '[MIC ON]';
+    case 'retrying':
+      return '[RETRY]';
+    case 'network_blocked':
+      return '[RED]';
+    case 'no_mic':
+      return '[SIN MIC]';
+    case 'denied':
+      return '[DENEGADO]';
+    case 'mic_in_use':
+      return '[MIC EN USO]';
+    case 'session_required':
+      return '[LOGIN]';
+    case 'error':
+      return '[ERROR]';
+    default:
+      return '[MIC]';
+  }
 }
 
-function setVoiceActiveHud(scene: WorldVoiceSceneLike) {
-  scene.voiceMuteBtn?.setText('[MIC ON]').setStyle({ color: '#39FF14' });
-  scene.voiceStatusText?.setText('').setStyle({ color: '#39FF14' });
+function mapStatusColor(state: VoiceUiState): string {
+  switch (state) {
+    case 'active':
+      return '#39FF14';
+    case 'connecting':
+    case 'retrying':
+      return '#F5C842';
+    case 'disconnected':
+      return '#9999BB';
+    default:
+      return '#FF006E';
+  }
+}
+
+function publishStatus(scene: WorldVoiceSceneLike, payload: VoiceStatusPayload) {
+  const color = mapStatusColor(payload.state);
+  scene.voiceMuteBtn?.setText(payload.label).setStyle({ color });
+  scene.voiceStatusText?.setText(payload.detail ?? '').setStyle({
+    color: payload.state === 'active' ? '#39FF14' : payload.state === 'disconnected' ? '#7777AA' : '#FF6666',
+  });
+  eventBus.emit(EVENTS.VOICE_STATUS_CHANGED, payload);
+}
+
+function setVoiceIdleHud(scene: WorldVoiceSceneLike, detail = '') {
+  publishStatus(scene, {
+    state: 'disconnected',
+    label: '[MIC]',
+    detail,
+  });
+}
+
+function setVoiceActiveHud(scene: WorldVoiceSceneLike, detail = '') {
+  publishStatus(scene, {
+    state: 'active',
+    label: '[MIC ON]',
+    detail,
+  });
 }
 
 function setVoiceMutedHud(scene: WorldVoiceSceneLike) {
-  scene.voiceMuteBtn?.setText('[MUTED]').setStyle({ color: '#FF006E' });
+  publishStatus(scene, {
+    state: 'active',
+    label: '[MUTED]',
+    detail: scene.voiceStatusText?.text || '',
+  });
 }
 
 function createWorldVoiceHudObjects(scene: WorldVoiceSceneLike) {
@@ -146,8 +212,23 @@ function createWorldVoiceHudObjects(scene: WorldVoiceSceneLike) {
     360,
     false,
     0x39FF14,
-    0
+    0,
   ).setDepth(200);
+}
+
+async function getAuthSession() {
+  if (!supabase) return null;
+  const { data } = await supabase.auth.getSession();
+  return data.session ?? null;
+}
+
+function getVoiceIdentity(scene: WorldVoiceSceneLike) {
+  const userId = scene.authUserId?.trim() || '';
+  if (!userId) return null;
+  return {
+    userId,
+    sessionId: scene.playerId,
+  };
 }
 
 export function closeWorldVoicePrompt(scene: WorldVoiceSceneLike) {
@@ -161,29 +242,56 @@ export async function activateWorldVoice(scene: WorldVoiceSceneLike) {
   const vc = getVoiceChat();
   if (vc.connected) return;
 
+  const identity = getVoiceIdentity(scene);
+  if (!identity) {
+    publishStatus(scene, {
+      state: 'session_required',
+      label: mapStatusLabel('session_required'),
+      detail: 'Inicia sesion para usar la voz.',
+    });
+    return;
+  }
+
   scene.isActivatingVoice = true;
+  publishStatus(scene, {
+    state: 'connecting',
+    label: mapStatusLabel('connecting'),
+    detail: 'Preparando microfono y conexion...',
+  });
 
   try {
     const micStateBefore = await getMicPermissionState();
     const preferredMicId = getPreferredMicDeviceId();
-
-    scene.voiceMuteBtn?.setText('[MIC ...]').setStyle({ color: '#F5C842' });
+    const session = await getAuthSession();
+    const authToken = session?.access_token ?? null;
 
     try {
-      await vc.init(scene.playerId, preferredMicId ?? undefined);
+      await vc.init({
+        userId: identity.userId,
+        sessionId: identity.sessionId,
+        deviceId: preferredMicId ?? undefined,
+        authToken,
+      });
     } catch (error) {
       const name = (error as DOMException)?.name;
       if (preferredMicId && (name === 'NotFoundError' || name === 'OverconstrainedError')) {
         clearPreferredMicDeviceId();
-        await vc.init(scene.playerId);
+        await vc.init({
+          userId: identity.userId,
+          sessionId: identity.sessionId,
+          authToken,
+        });
       } else {
         throw error;
       }
     }
 
-    await scene.channel?.track({ player_id: scene.playerId, voice_peer_id: vc.peerId });
+    await scene.channel?.track({
+      player_id: scene.playerId,
+      voice_peer_id: vc.peerId,
+      voice_user_id: identity.userId,
+    });
     connectWorldVoicePeersInRoom(scene);
-
     setVoiceActiveHud(scene);
 
     if (micStateBefore === 'prompt' && !hasDoneMicGrantReload()) {
@@ -193,36 +301,50 @@ export async function activateWorldVoice(scene: WorldVoiceSceneLike) {
     }
   } catch (error) {
     const name = (error as DOMException)?.name;
-    let label = '[NO MIC]';
-    let hint = 'Revisa la configuracion del browser';
+    let state: VoiceUiState = 'error';
+    let detail = 'No pude iniciar la voz.';
 
     if (name === 'NotAllowedError') {
-      label = '[DENEGADO]';
-      hint = 'Habilita el mic en el candado de la URL';
-    } else if (name === 'NotFoundError') {
-      label = '[SIN MIC]';
-      hint = 'No se encontro microfono conectado';
+      state = 'denied';
+      detail = 'Habilita el microfono en el candado de la URL.';
+    } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+      state = 'no_mic';
+      detail = 'No se encontro un microfono valido.';
     } else if (name === 'NotReadableError') {
-      label = '[MIC EN USO]';
-      hint = 'Otra app esta usando el microfono';
+      state = 'mic_in_use';
+      detail = 'Otra app esta usando el microfono.';
+    } else if (formatErrorMessage(error).toLowerCase().includes('unauthorized')) {
+      state = 'session_required';
+      detail = 'Inicia sesion para habilitar TURN y voz.';
+    } else if (formatErrorMessage(error).toLowerCase().includes('ice')) {
+      state = 'network_blocked';
+      detail = 'La red bloqueo la conexion de voz.';
     }
 
-    console.warn('[VoiceChat] Mic init failed:', error);
-    scene.voiceMuteBtn?.setText(label).setStyle({ color: '#FF006E' });
-    scene.voiceStatusText?.setText(hint).setStyle({ color: '#FF6666' });
-    scene.time.delayedCall(4000, () => {
-      scene.voiceStatusText?.setText('').setStyle({ color: '#7777AA' });
+    publishStatus(scene, {
+      state,
+      label: mapStatusLabel(state),
+      detail,
+      technicalDetail: formatErrorMessage(error),
     });
   } finally {
     scene.isActivatingVoice = false;
   }
 }
 
+function formatErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return typeof error === 'string' ? error : 'Unknown voice error';
+}
+
 export async function disableWorldVoice(scene: WorldVoiceSceneLike) {
   closeWorldVoicePrompt(scene);
 
   const vc = getVoiceChat();
-  if (!vc.connected) return;
+  if (!vc.connected) {
+    setVoiceIdleHud(scene);
+    return;
+  }
 
   setVoicePref('off');
   await scene.channel?.track({ player_id: scene.playerId });
@@ -230,7 +352,6 @@ export async function disableWorldVoice(scene: WorldVoiceSceneLike) {
 
   setVoiceIdleHud(scene);
   scene.localSpeakingIndicator?.setAlpha(0);
-
   for (const [, arc] of scene.speakingIndicators) {
     arc.setAlpha(0);
   }
@@ -256,7 +377,7 @@ export function handleWorldVoicePresenceSync(scene: WorldVoiceSceneLike) {
 
 export function handleWorldVoicePresenceJoin(
   scene: WorldVoiceSceneLike,
-  newPresences: PresenceVoice[]
+  newPresences: PresenceVoice[],
 ) {
   const vc = getVoiceChat();
   if (!vc.connected) return;
@@ -270,7 +391,7 @@ export function handleWorldVoicePresenceJoin(
 
 export function handleWorldVoicePresenceLeave(
   scene: WorldVoiceSceneLike,
-  leftPresences: PresenceVoice[]
+  leftPresences: PresenceVoice[],
 ) {
   const vc = getVoiceChat();
   if (!vc.connected) return;
@@ -286,7 +407,9 @@ export async function tryAutoInitWorldVoice(scene: WorldVoiceSceneLike) {
   if (getVoicePref() !== 'on') return;
 
   try {
-    if (!await isMicGranted()) return;
+    const session = await getAuthSession();
+    scene.authUserId = session?.user.id ?? scene.authUserId ?? null;
+    if (!scene.authUserId || !await isMicGranted()) return;
     await activateWorldVoice(scene);
   } catch {
     // Silent failure. Manual activation via HUD remains available.
@@ -298,8 +421,8 @@ export function showWorldVoicePrompt(scene: WorldVoiceSceneLike) {
 
   const camW = scene.cameras.main.width;
   const camH = scene.cameras.main.height;
-  const panelW = 290;
-  const panelH = 116;
+  const panelW = 320;
+  const panelH = 124;
   const px = (camW - panelW) / 2;
   const py = (camH - panelH) / 2;
   const depth = 10001;
@@ -317,8 +440,8 @@ export function showWorldVoicePrompt(scene: WorldVoiceSceneLike) {
   }).setScrollFactor(0).setDepth(depth);
 
   const desc = scene.add.text(px + 12, py + 30, [
-    'Vas a escuchar a otros jugadores',
-    'cuando esten cerca. Audio P2P directo.',
+    'Escuchas a jugadores cercanos en tiempo real.',
+    'Requiere sesion iniciada para TURN y conexion estable.',
   ], {
     fontSize: '6px',
     fontFamily: 'Silkscreen, monospace',
@@ -326,7 +449,7 @@ export function showWorldVoicePrompt(scene: WorldVoiceSceneLike) {
     lineSpacing: 4,
   }).setScrollFactor(0).setDepth(depth);
 
-  const btnActivar = scene.add.text(px + 12, py + 78, '[ACTIVAR]', {
+  const btnActivar = scene.add.text(px + 12, py + 86, '[ACTIVAR]', {
     fontSize: '7px',
     fontFamily: '"Press Start 2P", monospace',
     color: '#39FF14',
@@ -334,7 +457,7 @@ export function showWorldVoicePrompt(scene: WorldVoiceSceneLike) {
     padding: { x: 5, y: 3 },
   }).setScrollFactor(0).setDepth(depth).setInteractive({ useHandCursor: true });
 
-  const btnSinVoz = scene.add.text(px + 130, py + 78, '[SIN VOZ]', {
+  const btnSinVoz = scene.add.text(px + 130, py + 86, '[SIN VOZ]', {
     fontSize: '7px',
     fontFamily: '"Press Start 2P", monospace',
     color: '#888888',
@@ -355,6 +478,7 @@ export function showWorldVoicePrompt(scene: WorldVoiceSceneLike) {
   btnSinVoz.on('pointerdown', () => {
     closeWorldVoicePrompt(scene);
     setVoicePref('off');
+    setVoiceIdleHud(scene, 'La voz queda desactivada.');
   });
 
   scene.voicePromptObjects = [bg, title, desc, btnActivar, btnSinVoz];
@@ -383,15 +507,56 @@ export function bindWorldVoiceHudToggle(scene: WorldVoiceSceneLike) {
       return;
     }
 
-    setVoiceActiveHud(scene);
+    setVoiceActiveHud(scene, vc.peerCount > 0 ? `${vc.peerCount}p` : '');
   });
 }
 
 export function bindWorldVoiceBridge(scene: WorldVoiceSceneLike): VoiceCleanup {
+  const unsubManager = getVoiceChat().subscribe((event) => {
+    const vc = getVoiceChat();
+    if (event.type === 'status') {
+      publishStatus(scene, {
+        state: event.status,
+        label: mapStatusLabel(event.status),
+        detail: event.detail,
+        peerCount: vc.peerCount,
+      });
+      return;
+    }
+    if (event.type === 'peer-stream') {
+      const count = vc.peerCount;
+      scene.voiceStatusText?.setText(count > 0 ? `${count}p` : '');
+      return;
+    }
+    if (event.type === 'error') {
+      publishStatus(scene, {
+        state: event.code === 'NotAllowedError' ? 'denied' : 'network_blocked',
+        label: mapStatusLabel(event.code === 'NotAllowedError' ? 'denied' : 'network_blocked'),
+        detail: event.message,
+        technicalDetail: event.stage,
+      });
+    }
+  });
+
   const unsubMic = eventBus.on(EVENTS.VOICE_MIC_CHANGED, (deviceId: unknown) => {
     const vc = getVoiceChat();
     if (!vc.connected || typeof deviceId !== 'string') return;
-    vc.switchMic(deviceId).catch((error) => console.warn('[VoiceChat] Mic switch failed:', error));
+    vc.switchMic(deviceId).catch((error) => {
+      publishStatus(scene, {
+        state: 'error',
+        label: mapStatusLabel('error'),
+        detail: 'No pude cambiar el microfono.',
+        technicalDetail: formatErrorMessage(error),
+      });
+    });
+  });
+
+  const unsubMute = eventBus.on(EVENTS.PLAYER_ACTION_MUTE, (payload: unknown) => {
+    const playerId = (payload as { playerId?: string } | null)?.playerId;
+    if (!playerId) return;
+    const voicePeerIds = getVoicePeerIdsForPlayer(scene, playerId);
+    const vc = getVoiceChat();
+    voicePeerIds.forEach((peerId) => vc.setPeerMuted(peerId, true));
   });
 
   const unsubSink = eventBus.on(EVENTS.AUDIO_OUTPUT_SINK_CHANGED, (sinkId: unknown) => {
@@ -406,7 +571,9 @@ export function bindWorldVoiceBridge(scene: WorldVoiceSceneLike): VoiceCleanup {
     void disableWorldVoice(scene);
   });
 
-  const unsubEnable = eventBus.on(EVENTS.VOICE_ENABLE, () => {
+  const unsubEnable = eventBus.on(EVENTS.VOICE_ENABLE, async () => {
+    const session = await getAuthSession();
+    scene.authUserId = session?.user.id ?? scene.authUserId ?? null;
     const vc = getVoiceChat();
     if (vc.connected) return;
     setVoicePref('on');
@@ -414,7 +581,9 @@ export function bindWorldVoiceBridge(scene: WorldVoiceSceneLike): VoiceCleanup {
   });
 
   return () => {
+    unsubManager();
     unsubMic();
+    unsubMute();
     unsubSink();
     unsubDisable();
     unsubEnable();
@@ -428,4 +597,37 @@ export function setupWorldVoiceHud(scene: WorldVoiceSceneLike) {
 
   const cleanupBridge = bindWorldVoiceBridge(scene);
   scene.events.once(Phaser.Scenes.Events.SHUTDOWN, cleanupBridge);
+}
+
+export function getVoicePeerIdsForPlayer(scene: WorldVoiceSceneLike, playerId: string): string[] {
+  const presence = scene.channel?.presenceState<PresenceVoice>() ?? {};
+  const peerIds: string[] = [];
+  for (const entries of Object.values(presence)) {
+    for (const entry of entries) {
+      if (entry.player_id === playerId && typeof entry.voice_peer_id === 'string') {
+        peerIds.push(entry.voice_peer_id);
+      }
+    }
+  }
+  return peerIds;
+}
+
+export function buildWorldVoicePeerPositions(scene: WorldVoiceSceneLike & {
+  remotePlayers?: Map<string, { x: number; y: number }>;
+}) {
+  const peerPositions = new Map<string, { x: number; y: number }>();
+  const presence = scene.channel?.presenceState<PresenceVoice>() ?? {};
+  const remotePlayers = scene.remotePlayers ?? new Map<string, { x: number; y: number }>();
+
+  for (const entries of Object.values(presence)) {
+    for (const entry of entries) {
+      if (!entry.voice_peer_id || !entry.player_id) continue;
+      if (scene.mutedPlayerIds?.has(entry.player_id)) continue;
+      const remote = remotePlayers.get(entry.player_id);
+      if (!remote) continue;
+      peerPositions.set(entry.voice_peer_id, { x: remote.x, y: remote.y });
+    }
+  }
+
+  return peerPositions;
 }

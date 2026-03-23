@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { CHAT, ZONES } from '../../config/constants';
 import { eventBus, EVENTS } from '../../config/eventBus';
 import { supabase, isConfigured } from '../../../lib/supabase';
+import { preferSupabaseHttpBroadcast } from '../../../lib/supabaseRealtime';
 import type { SharedParcelState } from '../../../lib/vecindad';
 import { MAX_VECINDAD_STAGE, getBuildCost } from '../../../lib/vecindad';
 import type { VecindadState } from '../../../lib/playerState';
@@ -105,12 +106,12 @@ export function setupWorldRealtimeBridge(scene: WorldRealtimeVecindadSceneLike):
     return 'solo';
   }
 
-  const channel = supabase.channel('waspi-world', {
+  const channel = preferSupabaseHttpBroadcast(supabase.channel('waspi-world', {
     config: {
       broadcast: { self: false },
       presence: { key: scene.playerId },
     },
-  });
+  }));
   scene.channel = channel;
   const voiceScene = scene as unknown as WorldVoiceSceneLike;
 

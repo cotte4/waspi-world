@@ -9,12 +9,15 @@ import { loadAudioSettings } from '@/src/game/systems/AudioSettings';
 import { applySinkIdToAudioContext, getStoredAudioOutputDeviceId } from '@/src/game/systems/audioOutputSink';
 import { clearVirtualJoystickState } from '@/src/game/systems/ControlSettings';
 import { getLevelFloorXp, getMaxProgressionLevel, loadProgressionState, type ProgressionState } from '@/src/game/systems/ProgressionSystem';
+import { ONBOARDING_SLIDES } from '@/app/play/lib/playPageConstants';
+import { usePlayPageActivities } from '@/app/play/hooks/usePlayPageActivities';
 import { usePlayPageSceneEvents } from '@/app/play/hooks/usePlayPageSceneEvents';
 import { usePlayPageAuth } from '@/app/play/hooks/usePlayPageAuth';
 import { usePlayPageChat } from '@/app/play/hooks/usePlayPageChat';
 import { usePlayPageMobileControls } from '@/app/play/hooks/usePlayPageMobileControls';
 import { usePlayPagePlayerState } from '@/app/play/hooks/usePlayPagePlayerState';
 import { usePlayPageShop } from '@/app/play/hooks/usePlayPageShop';
+import { usePlayPageSafeReset } from '@/app/play/hooks/usePlayPageSafeReset';
 import { usePlayPageSettings } from '@/app/play/hooks/usePlayPageSettings';
 import { usePlayPageStats } from '@/app/play/hooks/usePlayPageStats';
 import { loadStoredMutedPlayers } from '@/app/play/lib/playPageStorage';
@@ -76,7 +79,6 @@ export default function PlayPage() {
   const [pvpHudActive, setPvpHudActive] = useState(false);
   const [jukeboxOpen, setJukeboxOpen] = useState(false);
   const [rescueArmed, setRescueArmed] = useState(false);
-  const [activeActivities, setActiveActivities] = useState<ReadonlySet<string>>(new Set());
   const audioCtxRef = useRef<AudioContext | null>(null);
   const tokenRef = useRef<string | null>(null);
   const activeSceneRef = useRef('');
@@ -203,6 +205,7 @@ export default function PlayPage() {
     settingsOpen,
     settingsTab,
     voiceEnabled,
+    voiceStatus,
   } = usePlayPageSettings({
     audioCtxRef,
     jukeboxOpen,
@@ -263,6 +266,7 @@ export default function PlayPage() {
     activeScene,
     showVirtualJoystick: controlSettings.showVirtualJoystick,
   });
+  const activeActivities = usePlayPageActivities();
 
   usePlayPageSceneEvents({
     mutedPlayersRef,
@@ -322,35 +326,6 @@ export default function PlayPage() {
     }
   }, []);
 
-  // Combo HUD: track simultaneous active skills
-  useEffect(() => {
-    const onStart = (payload: unknown) => {
-      const p = payload as { activity?: string };
-      if (typeof p?.activity === 'string') {
-        setActiveActivities((prev) => new Set([...prev, p.activity as string]));
-      }
-    };
-    const onStop = (payload: unknown) => {
-      const p = payload as { activity?: string };
-      if (typeof p?.activity === 'string') {
-        setActiveActivities((prev) => {
-          const next = new Set(prev);
-          next.delete(p.activity as string);
-          return next;
-        });
-      }
-    };
-    const offStart = eventBus.on(EVENTS.ACTIVITY_STARTED, onStart);
-    const offStop  = eventBus.on(EVENTS.ACTIVITY_STOPPED,  onStop);
-    // Clear all activities when the scene changes (scene exit clears stale state)
-    const offScene = eventBus.on(EVENTS.SCENE_CHANGED, () => setActiveActivities(new Set()));
-    return () => {
-      offStart();
-      offStop();
-      offScene();
-    };
-  }, []);
-
   const currentLevelFloorXp = getLevelFloorXp(progression.level);
   const nextLevelDelta = progression.nextLevelAt === null
     ? 0
@@ -363,35 +338,14 @@ export default function PlayPage() {
     : Math.max(0, Math.min(1, (progression.xp - currentLevelFloorXp) / levelSpanXp));
   const comboCount = activeActivities.size;
   const comboMultiplier = comboCount >= 3 ? '2.0' : comboCount === 2 ? '1.5' : null;
-  const armSafeReset = useCallback(() => {
-    setRescueArmed(true);
-    setUiNotice({ msg: 'Volver a plaza armado. Toca de nuevo para confirmar.', color: '#46B3FF' });
-    window.setTimeout(() => {
-      setRescueArmed(false);
-    }, 4000);
-  }, []);
-  const confirmSafeReset = useCallback(() => {
-    setRescueArmed(false);
-    closeSettings();
-    setUiNotice({ msg: 'Rescate a plaza...', color: '#46B3FF' });
-    eventBus.emit(EVENTS.SAFE_RESET_TO_PLAZA);
-    if (rescueTimeoutRef.current) {
-      window.clearTimeout(rescueTimeoutRef.current);
-    }
-    rescueTimeoutRef.current = window.setTimeout(() => {
-      if (activeSceneRef.current !== 'WorldScene') {
-        window.location.assign('/play');
-      }
-    }, 1200);
-  }, [closeSettings]);
-
-  const handleSafeReset = useCallback(() => {
-    if (rescueArmed) {
-      confirmSafeReset();
-      return;
-    }
-    armSafeReset();
-  }, [armSafeReset, confirmSafeReset, rescueArmed]);
+  const { handleSafeReset } = usePlayPageSafeReset({
+    activeSceneRef,
+    closeSettings,
+    rescueArmed,
+    rescueTimeoutRef,
+    setRescueArmed,
+    setUiNotice,
+  });
 
   const passiveUtilityItems = useMemo(
     () => owned
@@ -400,24 +354,6 @@ export default function PlayPage() {
       .filter((item) => item.slot === 'utility' && item.id !== 'UTIL-GUN-01' && item.id !== 'UTIL-BALL-01'),
     [owned],
   );
-
-  const ONBOARDING_SLIDES = [
-    {
-      title: 'BIENVENIDO A WASPI WORLD',
-      body: 'Un mundo abierto donde la ropa que usas es real.\nExplora, juega y viste a tu waspi.',
-      icon: '👋',
-    },
-    {
-      title: 'TENKS',
-      body: 'Ganas TENKS jugando minijuegos y en combate.\nUsalos para comprar ropa y parcelas.',
-      icon: '🪙',
-    },
-    {
-      title: 'EMPEZA POR COTTENKS',
-      body: 'Habla con COTTENKS en la plaza.\nTe explica todo lo que necesitas saber.',
-      icon: '🗣️',
-    },
-  ];
 
   return (
     <>
@@ -1132,6 +1068,7 @@ export default function PlayPage() {
             bindingCaptureAction={bindingCaptureAction}
             onCaptureAction={setBindingCaptureAction}
             voiceEnabled={voiceEnabled}
+            voiceStatus={voiceStatus}
             onVoiceEnabledChange={onVoiceEnabledChange}
             micDevices={micDevices}
             selectedMicDeviceId={selectedMicDeviceId}

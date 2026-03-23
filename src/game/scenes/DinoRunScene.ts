@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { announceScene, bindSafeResetToPlaza, transitionToScene, transitionToWorldScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
-import { addTenks } from '../systems/TenksSystem';
+import { addTenks, applyTenksBalanceFromServer } from '../systems/TenksSystem';
 import { SceneControls } from '../systems/SceneControls';
 import { getAuthHeaders } from '../systems/authHelper';
 
@@ -23,6 +23,10 @@ const MAX_SPEED = 900;
 const SPEED_INCREMENT = 15;
 const POOL_SIZE = 10;
 const MIN_GAP = 300;
+
+function createDinoRunId() {
+  return `dino_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
 
 export default class DinoRunScene extends Phaser.Scene {
   private runner!: Phaser.GameObjects.Rectangle;
@@ -60,6 +64,7 @@ export default class DinoRunScene extends Phaser.Scene {
   private shuttingDown: boolean = false;
 
   private tenksEarned: number = 0;
+  private currentRunId = createDinoRunId();
   private retrySpaceHandler: (() => void) | null = null;
   private controls!: SceneControls;
 
@@ -373,6 +378,7 @@ export default class DinoRunScene extends Phaser.Scene {
     this.gameState = 'playing';
     this.spawnTimer = 0;
     this.spawnCooldown = 1000;
+    this.currentRunId = createDinoRunId();
     this.runnerBody.setAllowGravity(true); // activar gravity al arrancar
     this.triggerJump();
   }
@@ -618,7 +624,7 @@ export default class DinoRunScene extends Phaser.Scene {
       void this.submitScoreToServer(this.score);
     }
 
-    addTenks(this.tenksEarned, 'dino_run_score');
+    void this.grantReward(this.tenksEarned);
     eventBus.emit(EVENTS.UI_NOTICE, `+${this.tenksEarned} TENKS earned!`);
     eventBus.emit(EVENTS.DINO_GAME_OVER, { score: this.score });
     eventBus.emit(EVENTS.DINO_HUD_UPDATE, { score: this.score, highScore: this.bestScore });
@@ -753,6 +759,39 @@ export default class DinoRunScene extends Phaser.Scene {
       });
     } catch {
       // Non-fatal — score stays in localStorage
+    }
+  }
+
+  private async grantReward(reward: number): Promise<void> {
+    if (reward <= 0) return;
+
+    const authH = await getAuthHeaders();
+    if (!authH.Authorization) {
+      addTenks(reward, 'dino_run_score');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/minigames/reward', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authH },
+        body: JSON.stringify({
+          game: 'dino',
+          score: this.score,
+          runId: this.currentRunId,
+          easter404Used: this.easter404Used,
+        }),
+      });
+      if (!res.ok) {
+        eventBus.emit(EVENTS.UI_NOTICE, 'No pude guardar la recompensa de Dino Run.');
+        return;
+      }
+      const json = await res.json().catch(() => null) as { newBalance?: number } | null;
+      if (typeof json?.newBalance === 'number') {
+        applyTenksBalanceFromServer(json.newBalance, 'dino_reward_server');
+      }
+    } catch {
+      eventBus.emit(EVENTS.UI_NOTICE, 'No pude guardar la recompensa de Dino Run.');
     }
   }
 }
