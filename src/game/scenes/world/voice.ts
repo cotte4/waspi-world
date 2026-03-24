@@ -301,6 +301,7 @@ export async function activateWorldVoice(scene: WorldVoiceSceneLike) {
     }
   } catch (error) {
     const name = (error as DOMException)?.name;
+    const message = formatErrorMessage(error).toLowerCase();
     let state: VoiceUiState = 'error';
     let detail = 'No pude iniciar la voz.';
 
@@ -313,10 +314,13 @@ export async function activateWorldVoice(scene: WorldVoiceSceneLike) {
     } else if (name === 'NotReadableError') {
       state = 'mic_in_use';
       detail = 'Otra app esta usando el microfono.';
-    } else if (formatErrorMessage(error).toLowerCase().includes('unauthorized')) {
+    } else if (message.includes('unauthorized')) {
       state = 'session_required';
       detail = 'Inicia sesion para habilitar TURN y voz.';
-    } else if (formatErrorMessage(error).toLowerCase().includes('ice')) {
+    } else if (message.includes('ice config') || message.includes('failed to build ice config')) {
+      state = 'error';
+      detail = 'La configuracion de voz no esta lista todavia.';
+    } else if (message.includes('ice')) {
       state = 'network_blocked';
       detail = 'La red bloqueo la conexion de voz.';
     }

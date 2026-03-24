@@ -43,6 +43,18 @@ function getMeteredDomain(): string {
   return (process.env.METERED_TURN_DOMAIN ?? '').trim();
 }
 
+function hasUsableMeteredSecret(): boolean {
+  const secret = (process.env.METERED_TURN_SECRET_KEY ?? '').trim();
+  if (!secret) return false;
+
+  const normalized = secret.toUpperCase();
+  if (normalized.includes('REPLACE_WITH') || normalized.includes('PLACEHOLDER')) {
+    return false;
+  }
+
+  return true;
+}
+
 function getMeteredUrls(): VoiceIceServer[] {
   const overrideUrls = parseTurnUrls();
   if (overrideUrls.length > 0) {
@@ -64,7 +76,7 @@ async function buildMeteredIceConfig(userId: string): Promise<VoiceIceConfigResp
   const ttlSecondsRaw = Number(process.env.VOICE_TURN_TTL_SECONDS ?? '3600');
   const ttlSeconds = Number.isFinite(ttlSecondsRaw) && ttlSecondsRaw > 0 ? Math.floor(ttlSecondsRaw) : 3600;
 
-  if (!meteredDomain || !secretKey) {
+  if (!meteredDomain || !hasUsableMeteredSecret()) {
     throw new Error('Metered TURN is not configured. Missing METERED_TURN_DOMAIN or METERED_TURN_SECRET_KEY.');
   }
 
@@ -156,7 +168,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const payload = getMeteredDomain()
+    const payload = getMeteredDomain() && hasUsableMeteredSecret()
       ? await buildMeteredIceConfig(user.id)
       : buildIceConfig(user.id);
     return NextResponse.json(payload, {

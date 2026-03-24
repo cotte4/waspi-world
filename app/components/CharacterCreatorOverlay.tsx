@@ -604,9 +604,19 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
 
   // ── bottom bar ──────────────────────────────────────────────────────────────
   const bottomBar = (
-    <Panel style={{ padding: '7px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+    <Panel style={{
+      padding: isMobile ? '8px 10px' : '7px 12px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      flexWrap: isMobile ? 'wrap' : 'nowrap',
+    }}>
       <DripScoreBar cfg={cfg} />
-      <div style={{ width: 1, height: 28, background: 'rgba(57,255,20,0.12)' }} />
+      <div style={{
+        width: isMobile ? '100%' : 1,
+        height: isMobile ? 1 : 28,
+        background: 'rgba(57,255,20,0.12)',
+      }} />
       <span style={{ fontFamily: 'Silkscreen, monospace', fontSize: 8, color: 'rgba(57,255,20,0.45)', whiteSpace: 'nowrap' }}>ID</span>
       <input
         value={username}
@@ -615,19 +625,21 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
         maxLength={18}
         spellCheck={false}
         style={{
-          flex: 1, minWidth: 0,
+          flex: isMobile ? '1 1 100%' : 1,
+          minWidth: isMobile ? '100%' : 0,
           background: 'rgba(0,0,0,0.7)',
           border: 'none', borderBottom: '2px solid rgba(245,200,66,0.38)',
           color: '#fff', fontFamily: 'Silkscreen, monospace',
           fontSize: 11, padding: '3px 6px', outline: 'none', letterSpacing: '2px',
         }}
       />
-      <button onClick={handleRandom} style={ghostBtn('#39FF14')}>RANDOM</button>
-      <button onClick={handleReset}  style={ghostBtn('#46B3FF')}>RESET</button>
+      <button onClick={handleRandom} style={{ ...ghostBtn('#39FF14'), flex: isMobile ? 1 : undefined, textAlign: 'center' }}>RANDOM</button>
+      <button onClick={handleReset}  style={{ ...ghostBtn('#46B3FF'), flex: isMobile ? 1 : undefined, textAlign: 'center' }}>RESET</button>
       <button
         onClick={handleSave}
         disabled={saving}
         style={{
+          flex: isMobile ? '1 1 100%' : '0 0 auto',
           padding: '9px 14px',
           background: saving ? 'rgba(245,200,66,0.25)' : '#F5C842',
           border: 'none', cursor: saving ? 'default' : 'pointer',
@@ -645,15 +657,35 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
   // ── MOBILE layout ───────────────────────────────────────────────────────────
   if (isMobile) {
     return (
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', zIndex: 60, pointerEvents: 'none' }}>
+      <div style={{
+        position: 'absolute',
+        inset: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        zIndex: 60,
+        pointerEvents: 'auto',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        WebkitOverflowScrolling: 'touch',
+        overscrollBehaviorY: 'contain',
+        touchAction: 'pan-y',
+      }}>
         {/* Header */}
-        <Panel style={{ padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 8, pointerEvents: 'auto' }}>
+        <Panel style={{ padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 8, pointerEvents: 'auto', flexShrink: 0 }}>
           <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 7, color: '#F5C842', whiteSpace: 'nowrap' }}>DRIP STUDIO</span>
           <DripScoreBar cfg={cfg} />
         </Panel>
 
         {/* Slot tabs — horizontal scroll */}
-        <div style={{ display: 'flex', overflowX: 'auto', pointerEvents: 'auto', scrollbarWidth: 'none' }}>
+        <div style={{
+          display: 'flex',
+          overflowX: 'auto',
+          pointerEvents: 'auto',
+          scrollbarWidth: 'none',
+          flexShrink: 0,
+          WebkitOverflowScrolling: 'touch',
+          touchAction: 'pan-x',
+        }}>
           {SLOTS.map(s => {
             const active = activeSlot === s.id;
             return (
@@ -672,15 +704,29 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
         </div>
 
         {/* Transparent preview area */}
-        <div style={{ flex: 1, pointerEvents: 'none' }} />
+        <div style={{ flex: '0 0 min(28vh, 180px)', pointerEvents: 'none' }} />
 
         {/* Editor */}
-        <Panel style={{ padding: 10, pointerEvents: 'auto', maxHeight: '42%', overflowY: 'auto' }}>
+        <Panel style={{
+          padding: 10,
+          pointerEvents: 'auto',
+          flex: '0 0 auto',
+          overflow: 'visible',
+        }}>
           <SlotEditor slot={activeSlot} cfg={cfg} update={update} />
         </Panel>
 
         {/* Bottom */}
-        <div style={{ pointerEvents: 'auto' }}>{bottomBar}</div>
+        <div style={{
+          pointerEvents: 'auto',
+          position: 'sticky',
+          bottom: 0,
+          flexShrink: 0,
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          background: 'linear-gradient(180deg, rgba(2,3,10,0) 0%, rgba(2,3,10,0.92) 18%, rgba(2,3,10,1) 100%)',
+        }}>
+          {bottomBar}
+        </div>
       </div>
     );
   }
