@@ -73,6 +73,21 @@ const MOVEMENT_SCHEMES: Array<[MovementScheme, string]> = [
   ['custom', 'CUSTOM'],
 ];
 
+function getVoiceStatusFallback(status: VoiceStatusPayload): string {
+  switch (status.state) {
+    case 'active':
+      return 'Voz activa.';
+    case 'connecting':
+      return 'Conectando voz...';
+    case 'retrying':
+      return 'Reintentando voz...';
+    case 'disconnected':
+      return 'Voz desactivada.';
+    default:
+      return 'Estado de voz actualizado.';
+  }
+}
+
 // ── sub-components ────────────────────────────────────────────────────────────
 
 function SettingsTab({
@@ -736,7 +751,7 @@ export default function SettingsOverlay({
                 }}
               >
                 <div style={{ color: '#46B3FF', marginBottom: 4 }}>ESTADO {voiceStatus.label}</div>
-                <div>{voiceStatus.detail || 'Voz desactivada.'}</div>
+                <div>{voiceStatus.detail || getVoiceStatusFallback(voiceStatus)}</div>
               </div>
               <VoiceTab
                 voiceEnabled={voiceEnabled}
