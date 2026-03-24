@@ -704,7 +704,17 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
         </div>
 
         {/* Transparent preview area */}
-        <div style={{ flex: '0 0 min(28vh, 180px)', pointerEvents: 'none' }} />
+        <div style={{ flex: '0 0 min(18vh, 110px)', pointerEvents: 'none' }} />
+
+        {/* Mobile actions sit directly below the character preview */}
+        <div style={{
+          pointerEvents: 'auto',
+          flexShrink: 0,
+          paddingBottom: 6,
+          background: 'linear-gradient(180deg, rgba(2,3,10,0) 0%, rgba(2,3,10,0.92) 24%, rgba(2,3,10,1) 100%)',
+        }}>
+          {bottomBar}
+        </div>
 
         {/* Editor */}
         <Panel style={{
@@ -715,18 +725,6 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
         }}>
           <SlotEditor slot={activeSlot} cfg={cfg} update={update} />
         </Panel>
-
-        {/* Bottom */}
-        <div style={{
-          pointerEvents: 'auto',
-          position: 'sticky',
-          bottom: 0,
-          flexShrink: 0,
-          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-          background: 'linear-gradient(180deg, rgba(2,3,10,0) 0%, rgba(2,3,10,0.92) 18%, rgba(2,3,10,1) 100%)',
-        }}>
-          {bottomBar}
-        </div>
       </div>
     );
   }

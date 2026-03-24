@@ -114,24 +114,38 @@ function formatErrorMessage(error: unknown): string {
 async function fetchVoiceIceConfig(authToken?: string | null): Promise<VoiceIceConfigResponse> {
   if (!authToken) return loadFallbackIceConfig();
 
-  const response = await fetch('/api/voice/ice', {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${authToken}`,
-    },
-    cache: 'no-store',
-  });
+  try {
+    const response = await fetch('/api/voice/ice', {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+      cache: 'no-store',
+    });
 
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { error?: string } | null;
-    throw new Error(payload?.error || `ICE config request failed (${response.status})`);
-  }
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: string } | null;
+      if (response.status === 401) {
+        throw new Error(payload?.error || 'Unauthorized');
+      }
 
-  const payload = await response.json() as VoiceIceConfigResponse;
-  if (!Array.isArray(payload.iceServers) || payload.iceServers.length === 0) {
-    throw new Error('ICE config response did not include any ICE servers.');
+      console.warn('[VoiceChat] ICE config request failed, using fallback STUN config.', payload?.error || response.status);
+      return loadFallbackIceConfig();
+    }
+
+    const payload = await response.json() as VoiceIceConfigResponse;
+    if (!Array.isArray(payload.iceServers) || payload.iceServers.length === 0) {
+      console.warn('[VoiceChat] ICE config response was empty, using fallback STUN config.');
+      return loadFallbackIceConfig();
+    }
+    return payload;
+  } catch (error) {
+    if (formatErrorMessage(error).toLowerCase().includes('unauthorized')) {
+      throw error;
+    }
+    console.warn('[VoiceChat] ICE config fetch crashed, using fallback STUN config.', error);
+    return loadFallbackIceConfig();
   }
-  return payload;
 }
 
 export class VoiceChatManager {

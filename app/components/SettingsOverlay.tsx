@@ -443,17 +443,24 @@ function ControlsTab({
 
 function VoiceTab({
   voiceEnabled,
+  voiceStatus,
   onVoiceEnabledChange,
   micDevices,
   selectedMicDeviceId,
   onMicDeviceChange,
-}: Pick<SettingsOverlayProps, 'voiceEnabled' | 'onVoiceEnabledChange' | 'micDevices' | 'selectedMicDeviceId' | 'onMicDeviceChange'>) {
+}: Pick<SettingsOverlayProps, 'voiceEnabled' | 'voiceStatus' | 'onVoiceEnabledChange' | 'micDevices' | 'selectedMicDeviceId' | 'onMicDeviceChange'>) {
+  const runtimeEnabled =
+    voiceStatus.state === 'active'
+    || voiceStatus.state === 'connecting'
+    || voiceStatus.state === 'retrying';
+  const toggleLabel = runtimeEnabled ? 'ACTIVAR VOZ' : voiceEnabled ? 'REINTENTAR VOZ' : 'ACTIVAR VOZ';
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <ToggleRow
-        label="ACTIVAR VOZ"
-        value={voiceEnabled}
-        onToggle={() => onVoiceEnabledChange(!voiceEnabled)}
+        label={toggleLabel}
+        value={runtimeEnabled}
+        onToggle={() => onVoiceEnabledChange(!runtimeEnabled)}
       />
 
       <SectionLabel>MICRÓFONO</SectionLabel>
@@ -733,6 +740,7 @@ export default function SettingsOverlay({
               </div>
               <VoiceTab
                 voiceEnabled={voiceEnabled}
+                voiceStatus={voiceStatus}
                 onVoiceEnabledChange={onVoiceEnabledChange}
                 micDevices={micDevices}
                 selectedMicDeviceId={selectedMicDeviceId}
