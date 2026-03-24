@@ -96,9 +96,25 @@ function sanitizePeerPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80);
 }
 
-function buildPeerId(userId: string, sessionId?: string): string {
+function createVoiceInstanceSuffix(): string {
+  if (typeof crypto !== 'undefined') {
+    if (typeof crypto.randomUUID === 'function') {
+      return sanitizePeerPart(crypto.randomUUID()).slice(0, 12);
+    }
+    if (typeof crypto.getRandomValues === 'function') {
+      const bytes = new Uint8Array(6);
+      crypto.getRandomValues(bytes);
+      return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    }
+  }
+
+  return Math.random().toString(36).slice(2, 14);
+}
+
+function buildPeerId(userId: string, sessionId?: string, instanceSuffix = createVoiceInstanceSuffix()): string {
   const parts = [sanitizePeerPart(userId)];
   if (sessionId) parts.push(sanitizePeerPart(sessionId));
+  parts.push(instanceSuffix);
   return `waspi-${parts.join('-')}`;
 }
 
@@ -162,6 +178,7 @@ export class VoiceChatManager {
   private myPeerId = '';
   private voiceUserId = '';
   private sessionId = '';
+  private peerInstanceSuffix = createVoiceInstanceSuffix();
   private iceConfig = DEFAULT_ICE_CONFIG;
   private readonly peerDebugLevel = getPeerDebugLevel();
   private readonly peerServerConfig = loadPeerServerConfig();
@@ -230,7 +247,7 @@ export class VoiceChatManager {
     this.firstRemoteAudioAt = null;
     this.voiceUserId = options.userId;
     this.sessionId = options.sessionId ?? '';
-    this.myPeerId = buildPeerId(options.userId, options.sessionId);
+    this.myPeerId = buildPeerId(options.userId, options.sessionId, this.peerInstanceSuffix);
     this.setRuntimeState('connecting', 'Conectando voz...');
     this.trackMetric('voice_init_started', {
       has_auth: Boolean(options.authToken),
@@ -252,21 +269,9 @@ export class VoiceChatManager {
       if (typeof this.peerServerConfig.secure === 'boolean') peerOptions.secure = this.peerServerConfig.secure;
       if (this.peerServerConfig.key) peerOptions.key = this.peerServerConfig.key;
 
-      this.peer = new Peer(this.myPeerId, peerOptions);
+      await this.openPeer(peerOptions);
 
-      await new Promise<void>((resolve, reject) => {
-        const onOpen = () => {
-          this.peer?.off('error', onError);
-          resolve();
-        };
-        const onError = (error: unknown) => {
-          this.peer?.off('open', onOpen);
-          reject(error);
-        };
-        this.peer?.once('open', onOpen);
-        this.peer?.once('error', onError);
-      });
-
+      if (!this.peer) throw new Error('Peer failed to initialize after openPeer');
       this.peer.on('call', (incoming) => this.handleIncomingCall(incoming));
       this.peer.on('disconnected', () => {
         this.setRuntimeState('retrying', 'Reconectando señalizacion...');
@@ -323,6 +328,41 @@ export class VoiceChatManager {
       throw error;
     } finally {
       this.isInitializing = false;
+    }
+  }
+
+  private async openPeer(peerOptions: Record<string, unknown>) {
+    const openOnce = async () => {
+      this.peer = new Peer(this.myPeerId, peerOptions);
+
+      await new Promise<void>((resolve, reject) => {
+        const onOpen = () => {
+          this.peer?.off('error', onError);
+          resolve();
+        };
+        const onError = (error: unknown) => {
+          this.peer?.off('open', onOpen);
+          reject(error);
+        };
+        this.peer?.once('open', onOpen);
+        this.peer?.once('error', onError);
+      });
+    };
+
+    try {
+      await openOnce();
+    } catch (error) {
+      if (!formatErrorMessage(error).toLowerCase().includes('is taken')) throw error;
+
+      try {
+        this.peer?.destroy();
+      } catch {
+        // noop
+      }
+
+      this.peerInstanceSuffix = createVoiceInstanceSuffix();
+      this.myPeerId = buildPeerId(this.voiceUserId, this.sessionId, this.peerInstanceSuffix);
+      await openOnce();
     }
   }
 

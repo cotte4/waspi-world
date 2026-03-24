@@ -602,6 +602,31 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
     eventBus.emit(EVENTS.CREATOR_COMMIT, { username });
   };
 
+  const mobileCreateButton = (
+    <Panel style={{ margin: '0 10px 6px', padding: '8px 10px', pointerEvents: 'auto' }}>
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        style={{
+          width: '100%',
+          padding: '12px 14px',
+          background: saving ? 'rgba(245,200,66,0.25)' : '#F5C842',
+          border: 'none',
+          cursor: saving ? 'default' : 'pointer',
+          color: '#0a0a0a',
+          fontFamily: '"Press Start 2P", monospace',
+          fontSize: 9,
+          boxShadow: saving ? 'none' : '0 0 18px rgba(245,200,66,0.4)',
+          transition: 'box-shadow .2s, background .2s',
+          whiteSpace: 'nowrap',
+          letterSpacing: '0.04em',
+        }}
+      >
+        {saving ? 'CREANDO...' : 'ENTRAR'}
+      </button>
+    </Panel>
+  );
+
   // ── bottom bar ──────────────────────────────────────────────────────────────
   const bottomBar = (
     <Panel style={{
@@ -713,6 +738,7 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
           paddingBottom: 6,
           background: 'linear-gradient(180deg, rgba(2,3,10,0) 0%, rgba(2,3,10,0.92) 24%, rgba(2,3,10,1) 100%)',
         }}>
+          {mobileCreateButton}
           {bottomBar}
         </div>
 
