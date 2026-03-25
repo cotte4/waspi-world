@@ -105,7 +105,7 @@ export default function VecindadHUD() {
       {/* ── Top-left: parcel info + materials + build progress ── */}
       <div
         className="absolute pointer-events-none"
-        style={{ top: 72, left: 8, width: 210, zIndex: 60 }}
+        style={{ top: 72, left: 8, width: 240, zIndex: 60 }}
       >
         <div
           style={{

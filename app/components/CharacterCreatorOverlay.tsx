@@ -58,15 +58,15 @@ const CHAIN_METALS = [
 ];
 
 const SEEDS = [
-  { id: 'procedural' as AvatarKind, label: 'PROC', dot: '#888888' },
-  { id: 'gengar'     as AvatarKind, label: 'GEN',  dot: '#A855F7' },
-  { id: 'buho'       as AvatarKind, label: 'BUHO', dot: '#22C55E' },
-  { id: 'piplup'     as AvatarKind, label: 'PIP',  dot: '#3B82F6' },
-  { id: 'chacha'     as AvatarKind, label: 'CHA',  dot: '#EC4899' },
-  { id: 'trap_a'     as AvatarKind, label: 'TRA',  dot: '#F5C842' },
-  { id: 'trap_b'     as AvatarKind, label: 'TRB',  dot: '#F5C842' },
-  { id: 'trap_c'     as AvatarKind, label: 'TRC',  dot: '#F5C842' },
-  { id: 'trap_d'     as AvatarKind, label: 'TRD',  dot: '#F5C842' },
+  { id: 'procedural' as AvatarKind, label: 'RANDOM', dot: '#888888' },
+  { id: 'gengar'     as AvatarKind, label: 'GENGAR', dot: '#A855F7' },
+  { id: 'buho'       as AvatarKind, label: 'BUHO',   dot: '#22C55E' },
+  { id: 'piplup'     as AvatarKind, label: 'PIPLUP', dot: '#3B82F6' },
+  { id: 'chacha'     as AvatarKind, label: 'CHACHA', dot: '#EC4899' },
+  { id: 'trap_a'     as AvatarKind, label: 'TRAP A', dot: '#F5C842' },
+  { id: 'trap_b'     as AvatarKind, label: 'TRAP B', dot: '#F5C842' },
+  { id: 'trap_c'     as AvatarKind, label: 'TRAP C', dot: '#F5C842' },
+  { id: 'trap_d'     as AvatarKind, label: 'TRAP D', dot: '#F5C842' },
 ];
 
 const SLOTS: Array<{ id: SlotId; label: string; icon: string }> = [

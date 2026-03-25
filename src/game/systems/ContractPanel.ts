@@ -196,7 +196,7 @@ export class ContractPanel {
     );
 
     // Title
-    this.scene.add
+    const titleText = this.scene.add
       .text(pcx - PANEL_W / 2 + 18, pcy - PANEL_H / 2 + 22, 'CONTRATOS SEMANALES', {
         fontSize: '9px',
         fontFamily: FONT,
@@ -244,6 +244,7 @@ export class ContractPanel {
       panelBg,
       borderGfx,
       sepGfx,
+      titleText,
       this.weekText,
       this.noticeText,
       closeHint,

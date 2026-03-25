@@ -873,7 +873,7 @@ export class WorldScene extends Phaser.Scene {
 
     // Supabase Realtime
     const mode = this.safeSetupRealtime();
-    statusText.setText(mode === 'multiplayer' ? 'MULTI: ONLINE' : 'MULTI: SOLO MODE');
+    statusText.setText(mode === 'multiplayer' ? 'MULTI: ONLINE' : 'MULTI: SOLO MODE').setAlpha(0);
 
     // Notify React that player is ready
     eventBus.emit(EVENTS.PLAYER_INFO, {

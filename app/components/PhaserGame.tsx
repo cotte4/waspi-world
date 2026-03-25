@@ -58,6 +58,7 @@ export default function PhaserGame() {
       });
 
       gameRef.current = game;
+      (window as Window & typeof globalThis & { __game: unknown }).__game = game;
     };
 
     init();
@@ -66,6 +67,7 @@ export default function PhaserGame() {
       if (game) {
         (game as { destroy: (v: boolean) => void }).destroy(true);
         gameRef.current = null;
+        delete (window as Window & typeof globalThis & { __game: unknown }).__game;
       }
     };
   }, []);

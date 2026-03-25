@@ -681,6 +681,12 @@ export class StoreInterior extends Phaser.Scene {
     } catch (e) { console.error('[StoreInterior] remotePlayers cleanup failed', e); }
 
     try {
+      this.player?.destroy?.();
+      this.localNameplate?.destroy?.();
+      this.localNameplate = undefined;
+    } catch (e) { console.error('[StoreInterior] local player cleanup failed', e); }
+
+    try {
       this.chatSystem?.destroy();
       this.chatSystem = undefined;
     } catch (e) { console.error('[StoreInterior] chatSystem cleanup failed', e); }

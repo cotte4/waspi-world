@@ -63,6 +63,7 @@ export default function PlayPage() {
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [smoking, setSmoking] = useState(false);
   const [activeScene, setActiveScene] = useState('');
+  const [loginDismissed, setLoginDismissed] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [onboardingSlide, setOnboardingSlide] = useState(0);
   const [uiNotice, setUiNotice] = useState<{ msg: string; color?: string } | null>(null);
@@ -876,7 +877,7 @@ export default function PlayPage() {
           </button>
         </div>
 
-        {activeScene !== 'CreatorScene' && !isAuthenticated && (
+        {activeScene !== 'CreatorScene' && !isAuthenticated && !loginDismissed && (
           <LoginCard
             authMode={authMode}
             emailInput={emailInput}
@@ -892,6 +893,7 @@ export default function PlayPage() {
             onResetPassword={() => void resetPassword()}
             onMagicLink={() => void sendMagicLink()}
             onGoogle={() => void signInWithGoogle()}
+            onDismiss={() => setLoginDismissed(true)}
           />
         )}
 

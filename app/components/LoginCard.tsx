@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 
 export interface LoginCardProps {
   authMode: 'login' | 'signup';
@@ -17,6 +17,7 @@ export interface LoginCardProps {
   onResetPassword: () => void;
   onMagicLink: () => void;
   onGoogle: () => void;
+  onDismiss?: () => void;
 }
 
 function buttonStyle(
@@ -102,7 +103,15 @@ export default function LoginCard({
   onResetPassword,
   onMagicLink,
   onGoogle,
+  onDismiss,
 }: LoginCardProps) {
+  useEffect(() => {
+    if (!onDismiss) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onDismiss(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onDismiss]);
+
   return (
     <div
       className="ww-auth-card absolute"
@@ -128,6 +137,27 @@ export default function LoginCard({
         }}
       >
         WASPI ID
+        {onDismiss && (
+          <button
+            onClick={onDismiss}
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              background: 'transparent',
+              border: 'none',
+              color: 'rgba(255,255,255,0.4)',
+              fontFamily: '"Press Start 2P", monospace',
+              fontSize: 8,
+              cursor: 'pointer',
+              padding: '2px 4px',
+              lineHeight: 1,
+            }}
+            title="Cerrar (ESC)"
+          >
+            ×
+          </button>
+        )}
       </div>
       <div
         style={{

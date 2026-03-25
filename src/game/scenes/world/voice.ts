@@ -195,7 +195,7 @@ function createWorldVoiceHudObjects(scene: WorldVoiceSceneLike) {
     fontFamily: '"Press Start 2P", monospace',
     backgroundColor: '#0A0A14',
     padding: { x: 5, y: 3 },
-    color: '#9999BB',
+    color: '#AABBEE',
   }).setScrollFactor(0).setDepth(9999).setInteractive({ useHandCursor: true });
 
   scene.voiceStatusText = scene.add.text(10, baseY + 18, '', {

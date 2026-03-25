@@ -36,7 +36,7 @@ const PAD_X = 10;
 const PAD_Y = 8;
 const MARGIN_RIGHT = 12;
 const MARGIN_BOTTOM = 12;
-const DEPTH = 8000;
+const DEPTH = 9250;
 
 // ---------------------------------------------------------------------------
 // EventBanner

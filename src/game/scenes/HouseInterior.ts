@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { SAFE_PLAZA_RETURN, WORLD } from '../config/constants';
-import { announceScene, bindSafeResetToPlaza, transitionToScene, transitionToWorldScene } from '../systems/SceneUi';
+import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToScene, transitionToWorldScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { InteriorRoom } from '../systems/InteriorRoom';
 import { SceneControls } from '../systems/SceneControls';
@@ -156,6 +156,7 @@ export class HouseInterior extends Phaser.Scene {
     this.cameras.main.setAlpha(1);
     this.cameras.main.fadeIn(250, 0, 0, 0);
     this.controls = new SceneControls(this);
+    createBackButton(this, () => this.requestLeaveInterior());
     bindSafeResetToPlaza(this, () => {
       transitionToWorldScene(this, SAFE_PLAZA_RETURN.X, SAFE_PLAZA_RETURN.Y);
     });

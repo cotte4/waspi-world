@@ -90,7 +90,7 @@ export class CreatorScene extends Phaser.Scene {
     this.preview.setDepth(3);
 
     // Seed status pill — below avatar
-    this.seedStatusText = this.add.text(this.previewX, this.previewY + 120, '', {
+    this.seedStatusText = this.add.text(this.previewX, this.previewY + 148, '', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#111111',
