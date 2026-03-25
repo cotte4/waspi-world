@@ -4,6 +4,7 @@ import {
   getAuthenticatedUser,
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
+import { syncPlayerMetadataSnapshot, appendXpTransaction } from '@/src/lib/commercePersistence';
 import { clampXp, getProgressionForTotals } from '@/src/lib/progression';
 
 type ProgressionRow = {
@@ -50,7 +51,8 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/player/progression
-// Applies an XP delta (from a kill) and recomputes level server-side.
+// Applies a kill-derived XP delta and increments the zombie kill counter
+// atomically in the same authoritative row.
 // Body: { xp_delta: number }
 export async function POST(request: NextRequest) {
   if (!isServerSupabaseConfigured) {
@@ -79,18 +81,41 @@ export async function POST(request: NextRequest) {
     .maybeSingle<Pick<ProgressionRow, 'zombie_kills' | 'deaths' | 'xp' | 'level'>>();
 
   const newXp = clampXp((current?.xp ?? 0) + xpDelta);
-  const kills = current?.zombie_kills ?? 0;
+  const kills = (current?.zombie_kills ?? 0) + 1;
   const deaths = current?.deaths ?? 0;
   const progression = getProgressionForTotals(kills, newXp);
 
   const { error: upsertError } = await admin
     .from('player_stats')
     .upsert(
-      { user_id: user.id, xp: newXp, level: progression.level, updated_at: new Date().toISOString() },
+      {
+        user_id: user.id,
+        zombie_kills: kills,
+        xp: newXp,
+        level: progression.level,
+        updated_at: new Date().toISOString(),
+      },
       { onConflict: 'user_id' },
     );
 
   if (upsertError) return NextResponse.json({ error: upsertError.message }, { status: 500 });
+
+  try {
+    await appendXpTransaction(admin, {
+      playerId: user.id,
+      amount: xpDelta,
+      reason: 'zombie_kill',
+      xpAfter: newXp,
+    });
+  } catch (logError) {
+    console.error('[Waspi][player/progression] xp transaction log failed:', logError);
+  }
+
+  try {
+    await syncPlayerMetadataSnapshot(admin, user);
+  } catch (snapshotError) {
+    console.error('[Waspi][player/progression] snapshot sync failed:', snapshotError);
+  }
 
   return NextResponse.json({
     kills,

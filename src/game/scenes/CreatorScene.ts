@@ -26,6 +26,7 @@ export class CreatorScene extends Phaser.Scene {
   private controls!: SceneControls;
   private worldExitX: number = PLAYER.SPAWN_X;
   private worldExitY: number = PLAYER.SPAWN_Y;
+  private allowHairCustomization = true;
 
   constructor() {
     super({ key: 'CreatorScene' });
@@ -36,6 +37,7 @@ export class CreatorScene extends Phaser.Scene {
     const w = worldExitFromSceneData(data, PLAYER.SPAWN_X, PLAYER.SPAWN_Y);
     this.worldExitX = w.x;
     this.worldExitY = w.y;
+    this.allowHairCustomization = data?.allowHairCustomization !== false;
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -120,7 +122,10 @@ export class CreatorScene extends Phaser.Scene {
     });
 
     // Emit initial config so React overlay can pre-fill its state
-    eventBus.emit(EVENTS.CREATOR_READY, { config: { ...this.config, avatarKind: this.selectedSeed } });
+    eventBus.emit(EVENTS.CREATOR_READY, {
+      config: { ...this.config, avatarKind: this.selectedSeed },
+      allowHairCustomization: this.allowHairCustomization,
+    });
 
     this.cameras.main.fadeIn(350, 0, 0, 0);
   }

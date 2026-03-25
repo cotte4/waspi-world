@@ -563,7 +563,13 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
   const [username, setUsername] = useState<string>(getInitialUsername);
   const [saving, setSaving]     = useState(false);
   const [activeSlot, setActiveSlot] = useState<SlotId>('character');
+  const [allowHairCustomization, setAllowHairCustomization] = useState(true);
   const debounceRef             = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const visibleSlots = useMemo(
+    () => (allowHairCustomization ? SLOTS : SLOTS.filter((slot) => slot.id !== 'hair')),
+    [allowHairCustomization],
+  );
+  const selectedSlot = !allowHairCustomization && activeSlot === 'hair' ? 'character' : activeSlot;
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -575,8 +581,9 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
 
   useEffect(() => {
     const unsub = eventBus.on(EVENTS.CREATOR_READY, (payload: unknown) => {
-      const p = payload as { config: AvatarCfg };
+      const p = payload as { config: AvatarCfg; allowHairCustomization?: boolean };
       setCfg(p.config);
+      setAllowHairCustomization(p.allowHairCustomization !== false);
     });
     return () => unsub();
   }, []);
@@ -591,7 +598,12 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
     if (typeof window !== 'undefined') window.localStorage.setItem(USERNAME_KEY, cleaned);
   };
 
-  const handleRandom = () => setCfg(randomCfg());
+  const handleRandom = () => {
+    const nextCfg = randomCfg();
+    setCfg(allowHairCustomization
+      ? nextCfg
+      : { ...nextCfg, hairStyle: cfg.hairStyle, hairColor: cfg.hairColor });
+  };
 
   const handleReset = () => setCfg(loadInitialCfg());
 
@@ -711,8 +723,8 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
           WebkitOverflowScrolling: 'touch',
           touchAction: 'pan-x',
         }}>
-          {SLOTS.map(s => {
-            const active = activeSlot === s.id;
+          {visibleSlots.map(s => {
+            const active = selectedSlot === s.id;
             return (
               <button key={s.id} onClick={() => setActiveSlot(s.id)} style={{
                 flexShrink: 0, padding: '6px 8px',
@@ -749,7 +761,7 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
           flex: '0 0 auto',
           overflow: 'visible',
         }}>
-          <SlotEditor slot={activeSlot} cfg={cfg} update={update} />
+          <SlotEditor slot={selectedSlot} cfg={cfg} update={update} />
         </Panel>
       </div>
     );
@@ -784,8 +796,8 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
         </div>
         {/* slots */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', paddingTop: 4 }}>
-          {SLOTS.map(s => (
-            <SlotItem key={s.id} slot={s} active={activeSlot === s.id} cfg={cfg} onClick={() => setActiveSlot(s.id)} />
+          {visibleSlots.map(s => (
+            <SlotItem key={s.id} slot={s} active={selectedSlot === s.id} cfg={cfg} onClick={() => setActiveSlot(s.id)} />
           ))}
         </div>
       </Panel>
@@ -801,9 +813,9 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
         pointerEvents: 'auto', overflowY: 'auto',
       }}>
         <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 6, color: 'rgba(57,255,20,0.5)', letterSpacing: '0.08em', marginBottom: 10 }}>
-          {SLOTS.find(s => s.id === activeSlot)?.icon} {SLOTS.find(s => s.id === activeSlot)?.label}
+          {visibleSlots.find(s => s.id === selectedSlot)?.icon} {visibleSlots.find(s => s.id === selectedSlot)?.label}
         </div>
-        <SlotEditor slot={activeSlot} cfg={cfg} update={update} />
+        <SlotEditor slot={selectedSlot} cfg={cfg} update={update} />
       </Panel>
 
       {/* ── Bottom bar ──────────────────────────────────────────────── */}

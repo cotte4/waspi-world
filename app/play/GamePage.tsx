@@ -20,7 +20,6 @@ import { usePlayPageShop } from '@/app/play/hooks/usePlayPageShop';
 import { usePlayPageSafeReset } from '@/app/play/hooks/usePlayPageSafeReset';
 import { usePlayPageSettings } from '@/app/play/hooks/usePlayPageSettings';
 import { usePlayPageStats } from '@/app/play/hooks/usePlayPageStats';
-import { loadStoredMutedPlayers } from '@/app/play/lib/playPageStorage';
 import type {
   CombatStats,
 } from '@/app/play/types';
@@ -84,10 +83,11 @@ export default function PlayPage() {
   const activeSceneRef = useRef('');
   /** Escena Phaser anterior (para no re-abrir onboarding al volver del interior con ESC). */
   const previousPhaserSceneRef = useRef('');
-  const mutedPlayersRef = useRef<string[]>(loadStoredMutedPlayers());
+  const mutedPlayersRef = useRef<string[]>([]);
   const rescueTimeoutRef = useRef<number | null>(null);
 
   const {
+    activeWeapon,
     applyPlayerState,
     ballOn,
     equipped,
@@ -95,8 +95,10 @@ export default function PlayPage() {
     handleEquipOwnedItem,
     hydratePlayerState,
     owned,
+    persistEditablePlayerPatch,
     playerState,
     refreshPlayerState,
+    setActiveWeapon,
     setBallOn,
     setEquipped,
     setGunOn,
@@ -140,11 +142,20 @@ export default function PlayPage() {
   const {
     authBusy,
     authStatus,
+    authMode,
     emailInput,
     isAuthenticated,
+    passwordInput,
+    rememberMe,
+    resetPassword,
     sendMagicLink,
+    setAuthMode,
     setEmailInput,
+    setPasswordInput,
+    setRememberMe,
     signInWithGoogle,
+    signInWithPassword,
+    signUpWithPassword,
   } = usePlayPageAuth({
     hydratePlayerState,
   });
@@ -155,14 +166,12 @@ export default function PlayPage() {
     checkoutRedirecting,
     closeShop,
     clothingItems,
-    discountCodeInput,
     loadOrders,
     openShop,
     orders,
     ordersLoaded,
     ordersLoading,
     selectedSize,
-    setDiscountCodeInput,
     setSelectedSize,
     setCheckoutRedirecting,
     setShopOpen,
@@ -242,6 +251,7 @@ export default function PlayPage() {
     mutedPlayersRef,
     playUiSfx,
     playerState,
+    persistEditablePlayerPatch,
     setShopStatus,
     syncPlayerState,
     tokenRef,
@@ -295,6 +305,7 @@ export default function PlayPage() {
     setEquipped,
     setGunOn,
     setBallOn,
+    setActiveWeapon,
     setPlayerActions,
     setUiNotice,
     setShopStatus,
@@ -351,7 +362,7 @@ export default function PlayPage() {
     () => owned
       .map((id) => CATALOG.find((i) => i.id === id))
       .filter((item): item is CatalogItem => Boolean(item))
-      .filter((item) => item.slot === 'utility' && item.id !== 'UTIL-GUN-01' && item.id !== 'UTIL-BALL-01'),
+      .filter((item) => item.slot === 'utility' && item.id !== 'UTIL-GUN-01' && item.id !== 'UTIL-BALL-01' && item.id !== 'UTIL-CIG-01'),
     [owned],
   );
 
@@ -698,137 +709,89 @@ export default function PlayPage() {
           </div>
         )}
 
-        <div className="absolute top-12 left-2 flex flex-col gap-2">
-          {hudSettings.showSocialPanel && (
-            <div
-              className="ww-panel ww-panel-delayed"
-              style={{
-                width: 182,
-                background: 'rgba(0,0,0,0.7)',
-                border: '1px solid rgba(57,255,20,0.14)',
-                padding: '6px 8px',
-                boxShadow: '0 10px 24px rgba(0,0,0,0.28)',
-              }}
-            >
-              <div className="flex items-center justify-between" style={{ marginBottom: hudSettings.socialCollapsed ? 0 : 6 }}>
+        {hudSettings.showSocialPanel && (
+          <div
+            className="ww-panel ww-panel-delayed absolute top-12 left-2"
+            style={{
+              width: 172,
+              background: 'rgba(5,5,10,0.84)',
+              border: '1px solid rgba(255,255,255,0.07)',
+              padding: '8px 9px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 7,
+            }}
+          >
+            {/* Social */}
+            {hudSettings.showSocialPanel && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <div
                   style={{
-                    fontFamily: '"Press Start 2P", monospace',
-                    fontSize: '7px',
-                    color: '#39FF14',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    cursor: 'pointer',
                   }}
-                >
-                  CONECTADOS {presencePlayers.length}
-                </div>
-                <button
                   onClick={() => onHudChange({ socialCollapsed: !hudSettings.socialCollapsed })}
-                  style={hudCollapseButtonStyle()}
                 >
-                  {hudSettings.socialCollapsed ? '+' : '-'}
-                </button>
-              </div>
-              {!hudSettings.socialCollapsed && (
-                <div style={{ display: 'grid', gap: 4 }}>
-                  {presencePlayers.slice(0, 6).map((player, index) => (
-                    <div
-                      className="ww-presence-row"
-                      key={player.playerId}
-                      style={{
-                        fontFamily: '"Silkscreen", monospace',
-                        fontSize: '11px',
-                        color: player.playerId === playerInfo?.playerId ? '#F5C842' : 'rgba(255,255,255,0.8)',
-                        lineHeight: 1.1,
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        animationDelay: `${index * 45}ms`,
-                      }}
-                    >
-                      {player.playerId === playerInfo?.playerId ? '→ ' : '· '}{player.username}
-                    </div>
-                  ))}
-                  {presencePlayers.length === 0 && (
-                    <div
-                      style={{
-                        fontFamily: '"Silkscreen", monospace',
-                        fontSize: '11px',
-                        color: 'rgba(255,255,255,0.45)',
-                      }}
-                    >
-                      Solo vos por ahora.
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {hudSettings.showProgressPanel && (
-            <div
-              className="ww-panel"
-              style={{
-                width: 182,
-                background: 'rgba(0,0,0,0.74)',
-                border: '1px solid rgba(70,179,255,0.24)',
-                padding: '6px 8px',
-                boxShadow: '0 10px 24px rgba(0,0,0,0.28)',
-              }}
-            >
-              <div className="flex items-center justify-between" style={{ marginBottom: hudSettings.progressCollapsed ? 0 : 6 }}>
-                <div
-                  style={{
-                    fontFamily: '"Press Start 2P", monospace',
-                    fontSize: '7px',
-                    color: '#46B3FF',
-                  }}
-                >
-                  PROGRESO
-                </div>
-                <button
-                  onClick={() => onHudChange({ progressCollapsed: !hudSettings.progressCollapsed })}
-                  style={hudCollapseButtonStyle()}
-                >
-                  {hudSettings.progressCollapsed ? '+' : '-'}
-                </button>
-              </div>
-              {hudSettings.progressCollapsed ? (
-                <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: '12px', color: 'rgba(255,255,255,0.82)' }}>
-                  LVL {progression.level}/{getMaxProgressionLevel()} {nextLevelDelta > 0 ? `| NEXT ${nextLevelDelta} XP` : '| MAX'}
-                </div>
-              ) : (
-                <>
-                  <div style={{ display: 'grid', gap: 4, fontFamily: '"Silkscreen", monospace', fontSize: '12px', color: 'rgba(255,255,255,0.82)' }}>
-                    <div className="flex items-center justify-between">
-                      <span>LVL {progression.level}/{getMaxProgressionLevel()}</span>
-                      <span>{progression.nextLevelAt === null ? 'MAX' : `${nextLevelDelta} XP`}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>XP {progression.xp}</span>
-                      <span>KOs {progression.kills}</span>
-                    </div>
-                  </div>
-                  <div style={{ position: 'relative', marginTop: 6, height: 8, border: '1px solid rgba(70,179,255,0.28)', background: 'rgba(255,255,255,0.05)' }}>
-                    <div
-                      style={{
-                        width: `${progressPct * 100}%`,
-                        height: '100%',
-                        background: '#46B3FF',
-                        transition: 'width 0.6s ease-out',
-                      }}
-                    />
-                    {/* Pixel segment dividers */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                     <div style={{
-                      position: 'absolute',
-                      inset: 0,
-                      backgroundImage: 'repeating-linear-gradient(90deg, transparent 0, transparent calc(10% - 1px), rgba(5,5,10,0.65) calc(10% - 1px), rgba(5,5,10,0.65) 10%)',
-                      pointerEvents: 'none',
+                      width: 5, height: 5, borderRadius: '50%',
+                      background: '#39FF14',
+                      boxShadow: '0 0 4px #39FF1499',
+                      flexShrink: 0,
                     }} />
+                    <span style={{
+                      fontFamily: '"Silkscreen", monospace',
+                      fontSize: '10px',
+                      color: 'rgba(57,255,20,0.7)',
+                    }}>
+                      {presencePlayers.length} online
+                    </span>
                   </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
+                  <span style={{
+                    fontFamily: '"Press Start 2P", monospace',
+                    fontSize: '6px',
+                    color: 'rgba(255,255,255,0.25)',
+                  }}>
+                    {hudSettings.socialCollapsed ? '+' : '−'}
+                  </span>
+                </div>
+
+                {!hudSettings.socialCollapsed && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3, paddingLeft: 10 }}>
+                    {presencePlayers.slice(0, 5).map((player, index) => (
+                      <div
+                        className="ww-presence-row"
+                        key={player.playerId}
+                        style={{
+                          fontFamily: '"Silkscreen", monospace',
+                          fontSize: '11px',
+                          color: player.playerId === playerInfo?.playerId ? '#F5C842' : 'rgba(255,255,255,0.6)',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          animationDelay: `${index * 45}ms`,
+                        }}
+                      >
+                        {player.playerId === playerInfo?.playerId ? '▶ ' : '· '}{player.username}
+                      </div>
+                    ))}
+                    {presencePlayers.length === 0 && (
+                      <div style={{
+                        fontFamily: '"Silkscreen", monospace',
+                        fontSize: '11px',
+                        color: 'rgba(255,255,255,0.3)',
+                      }}>
+                        solo vos por ahora
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {hudSettings.showControlsPanel && !isMobile && (
           <div className="ww-ctrl-wrap absolute top-2 right-2 pointer-events-auto">
@@ -915,10 +878,18 @@ export default function PlayPage() {
 
         {activeScene !== 'CreatorScene' && !isAuthenticated && (
           <LoginCard
+            authMode={authMode}
             emailInput={emailInput}
             onEmailChange={setEmailInput}
+            passwordInput={passwordInput}
+            onPasswordChange={setPasswordInput}
+            rememberMe={rememberMe}
+            onRememberMeChange={setRememberMe}
             authBusy={authBusy}
             authStatus={authStatus}
+            onPasswordSubmit={() => void (authMode === 'signup' ? signUpWithPassword() : signInWithPassword())}
+            onModeChange={setAuthMode}
+            onResetPassword={() => void resetPassword()}
             onMagicLink={() => void sendMagicLink()}
             onGoogle={() => void signInWithGoogle()}
           />
@@ -948,8 +919,6 @@ export default function PlayPage() {
             checkoutRedirecting={checkoutRedirecting}
             selectedSize={selectedSize}
             onSizeChange={setSelectedSize}
-            discountCode={discountCodeInput}
-            onDiscountChange={setDiscountCodeInput}
             shopStatus={shopStatus}
             orders={orders}
             ordersLoaded={ordersLoaded}
@@ -960,7 +929,7 @@ export default function PlayPage() {
               handleEquipOwnedItem(itemId);
               setShopStatus(active ? 'Ya está puesto.' : 'Equipado.');
             }}
-            onBuyPhysical={(item) => void startStripeCheckout('product', { itemId: item.id, size: selectedSize, discountCode: discountCodeInput })}
+            onBuyPhysical={(item) => void startStripeCheckout('product', { itemId: item.id, size: selectedSize })}
             onBuyPack={(packId) => void startStripeCheckout('tenks_pack', { packId })}
           />
         )}
@@ -982,6 +951,7 @@ export default function PlayPage() {
             onToggleSmoke={setSmoking}
             gunOn={gunOn}
             ballOn={ballOn}
+            activeWeapon={activeWeapon}
             passiveUtilityItems={passiveUtilityItems}
             clothingCatalog={CATALOG}
             onEquip={handleEquipOwnedItem}

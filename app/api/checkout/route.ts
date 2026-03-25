@@ -3,9 +3,8 @@ import { stripe, isStripeConfigured } from '@/src/lib/stripe';
 import { createSupabaseAdminClient, getAuthenticatedUser } from '@/src/lib/supabaseServer';
 import { getTenksPack } from '@/src/lib/tenksPacks';
 import { getCatalogItemWithStripe } from '@/src/lib/catalogServer';
-import { ensureCatalogSeeded, ensurePlayerRow, loadDiscountCode } from '@/src/lib/commercePersistence';
+import { ensureCatalogSeeded, ensurePlayerRow, hydratePlayerFromDatabase, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
 import { getCheckoutPricingConfig, toStripeUnitAmountFromArs } from '@/src/lib/commercePricing';
-import { DEFAULT_PLAYER_STATE, normalizePlayerState } from '@/src/lib/playerState';
 
 function getBaseUrl(request: NextRequest) {
   return process.env.NEXT_PUBLIC_APP_URL
@@ -19,7 +18,7 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json().catch(() => null) as
     | { type?: 'tenks_pack'; packId?: string }
-    | { type?: 'product'; itemId?: string; size?: string; discountCode?: string }
+    | { type?: 'product'; itemId?: string; size?: string }
     | null;
 
   const user = await getAuthenticatedUser(request.headers.get('authorization'));
@@ -32,10 +31,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Supabase admin client unavailable.' }, { status: 500 });
   }
 
-  const playerState = normalizePlayerState(user.user_metadata?.waspiPlayer ?? DEFAULT_PLAYER_STATE);
+  const playerState = await hydratePlayerFromDatabase(admin, user);
   const pricingConfig = getCheckoutPricingConfig();
   await ensureCatalogSeeded(admin);
   await ensurePlayerRow(admin, user, playerState);
+  try {
+    await syncPlayerMetadataSnapshot(admin, user, playerState);
+  } catch (error) {
+    console.error('[Waspi][checkout] snapshot sync failed:', error);
+  }
 
   let session;
   if (body?.type === 'product') {
@@ -51,25 +55,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Select a valid size.' }, { status: 400 });
     }
 
-    let discountCode: string | null = null;
-    let discountPercent: number | null = null;
-    if (body.discountCode?.trim()) {
-      const discount = await loadDiscountCode(admin, user.id, body.discountCode.trim().toUpperCase());
-      if (!discount) {
-        return NextResponse.json({ error: 'Discount code is invalid or expired.' }, { status: 400 });
-      }
-      discountCode = discount.code;
-      discountPercent = discount.percent_off;
-    }
-
     const unitAmount = toStripeUnitAmountFromArs(item.priceArs, pricingConfig);
-    const coupon = discountPercent
-      ? await stripe.coupons.create({
-          percent_off: discountPercent,
-          duration: 'once',
-          name: discountCode ?? undefined,
-        })
-      : null;
 
     session = await stripe.checkout.sessions.create({
       mode: 'payment',
@@ -102,14 +88,11 @@ export async function POST(request: NextRequest) {
               }),
         },
       ],
-      discounts: coupon ? [{ coupon: coupon.id }] : undefined,
       metadata: {
         purchaseType: 'product',
         itemId: item.id,
         size,
         subtotalArs: String(item.priceArs),
-        discountCode: discountCode ?? '',
-        discountPercent: discountPercent ? String(discountPercent) : '',
         paymentCurrency: pricingConfig.currency,
         arsPerUsd: String(pricingConfig.arsPerUsd),
         customerUserId: user.id,

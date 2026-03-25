@@ -4,16 +4,16 @@ import {
   getAuthenticatedUser,
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
+import { hydratePlayerFromDatabase, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
 import { getItem } from '@/src/game/config/catalog';
+import { mergePlayerWithVecindad } from '@/src/lib/vecindadPersistence';
+
+const DEFAULT_UTILITY_ID = 'UTIL-GUN-01';
 
 type PlayerRow = {
   equipped_top: string | null;
   equipped_bottom: string | null;
   utility_equipped: string[];
-};
-
-type InventoryRow = {
-  product_id: string;
 };
 
 // POST /api/player/inventory/equip
@@ -29,6 +29,8 @@ export async function POST(request: NextRequest) {
 
   const admin = createSupabaseAdminClient();
   if (!admin) return NextResponse.json({ error: 'not_configured' }, { status: 503 });
+
+  const currentPlayer = await hydratePlayerFromDatabase(admin, user);
 
   const body = await request.json().catch(() => null) as { item_id?: string } | null;
   const itemId = typeof body?.item_id === 'string' ? body.item_id.trim() : '';
@@ -46,24 +48,9 @@ export async function POST(request: NextRequest) {
 
   if (playerError) return NextResponse.json({ error: playerError.message }, { status: 500 });
 
-  // Verify ownership
-  if (item.slot === 'utility') {
-    const currentUtility: string[] = Array.isArray(playerRow?.utility_equipped)
-      ? playerRow.utility_equipped
-      : [];
-    if (!currentUtility.includes(itemId)) {
-      return NextResponse.json({ error: 'Item not owned.' }, { status: 403 });
-    }
-  } else {
-    const { data: owned, error: ownedError } = await admin
-      .from('player_inventory')
-      .select('product_id')
-      .eq('player_id', user.id)
-      .eq('product_id', itemId)
-      .maybeSingle<InventoryRow>();
-
-    if (ownedError) return NextResponse.json({ error: ownedError.message }, { status: 500 });
-    if (!owned) return NextResponse.json({ error: 'Item not owned.' }, { status: 403 });
+  // Verify ownership from the hydrated DB-first player view.
+  if (!currentPlayer.inventory.owned.includes(itemId) && itemId !== DEFAULT_UTILITY_ID) {
+    return NextResponse.json({ error: 'Item not owned.' }, { status: 403 });
   }
 
   // Compute new equipped state
@@ -74,9 +61,11 @@ export async function POST(request: NextRequest) {
   let update: Record<string, string | string[] | null>;
 
   if (item.slot === 'top') {
-    update = { equipped_top: itemId };
+    const alreadyEquipped = playerRow?.equipped_top === itemId;
+    update = { equipped_top: alreadyEquipped ? null : itemId };
   } else if (item.slot === 'bottom') {
-    update = { equipped_bottom: itemId };
+    const alreadyEquipped = playerRow?.equipped_bottom === itemId;
+    update = { equipped_bottom: alreadyEquipped ? null : itemId };
   } else {
     // utility: toggle
     const has = currentUtility.includes(itemId);
@@ -94,11 +83,21 @@ export async function POST(request: NextRequest) {
 
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 
+  let nextPlayer;
+  try {
+    nextPlayer = await hydratePlayerFromDatabase(admin, user);
+    nextPlayer = await mergePlayerWithVecindad(admin, user.id, nextPlayer);
+    nextPlayer = await syncPlayerMetadataSnapshot(admin, user, nextPlayer);
+  } catch (snapshotError) {
+    console.error('[Waspi] inventory equip snapshot sync failed:', snapshotError);
+  }
+
   const newUtility = item.slot === 'utility'
     ? (update.utility_equipped as string[])
     : currentUtility;
 
   return NextResponse.json({
+    player: nextPlayer,
     equipped: {
       top: item.slot === 'top' ? itemId : (playerRow?.equipped_top ?? undefined),
       bottom: item.slot === 'bottom' ? itemId : (playerRow?.equipped_bottom ?? undefined),

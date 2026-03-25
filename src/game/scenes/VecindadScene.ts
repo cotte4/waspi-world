@@ -1824,36 +1824,13 @@ export class VecindadScene extends Phaser.Scene {
   }
 
   private loadVecindadState() {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = window.localStorage.getItem('waspi_player_state');
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as { vecindad?: Partial<VecindadState> };
-      this.vecindadState = {
-        ownedParcelId: typeof parsed.vecindad?.ownedParcelId === 'string' ? parsed.vecindad.ownedParcelId : undefined,
-        buildStage: typeof parsed.vecindad?.buildStage === 'number' ? parsed.vecindad.buildStage : 0,
-        materials: typeof parsed.vecindad?.materials === 'number' ? parsed.vecindad.materials : 0,
-        cannabisFarmUnlocked: Boolean(parsed.vecindad?.cannabisFarmUnlocked),
-        farmPlants: Array.isArray(parsed.vecindad?.farmPlants)
-          ? parsed.vecindad.farmPlants.filter((entry): entry is FarmPlant =>
-              Boolean(entry)
-              && typeof entry === 'object'
-              && typeof (entry as FarmPlant).slotIndex === 'number'
-              && typeof (entry as FarmPlant).seedType === 'string'
-              && typeof (entry as FarmPlant).plantedAt === 'number'
-              && typeof (entry as FarmPlant).waterCount === 'number'
-            )
-          : [],
-      };
-    } catch {
-      this.vecindadState = {
-        ownedParcelId: undefined,
-        buildStage: 0,
-        materials: 0,
-        cannabisFarmUnlocked: false,
-        farmPlants: [],
-      };
-    }
+    this.vecindadState = {
+      ownedParcelId: undefined,
+      buildStage: 0,
+      materials: 0,
+      cannabisFarmUnlocked: false,
+      farmPlants: [],
+    };
   }
 
   // ─── Weed Lv4 Puesto ──────────────────────────────────────────────────────

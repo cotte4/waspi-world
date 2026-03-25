@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { COLORS } from '../config/constants';
+import { getItem as getCatalogItem } from '../config/catalog';
 import {
   ensureFallbackRectTexture,
   safeCreateSpritesheetAnimation,
@@ -245,6 +246,26 @@ export class AvatarRenderer {
     const shirt = scene.add.arc(0, bodyY + 2, bodyR * 0.92, 200, 340, false, c.topColor);
     shirt.setAlpha(0.9);
     all.push(this.body, shirt);
+
+    // ── Clothing sprite overlays (Model B) ───────────────────────
+    // Top overlay: drawn over shirt arc if spriteKey is defined and texture loaded
+    if (c.equipTop) {
+      const topItem = getCatalogItem(c.equipTop);
+      if (topItem?.spriteKey && scene.textures.exists(topItem.spriteKey)) {
+        const topSprite = scene.add.image(0, bodyY + 2, topItem.spriteKey);
+        topSprite.setDisplaySize(bodyR * 2.2, bodyR * 2.2);
+        all.push(topSprite);
+      }
+    }
+    // Bottom overlay: drawn over feet if spriteKey is defined and texture loaded
+    if (c.equipBottom) {
+      const bottomItem = getCatalogItem(c.equipBottom);
+      if (bottomItem?.spriteKey && scene.textures.exists(bottomItem.spriteKey)) {
+        const bottomSprite = scene.add.image(0, footY - 2, bottomItem.spriteKey);
+        bottomSprite.setDisplaySize(bodyR * 2.0, 18);
+        all.push(bottomSprite);
+      }
+    }
 
     // ── TT / PP blobs ────────────────────────────────────────────
     const ttScale = 0.3 + tt * 0.22;

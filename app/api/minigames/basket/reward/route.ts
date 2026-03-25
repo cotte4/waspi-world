@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getAuthenticatedUser } from '@/src/lib/supabaseServer';
-import { DEFAULT_PLAYER_STATE, creditTenks, normalizePlayerState } from '@/src/lib/playerState';
-import { appendTenksTransaction, ensureCatalogSeeded, ensurePlayerRow } from '@/src/lib/commercePersistence';
+import { DEFAULT_PLAYER_STATE } from '@/src/lib/playerState';
+import { appendTenksTransaction, ensureCatalogSeeded, hydratePlayerFromDatabase, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
 import { calculateBasketReward } from '@/src/lib/basketRewards';
-import { creditBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
+import { creditBalance, debitBalance } from '@/src/lib/tenksBalance';
 
 const MAX_SCORE = 30;
 const MAX_SHOTS = 30;
@@ -72,8 +72,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Basket run expired.' }, { status: 409 });
   }
 
+  const current = await hydratePlayerFromDatabase(admin, user, DEFAULT_PLAYER_STATE);
+
   if (session.result === 'reward' || session.result === 'no_reward') {
-    const current = normalizePlayerState(user.user_metadata?.waspiPlayer ?? DEFAULT_PLAYER_STATE);
     return NextResponse.json({
       score: session.score ?? score,
       shots,
@@ -111,7 +112,6 @@ export async function POST(request: NextRequest) {
       .maybeSingle<BasketSessionRow>();
 
     if (latest?.result === 'reward' || latest?.result === 'no_reward') {
-      const current = normalizePlayerState(user.user_metadata?.waspiPlayer ?? DEFAULT_PLAYER_STATE);
       return NextResponse.json({
         score: latest.score ?? score,
         shots,
@@ -124,32 +124,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Basket run is already being claimed.' }, { status: 409 });
   }
 
-  const baseBalance = await getAuthoritativeBalance(admin, {
-    playerId: user.id,
-    fallbackBalance: (user.user_metadata?.waspiPlayer as { tenks?: number } | undefined)?.tenks ?? DEFAULT_PLAYER_STATE.tenks,
-  });
-  const current = normalizePlayerState(user.user_metadata?.waspiPlayer ?? DEFAULT_PLAYER_STATE);
-  const next = reward > 0 ? creditTenks({ ...current, tenks: baseBalance }, reward) : { ...current, tenks: baseBalance };
+  const baseBalance = current.tenks;
+  let next = { ...current, tenks: baseBalance };
+  let creditedBalance: number | null = null;
 
   try {
-    const { error } = await admin.auth.admin.updateUserById(user.id, {
-      user_metadata: {
-        ...(user.user_metadata ?? {}),
-        waspiPlayer: next,
-      },
-    });
-
-    if (error) throw error;
-
     if (reward > 0) {
-      await creditBalance(admin, {
+      const credited = await creditBalance(admin, {
         playerId: user.id,
         amount: reward,
         fallbackBalance: baseBalance,
       });
+      creditedBalance = credited.newBalance;
+      next = { ...current, tenks: credited.newBalance };
     }
-
-    await ensurePlayerRow(admin, user, next, { syncTenksBalance: true });
 
     if (reward > 0) {
       try {
@@ -175,6 +163,15 @@ export async function POST(request: NextRequest) {
 
     if (finalizeError) throw finalizeError;
   } catch (error) {
+    if (reward > 0 && creditedBalance !== null) {
+      await debitBalance(admin, {
+        playerId: user.id,
+        amount: reward,
+        fallbackBalance: creditedBalance,
+      }).catch((rollbackError) => {
+        console.error('[Waspi][basket/reward] TENKS rollback failed:', rollbackError);
+      });
+    }
     await admin
       .from('game_sessions')
       .update({ result: 'started', score: 0, tenks_earned: 0 })
@@ -185,11 +182,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
+  let refreshedPlayer = next;
+  try {
+    refreshedPlayer = await syncPlayerMetadataSnapshot(admin, user, next);
+  } catch (error) {
+    console.error('[Waspi][basket/reward] snapshot sync failed:', error);
+  }
+
   return NextResponse.json({
     score,
     shots,
     tenksEarned: reward,
-    player: next,
+    player: refreshedPlayer,
     status: 'granted',
   });
 }

@@ -82,16 +82,18 @@ export async function getAuthoritativeBalance(
   const playerTenks = typeof playerRow?.tenks === 'number' ? normalizeTenks(playerRow.tenks) : 0;
 
   if (!balanceRow) {
-    const seeded = Math.max(defaultBalance, fallbackBalance, playerTenks);
+    // Row missing: seed from fallback only. Never use defaultBalance (5000) as a floor
+    // because it would reset real balances for players whose row was temporarily missing.
+    const seeded = Math.max(fallbackBalance, playerTenks);
     return seedBalanceIfMissing(admin, input.playerId, seeded);
   }
 
-  const resolved = Math.max(normalizeTenks(balanceRow.balance), playerTenks, fallbackBalance);
-  if (resolved !== balanceRow.balance) {
-    const { error: upsertError } = await admin
-      .from('player_tenks_balance')
-      .upsert({ player_id: input.playerId, balance: resolved }, { onConflict: 'player_id' });
-    if (upsertError) throw upsertError;
+  // player_tenks_balance is the authoritative source. Do NOT use players.tenks as a floor —
+  // that column is a denormalized projection that may be stale (e.g. stuck at 5000 from
+  // an old bug). Trust only the balance table and sync the projection to match.
+  const resolved = normalizeTenks(balanceRow.balance);
+  if (playerTenks !== resolved) {
+    // Keep players.tenks in sync with the authoritative balance row.
     await syncPlayerTenksProjection(admin, input.playerId, resolved);
   }
 

@@ -1,5 +1,4 @@
 import Phaser from 'phaser';
-import { initTenks } from '../systems/TenksSystem';
 import { announceScene, transitionToScene } from '../systems/SceneUi';
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
@@ -964,11 +963,11 @@ export class BasketMinigame extends Phaser.Scene {
 
     const json = await res.json().catch(() => null) as {
       tenksEarned?: number;
-      player?: { tenks?: number };
+      player?: import('@/src/lib/playerState').PlayerState;
     } | null;
 
-    if (typeof json?.player?.tenks === 'number') {
-      initTenks(json.player.tenks);
+    if (json?.player) {
+      eventBus.emit(EVENTS.PLAYER_STATE_APPLY, json.player);
     }
     if (typeof json?.tenksEarned === 'number') {
       this.grantedRewardTenks = json.tenksEarned;

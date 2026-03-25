@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getAuthenticatedUser, hasServiceRole, isServerSupabaseConfigured } from '@/src/lib/supabaseServer';
-import { grantInventoryItem, normalizePlayerState, syncVecindadDeed, VECINDAD_DEED_ITEM_ID, type PlayerState } from '@/src/lib/playerState';
-import { ensurePlayerRow } from '@/src/lib/commercePersistence';
+import { grantInventoryItem, syncVecindadDeed, VECINDAD_DEED_ITEM_ID, type PlayerState } from '@/src/lib/playerState';
+import { appendTenksTransaction, ensurePlayerRow, hydratePlayerFromDatabase } from '@/src/lib/commercePersistence';
 import {
   clearFarmPlant,
   createVecindadParcel,
@@ -19,8 +19,8 @@ import {
   upsertFarmPlant,
 } from '@/src/lib/vecindadPersistence';
 import { getNextVecindadBuildCost, getNextVecindadBuildStage, getParcelById, MAX_VECINDAD_STAGE, normalizeVecindadBuildStage } from '@/src/lib/vecindad';
+import { creditBalance, debitBalance } from '@/src/lib/tenksBalance';
 
-const PLAYER_METADATA_KEY = 'waspiPlayer';
 const CANNABIS_FARM_UNLOCK_KEY = 'cannabis_farm';
 const FARM_UNLOCK_COST = 11000;
 const FARM_SLOT_COUNT = 6;
@@ -37,6 +37,7 @@ type FarmPlantState = NonNullable<PlayerState['vecindad']['farmPlants']>[number]
 type VecindadAction =
   | { action: 'buy'; parcelId: string }
   | { action: 'build' }
+  | { action: 'collect_materials'; amount: number }
   | { action: 'farm_unlock' }
   | { action: 'farm_plant'; slotIndex: number; seedType: FarmSeedType }
   | { action: 'farm_water'; slotIndex: number }
@@ -75,8 +76,8 @@ export async function GET(request: NextRequest) {
     let player: PlayerState | null = null;
 
     if (user) {
-      const basePlayer = normalizePlayerState(user.user_metadata?.[PLAYER_METADATA_KEY]);
-      player = await mergePlayerWithVecindad(admin, user.id, basePlayer);
+      const hydratedPlayer = await hydratePlayerFromDatabase(admin, user);
+      player = await mergePlayerWithVecindad(admin, user.id, hydratedPlayer);
     }
 
     return NextResponse.json({ parcels, player });
@@ -108,9 +109,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid vecindad action.' }, { status: 400 });
   }
 
-  let player = normalizePlayerState(user.user_metadata?.[PLAYER_METADATA_KEY]);
+  let player: PlayerState;
 
   try {
+    player = await hydratePlayerFromDatabase(admin, user);
     await ensurePlayerRow(admin, user, player);
     player = await mergePlayerWithVecindad(admin, user.id, player);
 
@@ -138,14 +140,19 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: `La parcela ${parcel.id} ya tiene duenio.` }, { status: 409 });
       }
 
-      if (player.tenks < parcel.cost) {
+      const debit = await debitBalance(admin, {
+        playerId: user.id,
+        amount: parcel.cost,
+        fallbackBalance: player.tenks,
+      });
+      if (!debit.ok) {
         return NextResponse.json({ error: `Necesitas ${parcel.cost} TENKS para comprar esta parcela.` }, { status: 400 });
       }
 
       const nextBuildStage = normalizeVecindadBuildStage(myParcel?.buildStage ?? player.vecindad.buildStage ?? 0);
       player = syncVecindadDeed({
         ...player,
-        tenks: Math.max(0, player.tenks - parcel.cost),
+        tenks: debit.newBalance,
         vecindad: {
           ...player.vecindad,
           ownedParcelId: parcel.id,
@@ -168,22 +175,60 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        await persistPlayerMetadata(admin, user, player);
         await ensurePlayerRow(admin, user, player, { syncTenksBalance: true });
+        player = await hydratePlayerFromDatabase(admin, user, player);
+        player = await mergePlayerWithVecindad(admin, user.id, player);
+        await persistPlayerMetadata(admin, user, player);
+        await appendTenksTransaction(admin, {
+          playerId: user.id,
+          amount: -parcel.cost,
+          reason: `vecindad_buy_${parcel.id.toLowerCase()}`,
+          balanceAfter: player.tenks,
+        });
       } catch (error) {
+        await creditBalance(admin, {
+          playerId: user.id,
+          amount: parcel.cost,
+          fallbackBalance: debit.newBalance,
+        }).catch(() => undefined);
         if (!myParcel) {
           await deleteVecindadParcel(admin, parcel.id).catch(() => undefined);
         }
         throw error;
       }
 
-        const parcels = await listVecindadParcels(admin);
-        return NextResponse.json({
-          player: await mergePlayerWithVecindad(admin, user.id, player),
-          parcels,
-          notice: `Compraste la parcela ${parcel.id}. La escritura ya esta en tu inventario. Ahora junta materiales y empeza a construir.`,
-        });
+      const parcels = await listVecindadParcels(admin);
+      return NextResponse.json({
+        player: await mergePlayerWithVecindad(admin, user.id, player),
+        parcels,
+        notice: `Compraste la parcela ${parcel.id}. La escritura ya esta en tu inventario. Ahora junta materiales y empeza a construir.`,
+      });
+    }
+
+    if (body.action === 'collect_materials') {
+      const amount = Math.floor(body.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return NextResponse.json({ error: 'Cantidad de materiales invalida.' }, { status: 400 });
       }
+
+      player = {
+        ...player,
+        vecindad: {
+          ...player.vecindad,
+          materials: Math.max(0, player.vecindad.materials + amount),
+        },
+      };
+
+      await ensurePlayerRow(admin, user, player);
+      player = await hydratePlayerFromDatabase(admin, user, player);
+      player = await mergePlayerWithVecindad(admin, user.id, player);
+      await persistPlayerMetadata(admin, user, player);
+
+      return NextResponse.json({
+        player,
+        notice: `+${amount} materiales`,
+      });
+    }
 
     const myParcel = await getUserVecindadParcel(admin, user.id);
     if (!myParcel) {
@@ -218,8 +263,10 @@ export async function POST(request: NextRequest) {
         buildStage: nextStage,
       });
       try {
-        await persistPlayerMetadata(admin, user, player);
         await ensurePlayerRow(admin, user, player);
+        player = await hydratePlayerFromDatabase(admin, user, player);
+        player = await mergePlayerWithVecindad(admin, user.id, player);
+        await persistPlayerMetadata(admin, user, player);
       } catch (error) {
         await updateVecindadParcelBuildStage(admin, {
           userId: user.id,
@@ -249,16 +296,41 @@ export async function POST(request: NextRequest) {
           notice: 'Cannabis Farm ya estaba desbloqueado.',
         });
       }
-      if (player.tenks < FARM_UNLOCK_COST) {
+      const debit = await debitBalance(admin, {
+        playerId: user.id,
+        amount: FARM_UNLOCK_COST,
+        fallbackBalance: player.tenks,
+      });
+      if (!debit.ok) {
         return NextResponse.json({ error: `Necesitas ${FARM_UNLOCK_COST} TENKS.` }, { status: 400 });
       }
+
       player = {
         ...player,
-        tenks: player.tenks - FARM_UNLOCK_COST,
+        tenks: debit.newBalance,
       };
-      await unlockPlayerFeature(admin, user.id, CANNABIS_FARM_UNLOCK_KEY);
-      await persistPlayerMetadata(admin, user, player);
-      await ensurePlayerRow(admin, user, player, { syncTenksBalance: true });
+
+      try {
+        await unlockPlayerFeature(admin, user.id, CANNABIS_FARM_UNLOCK_KEY);
+        await ensurePlayerRow(admin, user, player, { syncTenksBalance: true });
+        player = await hydratePlayerFromDatabase(admin, user, player);
+        player = await mergePlayerWithVecindad(admin, user.id, player);
+        await persistPlayerMetadata(admin, user, player);
+        await appendTenksTransaction(admin, {
+          playerId: user.id,
+          amount: -FARM_UNLOCK_COST,
+          reason: 'vecindad_farm_unlock',
+          balanceAfter: player.tenks,
+        });
+      } catch (error) {
+        await creditBalance(admin, {
+          playerId: user.id,
+          amount: FARM_UNLOCK_COST,
+          fallbackBalance: debit.newBalance,
+        }).catch(() => undefined);
+        throw error;
+      }
+
       const parcels = await listVecindadParcels(admin);
       return NextResponse.json({
         player: await mergePlayerWithVecindad(admin, user.id, player),
@@ -285,21 +357,47 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Ese slot ya esta ocupado.' }, { status: 409 });
       }
       const cfg = FARM_SEED_CONFIG[body.seedType];
-      if (player.tenks < cfg.cost) {
+      const debit = await debitBalance(admin, {
+        playerId: user.id,
+        amount: cfg.cost,
+        fallbackBalance: player.tenks,
+      });
+      if (!debit.ok) {
         return NextResponse.json({ error: `Necesitas ${cfg.cost} TENKS para esa semilla.` }, { status: 400 });
       }
+
       player = {
         ...player,
-        tenks: player.tenks - cfg.cost,
+        tenks: debit.newBalance,
       };
-      await upsertFarmPlant(admin, {
-        userId: user.id,
-        slotIndex,
-        seedType: body.seedType,
-        waterCount: 0,
-      });
-      await persistPlayerMetadata(admin, user, player);
-      await ensurePlayerRow(admin, user, player, { syncTenksBalance: true });
+
+      try {
+        await upsertFarmPlant(admin, {
+          userId: user.id,
+          slotIndex,
+          seedType: body.seedType,
+          waterCount: 0,
+        });
+        await ensurePlayerRow(admin, user, player, { syncTenksBalance: true });
+        player = await hydratePlayerFromDatabase(admin, user, player);
+        player = await mergePlayerWithVecindad(admin, user.id, player);
+        await persistPlayerMetadata(admin, user, player);
+        await appendTenksTransaction(admin, {
+          playerId: user.id,
+          amount: -cfg.cost,
+          reason: `vecindad_seed_${body.seedType}`,
+          balanceAfter: player.tenks,
+        });
+      } catch (error) {
+        await creditBalance(admin, {
+          playerId: user.id,
+          amount: cfg.cost,
+          fallbackBalance: debit.newBalance,
+        }).catch(() => undefined);
+        await clearFarmPlant(admin, user.id, slotIndex).catch(() => undefined);
+        throw error;
+      }
+
       const parcels = await listVecindadParcels(admin);
       return NextResponse.json({
         player: await mergePlayerWithVecindad(admin, user.id, player),
@@ -325,6 +423,9 @@ export async function POST(request: NextRequest) {
         wateredAt: new Date(),
         waterCount: Math.min(2, plant.waterCount + 1),
       });
+      player = await hydratePlayerFromDatabase(admin, user, player);
+      player = await mergePlayerWithVecindad(admin, user.id, player);
+      await persistPlayerMetadata(admin, user, player);
       const parcels = await listVecindadParcels(admin);
       return NextResponse.json({
         player: await mergePlayerWithVecindad(admin, user.id, player),
@@ -349,13 +450,47 @@ export async function POST(request: NextRequest) {
       const qualityBonus = plant.waterCount >= 1 ? 0.2 : 0;
       const variance = 0.9 + Math.random() * 0.2;
       const reward = Math.max(1, Math.floor(cfg.rewardBase * (1 + qualityBonus) * variance));
+
+      const credit = await creditBalance(admin, {
+        playerId: user.id,
+        amount: reward,
+        fallbackBalance: player.tenks,
+      });
+
       player = {
         ...player,
-        tenks: player.tenks + reward,
+        tenks: credit.newBalance,
       };
-      await clearFarmPlant(admin, user.id, slotIndex);
-      await persistPlayerMetadata(admin, user, player);
-      await ensurePlayerRow(admin, user, player, { syncTenksBalance: true });
+
+      try {
+        await clearFarmPlant(admin, user.id, slotIndex);
+        await ensurePlayerRow(admin, user, player, { syncTenksBalance: true });
+        player = await hydratePlayerFromDatabase(admin, user, player);
+        player = await mergePlayerWithVecindad(admin, user.id, player);
+        await persistPlayerMetadata(admin, user, player);
+        await appendTenksTransaction(admin, {
+          playerId: user.id,
+          amount: reward,
+          reason: `vecindad_harvest_${plant.seedType}`,
+          balanceAfter: player.tenks,
+        });
+      } catch (error) {
+        await debitBalance(admin, {
+          playerId: user.id,
+          amount: reward,
+          fallbackBalance: credit.newBalance,
+        }).catch(() => undefined);
+        await upsertFarmPlant(admin, {
+          userId: user.id,
+          slotIndex,
+          seedType: plant.seedType,
+          plantedAt: new Date(plant.plantedAt),
+          wateredAt: plant.wateredAt ? new Date(plant.wateredAt) : undefined,
+          waterCount: plant.waterCount,
+        }).catch(() => undefined);
+        throw error;
+      }
+
       const parcels = await listVecindadParcels(admin);
       return NextResponse.json({
         player: await mergePlayerWithVecindad(admin, user.id, player),

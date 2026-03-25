@@ -6,7 +6,7 @@ import {
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
 import { appendTenksTransaction } from '@/src/lib/commercePersistence';
-import { debitBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
+import { creditBalance, debitBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
 
 const MAX_SONGS_PER_PLAYER = 3;
 const COST_CATALOG = 0;
@@ -83,13 +83,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
-  if (serverBalance < cost) {
-    return NextResponse.json(
-      { error: `Necesitás ${cost} TENKS para agregar una canción. Tenés ${serverBalance}.`, balance: serverBalance },
-      { status: 400 }
-    );
-  }
-
   let newBalance = serverBalance;
   if (cost > 0) {
     const debit = await debitBalance(admin, {
@@ -126,9 +119,13 @@ export async function POST(request: NextRequest) {
   if (insertError) {
     // Compensating refund if queue insert fails
     if (cost > 0) {
-      await admin
-        .from('player_tenks_balance')
-        .upsert({ player_id: user.id, balance: serverBalance });
+      await creditBalance(admin, {
+        playerId: user.id,
+        amount: cost,
+        fallbackBalance: newBalance,
+      }).catch((refundError) => {
+        console.error('POST /api/jukebox/add refund failed after insert error:', refundError);
+      });
     }
 
     return NextResponse.json({ error: insertError.message }, { status: 500 });
@@ -163,3 +160,4 @@ export async function POST(request: NextRequest) {
     queuePosition,
   });
 }
+

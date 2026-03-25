@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getAuthenticatedUser, isServerSupabaseConfigured } from '@/src/lib/supabaseServer';
 import type { PlayerStats } from '@/src/game/systems/StatsSystem';
 
+type PlayerStatsResponse = PlayerStats & {
+  xp: number;
+  level: number;
+};
+
 export async function GET(request: NextRequest) {
   if (!isServerSupabaseConfigured) {
     return NextResponse.json({ error: 'not_configured' }, { status: 503 });
@@ -18,14 +23,14 @@ export async function GET(request: NextRequest) {
     .from('player_stats')
     .select('*')
     .eq('user_id', user.id)
-    .maybeSingle<PlayerStats & { user_id: string; updated_at: string }>();
+    .maybeSingle<PlayerStatsResponse & { user_id: string; updated_at: string }>();
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   // Row might not exist yet for a new player — return zeroed defaults
-  const stats: PlayerStats = data ?? {
+  const stats: PlayerStatsResponse = data ?? {
     zombie_kills: 0,
     pvp_kills: 0,
     deaths: 0,
@@ -43,6 +48,8 @@ export async function GET(request: NextRequest) {
     penalty_saves: 0,
     penalty_wins: 0,
     penalty_losses: 0,
+    xp: 0,
+    level: 1,
   };
 
   return NextResponse.json({ stats });

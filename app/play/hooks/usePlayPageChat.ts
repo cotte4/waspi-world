@@ -16,6 +16,7 @@ type UsePlayPageChatOptions = {
   mutedPlayersRef: MutableRefObject<string[]>;
   playUiSfx: (freq: number, duration: number, sweep?: number) => void;
   playerState: PlayerState | null;
+  persistEditablePlayerPatch: (patch: Partial<PlayerState>) => Promise<PlayerState | null>;
   setShopStatus: (status: string) => void;
   syncPlayerState: (overridePlayerState?: PlayerState) => Promise<void>;
   tokenRef: MutableRefObject<string | null>;
@@ -30,6 +31,7 @@ export function usePlayPageChat({
   mutedPlayersRef,
   playUiSfx,
   playerState,
+  persistEditablePlayerPatch,
   setShopStatus,
   syncPlayerState,
   tokenRef,
@@ -49,14 +51,19 @@ export function usePlayPageChat({
 
   const handleMutePlayer = useCallback(() => {
     if (!playerActions || !playerState) return;
-    const next = mutePlayer(playerState, playerActions.playerId);
+    const target = playerActions;
+    const next = mutePlayer(playerState, target.playerId);
     applyPlayerState(next);
-    void syncPlayerState();
+    if (tokenRef.current) {
+      void persistEditablePlayerPatch({ mutedPlayers: next.mutedPlayers });
+    } else {
+      void syncPlayerState();
+    }
     setMessages((prev) => prev.filter((msg) => msg.playerId !== playerActions.playerId));
     setPlayerActions(null);
-    setShopStatus(`${playerActions.username} silenciado.`);
-    eventBus.emit(EVENTS.PLAYER_ACTION_MUTE, { playerId: playerActions.playerId });
-  }, [applyPlayerState, playerActions, playerState, setShopStatus, syncPlayerState]);
+    setShopStatus(`${target.username} silenciado.`);
+    eventBus.emit(EVENTS.PLAYER_ACTION_MUTE, { playerId: target.playerId });
+  }, [applyPlayerState, persistEditablePlayerPatch, playerActions, playerState, setShopStatus, syncPlayerState, tokenRef]);
 
   const handleReportPlayer = useCallback(() => {
     if (!playerActions) return;

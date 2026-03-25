@@ -31,8 +31,6 @@ export interface ShopOverlayProps {
   checkoutRedirecting: boolean;
   selectedSize: string;
   onSizeChange: (s: string) => void;
-  discountCode: string;
-  onDiscountChange: (s: string) => void;
   shopStatus: string;
   orders: OrderRow[];
   ordersLoaded: boolean;
@@ -179,19 +177,15 @@ function VirtualCard({
 }
 
 // ── physical item card ────────────────────────────────────────────────────────
-function PhysicalCard({
-  item, selectedSize, onSizeChange, discountCode, onDiscountChange,
-  checkoutRedirecting, isAuthenticated, onBuy,
-}: {
+function PhysicalCard(props: {
   item: CatalogItem;
   selectedSize: string;
   onSizeChange: (s: string) => void;
-  discountCode: string;
-  onDiscountChange: (s: string) => void;
   checkoutRedirecting: boolean;
   isAuthenticated: boolean;
   onBuy: () => void;
 }) {
+  const { item, selectedSize, onSizeChange, checkoutRedirecting, isAuthenticated, onBuy } = props;
   const swatchColor = toHex(item.color ?? 0x555555);
   const [open, setOpen] = useState(false);
   const canBuy = isAuthenticated && !!selectedSize && !checkoutRedirecting;
@@ -224,7 +218,7 @@ function PhysicalCard({
         </div>
       </div>
 
-      {/* Expanded: size + coupon + buy */}
+      {/* Expanded: size + buy */}
       {open && (
         <div style={{ padding: '10px 14px 12px', borderTop: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {/* Sizes */}
@@ -255,27 +249,6 @@ function PhysicalCard({
             </div>
           )}
 
-          {/* Coupon */}
-          <div>
-            <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 6, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em', marginBottom: 5 }}>
-              CUPÓN (OPCIONAL)
-            </div>
-            <input
-              type="text"
-              placeholder="WASPI2026"
-              value={discountCode}
-              onChange={e => onDiscountChange(e.target.value.toUpperCase())}
-              style={{
-                width: '100%', boxSizing: 'border-box',
-                background: 'rgba(0,0,0,0.5)',
-                border: '1px solid rgba(245,200,66,0.18)',
-                color: '#F5C842',
-                fontFamily: '"Press Start 2P", monospace', fontSize: 8,
-                padding: '7px 9px', outline: 'none', letterSpacing: '0.08em',
-              }}
-            />
-          </div>
-
           <button
             onClick={onBuy}
             disabled={!canBuy}
@@ -298,7 +271,7 @@ export default function ShopOverlay({
   isMobile, shopTab, onTabChange, onClose,
   clothingItems, owned, equipped, tenks, isAuthenticated,
   checkoutBusyId, checkoutRedirecting,
-  selectedSize, onSizeChange, discountCode, onDiscountChange,
+  selectedSize, onSizeChange,
   shopStatus, orders, ordersLoaded, ordersLoading, onLoadOrders,
   onBuyVirtual, onEquip, onBuyPhysical, onBuyPack,
 }: ShopOverlayProps) {
@@ -375,7 +348,7 @@ export default function ShopOverlay({
           {shopTab === 'tenks_virtual' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div style={{ fontFamily: 'Silkscreen, monospace', fontSize: 11, color: 'rgba(255,255,255,0.38)', marginBottom: 4 }}>
-                Comprá con TENKS · Se equipa al instante en tu avatar
+                Comprá con TENKS · Solo con sesión iniciada
               </div>
               {clothingItems.map(item => {
                 const isOwned   = owned.includes(item.id);
@@ -400,7 +373,7 @@ export default function ShopOverlay({
           {shopTab === 'physical' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div style={{ fontFamily: 'Silkscreen, monospace', fontSize: 11, color: 'rgba(255,255,255,0.38)', marginBottom: 4 }}>
-                Ropa física WASPI · Pago seguro via Stripe · Envío Argentina 3-5 días
+                Ropa física WASPI · Pago seguro via Stripe · El look digital se suma a tu WASPI
               </div>
               {getPhysicalCatalog().map(item => (
                 <PhysicalCard
@@ -408,8 +381,6 @@ export default function ShopOverlay({
                   item={item}
                   selectedSize={selectedSize}
                   onSizeChange={onSizeChange}
-                  discountCode={discountCode}
-                  onDiscountChange={onDiscountChange}
                   checkoutRedirecting={checkoutRedirecting}
                   isAuthenticated={isAuthenticated}
                   onBuy={() => onBuyPhysical(item)}
@@ -522,9 +493,6 @@ export default function ShopOverlay({
                           <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 6, color: 'rgba(255,255,255,0.35)', letterSpacing: '0.04em' }}>
                             {item?.size ? `T.${item.size} · ` : ''}{dateStr}
                           </div>
-                          {order.discount_code && (
-                            <div style={{ fontFamily: 'Silkscreen, monospace', fontSize: 11, color: '#39FF14', marginTop: 3 }}>↳ {order.discount_code}</div>
-                          )}
                         </div>
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
                           <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 9, color: '#F5C842', marginBottom: 6 }}>

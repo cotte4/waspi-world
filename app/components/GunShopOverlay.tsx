@@ -4,8 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 import { CATALOG } from '@/src/game/config/catalog';
 import { getTenksBalance, initTenks } from '@/src/game/systems/TenksSystem';
-import { getInventory, ownItem, ensureItemEquipped, replaceInventory } from '@/src/game/systems/InventorySystem';
+import { getInventory } from '@/src/game/systems/InventorySystem';
 import { supabase, isConfigured } from '@/src/lib/supabase';
+import type { PlayerState } from '@/src/lib/playerState';
 
 const S = {
   bg: '#0E0E14',
@@ -41,7 +42,6 @@ async function syncTenksFromServer(token: string): Promise<number | null> {
 
 async function buyGunItem(
   itemId: string,
-  priceTenks: number,
 ): Promise<{ success: boolean; message: string }> {
   const item = CATALOG.find((i) => i.id === itemId);
   if (item?.comingSoon) {
@@ -49,13 +49,7 @@ async function buyGunItem(
   }
 
   if (!supabase || !isConfigured) {
-    if (getTenksBalance() < priceTenks) {
-      return { success: false, message: `Necesitás ${priceTenks.toLocaleString('es-AR')} TENKS.` };
-    }
-    ownItem(itemId);
-    ensureItemEquipped(itemId);
-    initTenks(getTenksBalance() - priceTenks);
-    return { success: true, message: `${itemId} equipado (modo offline).` };
+    return { success: false, message: 'Tenés que iniciar sesión para gastar TENKS.' };
   }
 
   const token = await getSessionToken();
@@ -79,19 +73,12 @@ async function buyGunItem(
   }
 
   const result = await res.json() as {
-    player?: { tenks?: number; inventory?: { owned: string[]; equipped: Record<string, unknown> } };
+    player?: PlayerState;
     notice?: string;
   };
 
-  if (result.player?.inventory) {
-    replaceInventory(result.player.inventory as Parameters<typeof replaceInventory>[0]);
-  } else {
-    ownItem(itemId);
-  }
-  ensureItemEquipped(itemId);
-
-  if (typeof result.player?.tenks === 'number') {
-    initTenks(result.player.tenks);
+  if (result.player) {
+    eventBus.emit(EVENTS.PLAYER_STATE_APPLY, result.player);
   } else {
     await syncTenksFromServer(token);
   }
@@ -157,9 +144,9 @@ export default function GunShopOverlay({ isMobile }: GunShopOverlayProps) {
     noticeTimerRef.current = window.setTimeout(() => setNotice(null), 2800);
   }, []);
 
-  const handleBuy = useCallback(async (itemId: string, priceTenks: number) => {
+  const handleBuy = useCallback(async (itemId: string) => {
     setBusyId(itemId);
-    const result = await buyGunItem(itemId, priceTenks);
+    const result = await buyGunItem(itemId);
     setBusyId(null);
     if (result.success) {
       setResultMap((prev) => ({ ...prev, [itemId]: 'ok' }));
@@ -363,7 +350,7 @@ export default function GunShopOverlay({ isMobile }: GunShopOverlayProps) {
                   {!isOwned && !comingSoon && (
                     <button
                       disabled={isBusy}
-                      onClick={() => { void handleBuy(item.id, item.priceTenks); }}
+                      onClick={() => { void handleBuy(item.id); }}
                       style={{
                         fontFamily: S.fontHud,
                         fontSize: 7,
@@ -404,3 +391,5 @@ export default function GunShopOverlay({ isMobile }: GunShopOverlayProps) {
     </div>
   );
 }
+
+

@@ -171,8 +171,6 @@ export function createDefaultVecindadState(): VecindadStateLike {
   };
 }
 
-// Future WorldScene integration:
-// `loadVecindadState()` -> parse `waspi_player_state` and assign `this.vecindadState`.
 export function loadVecindadStateFromStorage(raw: string | null | undefined): VecindadStateLike {
   if (!raw) return createDefaultVecindadState();
 

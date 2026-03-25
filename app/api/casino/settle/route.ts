@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { appendTenksTransaction } from '@/src/lib/commercePersistence';
+import { appendTenksTransaction, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
 import {
   createSupabaseAdminClient,
   getAuthenticatedUser,
@@ -106,6 +106,8 @@ export async function POST(request: NextRequest) {
   }
 
   let newBalance = 0;
+  let debitedWager = false;
+  let creditedPayout = false;
   try {
     const debit = await debitBalance(admin, {
       playerId: user.id,
@@ -125,6 +127,7 @@ export async function POST(request: NextRequest) {
     }
 
     newBalance = debit.newBalance;
+    debitedWager = wager > 0;
 
     if (wager > 0) {
       await appendTenksTransaction(admin, {
@@ -143,6 +146,7 @@ export async function POST(request: NextRequest) {
         defaultBalance: newBalance,
       });
       newBalance = credit.newBalance;
+      creditedPayout = true;
 
       await appendTenksTransaction(admin, {
         playerId: user.id,
@@ -152,17 +156,21 @@ export async function POST(request: NextRequest) {
       });
     }
   } catch (error) {
-    if (newBalance > 0 && payout === 0) {
-      try {
-        await creditBalance(admin, {
-          playerId: user.id,
-          amount: wager,
-          fallbackBalance: newBalance,
-          defaultBalance: newBalance,
-        });
-      } catch {
-        // Keep the original error path; balance can be inspected from the authoritative table.
-      }
+    if (creditedPayout) {
+      await debitBalance(admin, {
+        playerId: user.id,
+        amount: payout,
+        fallbackBalance: newBalance,
+        defaultBalance: newBalance,
+      }).catch(() => undefined);
+    }
+    if (debitedWager) {
+      await creditBalance(admin, {
+        playerId: user.id,
+        amount: wager,
+        fallbackBalance: creditedPayout ? Math.max(0, newBalance - payout) : newBalance,
+        defaultBalance: creditedPayout ? Math.max(0, newBalance - payout) : newBalance,
+      }).catch(() => undefined);
     }
 
     await admin
@@ -180,7 +188,34 @@ export async function POST(request: NextRequest) {
     .eq('id', inserted.id);
 
   if (finalizeError) {
+    if (creditedPayout) {
+      await debitBalance(admin, {
+        playerId: user.id,
+        amount: payout,
+        fallbackBalance: newBalance,
+        defaultBalance: newBalance,
+      }).catch(() => undefined);
+    }
+    if (debitedWager) {
+      const rollbackBase = creditedPayout ? Math.max(0, newBalance - payout) : newBalance;
+      await creditBalance(admin, {
+        playerId: user.id,
+        amount: wager,
+        fallbackBalance: rollbackBase,
+        defaultBalance: rollbackBase,
+      }).catch(() => undefined);
+    }
+    await admin
+      .from('game_sessions')
+      .update({ result: 'failed' })
+      .eq('id', inserted.id);
     return NextResponse.json({ error: finalizeError.message }, { status: 500 });
+  }
+
+  try {
+    await syncPlayerMetadataSnapshot(admin, user);
+  } catch (error) {
+    console.error('[Waspi][casino/settle] snapshot sync failed:', error);
   }
 
   return NextResponse.json({

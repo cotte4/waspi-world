@@ -13,8 +13,8 @@ import {
   hasServiceRole,
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
-import { appendTenksTransaction } from '@/src/lib/commercePersistence';
-import { creditBalance } from '@/src/lib/tenksBalance';
+import { appendTenksTransaction, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
+import { creditBalance, debitBalance } from '@/src/lib/tenksBalance';
 
 // ---------------------------------------------------------------------------
 // Constants — server-authoritative, never trust the client for amounts
@@ -127,12 +127,23 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Record cooldown ────────────────────────────────────────────────────────
-  await admin
+  const { error: cooldownError } = await admin
     .from('weed_delivery_cooldowns')
     .upsert(
       { player_id: user.id, npc_id: npcId, delivered_at: new Date().toISOString() },
       { onConflict: 'player_id,npc_id' },
     );
+
+  if (cooldownError) {
+    await debitBalance(admin, {
+      playerId: user.id,
+      amount: tenksEarned,
+      fallbackBalance: newBalance,
+    }).catch((rollbackError) => {
+      console.error('[weed/deliver] TENKS rollback failed after cooldown error:', rollbackError);
+    });
+    return NextResponse.json({ error: cooldownError.message }, { status: 500 });
+  }
 
   // ── Log TENKS transaction ──────────────────────────────────────────────────
   try {
@@ -195,6 +206,12 @@ export async function POST(request: NextRequest) {
   } catch (xpErr) {
     // XP grant is non-fatal — TENKS were already awarded
     console.error('[weed/deliver] XP grant failed:', xpErr);
+  }
+
+  try {
+    await syncPlayerMetadataSnapshot(admin, user);
+  } catch (error) {
+    console.error('[Waspi][weed/deliver] snapshot sync failed:', error);
   }
 
   return NextResponse.json({

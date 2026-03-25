@@ -2,18 +2,22 @@
 
 import React from 'react';
 
-// ── types ─────────────────────────────────────────────────────────────────────
-
 export interface LoginCardProps {
+  authMode: 'login' | 'signup';
   emailInput: string;
   onEmailChange: (v: string) => void;
+  passwordInput: string;
+  onPasswordChange: (v: string) => void;
+  rememberMe: boolean;
+  onRememberMeChange: (v: boolean) => void;
   authBusy: boolean;
   authStatus: string;
+  onPasswordSubmit: () => void;
+  onModeChange: (mode: 'login' | 'signup') => void;
+  onResetPassword: () => void;
   onMagicLink: () => void;
   onGoogle: () => void;
 }
-
-// ── helpers ───────────────────────────────────────────────────────────────────
 
 function buttonStyle(
   bg: string,
@@ -38,8 +42,6 @@ function buttonStyle(
     opacity: disabled ? 0.6 : 1,
   };
 }
-
-// ── Google SVG icon ───────────────────────────────────────────────────────────
 
 function GoogleIcon() {
   return (
@@ -70,13 +72,34 @@ function GoogleIcon() {
   );
 }
 
-// ── component ─────────────────────────────────────────────────────────────────
+function inputStyle(borderColor: string): React.CSSProperties {
+  return {
+    width: '100%',
+    padding: '6px 8px',
+    fontFamily: '"Silkscreen", monospace',
+    fontSize: 10,
+    color: '#FFFFFF',
+    background: 'rgba(255,255,255,0.05)',
+    border: `1px solid ${borderColor}`,
+    outline: 'none',
+    borderRadius: 2,
+    boxSizing: 'border-box',
+  };
+}
 
 export default function LoginCard({
+  authMode,
   emailInput,
   onEmailChange,
+  passwordInput,
+  onPasswordChange,
+  rememberMe,
+  onRememberMeChange,
   authBusy,
   authStatus,
+  onPasswordSubmit,
+  onModeChange,
+  onResetPassword,
   onMagicLink,
   onGoogle,
 }: LoginCardProps) {
@@ -86,7 +109,7 @@ export default function LoginCard({
       style={{
         bottom: 8,
         right: 8,
-        width: 228,
+        width: 272,
         background: 'rgba(0,0,0,0.82)',
         border: '1px solid rgba(245,200,66,0.2)',
         padding: '10px',
@@ -95,7 +118,6 @@ export default function LoginCard({
         zIndex: 12,
       }}
     >
-      {/* Header */}
       <div
         style={{
           fontFamily: '"Press Start 2P", monospace',
@@ -116,28 +138,43 @@ export default function LoginCard({
           letterSpacing: '0.04em',
         }}
       >
-        Guarda progreso y avatar
+        Guarda progreso, TENKS y nivel
       </div>
 
-      {/* Email input + magic link */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
+        <button
+          onClick={() => onModeChange('login')}
+          disabled={authBusy}
+          style={buttonStyle(
+            authMode === 'login' ? '#F5C842' : 'rgba(255,255,255,0.06)',
+            authMode === 'login' ? '#0E0E14' : '#FFFFFF',
+            authBusy,
+            authMode !== 'login'
+          )}
+        >
+          LOGIN
+        </button>
+        <button
+          onClick={() => onModeChange('signup')}
+          disabled={authBusy}
+          style={buttonStyle(
+            authMode === 'signup' ? '#46B3FF' : 'rgba(255,255,255,0.06)',
+            '#FFFFFF',
+            authBusy,
+            authMode !== 'signup'
+          )}
+        >
+          SIGN UP
+        </button>
+      </div>
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <input
           value={emailInput}
           onChange={(e) => onEmailChange(e.target.value)}
           placeholder="email@waspi.world"
           autoComplete="email"
-          style={{
-            width: '100%',
-            padding: '6px 8px',
-            fontFamily: '"Silkscreen", monospace',
-            fontSize: 10,
-            color: '#FFFFFF',
-            background: 'rgba(255,255,255,0.05)',
-            border: '1px solid rgba(245,200,66,0.25)',
-            outline: 'none',
-            borderRadius: 2,
-            boxSizing: 'border-box',
-          }}
+          style={inputStyle('rgba(245,200,66,0.25)')}
           onFocus={(e) => {
             e.currentTarget.style.borderColor = 'rgba(245,200,66,0.65)';
           }}
@@ -145,16 +182,87 @@ export default function LoginCard({
             e.currentTarget.style.borderColor = 'rgba(245,200,66,0.25)';
           }}
         />
-        <button
-          onClick={onMagicLink}
-          disabled={authBusy}
-          style={buttonStyle('#F5C842', '#0E0E14', authBusy)}
+        <input
+          value={passwordInput}
+          onChange={(e) => onPasswordChange(e.target.value)}
+          placeholder={authMode === 'signup' ? 'min 6 caracteres' : 'tu password'}
+          autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
+          type="password"
+          style={inputStyle('rgba(70,179,255,0.25)')}
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(70,179,255,0.65)';
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(70,179,255,0.25)';
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onPasswordSubmit();
+          }}
+        />
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontFamily: '"Silkscreen", monospace',
+            fontSize: 10,
+            color: 'rgba(255,255,255,0.72)',
+          }}
         >
-          {authBusy ? 'ENVIANDO...' : 'MAGIC LINK ✉'}
+          <input
+            type="checkbox"
+            checked={rememberMe}
+            onChange={(e) => onRememberMeChange(e.target.checked)}
+            disabled={authBusy}
+          />
+          Recordarme en este dispositivo
+        </label>
+        <button
+          onClick={onPasswordSubmit}
+          disabled={authBusy}
+          style={buttonStyle(
+            authMode === 'signup' ? '#46B3FF' : '#F5C842',
+            authMode === 'signup' ? '#FFFFFF' : '#0E0E14',
+            authBusy
+          )}
+        >
+          {authBusy ? 'PROCESANDO...' : authMode === 'signup' ? 'CREAR CUENTA' : 'ENTRAR CON PASSWORD'}
         </button>
       </div>
 
-      {/* Divider */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, gap: 8 }}>
+        <button
+          onClick={onResetPassword}
+          disabled={authBusy}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            padding: 0,
+            color: 'rgba(255,255,255,0.55)',
+            fontFamily: '"Silkscreen", monospace',
+            fontSize: 9,
+            cursor: authBusy ? 'not-allowed' : 'pointer',
+          }}
+        >
+          Olvide mi password
+        </button>
+        <button
+          onClick={onMagicLink}
+          disabled={authBusy}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            padding: 0,
+            color: '#F5C842',
+            fontFamily: '"Silkscreen", monospace',
+            fontSize: 9,
+            cursor: authBusy ? 'not-allowed' : 'pointer',
+          }}
+        >
+          Usar magic link
+        </button>
+      </div>
+
       <div
         style={{
           display: 'flex',
@@ -176,7 +284,6 @@ export default function LoginCard({
         <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.1)' }} />
       </div>
 
-      {/* Google button */}
       <button
         onClick={onGoogle}
         disabled={authBusy}
@@ -192,7 +299,6 @@ export default function LoginCard({
         ENTRAR CON GOOGLE
       </button>
 
-      {/* Status message */}
       <div
         style={{
           fontFamily: '"Silkscreen", monospace',
@@ -204,7 +310,7 @@ export default function LoginCard({
           lineHeight: 1.4,
         }}
       >
-        {authStatus || 'Guarda TENKS, inventario y avatar.'}
+        {authStatus || 'Tu cuenta ahora puede usar password, Google o magic link.'}
       </div>
     </div>
   );

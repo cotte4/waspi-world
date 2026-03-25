@@ -50,6 +50,7 @@ const DEFAULT_STATS: PlayerStats = {
 };
 
 let cache: PlayerStats = { ...DEFAULT_STATS };
+let baseCache: PlayerStats = { ...DEFAULT_STATS };
 let userId: string | null = null;
 let dirty = false;
 let currentStreak = 0;
@@ -61,17 +62,87 @@ let eventUnsubs: Array<() => void> = [];
 
 async function flush(): Promise<void> {
   if (!dirty || !userId || !supabase) return;
-  dirty = false;
+  const { data: current, error: currentError } = await supabase
+    .from('player_stats')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle<PlayerStats & { user_id: string; updated_at: string }>();
+
+  if (currentError) {
+    console.warn('[StatsSystem] flush preload error', currentError.message);
+    return;
+  }
+
+  const currentStats: PlayerStats = current ? {
+    zombie_kills: current.zombie_kills,
+    pvp_kills: current.pvp_kills,
+    deaths: current.deaths,
+    kill_streak_best: current.kill_streak_best,
+    tenks_earned: current.tenks_earned,
+    tenks_spent: current.tenks_spent,
+    time_played_seconds: current.time_played_seconds,
+    distance_walked: current.distance_walked,
+    zones_visited: Array.isArray(current.zones_visited) ? current.zones_visited : [],
+    npcs_talked_to: current.npcs_talked_to,
+    basket_best_score: current.basket_best_score,
+    basket_shots: current.basket_shots,
+    basket_makes: current.basket_makes,
+    penalty_goals: current.penalty_goals,
+    penalty_saves: current.penalty_saves,
+    penalty_wins: current.penalty_wins,
+    penalty_losses: current.penalty_losses,
+  } : { ...DEFAULT_STATS };
+
+  const numericDelta = (key: keyof Pick<PlayerStats,
+    'zombie_kills' |
+    'pvp_kills' |
+    'deaths' |
+    'tenks_earned' |
+    'tenks_spent' |
+    'time_played_seconds' |
+    'distance_walked' |
+    'npcs_talked_to' |
+    'basket_shots' |
+    'basket_makes' |
+    'penalty_goals' |
+    'penalty_saves' |
+    'penalty_wins' |
+    'penalty_losses'>) => Math.max(0, cache[key] - baseCache[key]);
+
+  const merged: PlayerStats = {
+    zombie_kills: currentStats.zombie_kills + numericDelta('zombie_kills'),
+    pvp_kills: currentStats.pvp_kills + numericDelta('pvp_kills'),
+    deaths: currentStats.deaths + numericDelta('deaths'),
+    kill_streak_best: Math.max(currentStats.kill_streak_best, cache.kill_streak_best),
+    tenks_earned: currentStats.tenks_earned + numericDelta('tenks_earned'),
+    tenks_spent: currentStats.tenks_spent + numericDelta('tenks_spent'),
+    time_played_seconds: currentStats.time_played_seconds + numericDelta('time_played_seconds'),
+    distance_walked: currentStats.distance_walked + numericDelta('distance_walked'),
+    zones_visited: Array.from(new Set([...(currentStats.zones_visited ?? []), ...(cache.zones_visited ?? [])])),
+    npcs_talked_to: currentStats.npcs_talked_to + numericDelta('npcs_talked_to'),
+    basket_best_score: Math.max(currentStats.basket_best_score, cache.basket_best_score),
+    basket_shots: currentStats.basket_shots + numericDelta('basket_shots'),
+    basket_makes: currentStats.basket_makes + numericDelta('basket_makes'),
+    penalty_goals: currentStats.penalty_goals + numericDelta('penalty_goals'),
+    penalty_saves: currentStats.penalty_saves + numericDelta('penalty_saves'),
+    penalty_wins: currentStats.penalty_wins + numericDelta('penalty_wins'),
+    penalty_losses: currentStats.penalty_losses + numericDelta('penalty_losses'),
+  };
+
   const { error } = await supabase
     .from('player_stats')
     .upsert(
-      { user_id: userId, ...cache, updated_at: new Date().toISOString() },
+      { user_id: userId, ...merged, updated_at: new Date().toISOString() },
       { onConflict: 'user_id' }
     );
   if (error) {
-    dirty = true; // retry on next tick
     console.warn('[StatsSystem] flush error', error.message);
+    return;
   }
+
+  cache = merged;
+  baseCache = { ...merged };
+  dirty = false;
 }
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -110,6 +181,7 @@ export async function initStatsSystem(uid: string): Promise<void> {
         penalty_wins: data.penalty_wins,
         penalty_losses: data.penalty_losses,
       };
+      baseCache = { ...cache };
     }
   }
 
@@ -164,6 +236,7 @@ export function teardownStatsSystem(): void {
     flushTimer = null;
   }
   cache = { ...DEFAULT_STATS };
+  baseCache = { ...DEFAULT_STATS };
   userId = null;
   dirty = false;
   currentStreak = 0;

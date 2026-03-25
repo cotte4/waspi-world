@@ -5,7 +5,9 @@ import {
   hasServiceRole,
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
-import { debitBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
+import { ensurePlayerRow, hydratePlayerFromDatabase, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
+import type { HairStyle } from '@/src/game/systems/AvatarRenderer';
+import { creditBalance, debitBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
 
 // ─── Style catalogue (server-authoritative) ───────────────────────────────────
 // style_id maps to the HairStyle values in AvatarRenderer.ts
@@ -59,13 +61,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
-  if (currentBalance < cost) {
-    return NextResponse.json(
-      { error: 'Saldo insuficiente de TENKS.', current_balance: currentBalance, cost },
-      { status: 402 },
-    );
-  }
-
   // ── 2. Deduct TENKS ────────────────────────────────────────────────────────
   const debit = await debitBalance(admin, {
     playerId: user.id,
@@ -83,46 +78,34 @@ export async function POST(request: NextRequest) {
   const newBalance = debit.newBalance;
 
   // ── 3. Persist hair style in user_metadata ─────────────────────────────────
-  // We store it inside the existing waspiPlayer metadata blob so it loads on next
-  // GET /api/player without a separate table.
-  const { data: userData, error: userFetchError } = await admin.auth.admin.getUserById(user.id);
-  if (userFetchError) {
-    return NextResponse.json({ error: userFetchError.message }, { status: 500 });
-  }
-
-  const existingMeta = userData.user?.user_metadata ?? {};
-  const existingPlayer = (existingMeta['waspiPlayer'] && typeof existingMeta['waspiPlayer'] === 'object')
-    ? existingMeta['waspiPlayer'] as Record<string, unknown>
-    : {};
-  const existingAvatar = (existingPlayer['avatar'] && typeof existingPlayer['avatar'] === 'object')
-    ? existingPlayer['avatar'] as Record<string, unknown>
-    : {};
-
-  const { error: updateError } = await admin.auth.admin.updateUserById(user.id, {
-    user_metadata: {
-      ...existingMeta,
-      waspiPlayer: {
-        ...existingPlayer,
-        avatar: {
-          ...existingAvatar,
-          hairStyle: styleId,
-        },
-      },
+  // Persist hairstyle through the DB-backed player row, then refresh the
+  // compatibility snapshot so legacy readers still see the latest avatar state.
+  const currentPlayer = await hydratePlayerFromDatabase(admin, user);
+  const nextPlayer = {
+    ...currentPlayer,
+    tenks: newBalance,
+    avatar: {
+      ...currentPlayer.avatar,
+      hairStyle: styleId as HairStyle,
     },
-  });
-
-  if (updateError) {
-    // TENKS were already deducted — still return success but with a warning so the
-    // client can persist locally.
-    console.error('[Waspi][barbershop] user_metadata update failed after deduct:', updateError.message);
-    return NextResponse.json({
-      success: true,
-      new_balance: newBalance,
-      style_id: styleId,
-      notice: 'Estilo aplicado, pero no se pudo persistir en el servidor. Se guardará localmente.',
-    });
+  };
+  try {
+    await ensurePlayerRow(admin, user, nextPlayer);
+    await syncPlayerMetadataSnapshot(admin, user, nextPlayer);
+  } catch (error) {
+    try {
+      await creditBalance(admin, {
+        playerId: user.id,
+        amount: cost,
+        fallbackBalance: newBalance,
+      });
+    } catch (refundError) {
+      console.error('[Waspi][barbershop] refund failed after persistence error:', refundError);
+    }
+    const message = error instanceof Error ? error.message : 'Unknown metadata update failure.';
+    console.error('[Waspi][barbershop] user_metadata update failed after deduct:', message);
+    return NextResponse.json({ error: 'No se pudo guardar el cambio de barberia.' }, { status: 500 });
   }
-
   return NextResponse.json({ success: true, new_balance: newBalance, style_id: styleId });
 }
 
@@ -136,3 +119,4 @@ export async function GET() {
     })),
   });
 }
+

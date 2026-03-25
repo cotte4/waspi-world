@@ -119,7 +119,7 @@ export function setupWorldReactBridge(scene: WorldReactBridgeSceneLike) {
 
   scene.bridgeCleanupFns.push(eventBus.on(EVENTS.OPEN_CREATOR, () => {
     if (scene.inTransition) return;
-    scene.transitionToScene('CreatorScene');
+    scene.transitionToScene('CreatorScene', { allowHairCustomization: false });
   }));
 
   registerWorldVecindadBridge(scene as unknown as WorldRealtimeVecindadSceneLike);

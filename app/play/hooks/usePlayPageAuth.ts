@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { supabase } from '@/src/lib/supabase';
+import { getSupabaseRememberPreference, setSupabaseRememberPreference, supabase } from '@/src/lib/supabase';
 import { getInitialMagicLinkCooldownUntil } from '@/app/play/lib/playPageStorage';
 import { MAGIC_LINK_COOLDOWN_KEY, MAGIC_LINK_COOLDOWN_MS } from '@/app/play/lib/playPageConstants';
 
@@ -13,11 +13,22 @@ export function usePlayPageAuth({
 }: UsePlayPageAuthOptions) {
   const [authEmail, setAuthEmail] = useState<string | null>(null);
   const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [rememberMe, setRememberMe] = useState(getSupabaseRememberPreference);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [authBusy, setAuthBusy] = useState(false);
   const [authStatus, setAuthStatus] = useState('');
   const [magicLinkCooldownUntil, setMagicLinkCooldownUntil] = useState(getInitialMagicLinkCooldownUntil);
 
   const isAuthenticated = useMemo(() => Boolean(authEmail), [authEmail]);
+  const resolveRedirectTo = useCallback(() => {
+    if (typeof window !== 'undefined' && window.location.origin) {
+      return `${window.location.origin.replace(/\/+$/, '')}/play`;
+    }
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, '');
+    return appUrl ? `${appUrl}/play` : undefined;
+  }, []);
 
   useEffect(() => {
     if (!magicLinkCooldownUntil || magicLinkCooldownUntil <= Date.now()) return;
@@ -29,6 +40,10 @@ export function usePlayPageAuth({
     }, 1000);
     return () => window.clearInterval(timer);
   }, [magicLinkCooldownUntil]);
+
+  useEffect(() => {
+    setSupabaseRememberPreference(rememberMe);
+  }, [rememberMe]);
 
   const hydrateSession = useCallback(async (session: Session | null) => {
     setAuthEmail(session?.user?.email ?? null);
@@ -51,7 +66,10 @@ export function usePlayPageAuth({
       void hydrateSession(session);
       setAuthBusy(false);
       if (event === 'SIGNED_IN') {
+        setPasswordInput('');
         setAuthStatus('Sesion iniciada.');
+      } else if (event === 'INITIAL_SESSION' && session?.user?.email) {
+        setAuthStatus('Sesion recuperada.');
       } else if (event === 'SIGNED_OUT') {
         setAuthStatus('Sesion cerrada.');
       }
@@ -89,12 +107,8 @@ export function usePlayPageAuth({
 
     setAuthBusy(true);
     setAuthStatus('');
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, '');
-    const redirectTo = appUrl
-      ? `${appUrl}/play`
-      : typeof window !== 'undefined'
-        ? `${window.location.origin}/play`
-        : undefined;
+    setSupabaseRememberPreference(rememberMe);
+    const redirectTo = resolveRedirectTo();
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: redirectTo },
@@ -121,7 +135,7 @@ export function usePlayPageAuth({
       window.localStorage.setItem(MAGIC_LINK_COOLDOWN_KEY, String(cooldownUntil));
     }
     setAuthStatus('Magic link enviado. Si tu mail ya esta verificado, entra con el ultimo link del correo.');
-  }, [emailInput, magicLinkCooldownUntil]);
+  }, [emailInput, magicLinkCooldownUntil, rememberMe, resolveRedirectTo]);
 
   const signInWithGoogle = useCallback(async () => {
     if (!supabase) {
@@ -130,12 +144,8 @@ export function usePlayPageAuth({
     }
     setAuthBusy(true);
     setAuthStatus('');
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, '');
-    const redirectTo = appUrl
-      ? `${appUrl}/play`
-      : typeof window !== 'undefined'
-        ? `${window.location.origin}/play`
-        : undefined;
+    setSupabaseRememberPreference(rememberMe);
+    const redirectTo = resolveRedirectTo();
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo },
@@ -144,7 +154,103 @@ export function usePlayPageAuth({
     if (error) {
       setAuthStatus(error.message);
     }
-  }, []);
+  }, [rememberMe, resolveRedirectTo]);
+
+  const signInWithPassword = useCallback(async () => {
+    if (!supabase) {
+      setAuthStatus('Supabase no esta configurado.');
+      return;
+    }
+
+    const email = emailInput.trim().toLowerCase();
+    if (!email) {
+      setAuthStatus('Escribi tu email primero.');
+      return;
+    }
+
+    if (!passwordInput) {
+      setAuthStatus('Escribi tu password.');
+      return;
+    }
+
+    setAuthBusy(true);
+    setAuthStatus('');
+    setSupabaseRememberPreference(rememberMe);
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password: passwordInput,
+    });
+    setAuthBusy(false);
+    if (error) {
+      setAuthStatus(error.message);
+    }
+  }, [emailInput, passwordInput, rememberMe]);
+
+  const signUpWithPassword = useCallback(async () => {
+    if (!supabase) {
+      setAuthStatus('Supabase no esta configurado.');
+      return;
+    }
+
+    const email = emailInput.trim().toLowerCase();
+    if (!email) {
+      setAuthStatus('Escribi tu email primero.');
+      return;
+    }
+
+    if (passwordInput.length < 6) {
+      setAuthStatus('La password necesita al menos 6 caracteres.');
+      return;
+    }
+
+    setAuthBusy(true);
+    setAuthStatus('');
+    setSupabaseRememberPreference(rememberMe);
+    const redirectTo = resolveRedirectTo();
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password: passwordInput,
+      options: { emailRedirectTo: redirectTo },
+    });
+    setAuthBusy(false);
+    if (error) {
+      setAuthStatus(error.message);
+      return;
+    }
+
+    if (data.session) {
+      setPasswordInput('');
+      setAuthStatus('Cuenta creada. Sesion iniciada.');
+      return;
+    }
+
+    setAuthStatus('Cuenta creada. Revisa tu mail para confirmar el acceso.');
+  }, [emailInput, passwordInput, rememberMe, resolveRedirectTo]);
+
+  const resetPassword = useCallback(async () => {
+    if (!supabase) {
+      setAuthStatus('Supabase no esta configurado.');
+      return;
+    }
+
+    const email = emailInput.trim().toLowerCase();
+    if (!email) {
+      setAuthStatus('Escribi tu email primero.');
+      return;
+    }
+
+    setAuthBusy(true);
+    setAuthStatus('');
+    const redirectTo = resolveRedirectTo();
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+    setAuthBusy(false);
+    if (error) {
+      setAuthStatus(error.message);
+      return;
+    }
+
+    setAuthStatus('Te mandamos un mail para resetear la password.');
+  }, [emailInput, resolveRedirectTo]);
 
   const signOut = useCallback(async () => {
     if (!supabase) return;
@@ -160,11 +266,20 @@ export function usePlayPageAuth({
     authEmail,
     authBusy,
     authStatus,
+    authMode,
     emailInput,
     isAuthenticated,
+    passwordInput,
+    rememberMe,
+    resetPassword,
     sendMagicLink,
+    setAuthMode,
     setEmailInput,
+    setPasswordInput,
+    setRememberMe,
     signInWithGoogle,
+    signInWithPassword,
     signOut,
+    signUpWithPassword,
   };
 }

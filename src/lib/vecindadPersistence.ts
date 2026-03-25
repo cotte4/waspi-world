@@ -1,6 +1,7 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { syncVecindadDeed, type PlayerState } from '@/src/lib/playerState';
 import { normalizeVecindadBuildStage, type SharedParcelState } from '@/src/lib/vecindad';
+import { PLAYER_METADATA_KEY } from '@/src/lib/commercePersistence';
 
 type Json = string | number | boolean | null | { [key: string]: Json } | Json[];
 
@@ -27,7 +28,6 @@ type FarmPlantRow = {
   harvested: boolean;
 };
 
-const PLAYER_METADATA_KEY = 'waspiPlayer';
 const CANNABIS_FARM_UNLOCK_KEY = 'cannabis_farm';
 
 export async function listVecindadParcels(admin: SupabaseClient): Promise<SharedParcelState[]> {
@@ -270,10 +270,15 @@ export async function clearFarmPlant(admin: SupabaseClient, userId: string, slot
 }
 
 export async function persistPlayerMetadata(admin: SupabaseClient, user: User, player: PlayerState) {
+  const { data: latestUserData, error: latestUserError } = await admin.auth.admin.getUserById(user.id);
+  if (latestUserError) throw latestUserError;
+
+  const latestUser = latestUserData.user ?? user;
+
   const { error } = await admin.auth.admin.updateUserById(user.id, {
     user_metadata: {
-      ...(user.user_metadata ?? {}),
-      [PLAYER_METADATA_KEY]: player as unknown as Json,
+      ...(latestUser.user_metadata ?? {}),
+      [PLAYER_METADATA_KEY]: syncVecindadDeed(player) as unknown as Json,
     },
   });
 

@@ -200,7 +200,7 @@ export function resolveWorldInteractionTarget(
   const barberY = 558;
   const nearBarber = Math.abs(scene.px - barberX) < 90 && Math.abs(scene.py - barberY) < 90;
   if (nearBarber && !scene.barberPanelOpen) {
-    return { x: barberX, y: barberY - 36, w: 160, h: 70, label: 'SPACE BARBERIA', color: 0xff88cc, npcKey: 'barber' } satisfies InteractionTarget;
+    return { x: barberX, y: barberY - 36, w: 160, h: 70, label: 'SPACE WARDROBE', color: 0xff88cc, npcKey: 'barber' } satisfies InteractionTarget;
   }
 
   return null;

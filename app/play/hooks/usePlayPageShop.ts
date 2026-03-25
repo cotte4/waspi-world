@@ -30,15 +30,19 @@ export function usePlayPageShop({
   const [checkoutBusyId, setCheckoutBusyId] = useState<string | null>(null);
   const [shopStatus, setShopStatus] = useState(initialCheckout.status);
   const [selectedSize, setSelectedSize] = useState('');
-  const [discountCodeInput, setDiscountCodeInput] = useState('');
   const [checkoutRedirecting, setCheckoutRedirecting] = useState(false);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersLoaded, setOrdersLoaded] = useState(false);
 
+  // Purchasable utility cosmetics (CIG, BALL) that appear in the virtual shop tab
+  const PURCHASABLE_UTILITY_IDS = new Set(['UTIL-CIG-01', 'UTIL-BALL-01']);
+
   const clothingItems = useMemo(
-    () => (shopItems.length ? shopItems : CATALOG).filter((item) => item.slot !== 'utility' && item.priceTenks > 0),
-    [shopItems]
+    () => (shopItems.length ? shopItems : CATALOG).filter(
+      (item) => item.priceTenks > 0 && (item.slot !== 'utility' || PURCHASABLE_UTILITY_IDS.has(item.id))
+    ),
+    [shopItems] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const openShop = useCallback((source = '') => {
@@ -111,7 +115,7 @@ export function usePlayPageShop({
 
   const startStripeCheckout = useCallback(async (
     type: 'product' | 'tenks_pack',
-    payload: { itemId?: string; size?: string; discountCode?: string; packId?: string }
+    payload: { itemId?: string; size?: string; packId?: string }
   ) => {
     if (!tokenRef.current) {
       setShopStatus('Inicia sesion para comprar.');
@@ -121,7 +125,7 @@ export function usePlayPageShop({
     setShopStatus('');
 
     const body = type === 'product'
-      ? { type: 'product', itemId: payload.itemId, size: payload.size, discountCode: payload.discountCode || undefined }
+      ? { type: 'product', itemId: payload.itemId, size: payload.size }
       : { type: 'tenks_pack', packId: payload.packId };
 
     const res = await fetch('/api/checkout', {
@@ -194,7 +198,6 @@ export function usePlayPageShop({
     checkoutRedirecting,
     closeShop,
     clothingItems,
-    discountCodeInput,
     loadOrders,
     openShop,
     orders,
@@ -202,7 +205,6 @@ export function usePlayPageShop({
     ordersLoading,
     selectedSize,
     setCheckoutRedirecting,
-    setDiscountCodeInput,
     setSelectedSize,
     setShopOpen,
     setShopSource,

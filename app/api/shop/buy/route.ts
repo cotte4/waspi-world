@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getAuthenticatedUser, hasServiceRole, isServerSupabaseConfigured } from '@/src/lib/supabaseServer';
-import { DEFAULT_PLAYER_STATE, grantInventoryItem, normalizePlayerState, syncVecindadDeed } from '@/src/lib/playerState';
+import { DEFAULT_PLAYER_STATE, grantInventoryItem, syncVecindadDeed } from '@/src/lib/playerState';
 import { getItem } from '@/src/game/config/catalog';
-import { appendTenksTransaction, ensureCatalogSeeded, ensurePlayerRow, syncPlayerInventory } from '@/src/lib/commercePersistence';
-import { debitBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
-
-const PLAYER_METADATA_KEY = 'waspiPlayer';
+import { appendTenksTransaction, ensureCatalogSeeded, ensurePlayerRow, hydratePlayerFromDatabase, syncPlayerInventory, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
+import { creditBalance, debitBalance } from '@/src/lib/tenksBalance';
 
 export async function POST(request: NextRequest) {
   if (!isServerSupabaseConfigured || !hasServiceRole) {
@@ -32,9 +30,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Este item estará disponible próximamente.' }, { status: 400 });
   }
 
-  const currentPlayer = syncVecindadDeed(
-    normalizePlayerState(user.user_metadata?.[PLAYER_METADATA_KEY] ?? DEFAULT_PLAYER_STATE)
-  );
+  const currentPlayer = syncVecindadDeed(await hydratePlayerFromDatabase(admin, user, DEFAULT_PLAYER_STATE));
 
   if (currentPlayer.inventory.owned.includes(item.id)) {
     return NextResponse.json({
@@ -43,29 +39,10 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  let serverBalance: number;
-  try {
-    serverBalance = await getAuthoritativeBalance(admin, {
-      playerId: user.id,
-      fallbackBalance: currentPlayer.tenks,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to resolve TENKS balance.';
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-
-  if (serverBalance < item.priceTenks) {
-    return NextResponse.json({
-      error: `Necesitas ${item.priceTenks.toLocaleString('es-AR')} TENKS para comprar ${item.name}.`,
-      balance: serverBalance,
-      required: item.priceTenks,
-    }, { status: 400 });
-  }
-
   const debit = await debitBalance(admin, {
     playerId: user.id,
     amount: item.priceTenks,
-    fallbackBalance: serverBalance,
+    fallbackBalance: currentPlayer.tenks,
   });
 
   if (!debit.ok) {
@@ -88,39 +65,27 @@ export async function POST(request: NextRequest) {
     )
   );
 
-  const { error: metadataError } = await admin.auth.admin.updateUserById(user.id, {
-    user_metadata: {
-      ...(user.user_metadata ?? {}),
-      [PLAYER_METADATA_KEY]: nextPlayer,
-    },
-  });
-
-  if (metadataError) {
-    // Compensating action: refund TENKS if persistence to user_metadata fails.
-    // Without this, the player can lose TENKS but not receive the item.
-    try {
-      const { data: afterDeduct } = await admin
-        .from('player_tenks_balance')
-        .select('balance')
-        .eq('player_id', user.id)
-        .single<{ balance: number }>();
-      const currentBalance = typeof afterDeduct?.balance === 'number' ? afterDeduct.balance : newBalance;
-      const refundBalance = currentBalance + item.priceTenks;
-      await ensurePlayerRow(admin, user, { ...nextPlayer, tenks: refundBalance }, { syncTenksBalance: true });
-    } catch (refundErr) {
-      console.error('POST /api/shop/buy refund failed after metadata error:', refundErr);
-    }
-
-    return NextResponse.json({
-      error: `No se pudo guardar la compra en tu cuenta (${metadataError.message}). Reembolsamos los TENKS.`,
-    }, { status: 500 });
-  }
-
   let syncWarning: string | null = null;
   try {
     await ensureCatalogSeeded(admin);
     await ensurePlayerRow(admin, user, nextPlayer);
     await syncPlayerInventory(admin, user.id, nextPlayer);
+  } catch (error) {
+    try {
+      await creditBalance(admin, {
+        playerId: user.id,
+        amount: item.priceTenks,
+        fallbackBalance: newBalance,
+      });
+    } catch {
+      // no-op; balance already changed, we keep the durable error visible.
+    }
+
+    const message = error instanceof Error ? error.message : 'Shop sync failed.';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
+  try {
     await appendTenksTransaction(admin, {
       playerId: user.id,
       amount: -item.priceTenks,
@@ -128,8 +93,21 @@ export async function POST(request: NextRequest) {
       balanceAfter: nextPlayer.tenks,
     });
   } catch (error) {
-    syncWarning = error instanceof Error ? error.message : 'Shop sync failed.';
-    console.error('POST /api/shop/buy sync failed:', error);
+    syncWarning = error instanceof Error ? error.message : 'Shop transaction log failed.';
+    console.error('POST /api/shop/buy transaction log failed:', error);
+  }
+
+  try {
+    const refreshedPlayer = await syncPlayerMetadataSnapshot(admin, user, nextPlayer);
+    return NextResponse.json({
+      player: refreshedPlayer,
+      itemId: item.id,
+      notice: `${item.name} comprado por ${item.priceTenks.toLocaleString('es-AR')} TENKS y equipado.`,
+      syncWarning,
+    });
+  } catch (error) {
+    syncWarning = error instanceof Error ? error.message : 'Shop snapshot sync failed.';
+    console.error('POST /api/shop/buy snapshot sync failed:', error);
   }
 
   return NextResponse.json({

@@ -7,7 +7,7 @@ import {
 } from '@/src/lib/supabaseServer';
 import { DEFAULT_PLAYER_STATE } from '@/src/lib/playerState';
 import { appendTenksTransaction, resolveAuthoritativeTenksBalance } from '@/src/lib/commercePersistence';
-import { debitBalance } from '@/src/lib/tenksBalance';
+import { creditBalance, debitBalance } from '@/src/lib/tenksBalance';
 
 // ---------------------------------------------------------------------------
 // Skill shop catalog — defined inline, never in a separate file
@@ -127,17 +127,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
-  if (serverBalance < skillItem.cost) {
-    return NextResponse.json(
-      {
-        error: `Necesitas ${skillItem.cost.toLocaleString('es-AR')} TENKS para comprar ${skillItem.name}.`,
-        balance: serverBalance,
-        required: skillItem.cost,
-      },
-      { status: 400 },
-    );
-  }
-
   const debit = await debitBalance(admin, {
     playerId: user.id,
     amount: skillItem.cost,
@@ -163,16 +152,11 @@ export async function POST(request: NextRequest) {
   if (insertError) {
     // Compensating action: refund TENKS if item grant fails after deduction.
     try {
-      const { data: afterDeduct } = await admin
-        .from('player_tenks_balance')
-        .select('balance')
-        .eq('player_id', user.id)
-        .single<{ balance: number }>();
-      const currentBalance = typeof afterDeduct?.balance === 'number' ? afterDeduct.balance : newBalance;
-      const refundBalance = currentBalance + skillItem.cost;
-      await admin
-        .from('player_tenks_balance')
-        .upsert({ player_id: user.id, balance: refundBalance });
+      await creditBalance(admin, {
+        playerId: user.id,
+        amount: skillItem.cost,
+        fallbackBalance: newBalance,
+      });
     } catch (refundErr) {
       console.error('POST /api/skills/purchase refund failed after insert error:', refundErr);
     }

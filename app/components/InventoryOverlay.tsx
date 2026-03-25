@@ -1,8 +1,20 @@
 'use client';
 
-import Image from 'next/image';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
+import { getItem as getCatalogItem } from '@/src/game/config/catalog';
 import type { CatalogItem } from '@/src/game/config/catalog';
+
+const WEAPON_TO_ITEM_ID: Record<string, string> = {
+  pistol:  'UTIL-GUN-01',
+  shotgun: 'UTIL-GUN-SHOT-01',
+  smg:     'UTIL-GUN-SMG-01',
+  rifle:   'UTIL-GUN-RIFL-01',
+  deagle:  'UTIL-GUN-DEAGLE-01',
+  cannon:  'UTIL-GUN-CANNON-01',
+  raygun:  'UTIL-GUN-GOLD-01',
+};
+
+const GUN_UTIL_IDS = Object.values(WEAPON_TO_ITEM_ID);
 
 interface EquippedState {
   top?: string;
@@ -18,6 +30,7 @@ export interface InventoryOverlayProps {
   onToggleSmoke: (next: boolean) => void;
   gunOn: boolean;
   ballOn: boolean;
+  activeWeapon?: string;
   passiveUtilityItems: CatalogItem[];
   clothingCatalog: CatalogItem[];
   onEquip: (itemId: string) => void;
@@ -100,18 +113,46 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 }
 
 /* ── loadout slot placeholder ── */
-function LoadoutSlot({ label, item, color }: { label: string; item?: CatalogItem; color?: number }) {
+function LoadoutSlot({
+  label,
+  item,
+  color,
+  active = true,
+  icon,
+}: {
+  label: string;
+  item?: CatalogItem;
+  color?: number;
+  /** When false, item is shown as inactive (owned but toggled off) */
+  active?: boolean;
+  /** Optional emoji icon override instead of color swatch */
+  icon?: string;
+}) {
+  const filled = !!item;
+  const borderColor = filled
+    ? active
+      ? 'rgba(57,255,20,0.3)'
+      : 'rgba(255,255,255,0.18)'
+    : 'rgba(255,255,255,0.12)';
+  const bgColor = filled
+    ? active
+      ? 'rgba(57,255,20,0.05)'
+      : 'rgba(255,255,255,0.03)'
+    : 'rgba(255,255,255,0.02)';
+
   return (
     <div style={{
       flex: 1,
       padding: '10px 8px',
-      border: item ? '1px solid rgba(57,255,20,0.3)' : '1px dashed rgba(255,255,255,0.12)',
-      background: item ? 'rgba(57,255,20,0.05)' : 'rgba(255,255,255,0.02)',
+      border: filled ? `1px solid ${borderColor}` : `1px dashed ${borderColor}`,
+      background: bgColor,
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
       gap: 5,
       minHeight: 60,
+      opacity: filled && !active ? 0.6 : 1,
+      position: 'relative',
     }}>
       <div style={{
         fontFamily: '"Press Start 2P", monospace',
@@ -123,13 +164,17 @@ function LoadoutSlot({ label, item, color }: { label: string; item?: CatalogItem
       </div>
       {item ? (
         <>
-          <div style={{
-            width: 20,
-            height: 20,
-            background: hexColor(color ?? item.color),
-            border: '1px solid rgba(0,0,0,0.4)',
-            flexShrink: 0,
-          }} />
+          {icon ? (
+            <div style={{ fontSize: 18, lineHeight: 1 }}>{icon}</div>
+          ) : (
+            <div style={{
+              width: 20,
+              height: 20,
+              background: hexColor(color ?? item.color),
+              border: '1px solid rgba(0,0,0,0.4)',
+              flexShrink: 0,
+            }} />
+          )}
           <div style={{
             fontFamily: '"Silkscreen", monospace',
             fontSize: 10,
@@ -139,6 +184,19 @@ function LoadoutSlot({ label, item, color }: { label: string; item?: CatalogItem
           }}>
             {item.name}
           </div>
+          {!active && (
+            <div style={{
+              fontFamily: '"Press Start 2P", monospace',
+              fontSize: 5,
+              color: 'rgba(255,100,100,0.8)',
+              background: 'rgba(255,0,0,0.1)',
+              border: '1px solid rgba(255,100,100,0.3)',
+              padding: '1px 4px',
+              letterSpacing: '0.06em',
+            }}>
+              OFF
+            </div>
+          )}
         </>
       ) : (
         <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 11, color: 'rgba(255,255,255,0.18)' }}>
@@ -160,6 +218,7 @@ export default function InventoryOverlay({
   onToggleSmoke,
   gunOn,
   ballOn,
+  activeWeapon = 'pistol',
   passiveUtilityItems,
   clothingCatalog,
   onEquip,
@@ -172,8 +231,16 @@ export default function InventoryOverlay({
   const equippedTop = ownedClothing.find((i) => i.id === equipped.top && i.slot === 'top');
   const equippedBottom = ownedClothing.find((i) => i.id === equipped.bottom && i.slot === 'bottom');
 
-  const gunOwned = owned.includes('UTIL-GUN-01');
+  const cigOwned = owned.includes('UTIL-CIG-01');
+  const gunOwned = GUN_UTIL_IDS.some(id => owned.includes(id));
   const ballOwned = owned.includes('UTIL-BALL-01');
+
+  // Active weapon's catalog item (for loadout slot)
+  const activeGunItemId = WEAPON_TO_ITEM_ID[activeWeapon] ?? 'UTIL-GUN-01';
+  const resolvedGunId = gunOwned && owned.includes(activeGunItemId)
+    ? activeGunItemId
+    : GUN_UTIL_IDS.find(id => owned.includes(id));
+  const activeGunCatalogItem = resolvedGunId ? (getCatalogItem(resolvedGunId) ?? undefined) : undefined;
 
   return (
     <div
@@ -263,7 +330,9 @@ export default function InventoryOverlay({
             <LoadoutSlot label="BOTTOM" item={equippedBottom} />
             <LoadoutSlot
               label="GUN"
-              item={gunOwned && gunOn ? { id: 'UTIL-GUN-01', name: 'PISTOLA 9MM', slot: 'utility', category: 'accessory', virtualType: 'accessory', description: '', priceTenks: 0 } : undefined}
+              item={activeGunCatalogItem}
+              active={gunOn}
+              icon="🔫"
             />
           </div>
         </div>
@@ -322,15 +391,15 @@ export default function InventoryOverlay({
                         fontFamily: '"Press Start 2P", monospace',
                         fontSize: 7,
                         padding: '7px 10px',
-                        border: isEquipped ? 'none' : '1px solid rgba(255,255,255,0.15)',
-                        background: isEquipped ? '#F5C842' : 'rgba(255,255,255,0.06)',
-                        color: isEquipped ? '#0E0E14' : '#FFFFFF',
+                        border: isEquipped ? '1px solid rgba(255,100,100,0.4)' : '1px solid rgba(255,255,255,0.15)',
+                        background: isEquipped ? 'rgba(255,60,60,0.15)' : 'rgba(255,255,255,0.06)',
+                        color: isEquipped ? '#FF6B6B' : '#FFFFFF',
                         cursor: 'pointer',
                         letterSpacing: '0.04em',
                         flexShrink: 0,
                       }}
                     >
-                      {isEquipped ? 'EQUIPADO' : 'EQUIPAR'}
+                      {isEquipped ? 'QUITAR' : 'EQUIPAR'}
                     </button>
                   </div>
                 );
@@ -343,25 +412,27 @@ export default function InventoryOverlay({
         <div>
           <SectionHeader>UTILIDADES</SectionHeader>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {/* Smoke */}
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '8px 10px',
-              border: smoking ? '1px solid rgba(57,255,20,0.3)' : '1px solid rgba(255,255,255,0.07)',
-              background: smoking ? 'rgba(57,255,20,0.05)' : 'rgba(255,255,255,0.02)',
-            }}>
-              <div>
-                <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 14, color: '#FFFFFF' }}>CIG</div>
-                <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 2 }}>
-                  Idle smoke puffs
+            {/* Smoke — only visible if owned */}
+            {cigOwned && (
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '8px 10px',
+                border: smoking ? '1px solid rgba(57,255,20,0.3)' : '1px solid rgba(255,255,255,0.07)',
+                background: smoking ? 'rgba(57,255,20,0.05)' : 'rgba(255,255,255,0.02)',
+              }}>
+                <div>
+                  <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 14, color: '#FFFFFF' }}>CIGARRILLO</div>
+                  <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 2 }}>
+                    Efecto visual al estar idle
+                  </div>
                 </div>
+                <ToggleBtn on={smoking} onClick={() => {
+                  const next = !smoking;
+                  onToggleSmoke(next);
+                  eventBus.emit(EVENTS.AVATAR_SET, { smoke: next });
+                }} />
               </div>
-              <ToggleBtn on={smoking} onClick={() => {
-                const next = !smoking;
-                onToggleSmoke(next);
-                eventBus.emit(EVENTS.AVATAR_SET, { smoke: next });
-              }} />
-            </div>
+            )}
 
             {/* Gun */}
             {gunOwned && (
@@ -372,18 +443,11 @@ export default function InventoryOverlay({
                 background: gunOn ? 'rgba(57,255,20,0.05)' : 'rgba(255,255,255,0.02)',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Image
-                    src="/assets/ui/icon_sword.png"
-                    alt=""
-                    width={24}
-                    height={24}
-                    unoptimized
-                    style={{ objectFit: 'contain', opacity: 0.9, flexShrink: 0 }}
-                  />
+                  <div style={{ fontSize: 22, lineHeight: 1, flexShrink: 0 }}>🔫</div>
                   <div>
                     <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 14, color: '#FFFFFF' }}>PISTOLA 9MM</div>
                     <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 2 }}>
-                      Click o F para disparar
+                      Equipa la pistola — click o F para disparar
                     </div>
                   </div>
                 </div>
@@ -402,7 +466,7 @@ export default function InventoryOverlay({
                 <div>
                   <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 14, color: '#FFFFFF' }}>FOOTBALL</div>
                   <div style={{ fontFamily: '"Silkscreen", monospace', fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 2 }}>
-                    Bote cosmético
+                    Pelota activa en tus pies al caminar
                   </div>
                 </div>
                 <ToggleBtn on={ballOn} onClick={() => onEquip('UTIL-BALL-01')} />
@@ -454,16 +518,16 @@ export default function InventoryOverlay({
             style={{
               flex: 1,
               fontFamily: '"Press Start 2P", monospace',
-              fontSize: 8,
+              fontSize: 7,
               padding: '12px 10px',
-              background: '#39FF14',
-              color: '#0E0E14',
-              border: 'none',
+              background: 'rgba(57,255,20,0.12)',
+              color: '#39FF14',
+              border: '1px solid rgba(57,255,20,0.3)',
               cursor: 'pointer',
               letterSpacing: '0.04em',
             }}
-          >
-            EDITAR WASPI
+            >
+            EDITOR AVATAR
           </button>
           <button
             onClick={onClose}

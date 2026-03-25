@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createSupabaseAdminClient } from '@/src/lib/supabaseServer';
 import { stripe, stripeWebhookSecret, isStripeConfigured, isStripeWebhookConfigured } from '@/src/lib/stripe';
-import { DEFAULT_PLAYER_STATE, normalizePlayerState, creditTenks, grantInventoryItem } from '@/src/lib/playerState';
-import { ensureCatalogSeeded, ensurePlayerRow, createOrderRecord, addInventoryFromOrder, appendTenksTransaction, markDiscountCodeUsed } from '@/src/lib/commercePersistence';
+import { creditTenks, grantInventoryItem } from '@/src/lib/playerState';
+import { ensureCatalogSeeded, ensurePlayerRow, createOrderRecord, addInventoryFromOrder, appendTenksTransaction, markDiscountCodeUsed, hydratePlayerFromDatabase, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
 import { toArsFromStripeAmount } from '@/src/lib/commercePricing';
 import { resend, isResendConfigured, buildProductConfirmationEmail, buildTenksConfirmationEmail } from '@/src/lib/resend';
 import { getItem } from '@/src/game/config/catalog';
@@ -56,8 +56,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ received: true, duplicate: true });
       }
 
-      const current = normalizePlayerState(user.user_metadata?.waspiPlayer ?? DEFAULT_PLAYER_STATE);
+      const current = await hydratePlayerFromDatabase(admin, user);
       let next = current;
+      const tenksPackReason = `tenks_pack_${sessionId}`;
 
       await ensureCatalogSeeded(admin);
       await ensurePlayerRow(admin, user, current);
@@ -66,13 +67,26 @@ export async function POST(request: NextRequest) {
         const tenksRaw = session.metadata?.tenks;
         const tenks = Number(tenksRaw ?? 0);
         if (Number.isFinite(tenks) && tenks > 0) {
-          next = creditTenks(current, tenks);
-          await appendTenksTransaction(admin, {
-            playerId: userId,
-            amount: tenks,
-            reason: 'tenks_pack',
-            balanceAfter: next.tenks,
-          });
+          const { data: existingGrant, error: existingGrantError } = await admin
+            .from('tenks_transactions')
+            .select('id')
+            .eq('player_id', userId)
+            .eq('reason', tenksPackReason)
+            .maybeSingle<{ id: string }>();
+
+          if (existingGrantError) {
+            return NextResponse.json({ error: existingGrantError.message }, { status: 500 });
+          }
+
+          if (!existingGrant) {
+            next = creditTenks(current, tenks);
+            await appendTenksTransaction(admin, {
+              playerId: userId,
+              amount: tenks,
+              reason: tenksPackReason,
+              balanceAfter: next.tenks,
+            });
+          }
         }
       }
 
@@ -94,26 +108,54 @@ export async function POST(request: NextRequest) {
               } as unknown as Parameters<typeof createOrderRecord>[1]['shippingAddress'])
             : null;
 
-          const order = await createOrderRecord(admin, {
-            playerId: userId,
-            stripeSessionId: sessionId,
-            itemId,
-            size: session.metadata?.size ?? '',
-            subtotalArs,
-            totalArs,
-            discountCode,
-            discountPercent,
-            shippingAddress,
-          });
+          let order: { data: { id: string } | null; error: { message: string } | null } = await admin
+            .from('orders')
+            .select('id')
+            .eq('stripe_session_id', sessionId)
+            .maybeSingle<{ id: string }>();
 
-          await addInventoryFromOrder(admin, {
-            playerId: userId,
-            productId: itemId,
-            orderId: order.id,
-          });
+          if (order.error) {
+            return NextResponse.json({ error: order.error.message }, { status: 500 });
+          }
 
-          if (discountCode) {
-            await markDiscountCodeUsed(admin, discountCode);
+          if (!order.data) {
+            const createdOrder = await createOrderRecord(admin, {
+              playerId: userId,
+              stripeSessionId: sessionId,
+              itemId,
+              size: session.metadata?.size ?? '',
+              subtotalArs,
+              totalArs,
+              discountCode,
+              discountPercent,
+              shippingAddress,
+            });
+            order = { data: createdOrder, error: null };
+
+            if (discountCode) {
+              await markDiscountCodeUsed(admin, discountCode);
+            }
+          }
+
+          const resolvedOrder = order.data!;
+          const { data: existingInventory, error: existingInventoryError } = await admin
+            .from('player_inventory')
+            .select('id')
+            .eq('player_id', userId)
+            .eq('product_id', itemId)
+            .eq('order_id', resolvedOrder.id)
+            .maybeSingle<{ id: string }>();
+
+          if (existingInventoryError) {
+            return NextResponse.json({ error: existingInventoryError.message }, { status: 500 });
+          }
+
+          if (!existingInventory) {
+            await addInventoryFromOrder(admin, {
+              playerId: userId,
+              productId: itemId,
+              orderId: resolvedOrder.id,
+            });
           }
 
           // --- METADATA SECOND: grant item in memory state after DB is safe ---
@@ -123,13 +165,28 @@ export async function POST(request: NextRequest) {
 
       await ensurePlayerRow(admin, user, next, { syncTenksBalance: purchaseType === 'tenks_pack' });
 
-      // Mark session processed and update user_metadata. If this fails, the item
-      // is already in player_inventory (DB) and will be reconciled on next player load.
+      try {
+        await syncPlayerMetadataSnapshot(admin, user, next);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to persist player metadata.';
+        console.error('[Waspi] Webhook: player metadata snapshot failed for user', userId, 'session', sessionId, message);
+        return NextResponse.json({ error: message }, { status: 500 });
+      }
+
+      const { data: latestUserData, error: latestUserError } = await admin.auth.admin.getUserById(userId);
+      if (latestUserError || !latestUserData.user) {
+        return NextResponse.json({ error: latestUserError?.message ?? 'User not found after metadata update.' }, { status: 500 });
+      }
+      const latestProcessedSessions = Array.isArray(latestUserData.user.user_metadata?.waspiProcessedStripeSessions)
+        ? latestUserData.user.user_metadata.waspiProcessedStripeSessions.filter((value: unknown): value is string => typeof value === 'string')
+        : [];
+
+      // Mark session processed separately so this webhook only appends its own id
+      // after the player blob has been merged against the latest metadata.
       const { error: updateError } = await admin.auth.admin.updateUserById(userId, {
         user_metadata: {
-          ...(user.user_metadata ?? {}),
-          waspiPlayer: next,
-          waspiProcessedStripeSessions: [...processedSessions, sessionId].slice(-50),
+          ...(latestUserData.user.user_metadata ?? {}),
+          waspiProcessedStripeSessions: [...new Set([...latestProcessedSessions, sessionId])].slice(-50),
         },
       });
 

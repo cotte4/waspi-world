@@ -14,8 +14,8 @@ const _isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
 export const DEFAULT_HUD_SETTINGS: HudSettings = {
   showSocialPanel: !_isMobile,
   socialCollapsed: _isMobile,
-  showProgressPanel: !_isMobile,
-  progressCollapsed: _isMobile,
+  showProgressPanel: false,
+  progressCollapsed: false,
   showControlsPanel: true,
   showArenaHud: true,
 };

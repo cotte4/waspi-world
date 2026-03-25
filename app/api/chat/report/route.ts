@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getAuthenticatedUser } from '@/src/lib/supabaseServer';
-import { ensureCatalogSeeded, ensurePlayerRow, logChatReport } from '@/src/lib/commercePersistence';
-import { DEFAULT_PLAYER_STATE, normalizePlayerState } from '@/src/lib/playerState';
+import { ensureCatalogSeeded, ensurePlayerRow, hydratePlayerFromDatabase, logChatReport, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
 
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser(request.headers.get('authorization'));
@@ -36,8 +35,9 @@ export async function POST(request: NextRequest) {
   }
 
   await ensureCatalogSeeded(admin);
-  const playerState = normalizePlayerState(user.user_metadata?.waspiPlayer ?? DEFAULT_PLAYER_STATE);
+  const playerState = await hydratePlayerFromDatabase(admin, user);
   await ensurePlayerRow(admin, user, playerState);
+  await syncPlayerMetadataSnapshot(admin, user, playerState);
 
   await logChatReport(admin, {
     reporterId: user.id,

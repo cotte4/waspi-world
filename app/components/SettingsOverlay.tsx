@@ -348,17 +348,12 @@ function HudTab({
         onToggle={() => onHudChange({ showSocialPanel: !hudSettings.showSocialPanel })}
       />
       <ToggleRow
-        label="PROGRESO"
-        value={hudSettings.showProgressPanel}
-        onToggle={() => onHudChange({ showProgressPanel: !hudSettings.showProgressPanel })}
-      />
-      <ToggleRow
         label="AYUDA DE CONTROLES"
         value={hudSettings.showControlsPanel}
         onToggle={() => onHudChange({ showControlsPanel: !hudSettings.showControlsPanel })}
       />
       <ToggleRow
-        label="ARENA"
+        label="HUD DE COMBATE"
         value={hudSettings.showArenaHud}
         onToggle={() => onHudChange({ showArenaHud: !hudSettings.showArenaHud })}
       />

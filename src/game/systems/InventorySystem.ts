@@ -10,12 +10,13 @@ function ensureDemoLoadout(state: InventoryState): InventoryState {
   const owned = state.owned.includes(DEFAULT_UTILITY_ID)
     ? state.owned
     : [...state.owned, DEFAULT_UTILITY_ID];
-  const utility = Array.isArray(state.equipped.utility) ? state.equipped.utility : [];
+  const hasUtilityState = Array.isArray(state.equipped.utility);
+  const utility = hasUtilityState ? state.equipped.utility : [];
   return {
     owned,
     equipped: {
       ...state.equipped,
-      utility: utility.length ? utility : [DEFAULT_UTILITY_ID],
+      utility: hasUtilityState ? utility : [DEFAULT_UTILITY_ID],
     },
   };
 }

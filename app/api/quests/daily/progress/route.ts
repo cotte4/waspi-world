@@ -4,8 +4,8 @@ import {
   getAuthenticatedUser,
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
-
-// ── Constants ──────────────────────────────────────────────────────────────
+import { appendTenksTransaction, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
+import { creditBalance } from '@/src/lib/tenksBalance';
 
 const VALID_SKILL_IDS = ['mining', 'fishing', 'gardening', 'cooking', 'gym', 'weed'] as const;
 type SkillId = (typeof VALID_SKILL_IDS)[number];
@@ -20,8 +20,6 @@ const XP_THRESHOLDS: Record<number, number> = {
 };
 const MAX_LEVEL = 5;
 const MAX_XP_GAIN = 50;
-
-// ── Types ──────────────────────────────────────────────────────────────────
 
 interface DailyQuestRow {
   id: string;
@@ -39,16 +37,10 @@ interface PlayerDailyQuestRow {
   updated_at: string | null;
 }
 
-interface TenksBalanceRow {
-  balance: number;
-}
-
 interface SkillRow {
   xp: number;
   level: number;
 }
-
-// ── Helpers ────────────────────────────────────────────────────────────────
 
 function getTodayUtc(): string {
   return new Date().toISOString().split('T')[0];
@@ -68,8 +60,6 @@ function computeLevel(xp: number): number {
   }
   return level;
 }
-
-// ── POST /api/quests/daily/progress ───────────────────────────────────────
 
 export async function POST(request: NextRequest) {
   if (!isServerSupabaseConfigured) {
@@ -111,7 +101,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'not_configured' }, { status: 503 });
   }
 
-  // ── Fetch the quest and verify it's from today ────────────────────────────
   const { data: quest, error: questError } = await admin
     .from('daily_quests')
     .select('id, date, skill_id, action_type, target, reward_xp, reward_tenks')
@@ -128,7 +117,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'This quest is from a different day.' }, { status: 400 });
   }
 
-  // ── Validate action_type and skill_id match ───────────────────────────────
   if (quest.action_type !== action_type) {
     return NextResponse.json(
       { error: `action_type mismatch: expected '${quest.action_type}'.` },
@@ -142,7 +130,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Fetch existing player progress ───────────────────────────────────────
   const { data: existing, error: fetchError } = await admin
     .from('player_daily_quests')
     .select('progress, completed_at, updated_at')
@@ -154,7 +141,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: fetchError.message }, { status: 500 });
   }
 
-  // ── Rate limit: max 1 update per second per user per quest ────────────────
   if (existing?.updated_at) {
     const lastUpdate = new Date(existing.updated_at).getTime();
     if (Date.now() - lastUpdate < 1000) {
@@ -162,7 +148,6 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ── Already completed check ───────────────────────────────────────────────
   if (existing?.completed_at != null) {
     return NextResponse.json({
       progress: existing.progress,
@@ -176,7 +161,6 @@ export async function POST(request: NextRequest) {
   const newProgress = Math.min(oldProgress + 1, quest.target);
   const justCompleted = newProgress >= quest.target;
 
-  // ── Upsert player progress ────────────────────────────────────────────────
   const upsertData = {
     user_id: user.id,
     quest_id,
@@ -209,35 +193,32 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ progress: newProgress, completed: false, reward_granted: false });
   }
 
-  // ── Grant TENKS reward ────────────────────────────────────────────────────
-  const { data: balanceRow, error: balanceError } = await admin
-    .from('player_tenks_balance')
-    .select('balance')
-    .eq('player_id', user.id)
-    .maybeSingle<TenksBalanceRow>();
+  let newBalance = 0;
+  try {
+    const credited = await creditBalance(admin, {
+      playerId: user.id,
+      amount: quest.reward_tenks,
+    });
+    newBalance = credited.newBalance;
 
-  if (balanceError) {
-    return NextResponse.json({ error: balanceError.message }, { status: 500 });
+    if (quest.reward_tenks > 0) {
+      await appendTenksTransaction(admin, {
+        playerId: user.id,
+        amount: quest.reward_tenks,
+        reason: `daily_quest_${quest_id}`,
+        balanceAfter: newBalance,
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to grant TENKS reward.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
-  const currentBalance = balanceRow?.balance ?? 0;
-  const newBalance = currentBalance + quest.reward_tenks;
-
-  const { error: tenksError } = await admin
-    .from('player_tenks_balance')
-    .upsert({ player_id: user.id, balance: newBalance });
-
-  if (tenksError) {
-    return NextResponse.json({ error: tenksError.message }, { status: 500 });
-  }
-
-  // ── Grant XP reward ───────────────────────────────────────────────────────
   let leveled_up = false;
   let new_level: number | null = null;
 
   if (isValidSkillId(quest.skill_id) && quest.reward_xp > 0) {
     const skillId: SkillId = quest.skill_id;
-    // Clamp to MAX_XP_GAIN per the skills API rule
     const xpToGrant = Math.min(quest.reward_xp, MAX_XP_GAIN);
 
     const { data: existingSkill, error: skillFetchError } = await admin
@@ -268,6 +249,12 @@ export async function POST(request: NextRequest) {
           { onConflict: 'user_id,skill_id' },
         );
     }
+  }
+
+  try {
+    await syncPlayerMetadataSnapshot(admin, user);
+  } catch (error) {
+    console.error('[Waspi][quests/daily/progress] snapshot sync failed:', error);
   }
 
   return NextResponse.json({

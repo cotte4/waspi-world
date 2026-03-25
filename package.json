@@ -6,7 +6,9 @@
     "dev": "next dev -H 0.0.0.0",
     "build": "eslint && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:persistence": "tsx --test tests/persistence/*.test.ts",
+    "backfill:player-persistence": "node scripts/backfill-player-persistence.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.43.0",
@@ -30,6 +32,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

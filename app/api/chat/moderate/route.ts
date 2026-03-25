@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getAuthenticatedUser } from '@/src/lib/supabaseServer';
-import { ensureCatalogSeeded, ensurePlayerRow, logChatMessage } from '@/src/lib/commercePersistence';
-import { DEFAULT_PLAYER_STATE, normalizePlayerState } from '@/src/lib/playerState';
+import { ensureCatalogSeeded, ensurePlayerRow, hydratePlayerFromDatabase, logChatMessage, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
 
 const PROFANITY = ['boludo', 'pelotudo', 'idiota', 'mierda', 'puta', 'puto'];
 
@@ -39,8 +38,9 @@ export async function POST(request: NextRequest) {
 
   try {
     await ensureCatalogSeeded(admin);
-    const playerState = normalizePlayerState(user.user_metadata?.waspiPlayer ?? DEFAULT_PLAYER_STATE);
+    const playerState = await hydratePlayerFromDatabase(admin, user);
     await ensurePlayerRow(admin, user, playerState);
+    await syncPlayerMetadataSnapshot(admin, user, playerState);
 
     const username = typeof user.user_metadata?.username === 'string' && user.user_metadata.username.trim()
       ? user.user_metadata.username.trim()

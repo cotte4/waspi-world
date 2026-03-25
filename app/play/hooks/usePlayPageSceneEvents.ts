@@ -1,7 +1,8 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
-import { hasUtilityEquipped } from '@/src/game/systems/InventorySystem';
-import { getTenksBalance } from '@/src/game/systems/TenksSystem';
+import { getInventory, hasUtilityEquipped } from '@/src/game/systems/InventorySystem';
+
+const GUN_UTIL_IDS = ['UTIL-GUN-01', 'UTIL-GUN-SHOT-01', 'UTIL-GUN-SMG-01', 'UTIL-GUN-GOLD-01', 'UTIL-GUN-DEAGLE-01', 'UTIL-GUN-CANNON-01', 'UTIL-GUN-RIFL-01'];
 import type { ProgressionState } from '@/src/game/systems/ProgressionSystem';
 import { normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
 import { track } from '@/src/lib/analytics';
@@ -41,6 +42,7 @@ type SceneEventStateSetters = {
   setEquipped: Dispatch<SetStateAction<{ top?: string; bottom?: string }>>;
   setGunOn: Dispatch<SetStateAction<boolean>>;
   setBallOn: Dispatch<SetStateAction<boolean>>;
+  setActiveWeapon: Dispatch<SetStateAction<string>>;
   setPlayerActions: Dispatch<SetStateAction<PlayerActionsPayload | null>>;
   setUiNotice: Dispatch<SetStateAction<UiNotice>>;
   setShopStatus: Dispatch<SetStateAction<string>>;
@@ -91,6 +93,7 @@ export function usePlayPageSceneEvents({
   setEquipped,
   setGunOn,
   setBallOn,
+  setActiveWeapon,
   setPlayerActions,
   setUiNotice,
   setShopStatus,
@@ -198,7 +201,8 @@ export function usePlayPageSceneEvents({
       const p = payload as { owned: string[]; equipped: { top?: string; bottom?: string } };
       setOwned(p.owned ?? []);
       setEquipped(p.equipped ?? {});
-      setGunOn(hasUtilityEquipped('UTIL-GUN-01'));
+      const inv = getInventory();
+      setGunOn((inv.equipped.utility ?? []).some(id => GUN_UTIL_IDS.includes(id)));
       setBallOn(hasUtilityEquipped('UTIL-BALL-01'));
       playUiSfx(660, 0.18, 990);
     });
@@ -341,14 +345,44 @@ export function usePlayPageSceneEvents({
       const next = payload as VecindadUpdatePayload | null;
       if (!next?.vecindad || !playerState) return;
 
+      const currentMaterials = playerState.vecindad.materials ?? 0;
+      const nextMaterials = next.vecindad.materials ?? 0;
+      const materialDelta = Math.floor(nextMaterials - currentMaterials);
+
+      if (tokenRef.current && materialDelta > 0) {
+        void (async () => {
+          const res = await fetch('/api/vecindad', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${tokenRef.current}`,
+            },
+            body: JSON.stringify({ action: 'collect_materials', amount: materialDelta }),
+          }).catch(() => null);
+
+          const json = (await res?.json().catch(() => null)) as {
+            error?: string;
+            notice?: string;
+            player?: PlayerState;
+          } | null;
+
+          if (!res?.ok || !json?.player) {
+            setUiNotice({ msg: json?.error ?? 'No pude guardar los materiales.', color: '#FF4444' });
+            return;
+          }
+
+          applyPlayerState(normalizePlayerState(json.player));
+          if (json.notice) setUiNotice({ msg: json.notice });
+        })();
+        return;
+      }
+
       const updatedPlayer: PlayerState = {
         ...playerState,
-        tenks: getTenksBalance(),
         vecindad: next.vecindad,
       };
 
       applyPlayerState(updatedPlayer);
-      void syncPlayerState(updatedPlayer);
       if (next.notice) setUiNotice({ msg: next.notice });
     });
 
@@ -443,6 +477,11 @@ export function usePlayPageSceneEvents({
       setPvpHudActive(payload as boolean);
     });
 
+    const unsubWeapon = eventBus.on(EVENTS.WEAPON_CHANGED, (payload: unknown) => {
+      const p = payload as { weapon: string };
+      if (typeof p?.weapon === 'string') setActiveWeapon(p.weapon);
+    });
+
     return () => {
       unsubChat();
       unsubInfo();
@@ -472,6 +511,7 @@ export function usePlayPageSceneEvents({
       unsubFlappyActive();
       unsubDinoActive();
       unsubPvpActive();
+      unsubWeapon();
     };
   }, [
     applyPlayerState,
@@ -490,6 +530,7 @@ export function usePlayPageSceneEvents({
     setDinoHudActive,
     setEquipped,
     setFlappyHudActive,
+    setActiveWeapon,
     setGunOn,
     setInventoryOpen,
     setJukeboxOpen,

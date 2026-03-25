@@ -130,7 +130,7 @@ export class HouseInterior extends Phaser.Scene {
       color: this.buildStage >= 4 ? '#F5C842' : '#A6B7FF',
     }).setOrigin(0.5);
 
-    this.add.text(width / 2, this.layout.roomY + 68, 'ESPEJO = CREATOR | ARMARIO = INVENTARIO', {
+    this.add.text(width / 2, this.layout.roomY + 68, 'ESPEJO = WARDROBE | ARMARIO = INVENTARIO', {
       fontSize: '8px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#AAAAAA',

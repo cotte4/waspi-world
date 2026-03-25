@@ -1,5 +1,4 @@
-import { normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
-import { AVATAR_STORAGE_KEY, MAGIC_LINK_COOLDOWN_KEY, PLAYER_STATE_STORAGE_KEY, VOICE_MIC_DEVICE_KEY } from './playPageConstants';
+import { AVATAR_STORAGE_KEY, MAGIC_LINK_COOLDOWN_KEY, VOICE_MIC_DEVICE_KEY } from './playPageConstants';
 import type { ShopTab } from '../types';
 
 export function loadStoredAvatarConfig() {
@@ -15,63 +14,6 @@ export function loadStoredAvatarConfig() {
 export function saveStoredAvatarConfig(config: Record<string, unknown>) {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(AVATAR_STORAGE_KEY, JSON.stringify(config));
-}
-
-export function saveStoredPlayerState(player: PlayerState) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(PLAYER_STATE_STORAGE_KEY, JSON.stringify(player));
-}
-
-export function loadStoredPlayerState(): PlayerState | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(PLAYER_STATE_STORAGE_KEY);
-    return raw ? normalizePlayerState(JSON.parse(raw)) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function mergeHydratedPlayerState(
-  localPlayer: PlayerState | null,
-  remotePlayer: PlayerState
-): PlayerState {
-  if (!localPlayer) return remotePlayer;
-
-  const remoteParcelId = remotePlayer.vecindad.ownedParcelId;
-  const localParcelId = localPlayer.vecindad.ownedParcelId;
-  const canRecoverPreAuthMaterials =
-    !remoteParcelId &&
-    !localParcelId &&
-    remotePlayer.vecindad.materials === 0 &&
-    localPlayer.vecindad.materials > 0;
-
-  return normalizePlayerState({
-    ...remotePlayer,
-    mutedPlayers: (remotePlayer.mutedPlayers?.length ? remotePlayer.mutedPlayers : localPlayer.mutedPlayers) ?? [],
-    vecindad: {
-      ...remotePlayer.vecindad,
-      ownedParcelId: remoteParcelId,
-      buildStage: remotePlayer.vecindad.buildStage,
-      materials: canRecoverPreAuthMaterials
-        ? localPlayer.vecindad.materials
-        : remotePlayer.vecindad.materials,
-    },
-  });
-}
-
-export function loadStoredMutedPlayers() {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = window.localStorage.getItem(PLAYER_STATE_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as { mutedPlayers?: string[] };
-    return Array.isArray(parsed.mutedPlayers)
-      ? parsed.mutedPlayers.filter((value): value is string => typeof value === 'string')
-      : [];
-  } catch {
-    return [];
-  }
 }
 
 export function getInitialMagicLinkCooldownUntil() {

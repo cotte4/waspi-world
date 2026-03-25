@@ -4,13 +4,13 @@ import { eventBus, EVENTS } from '@/src/game/config/eventBus';
 import { CHAT_SCENES } from '@/app/play/lib/playPageConstants';
 import { getItem as getCatalogItem } from '@/src/game/config/catalog';
 import { equipItem, getInventory, replaceInventory } from '@/src/game/systems/InventorySystem';
-import { getTenksBalance, initTenks, initTenksFromServer } from '@/src/game/systems/TenksSystem';
+import { loadProgressionFromServer, loadProgressionState } from '@/src/game/systems/ProgressionSystem';
+import { initTenks, initTenksFromServer } from '@/src/game/systems/TenksSystem';
 import { initStatsSystem } from '@/src/game/systems/StatsSystem';
-import { grantInventoryItem, normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
+import { normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
 import { supabase } from '@/src/lib/supabase';
-import { reconcileInventoryFromDB } from '@/src/lib/commercePersistence';
 import type { SharedParcelState } from '@/src/lib/vecindad';
-import { loadStoredAvatarConfig, loadStoredPlayerState, mergeHydratedPlayerState, saveStoredAvatarConfig, saveStoredPlayerState } from '@/app/play/lib/playPageStorage';
+import { loadStoredAvatarConfig, saveStoredAvatarConfig } from '@/app/play/lib/playPageStorage';
 import type { VecindadSharedPayload } from '@/app/play/types';
 
 type UsePlayPagePlayerStateOptions = {
@@ -29,10 +29,22 @@ export function usePlayPagePlayerState({
   const [tenks, setTenks] = useState<number | null>(null);
   const [owned, setOwned] = useState<string[]>(initialInventory.owned);
   const [equipped, setEquipped] = useState<{ top?: string; bottom?: string }>(initialInventory.equipped);
-  const [gunOn, setGunOn] = useState((initialInventory.equipped.utility ?? []).includes('UTIL-GUN-01'));
+  const GUN_UTIL_IDS = ['UTIL-GUN-01', 'UTIL-GUN-SHOT-01', 'UTIL-GUN-SMG-01', 'UTIL-GUN-GOLD-01', 'UTIL-GUN-DEAGLE-01', 'UTIL-GUN-CANNON-01', 'UTIL-GUN-RIFL-01'];
+  const [gunOn, setGunOn] = useState((initialInventory.equipped.utility ?? []).some(id => GUN_UTIL_IDS.includes(id)));
   const [ballOn, setBallOn] = useState((initialInventory.equipped.utility ?? []).includes('UTIL-BALL-01'));
+  const [activeWeapon, setActiveWeapon] = useState<string>('pistol');
   const playerStateRef = useRef<PlayerState | null>(null);
   const suppressSyncRef = useRef(false);
+  const authHydratingRef = useRef(false);
+
+  const buildEditablePlayerPatch = useCallback((base: PlayerState): Partial<PlayerState> => ({
+    avatar: loadStoredAvatarConfig(),
+    mutedPlayers: base.mutedPlayers ?? mutedPlayersRef.current,
+    inventory: {
+      owned: base.inventory.owned,
+      equipped: getInventory().equipped,
+    },
+  }), [mutedPlayersRef]);
 
   const applyPlayerState = useCallback((player: PlayerState) => {
     suppressSyncRef.current = true;
@@ -41,14 +53,13 @@ export function usePlayPagePlayerState({
       ...loadStoredAvatarConfig(),
       ...player.avatar,
     });
-    saveStoredPlayerState(player);
     replaceInventory(player.inventory);
     initTenks(player.tenks);
     mutedPlayersRef.current = player.mutedPlayers ?? [];
     setPlayerState(player);
     setOwned(player.inventory.owned);
     setEquipped(player.inventory.equipped);
-    setGunOn((player.inventory.equipped.utility ?? []).includes('UTIL-GUN-01'));
+    setGunOn((player.inventory.equipped.utility ?? []).some(id => GUN_UTIL_IDS.includes(id)));
     setBallOn((player.inventory.equipped.utility ?? []).includes('UTIL-BALL-01'));
     setTenks(player.tenks);
     eventBus.emit(EVENTS.PARCEL_STATE_CHANGED, player.vecindad);
@@ -59,32 +70,13 @@ export function usePlayPagePlayerState({
 
   const syncPlayerState = useCallback(async (overridePlayerState?: PlayerState) => {
     if (suppressSyncRef.current && !overridePlayerState) return;
+    if (authHydratingRef.current && !overridePlayerState) return;
     const token = tokenRef.current;
     if (!token) return;
+    if (!overridePlayerState && !playerStateRef.current) return;
 
     const base = overridePlayerState ?? playerStateRef.current;
-    const nextPlayer: PlayerState = normalizePlayerState({
-      ...(base ?? {
-        tenks: getTenksBalance(),
-        inventory: getInventory(),
-        avatar: loadStoredAvatarConfig(),
-        mutedPlayers: mutedPlayersRef.current,
-        vecindad: {
-          ownedParcelId: undefined,
-          buildStage: 0,
-          materials: 0,
-        },
-      }),
-      tenks: getTenksBalance(),
-      inventory: getInventory(),
-      avatar: loadStoredAvatarConfig(),
-      mutedPlayers: base?.mutedPlayers ?? mutedPlayersRef.current,
-      vecindad: base?.vecindad ?? {
-        ownedParcelId: undefined,
-        buildStage: 0,
-        materials: 0,
-      },
-    });
+    if (!base) return;
 
     await fetch('/api/player', {
       method: 'PUT',
@@ -93,15 +85,42 @@ export function usePlayPagePlayerState({
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        player: nextPlayer,
+        player: buildEditablePlayerPatch(base),
       }),
     }).catch(() => undefined);
-  }, [mutedPlayersRef, tokenRef]);
+  }, [buildEditablePlayerPatch, tokenRef]);
+
+  const persistEditablePlayerPatch = useCallback(async (patch: Partial<PlayerState>) => {
+    const token = tokenRef.current;
+    if (!token) return null;
+
+    const res = await fetch('/api/player', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        player: patch,
+      }),
+    }).catch(() => null);
+
+    if (!res?.ok) {
+      return null;
+    }
+
+    const json = await res.json().catch(() => null) as { player?: PlayerState } | null;
+    if (!json?.player) return null;
+
+    const nextPlayer = normalizePlayerState(json.player);
+    applyPlayerState(nextPlayer);
+    return nextPlayer;
+  }, [applyPlayerState, tokenRef]);
 
   const persistInventoryState = useCallback((inventory = getInventory()) => {
     setOwned(inventory.owned);
     setEquipped(inventory.equipped);
-    setGunOn((inventory.equipped.utility ?? []).includes('UTIL-GUN-01'));
+    setGunOn((inventory.equipped.utility ?? []).some(id => GUN_UTIL_IDS.includes(id)));
     setBallOn((inventory.equipped.utility ?? []).includes('UTIL-BALL-01'));
 
     const currentPlayer = playerStateRef.current;
@@ -125,15 +144,37 @@ export function usePlayPagePlayerState({
       ...loadStoredAvatarConfig(),
       ...nextPlayer.avatar,
     });
-    saveStoredPlayerState(nextPlayer);
     setPlayerState(nextPlayer);
     void syncPlayerState(nextPlayer);
   }, [syncPlayerState]);
 
-  const handleEquipOwnedItem = useCallback((itemId: string) => {
+  const handleEquipOwnedItem = useCallback(async (itemId: string) => {
+    const token = tokenRef.current;
+    if (token) {
+      const res = await fetch('/api/player/inventory/equip', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ item_id: itemId }),
+      }).catch(() => null);
+
+      if (res?.ok) {
+        const json = await res.json().catch(() => null) as { player?: PlayerState } | null;
+        if (json?.player) {
+          applyPlayerState(normalizePlayerState(json.player));
+          return true;
+        }
+      }
+
+      return false;
+    }
+
     equipItem(itemId);
     persistInventoryState(getInventory());
-  }, [persistInventoryState]);
+    return true;
+  }, [applyPlayerState, persistInventoryState, tokenRef]);
 
   const loadVecindadSharedState = useCallback(async (session?: Session | null) => {
     const headers: HeadersInit = {};
@@ -160,60 +201,66 @@ export function usePlayPagePlayerState({
   const hydratePlayerState = useCallback(async (session: Session | null) => {
     if (!session?.access_token) {
       tokenRef.current = null;
+      authHydratingRef.current = false;
       await loadVecindadSharedState(null);
       return;
     }
 
     tokenRef.current = session.access_token;
-    void initStatsSystem(session.user.id);
+    authHydratingRef.current = true;
+    playerStateRef.current = null;
 
-    const res = await fetch('/api/player', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-      },
-    });
-    if (!res.ok) return;
-    const json = await res.json();
-    const remotePlayer = json.player as PlayerState | undefined;
-    const localPlayer = loadStoredPlayerState();
-    await loadVecindadSharedState(session);
+    try {
+      void initStatsSystem(session.user.id);
 
-    if (remotePlayer) {
-      const merged = mergeHydratedPlayerState(
-        localPlayer,
-        normalizePlayerState(remotePlayer)
-      );
-      applyPlayerState(merged);
-      if (JSON.stringify(merged) !== JSON.stringify(normalizePlayerState(remotePlayer))) {
-        void syncPlayerState(merged);
+      const res = await fetch('/api/player', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      if (!res.ok) return;
+
+      const json = await res.json();
+      const remotePlayer = json.player as PlayerState | undefined;
+      await loadVecindadSharedState(session);
+
+      if (remotePlayer) {
+        applyPlayerState(normalizePlayerState(remotePlayer));
       }
-    }
 
-    void initTenksFromServer(session.user.id, session.access_token);
+      void initTenksFromServer(session.user.id, session.access_token);
 
-    const serverUsername = session.user.user_metadata?.username;
-    if (typeof serverUsername === 'string' && serverUsername.trim() && typeof window !== 'undefined') {
-      const storedUsername = window.localStorage.getItem('waspi_username');
-      if (storedUsername !== serverUsername.trim()) {
-        window.localStorage.setItem('waspi_username', serverUsername.trim());
+      const serverProgression = await loadProgressionFromServer();
+      if (serverProgression) {
+        const progression = loadProgressionState();
+        eventBus.emit(EVENTS.PLAYER_PROGRESSION, progression);
+        eventBus.emit(EVENTS.PLAYER_COMBAT_STATS, {
+          kills: progression.kills,
+          deaths: serverProgression.deaths,
+        });
       }
+
+      const serverUsername = session.user.user_metadata?.username;
+      if (typeof serverUsername === 'string' && serverUsername.trim() && typeof window !== 'undefined') {
+        const storedUsername = window.localStorage.getItem('waspi_username');
+        if (storedUsername !== serverUsername.trim()) {
+          window.localStorage.setItem('waspi_username', serverUsername.trim());
+        }
+      }
+    } finally {
+      authHydratingRef.current = false;
     }
-  }, [applyPlayerState, loadVecindadSharedState, syncPlayerState, tokenRef]);
+  }, [applyPlayerState, loadVecindadSharedState, tokenRef]);
 
   const refreshPlayerState = useCallback(async () => {
     let token = tokenRef.current;
-    let playerId: string | null = null;
     if (!token && supabase) {
       const { data } = await supabase.auth.getSession();
       token = data.session?.access_token ?? null;
       if (data.session) {
         tokenRef.current = data.session.access_token;
-        playerId = data.session.user.id;
       }
-    } else if (supabase) {
-      const { data } = await supabase.auth.getSession();
-      playerId = data.session?.user.id ?? null;
     }
     if (!token) return;
 
@@ -229,21 +276,7 @@ export function usePlayPagePlayerState({
     const player = json.player as PlayerState | undefined;
 
     if (player) {
-      let normalized = normalizePlayerState(player);
-
-      if (playerId && supabase) {
-        const reconciledOwned = await reconcileInventoryFromDB(supabase, playerId, normalized.inventory.owned);
-        if (reconciledOwned.length > normalized.inventory.owned.length) {
-          const newItemIds = reconciledOwned.filter((id) => !normalized.inventory.owned.includes(id));
-          let reconciledState = normalized;
-          for (const itemId of newItemIds) {
-            reconciledState = grantInventoryItem(reconciledState, itemId);
-          }
-          normalized = reconciledState;
-        }
-      }
-
-      applyPlayerState(normalized);
+      applyPlayerState(normalizePlayerState(player));
     }
 
     if (typeof window !== 'undefined') {
@@ -262,6 +295,9 @@ export function usePlayPagePlayerState({
   }, [applyPlayerState, loadVecindadSharedState, tokenRef]);
 
   useEffect(() => {
+    const unsubPlayerStateApply = eventBus.on(EVENTS.PLAYER_STATE_APPLY, (payload: unknown) => {
+      applyPlayerState(normalizePlayerState(payload));
+    });
     const unsubTenks = eventBus.on(EVENTS.TENKS_CHANGED, () => {
       void syncPlayerState();
     });
@@ -273,11 +309,12 @@ export function usePlayPagePlayerState({
     });
 
     return () => {
+      unsubPlayerStateApply();
       unsubTenks();
       unsubInventory();
       unsubAvatar();
     };
-  }, [syncPlayerState]);
+  }, [applyPlayerState, syncPlayerState]);
 
   useEffect(() => {
     if (!CHAT_SCENES.has(activeScene)) return;
@@ -285,6 +322,7 @@ export function usePlayPagePlayerState({
   }, [activeScene, syncPlayerState]);
 
   return {
+    activeWeapon,
     applyPlayerState,
     ballOn,
     equipped,
@@ -296,12 +334,14 @@ export function usePlayPagePlayerState({
     persistInventoryState,
     playerState,
     refreshPlayerState,
+    setActiveWeapon,
     setBallOn,
     setEquipped,
     setGunOn,
     setOwned,
     setPlayerState,
     setTenks,
+    persistEditablePlayerPatch,
     syncPlayerState,
     tenks,
   };

@@ -11,6 +11,6 @@ type RealtimeChannelWithHttpSend = {
 
 export function preferSupabaseHttpBroadcast<T extends RealtimeChannelWithHttpSend | null>(channel: T): T {
   if (!channel || typeof channel.httpSend !== 'function') return channel;
-  channel.send = (payload: RealtimeBroadcastPayload) => channel.httpSend!(payload.event, payload.payload);
+  channel.send = (payload: RealtimeBroadcastPayload) => channel.httpSend!(payload.event, payload.payload ?? {});
   return channel;
 }

@@ -1,8 +1,8 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js';
-import { DEFAULT_PLAYER_STATE, normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
-import { appendTenksTransaction, ensureCatalogSeeded, ensurePlayerRow } from '@/src/lib/commercePersistence';
+import type { PlayerState } from '@/src/lib/playerState';
+import { appendTenksTransaction, ensureCatalogSeeded, ensurePlayerRow, hydratePlayerFromDatabase, PLAYER_METADATA_KEY } from '@/src/lib/commercePersistence';
+import { creditBalance, debitBalance } from '@/src/lib/tenksBalance';
 
-const PLAYER_METADATA_KEY = 'waspiPlayer';
 const PVP_RESERVATION_KEY = 'waspiPvpReservation';
 const PVP_OUTCOME_KEY = 'waspiPvpOutcome';
 export const PVP_BET_OPTIONS = [250, 500, 1000] as const;
@@ -29,10 +29,6 @@ type UserWithPlayer = {
   reservation: PvpReservation | null;
   outcome: PvpOutcome | null;
 };
-
-export function readPlayerState(user: User) {
-  return normalizePlayerState(user.user_metadata?.[PLAYER_METADATA_KEY] ?? DEFAULT_PLAYER_STATE);
-}
 
 export function readReservation(user: User): PvpReservation | null {
   const raw = user.user_metadata?.[PVP_RESERVATION_KEY];
@@ -67,9 +63,10 @@ export async function loadUserWithState(admin: SupabaseClient, userId: string): 
   const { data, error } = await admin.auth.admin.getUserById(userId);
   if (error) throw error;
   if (!data.user) return null;
+  const player = await hydratePlayerFromDatabase(admin, data.user);
   return {
     user: data.user,
-    player: readPlayerState(data.user),
+    player,
     reservation: readReservation(data.user),
     outcome: readOutcome(data.user),
   };
@@ -84,10 +81,15 @@ export async function persistPlayerMetadata(
     outcome?: PvpOutcome | null;
   }
 ) {
+  const { data: latestUserData, error: latestUserError } = await admin.auth.admin.getUserById(input.user.id);
+  if (latestUserError) throw latestUserError;
+
+  const latestUser = latestUserData.user ?? input.user;
   const metadata = {
-    ...(input.user.user_metadata ?? {}),
-    [PLAYER_METADATA_KEY]: input.player,
+    ...(latestUser.user_metadata ?? {}),
   } as Record<string, unknown>;
+
+  metadata[PLAYER_METADATA_KEY] = input.player as unknown as Record<string, unknown>;
 
   if (input.reservation) {
     metadata[PVP_RESERVATION_KEY] = input.reservation;
@@ -103,29 +105,45 @@ export async function persistPlayerMetadata(
     }
   }
 
+  await ensureCatalogSeeded(admin);
+  await ensurePlayerRow(admin, latestUser, input.player, { syncTenksBalance: true });
+
   const { error } = await admin.auth.admin.updateUserById(input.user.id, {
     user_metadata: metadata,
   });
 
   if (error) throw error;
-  await ensureCatalogSeeded(admin);
-  await ensurePlayerRow(admin, input.user, input.player, { syncTenksBalance: true });
 }
 
 async function releaseExpiredReservation(admin: SupabaseClient, current: UserWithPlayer) {
   if (!current.reservation || !isReservationExpired(current.reservation)) return current;
 
+  const credit = await creditBalance(admin, {
+    playerId: current.user.id,
+    amount: current.reservation.bet,
+    fallbackBalance: current.player.tenks,
+  });
+
   const refundedPlayer: PlayerState = {
     ...current.player,
-    tenks: current.player.tenks + current.reservation.bet,
+    tenks: credit.newBalance,
   };
 
-  await persistPlayerMetadata(admin, {
-    user: current.user,
-    player: refundedPlayer,
-    reservation: null,
-    outcome: current.outcome?.matchId === current.reservation.matchId ? null : current.outcome,
-  });
+  try {
+    await persistPlayerMetadata(admin, {
+      user: current.user,
+      player: refundedPlayer,
+      reservation: null,
+      outcome: current.outcome?.matchId === current.reservation.matchId ? null : current.outcome,
+    });
+  } catch (error) {
+    await debitBalance(admin, {
+      playerId: current.user.id,
+      amount: current.reservation.bet,
+      fallbackBalance: credit.newBalance,
+    }).catch(() => undefined);
+    throw error;
+  }
   await appendTenksTransaction(admin, {
     playerId: current.user.id,
     amount: current.reservation.bet,
@@ -164,10 +182,6 @@ export async function reservePvpStake(
   if (nextCurrent.reservation) {
     throw new Error('You already have a pending PvP reservation.');
   }
-  if (nextCurrent.player.tenks < input.bet) {
-    throw new Error('Not enough TENKS for this bet.');
-  }
-
   const opponent = await loadUserWithState(admin, input.opponentId);
   if (!opponent) throw new Error('Opponent not found.');
   const nextOpponent = await releaseExpiredReservation(admin, opponent);
@@ -178,9 +192,18 @@ export async function reservePvpStake(
     throw new Error('Opponent already has a pending PvP match.');
   }
 
+  const debit = await debitBalance(admin, {
+    playerId: nextCurrent.user.id,
+    amount: input.bet,
+    fallbackBalance: nextCurrent.player.tenks,
+  });
+  if (!debit.ok) {
+    throw new Error('Not enough TENKS for this bet.');
+  }
+
   const nextPlayer: PlayerState = {
     ...nextCurrent.player,
-    tenks: nextCurrent.player.tenks - input.bet,
+    tenks: debit.newBalance,
   };
   const reservation: PvpReservation = {
     matchId: input.matchId,
@@ -189,12 +212,21 @@ export async function reservePvpStake(
     createdAt: new Date().toISOString(),
   };
 
-  await persistPlayerMetadata(admin, {
-    user: nextCurrent.user,
-    player: nextPlayer,
-    reservation,
-    outcome: nextCurrent.outcome,
-  });
+  try {
+    await persistPlayerMetadata(admin, {
+      user: nextCurrent.user,
+      player: nextPlayer,
+      reservation,
+      outcome: nextCurrent.outcome,
+    });
+  } catch (error) {
+    await creditBalance(admin, {
+      playerId: nextCurrent.user.id,
+      amount: input.bet,
+      fallbackBalance: debit.newBalance,
+    }).catch(() => undefined);
+    throw error;
+  }
   await appendTenksTransaction(admin, {
     playerId: nextCurrent.user.id,
     amount: -input.bet,
@@ -219,17 +251,32 @@ export async function cancelPvpStake(
     return { player: nextCurrent.player, refunded: false };
   }
 
+  const credit = await creditBalance(admin, {
+    playerId: nextCurrent.user.id,
+    amount: nextCurrent.reservation.bet,
+    fallbackBalance: nextCurrent.player.tenks,
+  });
+
   const nextPlayer: PlayerState = {
     ...nextCurrent.player,
-    tenks: nextCurrent.player.tenks + nextCurrent.reservation.bet,
+    tenks: credit.newBalance,
   };
 
-  await persistPlayerMetadata(admin, {
-    user: nextCurrent.user,
-    player: nextPlayer,
-    reservation: null,
-    outcome: nextCurrent.outcome?.matchId === input.matchId ? null : nextCurrent.outcome,
-  });
+  try {
+    await persistPlayerMetadata(admin, {
+      user: nextCurrent.user,
+      player: nextPlayer,
+      reservation: null,
+      outcome: nextCurrent.outcome?.matchId === input.matchId ? null : nextCurrent.outcome,
+    });
+  } catch (error) {
+    await debitBalance(admin, {
+      playerId: nextCurrent.user.id,
+      amount: nextCurrent.reservation.bet,
+      fallbackBalance: credit.newBalance,
+    }).catch(() => undefined);
+    throw error;
+  }
   await appendTenksTransaction(admin, {
     playerId: nextCurrent.user.id,
     amount: nextCurrent.reservation.bet,
@@ -345,17 +392,31 @@ export async function settlePvpForfeit(
   }
 
   const pot = winnerReservation.bet + loserReservation.bet;
+  const credit = await creditBalance(admin, {
+    playerId: nextWinner.user.id,
+    amount: pot,
+    fallbackBalance: nextWinner.player.tenks,
+  });
   const winnerNext: PlayerState = {
     ...nextWinner.player,
-    tenks: nextWinner.player.tenks + pot,
+    tenks: credit.newBalance,
   };
 
-  await persistPlayerMetadata(admin, {
-    user: nextWinner.user,
-    player: winnerNext,
-    reservation: null,
-    outcome: null,
-  });
+  try {
+    await persistPlayerMetadata(admin, {
+      user: nextWinner.user,
+      player: winnerNext,
+      reservation: null,
+      outcome: null,
+    });
+  } catch (error) {
+    await debitBalance(admin, {
+      playerId: nextWinner.user.id,
+      amount: pot,
+      fallbackBalance: credit.newBalance,
+    }).catch(() => undefined);
+    throw error;
+  }
   await appendTenksTransaction(admin, {
     playerId: nextWinner.user.id,
     amount: pot,
@@ -437,17 +498,31 @@ export async function settlePvpMatch(
   }
 
   const pot = winnerReservation.bet + loserReservation.bet;
+  const credit = await creditBalance(admin, {
+    playerId: nextWinner.user.id,
+    amount: pot,
+    fallbackBalance: nextWinner.player.tenks,
+  });
   const winnerNext: PlayerState = {
     ...nextWinner.player,
-    tenks: nextWinner.player.tenks + pot,
+    tenks: credit.newBalance,
   };
 
-  await persistPlayerMetadata(admin, {
-    user: nextWinner.user,
-    player: winnerNext,
-    reservation: null,
-    outcome: null,
-  });
+  try {
+    await persistPlayerMetadata(admin, {
+      user: nextWinner.user,
+      player: winnerNext,
+      reservation: null,
+      outcome: null,
+    });
+  } catch (error) {
+    await debitBalance(admin, {
+      playerId: nextWinner.user.id,
+      amount: pot,
+      fallbackBalance: credit.newBalance,
+    }).catch(() => undefined);
+    throw error;
+  }
   await appendTenksTransaction(admin, {
     playerId: nextWinner.user.id,
     amount: pot,

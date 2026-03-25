@@ -4,7 +4,8 @@ import {
   getAuthenticatedUser,
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
-import { creditBalance } from '@/src/lib/tenksBalance';
+import { appendTenksTransaction, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
+import { creditBalance, debitBalance } from '@/src/lib/tenksBalance';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -140,6 +141,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
+  const rollbackTenks = async () => {
+    await debitBalance(admin, {
+      playerId: user.id,
+      amount: contract.reward_tenks,
+      fallbackBalance: new_balance,
+    }).catch((rollbackError) => {
+      console.error('[Waspi][contracts/claim] TENKS rollback failed:', rollbackError);
+    });
+  };
+
   // ── Update skill XP (if skill_id is valid) ────────────────────────────────
   let leveled_up = false;
   let new_level: number | null = null;
@@ -155,6 +166,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle<SkillRow>();
 
     if (skillFetchError) {
+      await rollbackTenks();
       return NextResponse.json({ error: skillFetchError.message }, { status: 500 });
     }
 
@@ -179,19 +191,45 @@ export async function POST(request: NextRequest) {
       );
 
     if (skillUpsertError) {
+      await rollbackTenks();
       return NextResponse.json({ error: skillUpsertError.message }, { status: 500 });
     }
   }
 
   // ── Mark reward as claimed ────────────────────────────────────────────────
-  const { error: claimError } = await admin
+  const { data: claimedRow, error: claimError } = await admin
     .from('player_contracts')
     .update({ reward_claimed_at: new Date().toISOString() })
     .eq('user_id', user.id)
-    .eq('contract_id', contract_id);
+    .eq('contract_id', contract_id)
+    .is('reward_claimed_at', null)
+    .select('contract_id')
+    .maybeSingle<{ contract_id: string }>();
 
   if (claimError) {
+    await rollbackTenks();
     return NextResponse.json({ error: claimError.message }, { status: 500 });
+  }
+  if (!claimedRow) {
+    await rollbackTenks();
+    return NextResponse.json({ error: 'Reward already claimed.' }, { status: 409 });
+  }
+
+  try {
+    await appendTenksTransaction(admin, {
+      playerId: user.id,
+      amount: contract.reward_tenks,
+      reason: `contract_claim_${contract_id}`,
+      balanceAfter: new_balance,
+    });
+  } catch (error) {
+    console.error('[Waspi][contracts/claim] transaction log failed:', error);
+  }
+
+  try {
+    await syncPlayerMetadataSnapshot(admin, user);
+  } catch (error) {
+    console.error('[Waspi][contracts/claim] snapshot sync failed:', error);
   }
 
   return NextResponse.json({

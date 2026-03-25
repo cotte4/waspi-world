@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { AvatarRenderer, type AvatarAction, type AvatarConfig, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { COLORS, SAFE_PLAZA_RETURN } from '../config/constants';
-import { getTenksBalance, initTenks } from '../systems/TenksSystem';
+import { getTenksBalance } from '../systems/TenksSystem';
 import { announceScene, bindSafeResetToPlaza, createBackButton, transitionToWorldScene } from '../systems/SceneUi';
 import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
 import { SceneControls } from '../systems/SceneControls';
@@ -1187,9 +1187,9 @@ export class PvpArenaScene extends Phaser.Scene {
       return false;
     }
 
-    const json = await res.json().catch(() => null) as { player?: { tenks?: number } } | null;
-    if (typeof json?.player?.tenks === 'number') {
-      initTenks(json.player.tenks);
+    const json = await res.json().catch(() => null) as { player?: import('@/src/lib/playerState').PlayerState } | null;
+    if (json?.player) {
+      eventBus.emit(EVENTS.PLAYER_STATE_APPLY, json.player);
     }
     this.paidEntryForMatch = matchId;
     this.serverReservedMatchId = matchId;
@@ -1217,9 +1217,9 @@ export class PvpArenaScene extends Phaser.Scene {
     }).catch(() => null);
 
     if (res?.ok) {
-      const json = await res.json().catch(() => null) as { player?: { tenks?: number } } | null;
-      if (typeof json?.player?.tenks === 'number') {
-        initTenks(json.player.tenks);
+      const json = await res.json().catch(() => null) as { player?: import('@/src/lib/playerState').PlayerState } | null;
+      if (json?.player) {
+        eventBus.emit(EVENTS.PLAYER_STATE_APPLY, json.player);
       }
     }
     this.paidEntryForMatch = '';
@@ -1248,9 +1248,9 @@ export class PvpArenaScene extends Phaser.Scene {
     }).catch(() => null);
 
     if (res?.ok) {
-      const json = await res.json().catch(() => null) as { player?: { tenks?: number } } | null;
-      if (typeof json?.player?.tenks === 'number') {
-        initTenks(json.player.tenks);
+      const json = await res.json().catch(() => null) as { player?: import('@/src/lib/playerState').PlayerState } | null;
+      if (json?.player) {
+        eventBus.emit(EVENTS.PLAYER_STATE_APPLY, json.player);
       }
     } else {
       this.flashNotice('PAGO PENDIENTE: REINTENTA ENTRANDO DE NUEVO', '#FFB36A');

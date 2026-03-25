@@ -82,11 +82,12 @@ export function normalizePlayerState(input: unknown): PlayerState {
     ? inventory.equipped
     : DEFAULT_PLAYER_STATE.inventory.equipped;
   const owned = Array.isArray(inventory.owned) ? inventory.owned.filter((v): v is string => typeof v === 'string') : [];
-  const utility = Array.isArray(equipped.utility)
-    ? equipped.utility.filter((v): v is string => typeof v === 'string')
+  const hasUtilityState = Array.isArray(equipped.utility);
+  const utility = hasUtilityState
+    ? (equipped.utility ?? []).filter((v): v is string => typeof v === 'string')
     : [];
   const ownedWithDefaults = owned.includes(DEFAULT_UTILITY_ID) ? owned : [...owned, DEFAULT_UTILITY_ID];
-  const utilityWithDefaults = utility.length ? utility : [DEFAULT_UTILITY_ID];
+  const utilityWithDefaults = hasUtilityState ? utility : [DEFAULT_UTILITY_ID];
 
   const progRaw = state.progression;
   const progression: PlayerState['progression'] =

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdminClient, getAuthenticatedUser, isServerSupabaseConfigured } from '@/src/lib/supabaseServer';
-import { appendTenksTransaction } from '@/src/lib/commercePersistence';
-import { creditBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
+import { appendTenksTransaction, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
+import { creditBalance, debitBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
 
 const VALID_GAMES = ['darts', 'dino', 'flappy'] as const;
 type RewardGame = typeof VALID_GAMES[number];
@@ -150,12 +150,14 @@ export async function POST(request: NextRequest) {
   }
 
   let newBalance: number;
+  let creditedBalance: number | null = null;
   try {
     const credited = await creditBalance(admin, {
       playerId: user.id,
       amount: tenksEarned,
     });
     newBalance = credited.newBalance;
+    creditedBalance = credited.newBalance;
 
     if (tenksEarned > 0) {
       await appendTenksTransaction(admin, {
@@ -181,7 +183,27 @@ export async function POST(request: NextRequest) {
     .eq('id', inserted.id);
 
   if (finalizeError) {
+    if (tenksEarned > 0 && creditedBalance !== null) {
+      await debitBalance(admin, {
+        playerId: user.id,
+        amount: tenksEarned,
+        fallbackBalance: creditedBalance,
+      }).catch((rollbackError) => {
+        console.error('[Waspi][minigames/reward] TENKS rollback failed:', rollbackError);
+      });
+    }
+    await admin
+      .from('game_sessions')
+      .update({ result: 'failed' })
+      .eq('id', inserted.id)
+      .then(() => undefined, () => undefined);
     return NextResponse.json({ error: finalizeError.message }, { status: 500 });
+  }
+
+  try {
+    await syncPlayerMetadataSnapshot(admin, user);
+  } catch (error) {
+    console.error('[Waspi][minigames/reward] snapshot sync failed:', error);
   }
 
   return NextResponse.json({

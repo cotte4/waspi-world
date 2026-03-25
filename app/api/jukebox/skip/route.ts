@@ -6,7 +6,7 @@ import {
   isServerSupabaseConfigured,
 } from '@/src/lib/supabaseServer';
 import { appendTenksTransaction } from '@/src/lib/commercePersistence';
-import { debitBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
+import { creditBalance, debitBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
 
 const SKIP_COST = 500;
 const SKIP_THRESHOLD = 1;
@@ -76,13 +76,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 
-  if (serverBalance < SKIP_COST) {
-    return NextResponse.json(
-      { error: `Necesitás ${SKIP_COST} TENKS para votar skip. Tenés ${serverBalance}.`, balance: serverBalance },
-      { status: 400 }
-    );
-  }
-
   // --- Register vote first so we never charge twice for the same vote ---
   const { error: voteError } = await admin
     .from('jukebox_skip_votes')
@@ -119,9 +112,13 @@ export async function POST(request: NextRequest) {
     .eq('queue_id', body.queueId);
 
   if (countError) {
-    await admin
-      .from('player_tenks_balance')
-      .upsert({ player_id: user.id, balance: serverBalance });
+    await creditBalance(admin, {
+      playerId: user.id,
+      amount: SKIP_COST,
+      fallbackBalance: newBalance,
+    }).catch((refundError) => {
+      console.error('POST /api/jukebox/skip refund failed after count error:', refundError);
+    });
     await admin
       .from('jukebox_skip_votes')
       .delete()
@@ -160,3 +157,4 @@ export async function POST(request: NextRequest) {
     newBalance,
   });
 }
+

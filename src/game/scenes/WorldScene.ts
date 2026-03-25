@@ -6,8 +6,8 @@ import { WORLD, PLAYER, COLORS, ZONES, BUILDINGS, CHAT, SAFE_PLAZA_RETURN } from
 import { eventBus, EVENTS } from '../config/eventBus';
 import { supabase, isConfigured } from '../../lib/supabase';
 import { preferSupabaseHttpBroadcast } from '../../lib/supabaseRealtime';
-import { addTenks, initTenks, getTenksBalance } from '../systems/TenksSystem';
-import { ensureItemEquipped, getEquippedColors, hasUtilityEquipped, ownItem, getInventory, replaceInventory, initInventoryFromServer } from '../systems/InventorySystem';
+import { addTenks, applyTenksBalanceFromServer, getTenksBalance } from '../systems/TenksSystem';
+import { getEquippedColors, hasUtilityEquipped, getInventory, initInventoryFromServer } from '../systems/InventorySystem';
 import { DialogSystem } from '../systems/DialogSystem';
 import { BranchedDialog, type DialogNode } from '../systems/BranchedDialog';
 import { CATALOG, getItem } from '../config/catalog';
@@ -38,7 +38,6 @@ import type { VecindadState } from '../../lib/playerState';
 import { getBuildCost, MAX_VECINDAD_STAGE, type SharedParcelState, type VecindadParcelConfig, VECINDAD_PARCELS } from '../../lib/vecindad';
 import { EnemySprite, registerZombieAnims, type ZombieType } from '../systems/EnemySprite';
 import { SkillTreePanel } from '../systems/SkillTreePanel';
-import { ProgressionPanel } from '../systems/ProgressionPanel';
 import { SkillShopPanel } from '../systems/SkillShopPanel';
 import { getSkillSystem } from '../systems/SkillSystem';
 import { ContractPanel } from '../systems/ContractPanel';
@@ -524,7 +523,6 @@ export class WorldScene extends Phaser.Scene {
   private keyFive!: Phaser.Input.Keyboard.Key;
   private keySix!: Phaser.Input.Keyboard.Key;
   private skillTreePanel?: SkillTreePanel;
-  private progressionPanel?: ProgressionPanel;
   private skillShopPanel?: SkillShopPanel;
   private contractPanel?: ContractPanel;
   private guildPanel?: GuildPanel;
@@ -625,6 +623,7 @@ export class WorldScene extends Phaser.Scene {
   // BARBER NPC
   private barberPanelOpen = false;
   private barberPanel: Phaser.GameObjects.Container | null = null;
+  private barberRequestInFlight = false;
 
   // Sprint
   private shiftKey?: Phaser.Input.Keyboard.Key;
@@ -938,7 +937,6 @@ export class WorldScene extends Phaser.Scene {
 
     // Skill tree panel (T) + Skill shop panel (Y) + Contract panel (C) + Progression panel (I)
     this.skillTreePanel = new SkillTreePanel(this);
-    this.progressionPanel = new ProgressionPanel(this);
     this.skillShopPanel = new SkillShopPanel(this);
     this.contractPanel  = new ContractPanel(this);
     this.guildPanel     = new GuildPanel(this);
@@ -1783,6 +1781,7 @@ export class WorldScene extends Phaser.Scene {
     this.syncWeaponVisual();
     this.renderCombatHud();
     this.broadcastSelfState('player:update');
+    eventBus.emit(EVENTS.WEAPON_CHANGED, { weapon: this.currentWeapon });
   }
 
   private renderCombatHud() {
@@ -2130,12 +2129,17 @@ export class WorldScene extends Phaser.Scene {
     eventBus.emit(EVENTS.PLAYER_PROGRESSION, this.progression);
     const tenksReward = this.getScaledTrainingTenksReward(state.tenksReward);
     const multiplier = this.getTrainingTenksMultiplier();
-    addTenks(tenksReward, `training_${state.archetype}`);
-    if (state.isBoss) {
-      this.showArenaNotice(`BOSS DOWN +${state.xpReward} XP +${tenksReward} TENKS x${multiplier.toFixed(1)}`, '#39FF14');
-    } else {
-      this.showArenaNotice(`+${state.xpReward} XP +${tenksReward} TENKS x${multiplier.toFixed(1)} ${state.label}`, '#F5C842');
-    }
+    this.creditWorldTenks(
+      tenksReward,
+      state.isBoss ? 'training_boss' : `training_${state.archetype}`,
+      () => {
+        if (state.isBoss) {
+          this.showArenaNotice(`BOSS DOWN +${state.xpReward} XP +${tenksReward} TENKS x${multiplier.toFixed(1)}`, '#39FF14');
+        } else {
+          this.showArenaNotice(`+${state.xpReward} XP +${tenksReward} TENKS x${multiplier.toFixed(1)} ${state.label}`, '#F5C842');
+        }
+      },
+    );
     this.renderTrainingHud();
 
     // Pulse progressionHud on TENKS gain
@@ -2770,7 +2774,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private refreshUtilitiesFromInventory() {
-    this.gunEnabled = true;
+    this.gunEnabled = hasUtilityEquipped('UTIL-GUN-01');
     this.ballEnabled = hasUtilityEquipped('UTIL-BALL-01');
     // If current weapon no longer owned, revert to pistol
     if (!this.hasWeaponUnlocked(this.currentWeapon)) {
@@ -4338,8 +4342,9 @@ export class WorldScene extends Phaser.Scene {
 
     if (this.camaraTimer >= this.camaraTickMs) {
       this.camaraTimer = 0;
-      addTenks(this.camaraTenksPerTick, 'camara_del_tiempo');
-      this.showArenaNotice(`+${this.camaraTenksPerTick} TENKS`, '#B388FF');
+      this.creditWorldTenks(this.camaraTenksPerTick, 'camara_del_tiempo', () => {
+        this.showArenaNotice(`+${this.camaraTenksPerTick} TENKS`, '#B388FF');
+      });
     }
   }
 
@@ -4626,9 +4631,9 @@ export class WorldScene extends Phaser.Scene {
 
     const branchHowToEarn: DialogNode = {
       lines: [
-        'COTTENKS: Simple: participá.',
-        'COTTENKS: El Arcade paga. Las compras pagan. El chat paga.',
-        'COTTENKS: El mundo te mira. Cuanto más presente estás, más TENKS ganás.',
+      'COTTENKS: Simple: participá.',
+      'COTTENKS: El Arcade paga. Las compras pagan. El chat paga.',
+      'COTTENKS: El mundo te mira. Cuanto más presente estás, más TENKS ganás.',
       ],
       choices: [
         { label: 'Voy a intentarlo.', next: endBye },
@@ -4640,8 +4645,8 @@ export class WorldScene extends Phaser.Scene {
     const branchWhatAreTenks: DialogNode = {
       lines: [
         'COTTENKS: Los TENKS son la moneda del mundo WASPI.',
-        'COTTENKS: No se compran con plata. Se ganan con presencia.',
-        'COTTENKS: Sirven para votar drops, desbloquear zonas y conseguir descuentos.',
+        'COTTENKS: Se ganan con presencia o se compran cuando querés avanzar más rápido.',
+        'COTTENKS: Sirven para votar drops, desbloquear zonas y comprar en el mundo.',
       ],
       choices: [
         { label: '¿Cómo consigo más?', next: branchHowToEarn },
@@ -4654,7 +4659,7 @@ export class WorldScene extends Phaser.Scene {
     const branchStore: DialogNode = {
       lines: [
         'COTTENKS: La WASPI STORE. Ropa de verdad, envío a tu casa.',
-        'COTTENKS: Pagás con plata real. Pero si tenés TENKS, conseguís descuento.',
+        'COTTENKS: Pagás con plata real y también te llevás el look digital.',
         'COTTENKS: No hay excusas para no tener el look.',
       ],
       choices: [
@@ -4924,7 +4929,7 @@ export class WorldScene extends Phaser.Scene {
     g.lineBetween(x + 14, y - 22, x + 22, y - 10);
     g.lineBetween(x + 22, y - 22, x + 14, y - 10);
 
-    this.add.text(x, y - 56, 'BARBERIA', {
+    this.add.text(x, y - 56, 'WARDROBE', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#FF88CC',
@@ -4932,7 +4937,7 @@ export class WorldScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5, 1).setDepth(9000);
 
-    this.add.text(x, y - 44, 'ESTILOS x TENKS', {
+    this.add.text(x, y - 44, 'STYLE EDITS x TENKS', {
       fontSize: '5px',
       fontFamily: '"Silkscreen", monospace',
       color: '#AAAAAA',
@@ -5201,7 +5206,7 @@ export class WorldScene extends Phaser.Scene {
     container.add(bg);
 
     container.add(
-      this.add.text(cx, py + 22, 'BARBERIA', {
+      this.add.text(cx, py + 22, 'WARDROBE', {
         fontSize: '11px',
         fontFamily: '"Press Start 2P", monospace',
         color: '#FF88CC',
@@ -5293,6 +5298,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private closeBarberPanel() {
+    if (this.barberRequestInFlight) return;
     if (!this.barberPanelOpen) return;
     this.barberPanel?.destroy(true);
     this.barberPanel = null;
@@ -5305,25 +5311,28 @@ export class WorldScene extends Phaser.Scene {
     cost: number,
     balText: Phaser.GameObjects.Text,
   ): Promise<void> {
-    const prevConfig = loadStoredAvatarConfig();
-    if (prevConfig.hairStyle === styleId) return;
+    if (this.barberRequestInFlight) return;
+
+    const currentConfig = loadStoredAvatarConfig();
+    if (currentConfig.hairStyle === styleId) return;
 
     if (getTenksBalance() < cost) {
       eventBus.emit(EVENTS.UI_NOTICE, `Necesitas ${cost} TENKS para este estilo.`);
       return;
     }
 
-    // Close panel for snappy UX, then apply optimistically
-    this.closeBarberPanel();
+    const authH = await getAuthHeaders();
+    if (!authH.Authorization) {
+      eventBus.emit(EVENTS.UI_NOTICE, 'Inicia sesion para guardar cambios de barberia.');
+      return;
+    }
 
-    const nextConfig = { ...prevConfig, hairStyle: styleId };
-    saveStoredAvatarConfig(nextConfig);
-    this.rebuildLocalAvatar(nextConfig);
-    addTenks(-cost, 'barbershop');
+    this.barberRequestInFlight = true;
+    if (balText.active) {
+      balText.setText('TENKS: PROCESANDO...');
+    }
 
-    // Server-side charge
     try {
-      const authH = await getAuthHeaders();
       const res = await fetch('/api/player/barbershop', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authH },
@@ -5334,36 +5343,42 @@ export class WorldScene extends Phaser.Scene {
         const errBody = await res.json().catch(() => ({ error: 'Error desconocido' })) as { error?: string };
         const msg = errBody.error ?? `HTTP ${res.status}`;
         console.error('[Waspi][Barbershop] Server charge failed:', msg);
-        saveStoredAvatarConfig(prevConfig);
-        if (this.scene?.isActive('WorldScene')) {
-          this.rebuildLocalAvatar(prevConfig);
-          addTenks(cost, 'barbershop_rollback');
-          eventBus.emit(EVENTS.UI_NOTICE, `Error en barberia: ${msg}`);
-        }
+        eventBus.emit(EVENTS.UI_NOTICE, `Error en barberia: ${msg}`);
         return;
       }
 
       const data = await res.json() as { new_balance?: number; notice?: string };
+      const nextConfig = { ...currentConfig, hairStyle: styleId };
+      saveStoredAvatarConfig(nextConfig);
+      this.rebuildLocalAvatar(nextConfig);
+
       if (typeof data.new_balance === 'number') {
         const diff = data.new_balance - getTenksBalance();
-        if (diff !== 0) addTenks(diff, 'barbershop_reconcile');
+        if (diff !== 0) {
+          addTenks(diff, 'barbershop_confirmed');
+        }
       }
-      if (!this.scene?.isActive('WorldScene')) return;
-      if (data.notice) eventBus.emit(EVENTS.UI_NOTICE, data.notice);
-      // balText may be destroyed if panel was already closed — guard it
-      if (balText.active) {
-        balText.setText(`TENKS: ${getTenksBalance().toLocaleString('es-AR')}`);
+
+      if (this.scene?.isActive('WorldScene')) {
+        if (data.notice) eventBus.emit(EVENTS.UI_NOTICE, data.notice);
+        this.barberRequestInFlight = false;
+        this.closeBarberPanel();
+        eventBus.emit(EVENTS.UI_NOTICE, 'Nuevo look aplicado!');
+        return;
       }
-      eventBus.emit(EVENTS.UI_NOTICE, '¡Nuevo look aplicado!');
+
+      return;
     } catch (err) {
       console.error('[Waspi][Barbershop] fetch error:', err);
-      saveStoredAvatarConfig(prevConfig);
-      if (this.scene?.isActive('WorldScene')) {
-        this.rebuildLocalAvatar(prevConfig);
-        addTenks(cost, 'barbershop_rollback');
-        eventBus.emit(EVENTS.UI_NOTICE, 'Error de red en barberia. Intenta de nuevo.');
+      eventBus.emit(EVENTS.UI_NOTICE, 'Error de red en barberia. Intenta de nuevo.');
+      return;
+    } finally {
+      this.barberRequestInFlight = false;
+      if (this.scene?.isActive('WorldScene') && balText.active) {
+        balText.setText(`TENKS: ${getTenksBalance().toLocaleString('es-AR')}`);
       }
     }
+
   }
 
   private async buyGunItem(itemId: string, priceTenks: number): Promise<{ success: boolean; message: string }> {
@@ -5378,11 +5393,7 @@ export class WorldScene extends Phaser.Scene {
     }
 
     if (!supabase || !isConfigured) {
-      // Dev/offline mode: grant + equip locally
-      ownItem(itemId);
-      ensureItemEquipped(itemId); // idempotent equip for utilities
-      addTenks(-priceTenks, `gun_shop_${itemId.toLowerCase()}`);
-      return { success: true, message: `${itemId} equipado (modo offline).` };
+      return { success: false, message: 'Tenes que iniciar sesion para gastar TENKS.' };
     }
 
     const { data } = await supabase.auth.getSession();
@@ -5405,19 +5416,13 @@ export class WorldScene extends Phaser.Scene {
       return { success: false, message: err?.error ?? 'Error al comprar. Intentá de nuevo.' };
     }
 
-    const result = await res.json() as { player?: { tenks?: number; inventory?: { owned: string[]; equipped: Record<string, unknown> } }; notice?: string };
+    const result = await res.json() as { player?: import('@/src/lib/playerState').PlayerState; notice?: string };
 
-    // Sync full inventory from server if available, otherwise grant+equip locally
-    if (result.player?.inventory) {
-      replaceInventory(result.player.inventory as Parameters<typeof replaceInventory>[0]);
-    } else {
-      ownItem(itemId);
+    if (!result.player) {
+      return { success: false, message: 'La compra no se pudo confirmar en el servidor.' };
     }
-    // Always equip utility items so they take effect immediately
-    ensureItemEquipped(itemId); // idempotent equip for utilities
-    if (typeof result.player?.tenks === 'number') {
-      initTenks(result.player.tenks);
-    }
+
+    eventBus.emit(EVENTS.PLAYER_STATE_APPLY, result.player);
     return { success: true, message: result.notice ?? `${itemId} comprado!` };
   }
 
@@ -6239,22 +6244,11 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private loadMutedPlayers() {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = window.localStorage.getItem('waspi_player_state');
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as { mutedPlayers?: string[] };
-      this.mutedPlayerIds = new Set(parsed.mutedPlayers ?? []);
-    } catch {
-      this.mutedPlayerIds = new Set();
-    }
+    this.mutedPlayerIds = new Set();
   }
 
   private loadVecindadState() {
-    const raw = typeof window === 'undefined'
-      ? null
-      : window.localStorage.getItem('waspi_player_state');
-    this.vecindadState = loadVecindadStateFromStorage(raw) as VecindadState;
+    this.vecindadState = loadVecindadStateFromStorage(null) as VecindadState;
   }
 
   private async loadSharedVecindadState() {
@@ -6459,7 +6453,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.keyT && Phaser.Input.Keyboard.JustDown(this.keyT)) { this.skillTreePanel?.toggle(); }
     if (this.keyY && Phaser.Input.Keyboard.JustDown(this.keyY)) { this.skillShopPanel?.toggle(); }
     if (this.keyC && Phaser.Input.Keyboard.JustDown(this.keyC)) { this.contractPanel?.toggle(); }
-    if (this.keyI && Phaser.Input.Keyboard.JustDown(this.keyI)) { this.progressionPanel?.toggle(); }
+    if (this.keyI && Phaser.Input.Keyboard.JustDown(this.keyI)) { eventBus.emit(EVENTS.INVENTORY_TOGGLE); }
     if (this.keyH && Phaser.Input.Keyboard.JustDown(this.keyH)) { this.guildPanel?.toggle(); }
     if (this.keyM && Phaser.Input.Keyboard.JustDown(this.keyM)) { this.worldMapPanel?.toggle(); }
     if (this.keyN && Phaser.Input.Keyboard.JustDown(this.keyN)) { this.masteryPanel?.toggle(); }
@@ -6858,6 +6852,49 @@ export class WorldScene extends Phaser.Scene {
 
   private getScaledTrainingTenksReward(baseReward: number) {
     return Math.max(1, Math.round(baseReward * this.getTrainingTenksMultiplier()));
+  }
+
+  private creditWorldTenks(
+    amount: number,
+    reason: 'training_rusher' | 'training_shooter' | 'training_tank' | 'training_boss' | 'camara_del_tiempo',
+    onSuccess?: () => void,
+  ) {
+    const normalizedAmount = Math.max(0, Math.floor(amount));
+    if (normalizedAmount <= 0) return;
+
+    void (async () => {
+      const authH = await getAuthHeaders();
+      if (!authH.Authorization) {
+        addTenks(normalizedAmount, reason);
+        onSuccess?.();
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/player/tenks', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...authH,
+          },
+          body: JSON.stringify({ amount: normalizedAmount, reason }),
+        });
+
+        if (!res.ok) {
+          const errorBody = await res.json().catch(() => null) as { error?: string } | null;
+          eventBus.emit(EVENTS.UI_NOTICE, errorBody?.error ?? 'No pude guardar tus TENKS en el servidor.');
+          return;
+        }
+
+        const json = await res.json().catch(() => null) as { newBalance?: number } | null;
+        if (typeof json?.newBalance === 'number') {
+          applyTenksBalanceFromServer(json.newBalance, `${reason}_server`);
+        }
+        onSuccess?.();
+      } catch {
+        eventBus.emit(EVENTS.UI_NOTICE, 'No pude guardar tus TENKS en el servidor.');
+      }
+    })();
   }
 
   private renderTrainingHud() {

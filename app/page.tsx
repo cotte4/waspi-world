@@ -18,7 +18,7 @@ const FEATURES = [
   {
     icon: '👟',
     title: 'STREETWEAR',
-    desc: 'Comprá ropa física real con tus TENKS ganados',
+    desc: 'Comprá ropa física real y llevate el look digital para tu WASPI',
     color: '#F5C842',
     border: 'rgba(245,200,66,0.3)',
   },
