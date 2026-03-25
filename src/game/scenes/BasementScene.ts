@@ -844,6 +844,7 @@ export class BasementScene extends Phaser.Scene {
   }
 
   private updateInteractionUi() {
+    if (this.interactionText && !this.interactionText.active) return;
     if (!this.interactionText) {
       this.interactionText = this.add.text(this.cameras.main.width / 2, this.cameras.main.height - 36, '', {
         fontSize: '8px',
@@ -853,6 +854,7 @@ export class BasementScene extends Phaser.Scene {
         strokeThickness: 3,
       }).setOrigin(0.5).setScrollFactor(0).setDepth(12001).setVisible(false);
     }
+    if (this.interactionGlow && !this.interactionGlow.active) return;
     if (!this.interactionGlow) {
       this.interactionGlow = this.add.ellipse(this.cameras.main.width / 2, this.cameras.main.height - 40, 360, 28, 0xFF6EA8, 0.12)
         .setScrollFactor(0)
