@@ -108,6 +108,7 @@ export class BasketMinigame extends Phaser.Scene {
   }
 
   create() {
+    this.cameras.main.setBackgroundColor('#0E0E14');
     this.input.enabled = true;
     announceScene(this);
 

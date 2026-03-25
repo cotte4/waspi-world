@@ -51,6 +51,7 @@ export class DartsMinigame extends Phaser.Scene {
   }
 
   create() {
+    this.cameras.main.setBackgroundColor('#0E0E14');
     const { width, height } = this.scale;
     this.boardX = width / 2;
     this.boardY = height / 2 + 24;

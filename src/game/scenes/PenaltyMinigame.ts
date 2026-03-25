@@ -69,6 +69,7 @@ export class PenaltyMinigame extends Phaser.Scene {
   }
 
   create() {
+    this.cameras.main.setBackgroundColor('#0E0E14');
     const { width, height } = this.scale;
     this.resetSceneState();
     this.input.enabled = true;

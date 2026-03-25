@@ -91,6 +91,7 @@ export default class DinoRunScene extends Phaser.Scene {
   }
 
   create(): void {
+    this.cameras.main.setBackgroundColor('#0E0E14');
     this.shuttingDown = false;
     this.inTransition = false;
     this.input.enabled = true;
