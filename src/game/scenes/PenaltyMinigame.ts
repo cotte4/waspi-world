@@ -655,7 +655,7 @@ export class PenaltyMinigame extends Phaser.Scene {
     ]);
     this.summaryLabel.setColor(won ? '#39FF14' : '#F5C842');
     this.summaryLabel.setAlpha(1);
-    this.doneTimerMs = 1700;
+    this.doneTimerMs = 2500;
     this.footer.setText(won ? 'PREMIO GUARDANDO...' : 'VOLVIENDO AL ARCADE...');
     this.footer.setColor(won ? '#39FF14' : '#888888');
   }

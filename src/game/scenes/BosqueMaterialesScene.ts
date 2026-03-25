@@ -7,7 +7,7 @@ import { SAFE_PLAZA_RETURN } from '../config/constants';
 import { getSkillSystem } from '../systems/SkillSystem';
 import { getContractSystem } from '../systems/ContractSystem';
 import { getQuestSystem } from '../systems/QuestSystem';
-import { MiningMinigame } from '../systems/MiningMinigame';
+import { MiningMinigame, MinigameResult } from '../systems/MiningMinigame';
 import { getMasterySystem } from '../systems/MasterySystem';
 import { getEventSystem } from '../systems/EventSystem';
 import { SpecializationModal } from '../systems/SpecializationModal';
@@ -844,6 +844,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
           this.activeMiningMinigame = null;
           isAuto = result === 'miss';
           minigameBonus = result === 'perfect' ? 5 : result === 'good' ? 3 : 0;
+          this.spawnQualityPopup(result, nearest.x, nearest.y - 56);
         }
 
         // Roll quality server-side
@@ -923,6 +924,35 @@ export class BosqueMaterialesScene extends Phaser.Scene {
   private showPrompt(msg: string) {
     this.emitHudUpdate(msg);
     this.time.delayedCall(1800, () => this.emitHudUpdate(''));
+  }
+
+  private spawnQualityPopup(result: MinigameResult, worldX: number, worldY: number) {
+    if (!this.scene?.isActive('BosqueMaterialesScene')) return;
+    const labels: Record<string, string> = { miss: 'MISS', ok: 'OK', good: 'BIEN!', perfect: 'PERFECTO!' };
+    const colors: Record<string, number> = { miss: 0xFF4444, ok: 0xAAAAAA, good: 0xF5C842, perfect: 0x39FF14 };
+    const label = this.add.text(worldX, worldY, labels[result] ?? result.toUpperCase(), {
+      fontSize: result === 'perfect' ? '14px' : '11px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: result === 'miss' ? '#FF4444' : result === 'ok' ? '#AAAAAA' : result === 'good' ? '#F5C842' : '#39FF14',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(9500);
+    this.tweens.add({
+      targets: label,
+      y: worldY - 44,
+      alpha: { from: 1, to: 0 },
+      duration: 1100,
+      ease: 'Cubic.Out',
+      onComplete: () => { if (label.active) label.destroy(); },
+    });
+    // Flash tint the node area
+    const flash = this.add.circle(worldX, worldY, 22, colors[result] ?? 0xFFFFFF, 0.5).setDepth(9400);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      duration: 350,
+      onComplete: () => { if (flash.active) flash.destroy(); },
+    });
   }
 
   // ─── Communal Garden ──────────────────────────────────────────────────────

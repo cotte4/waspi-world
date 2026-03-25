@@ -34,6 +34,7 @@ export class DartsMinigame extends Phaser.Scene {
   private cursor!: Phaser.GameObjects.Arc;
   private footer!: Phaser.GameObjects.Text;
   private resultLabel!: Phaser.GameObjects.Text;
+  private rewardLabel!: Phaser.GameObjects.Text;
   private controls!: SceneControls;
 
   constructor() {
@@ -105,6 +106,16 @@ export class DartsMinigame extends Phaser.Scene {
       align: 'center',
     }).setOrigin(0.5).setAlpha(0);
 
+    this.rewardLabel = this.add.text(width / 2, height - 52, '', {
+      fontSize: '10px',
+      fontFamily: '"Press Start 2P", monospace',
+      color: '#F5C842',
+      stroke: '#000000',
+      strokeThickness: 3,
+      align: 'center',
+      shadow: { offsetX: 0, offsetY: 0, color: '#F5C842', blur: 8, fill: true },
+    }).setOrigin(0.5).setAlpha(0);
+
     this.input.on('pointerdown', this.throwDart, this);
     this.refreshHud();
   }
@@ -137,6 +148,7 @@ export class DartsMinigame extends Phaser.Scene {
       } else {
         this.phase = 'aiming';
         if (this.resultLabel.active) this.resultLabel.setAlpha(0);
+        if (this.rewardLabel.active) this.rewardLabel.setAlpha(0);
       }
     }
   }
@@ -222,8 +234,12 @@ export class DartsMinigame extends Phaser.Scene {
       this.phase = 'done';
       const reward = this.computeReward();
       if (this.resultLabel.active) {
-        this.resultLabel.setText(`FINAL ${this.score} / +${reward}`);
+        this.resultLabel.setText(`FINAL ${this.score}`);
         this.resultLabel.setColor('#39FF14');
+      }
+      if (this.rewardLabel.active) {
+        this.rewardLabel.setText(`+${reward} TENKS`);
+        this.rewardLabel.setAlpha(1);
       }
       if (this.textures.exists('icon_coin')) {
         const coinX = this.scale.width / 2 + this.resultLabel.width / 2 + 12;

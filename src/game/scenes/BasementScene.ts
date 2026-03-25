@@ -767,11 +767,12 @@ export class BasementScene extends Phaser.Scene {
 
   private drawSceneChrome() {
     this.add.text(this.cameras.main.width / 2, 26, 'STAIRWAYS TO BASEMENT', {
-      fontSize: '12px',
+      fontSize: '14px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#F5C842',
       stroke: '#000000',
       strokeThickness: 4,
+      shadow: { offsetX: 0, offsetY: 0, color: '#F5C842', blur: 12, fill: true },
     }).setOrigin(0.5).setScrollFactor(0).setDepth(12000);
 
     this.add.text(this.cameras.main.width / 2, 48, 'WASD / FLECHAS EXPLORAR  |  ESC VOLVER', {

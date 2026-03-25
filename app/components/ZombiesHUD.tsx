@@ -112,7 +112,13 @@ export default function ZombiesHUD() {
         prevHpRef.current = p.hp;
         return p;
       });
-      setGameOver(null);
+      // If the scene is already in game-over but ZOMBIES_GAME_OVER event was never
+      // emitted (e.g. instant death on scene launch), synthesize the overlay.
+      if (p.status.includes('GAME OVER') && p.hp === 0) {
+        setGameOver({ score: p.score, kills: p.kills, wave: p.wave });
+      } else {
+        setGameOver(null);
+      }
     });
 
     const unsubCountdown = eventBus.on(EVENTS.ZOMBIES_COUNTDOWN, (payload: unknown) => {
