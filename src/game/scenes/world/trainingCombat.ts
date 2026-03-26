@@ -304,7 +304,7 @@ export function renderTrainingHud(
 ) {
   if (!trainingHud) return;
   if (!state.inTraining) {
-    trainingHud.setText('TRAINING KOs ' + state.trainingScore + ' | BONO TENKS x1.0 | PROX +50% EN 11s');
+    trainingHud.setText('');
     return;
   }
 

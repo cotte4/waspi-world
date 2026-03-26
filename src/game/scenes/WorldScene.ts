@@ -632,7 +632,7 @@ export class WorldScene extends Phaser.Scene {
   private inCamara = false;
   private camaraTimer = 0;       // ms accumulated inside
   private camaraTickMs = 20000;  // earn every 20s
-  private camaraTenksPerTick = 6;
+  private camaraTenksPerTick = 25;
   private camaraHud?: Phaser.GameObjects.Text;
 
   // Minimap
@@ -996,7 +996,7 @@ export class WorldScene extends Phaser.Scene {
       strokeThickness: 4,
     }).setScrollFactor(0).setDepth(10001).setOrigin(0.5);
 
-    this.trainingHud = this.add.text(8, 58, '', {
+    this.trainingHud = this.add.text(8, 96, '', {
       fontSize: '7px',
       fontFamily: '"Press Start 2P", monospace',
       color: '#39FF14',
@@ -4336,7 +4336,9 @@ export class WorldScene extends Phaser.Scene {
       const cam = this.cameras.main;
       this.camaraHud.setPosition(cam.width / 2, cam.height - 52);
       this.camaraHud.setOrigin(0.5, 1);
-      this.camaraHud.setText(`⏳ TENKS en ${secsLeft}s  [${'█'.repeat(Math.floor(progress * 10))}${'░'.repeat(10 - Math.floor(progress * 10))}]`);
+      const filled = Math.floor(progress * 10);
+      const bar = '#'.repeat(filled) + '-'.repeat(10 - filled);
+      this.camaraHud.setText(`TENKS en ${secsLeft}s [${bar}]`);
       this.camaraHud.setAlpha(1);
     }
 
@@ -6900,7 +6902,7 @@ export class WorldScene extends Phaser.Scene {
   private renderTrainingHud() {
     if (!this.trainingHud) return;
     if (!this.inTraining) {
-      this.trainingHud.setText(`TRAINING KOs ${this.trainingScore} | BONO TENKS x1.0 | PROX +50% EN 11s`);
+      this.trainingHud.setText('');
       return;
     }
 

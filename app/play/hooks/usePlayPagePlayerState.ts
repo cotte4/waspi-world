@@ -5,7 +5,7 @@ import { CHAT_SCENES } from '@/app/play/lib/playPageConstants';
 import { getItem as getCatalogItem } from '@/src/game/config/catalog';
 import { equipItem, getInventory, replaceInventory } from '@/src/game/systems/InventorySystem';
 import { loadProgressionFromServer, loadProgressionState } from '@/src/game/systems/ProgressionSystem';
-import { initTenks, initTenksFromServer } from '@/src/game/systems/TenksSystem';
+import { initTenks } from '@/src/game/systems/TenksSystem';
 import { initStatsSystem } from '@/src/game/systems/StatsSystem';
 import { normalizePlayerState, type PlayerState } from '@/src/lib/playerState';
 import { supabase } from '@/src/lib/supabase';
@@ -228,8 +228,6 @@ export function usePlayPagePlayerState({
       if (remotePlayer) {
         applyPlayerState(normalizePlayerState(remotePlayer));
       }
-
-      void initTenksFromServer(session.user.id, session.access_token);
 
       const serverProgression = await loadProgressionFromServer();
       if (serverProgression) {

@@ -942,7 +942,7 @@ export class BasketMinigame extends Phaser.Scene {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          score: this.totalScore,
+          score: this.makesCount,
           shots: this.shotsTaken,
           runId: this.rewardRunId,
         }),
