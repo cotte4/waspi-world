@@ -2,6 +2,7 @@
   {
     "date": "2026-03-26",
     "commits": [
+      "fix: zombies HP regen + dynamic interact key in prompts",
       "fix: admin page Fragment key warning + proper React type imports",
       "feat: patch notes overlay + admin logs dashboard",
       "fix: reset bag graphics x before each hit tween to prevent spam drift",
