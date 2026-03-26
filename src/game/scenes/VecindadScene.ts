@@ -226,15 +226,16 @@ export class VecindadScene extends Phaser.Scene {
     void getWeedDeliverySystem().initCooldownsFromServer();
 
     if (this.pendingMaterials > 0) {
-      this.vecindadState = {
-        ...this.vecindadState,
-        materials: this.vecindadState.materials + this.pendingMaterials,
-      };
+      const delta = this.pendingMaterials;
+      this.pendingMaterials = 0;
+      // Pass materialsDelta explicitly so the hook adds it to the server balance
+      // rather than computing a subtraction from this.vecindadState.materials (which
+      // starts at 0 here and would produce a negative delta if the player already has materials).
       eventBus.emit(EVENTS.VECINDAD_UPDATE_REQUEST, {
         vecindad: this.vecindadState,
-        notice: `+${this.pendingMaterials} materiales del bosque`,
+        notice: `+${delta} materiales del bosque`,
+        materialsDelta: delta,
       });
-      this.pendingMaterials = 0;
     }
 
     this.drawDistrict();

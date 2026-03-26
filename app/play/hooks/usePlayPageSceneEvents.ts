@@ -353,8 +353,12 @@ export function usePlayPageSceneEvents({
       if (!next?.vecindad || !playerState) return;
 
       const currentMaterials = playerState.vecindad.materials ?? 0;
-      const nextMaterials = next.vecindad.materials ?? 0;
-      const materialDelta = Math.floor(nextMaterials - currentMaterials);
+      // Prefer explicit delta if provided — avoids subtraction from a stale base
+      // (VecindadScene resets its local materials to 0 on create(), so the computed
+      //  difference would be negative when the player already has accumulated materials).
+      const materialDelta = next.materialsDelta !== undefined
+        ? Math.floor(next.materialsDelta)
+        : Math.floor((next.vecindad.materials ?? 0) - currentMaterials);
 
       if (tokenRef.current && materialDelta > 0) {
         const slot = claimApplySlot();
@@ -387,7 +391,14 @@ export function usePlayPageSceneEvents({
 
       const updatedPlayer: PlayerState = {
         ...playerState,
-        vecindad: next.vecindad,
+        vecindad: {
+          ...next.vecindad,
+          // When an explicit delta was provided, compute the correct total.
+          // Otherwise preserve the current amount if the new value would decrease it.
+          materials: next.materialsDelta !== undefined
+            ? currentMaterials + next.materialsDelta
+            : Math.max(next.vecindad.materials ?? 0, currentMaterials),
+        },
       };
 
       applyPlayerState(updatedPlayer);

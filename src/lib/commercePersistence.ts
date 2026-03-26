@@ -499,7 +499,7 @@ export async function hydratePlayerFromDatabase(
   if (playerError) throw playerError;
   if (statsError) throw statsError;
 
-  const owned = await reconcileInventoryFromDB(admin, user.id, basePlayer.inventory.owned);
+  const reconciledOwned = await reconcileInventoryFromDB(admin, user.id, basePlayer.inventory.owned);
   const tenks = await resolveAuthoritativeTenksBalance(admin, {
     playerId: user.id,
     fallbackBalance: basePlayer.tenks,
@@ -509,6 +509,15 @@ export async function hydratePlayerFromDatabase(
     ? playerRow.utility_equipped.filter((value): value is string => typeof value === 'string')
     : basePlayer.inventory.equipped.utility;
   const mutedPlayers = basePlayer.mutedPlayers ?? [];
+
+  // Utility items can't sync to player_inventory (FK — they're not in the products table),
+  // so player_inventory never has them. If player_metadata is stale, reconcileInventoryFromDB
+  // may return an owned list that's missing equipped utility items (guns the player bought).
+  // Since utility_equipped is stored in the durable players row, treat it as authoritative:
+  // any equipped utility item must have been purchased and therefore is owned.
+  const owned = utilityEquipped?.length
+    ? Array.from(new Set([...reconciledOwned, ...(utilityEquipped as string[])]))
+    : reconciledOwned;
 
   return assembleHydratedPlayer(basePlayer, {
     tenks,

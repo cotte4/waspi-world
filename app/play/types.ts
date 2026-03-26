@@ -63,6 +63,9 @@ export interface ParcelBuyPayload {
 export interface VecindadUpdatePayload {
   vecindad: PlayerState['vecindad'];
   notice?: string;
+  /** Explicit materials increment — when set, the hook adds this to the current balance
+   *  instead of computing a delta from vecindad.materials (which starts at 0 in VecindadScene). */
+  materialsDelta?: number;
 }
 
 export interface VecindadSharedPayload {
