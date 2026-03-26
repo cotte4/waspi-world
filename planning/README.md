@@ -17,6 +17,7 @@ Planes con trabajo pendiente **en el código o en configuración externa**.
 | Plan | Status | Priority |
 |------|--------|----------|
 | [UI React Migration](./fixes/ui-react-migration.md) — extraer Settings, Stats, PlayerActions, UINotice, Login de GamePage.tsx | 🟡 Pendiente | High |
+| [Async Race Conditions](./fixes/async-race-conditions.md) — stale applyPlayerState guard, syncPlayerState debounce, XP queue | 🟡 In Progress | High |
 
 Ver [fixes/README.md](./fixes/README.md).
 

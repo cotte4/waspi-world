@@ -36,6 +36,10 @@ export function usePlayPagePlayerState({
   const playerStateRef = useRef<PlayerState | null>(null);
   const suppressSyncRef = useRef(false);
   const authHydratingRef = useRef(false);
+  // Monotonic counter — incremented on every applyPlayerState call so that
+  // concurrent fire-and-forget handlers can detect stale responses.
+  const applySeqRef = useRef(0);
+  const syncDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const buildEditablePlayerPatch = useCallback((base: PlayerState): Partial<PlayerState> => ({
     avatar: loadStoredAvatarConfig(),
@@ -47,6 +51,7 @@ export function usePlayPagePlayerState({
   }), [mutedPlayersRef]);
 
   const applyPlayerState = useCallback((player: PlayerState) => {
+    applySeqRef.current += 1;
     suppressSyncRef.current = true;
     playerStateRef.current = player;
     saveStoredAvatarConfig({
@@ -89,6 +94,28 @@ export function usePlayPagePlayerState({
       }),
     }).catch(() => undefined);
   }, [buildEditablePlayerPatch, tokenRef]);
+
+  // Returns the current apply-seq so an async handler can detect if a newer
+  // applyPlayerState call happened while its fetch was in-flight.
+  const claimApplySlot = useCallback((): number => {
+    return applySeqRef.current;
+  }, []);
+
+  // Only applies player state if no newer apply has occurred since the slot was claimed.
+  const applyIfCurrent = useCallback((player: PlayerState, slot: number) => {
+    if (applySeqRef.current !== slot) return;
+    applyPlayerState(player);
+  }, [applyPlayerState]);
+
+  // Debounced sync — coalesces rapid events (TENKS_CHANGED, INVENTORY_CHANGED,
+  // AVATAR_SET) into a single PUT after 600ms of quiet.
+  const debouncedSyncPlayerState = useCallback(() => {
+    if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+    syncDebounceRef.current = setTimeout(() => {
+      syncDebounceRef.current = null;
+      void syncPlayerState();
+    }, 600);
+  }, [syncPlayerState]);
 
   const persistEditablePlayerPatch = useCallback(async (patch: Partial<PlayerState>) => {
     const token = tokenRef.current;
@@ -145,8 +172,8 @@ export function usePlayPagePlayerState({
       ...nextPlayer.avatar,
     });
     setPlayerState(nextPlayer);
-    void syncPlayerState(nextPlayer);
-  }, [syncPlayerState]);
+    debouncedSyncPlayerState();
+  }, [debouncedSyncPlayerState]);
 
   const handleEquipOwnedItem = useCallback(async (itemId: string) => {
     const token = tokenRef.current;
@@ -296,23 +323,18 @@ export function usePlayPagePlayerState({
     const unsubPlayerStateApply = eventBus.on(EVENTS.PLAYER_STATE_APPLY, (payload: unknown) => {
       applyPlayerState(normalizePlayerState(payload));
     });
-    const unsubTenks = eventBus.on(EVENTS.TENKS_CHANGED, () => {
-      void syncPlayerState();
-    });
-    const unsubInventory = eventBus.on(EVENTS.INVENTORY_CHANGED, () => {
-      void syncPlayerState();
-    });
-    const unsubAvatar = eventBus.on(EVENTS.AVATAR_SET, () => {
-      void syncPlayerState();
-    });
+    const unsubTenks = eventBus.on(EVENTS.TENKS_CHANGED, debouncedSyncPlayerState);
+    const unsubInventory = eventBus.on(EVENTS.INVENTORY_CHANGED, debouncedSyncPlayerState);
+    const unsubAvatar = eventBus.on(EVENTS.AVATAR_SET, debouncedSyncPlayerState);
 
     return () => {
+      if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
       unsubPlayerStateApply();
       unsubTenks();
       unsubInventory();
       unsubAvatar();
     };
-  }, [applyPlayerState, syncPlayerState]);
+  }, [applyPlayerState, debouncedSyncPlayerState]);
 
   useEffect(() => {
     if (!CHAT_SCENES.has(activeScene)) return;
@@ -321,8 +343,10 @@ export function usePlayPagePlayerState({
 
   return {
     activeWeapon,
+    applyIfCurrent,
     applyPlayerState,
     ballOn,
+    claimApplySlot,
     equipped,
     gunOn,
     handleEquipOwnedItem,

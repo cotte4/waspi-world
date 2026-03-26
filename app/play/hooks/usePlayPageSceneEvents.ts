@@ -62,6 +62,8 @@ type UsePlayPageSceneEventsOptions = SceneEventStateSetters & {
   tokenRef: MutableRefObject<string | null>;
   playerState: PlayerState | null;
   applyPlayerState: (player: PlayerState) => void;
+  applyIfCurrent: (player: PlayerState, slot: number) => void;
+  claimApplySlot: () => number;
   playUiSfx: (freq: number, duration: number, sweep?: number) => void;
   syncPlayerState: (overridePlayerState?: PlayerState) => Promise<void>;
 };
@@ -72,6 +74,8 @@ export function usePlayPageSceneEvents({
   tokenRef,
   playerState,
   applyPlayerState,
+  applyIfCurrent,
+  claimApplySlot,
   playUiSfx,
   syncPlayerState,
   setMessages,
@@ -236,6 +240,7 @@ export function usePlayPageSceneEvents({
       }
 
       void (async () => {
+        const slot = claimApplySlot();
         const res = await fetch('/api/minigames/penalty/reward', {
           method: 'POST',
           headers: {
@@ -253,7 +258,7 @@ export function usePlayPageSceneEvents({
 
         const json = await res.json();
         if (json.player) {
-          applyPlayerState(json.player as PlayerState);
+          applyIfCurrent(json.player as PlayerState, slot);
         }
         const earned = typeof json.tenksEarned === 'number' ? json.tenksEarned : 0;
         setUiNotice({ msg: earned > 0 ? `Premio guardado: +${earned} TENKS` : 'Partida registrada.' });
@@ -270,6 +275,7 @@ export function usePlayPageSceneEvents({
           return;
         }
 
+        const slot = claimApplySlot();
         const res = await fetch('/api/vecindad', {
           method: 'POST',
           headers: {
@@ -291,7 +297,7 @@ export function usePlayPageSceneEvents({
           return;
         }
 
-        applyPlayerState(normalizePlayerState(json.player));
+        applyIfCurrent(normalizePlayerState(json.player), slot);
         if (json.parcels) {
           eventBus.emit(EVENTS.VECINDAD_SHARED_STATE_CHANGED, {
             parcels: json.parcels,
@@ -309,6 +315,7 @@ export function usePlayPageSceneEvents({
           return;
         }
 
+        const slot = claimApplySlot();
         const res = await fetch('/api/vecindad', {
           method: 'POST',
           headers: {
@@ -330,7 +337,7 @@ export function usePlayPageSceneEvents({
           return;
         }
 
-        applyPlayerState(normalizePlayerState(json.player));
+        applyIfCurrent(normalizePlayerState(json.player), slot);
         if (json.parcels) {
           eventBus.emit(EVENTS.VECINDAD_SHARED_STATE_CHANGED, {
             parcels: json.parcels,
@@ -350,6 +357,7 @@ export function usePlayPageSceneEvents({
       const materialDelta = Math.floor(nextMaterials - currentMaterials);
 
       if (tokenRef.current && materialDelta > 0) {
+        const slot = claimApplySlot();
         void (async () => {
           const res = await fetch('/api/vecindad', {
             method: 'POST',
@@ -371,7 +379,7 @@ export function usePlayPageSceneEvents({
             return;
           }
 
-          applyPlayerState(normalizePlayerState(json.player));
+          applyIfCurrent(normalizePlayerState(json.player), slot);
           if (json.notice) setUiNotice({ msg: json.notice });
         })();
         return;
@@ -394,6 +402,7 @@ export function usePlayPageSceneEvents({
           setUiNotice({ msg: 'Inicia sesion para usar Cannabis Farm.', color: '#46B3FF' });
           return;
         }
+        const slot = claimApplySlot();
         const res = await fetch('/api/vecindad', {
           method: 'POST',
           headers: {
@@ -416,7 +425,7 @@ export function usePlayPageSceneEvents({
           return;
         }
 
-        applyPlayerState(normalizePlayerState(json.player));
+        applyIfCurrent(normalizePlayerState(json.player), slot);
         if (json.parcels) {
           eventBus.emit(EVENTS.VECINDAD_SHARED_STATE_CHANGED, {
             parcels: json.parcels,

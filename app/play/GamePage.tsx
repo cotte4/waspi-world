@@ -89,8 +89,10 @@ export default function PlayPage() {
 
   const {
     activeWeapon,
+    applyIfCurrent,
     applyPlayerState,
     ballOn,
+    claimApplySlot,
     equipped,
     gunOn,
     handleEquipOwnedItem,
@@ -285,6 +287,8 @@ export default function PlayPage() {
     tokenRef,
     playerState,
     applyPlayerState,
+    applyIfCurrent,
+    claimApplySlot,
     playUiSfx,
     syncPlayerState,
     setMessages,

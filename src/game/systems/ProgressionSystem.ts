@@ -79,18 +79,42 @@ export async function loadProgressionFromServer(): Promise<{ deaths: number } | 
   }
 }
 
-/**
- * Fire-and-forget sync of XP gained from a kill to the server.
- * The server applies the delta with clamps and recomputes level.
- */
-export function syncXpToServer(xpDelta: number): void {
-  void (async () => {
+// Accumulated XP waiting to be flushed — survives transient network failures.
+let pendingXpDelta = 0;
+let xpSyncInFlight = false;
+
+async function flushXpToServer(): Promise<void> {
+  if (xpSyncInFlight || pendingXpDelta <= 0) return;
+  xpSyncInFlight = true;
+  const delta = pendingXpDelta;
+  pendingXpDelta = 0;
+
+  try {
     const authH = await getAuthHeaders();
-    if (!authH.Authorization) return;
-    await fetch('/api/player/progression', {
+    if (!authH.Authorization) {
+      pendingXpDelta += delta; // requeue — not authenticated yet
+      return;
+    }
+    const res = await fetch('/api/player/progression', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authH },
-      body: JSON.stringify({ xp_delta: xpDelta }),
-    }).catch(() => null);
-  })();
+      body: JSON.stringify({ xp_delta: delta }),
+    });
+    if (!res.ok) pendingXpDelta += delta; // requeue on server error
+  } catch {
+    pendingXpDelta += delta; // requeue on network error
+  } finally {
+    xpSyncInFlight = false;
+    // Flush again if more XP accumulated while this request was in-flight.
+    if (pendingXpDelta > 0) void flushXpToServer();
+  }
+}
+
+/**
+ * Queue XP gained from a kill for server sync.
+ * Accumulates concurrent deltas into a single request and retries on failure.
+ */
+export function syncXpToServer(xpDelta: number): void {
+  pendingXpDelta += xpDelta;
+  if (!xpSyncInFlight) void flushXpToServer();
 }
