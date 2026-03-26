@@ -57,6 +57,9 @@ export default function WorldHUD() {
           textShadow: `0 0 8px ${prompt.color}88`,
           letterSpacing: '0.06em',
           whiteSpace: 'nowrap',
+          maxWidth: '280px',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
         }}
       >
         {prompt.text}

@@ -198,7 +198,7 @@ export default function GameHUD() {
                 style={{
                   fontFamily: '"Press Start 2P", monospace',
                   fontSize: 6,
-                  color: 'rgba(150,150,150,0.5)',
+                  color: 'rgba(150,150,150,0.7)',
                   letterSpacing: '0.04em',
                 }}
               >
@@ -220,7 +220,7 @@ export default function GameHUD() {
             >
               {progression ? `LV${progression.level}` : 'LV–'}
             </span>
-            <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 5, color: 'rgba(245,200,66,0.35)' }}>
+            <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 6, color: 'rgba(245,200,66,0.55)' }}>
               /{maxLvl}
             </span>
           </div>
@@ -231,7 +231,7 @@ export default function GameHUD() {
           <div
             style={{
               fontFamily: 'Silkscreen, "Press Start 2P", monospace',
-              fontSize: 5,
+              fontSize: 6,
               color: hpDamaged ? '#FF006E' : 'rgba(180,180,200,0.55)',
               marginBottom: 3,
               letterSpacing: '0.07em',
@@ -252,8 +252,8 @@ export default function GameHUD() {
             <div
               style={{
                 fontFamily: 'Silkscreen, "Press Start 2P", monospace',
-                fontSize: 5,
-                color: 'rgba(130,130,160,0.5)',
+                fontSize: 6,
+                color: 'rgba(130,130,160,0.7)',
                 marginBottom: 3,
                 letterSpacing: '0.07em',
                 display: 'flex',

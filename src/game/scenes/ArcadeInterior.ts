@@ -355,7 +355,7 @@ export class ArcadeInterior extends Phaser.Scene {
         propMachineG.fillRect(mx - 2, my + mh, mw + 4, 8);
         // Label above
         this.add.text(mx + mw / 2, my - 10, label, {
-          fontSize: '5px',
+          fontSize: '6px',
           fontFamily: '"Press Start 2P", monospace',
           color: `#${color.toString(16).padStart(6, '0')}`,
         }).setOrigin(0.5).setDepth(3);
@@ -394,7 +394,7 @@ export class ArcadeInterior extends Phaser.Scene {
         propMachineG.fillStyle(0x07070f, 1);
         propMachineG.fillRect(mx - 2, my + mh, mw + 4, 8);
         this.add.text(mx + mw / 2, my - 10, label, {
-          fontSize: '5px',
+          fontSize: '6px',
           fontFamily: '"Press Start 2P", monospace',
           color: `#${color.toString(16).padStart(6, '0')}`,
         }).setOrigin(0.5).setDepth(3);

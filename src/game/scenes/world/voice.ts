@@ -199,9 +199,9 @@ function createWorldVoiceHudObjects(scene: WorldVoiceSceneLike) {
   }).setScrollFactor(0).setDepth(9999).setInteractive({ useHandCursor: true });
 
   scene.voiceStatusText = scene.add.text(10, baseY + 18, '', {
-    fontSize: '6px',
+    fontSize: '7px',
     fontFamily: 'Silkscreen, monospace',
-    color: '#7777AA',
+    color: '#9999CC',
   }).setScrollFactor(0).setDepth(9999);
 
   scene.localSpeakingIndicator = scene.add.arc(

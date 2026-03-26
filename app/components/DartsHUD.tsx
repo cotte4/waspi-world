@@ -172,6 +172,7 @@ export default function DartsHUD() {
                 fontSize: 9,
                 color: '#F5C842',
                 letterSpacing: '0.04em',
+                textShadow: '0 0 10px rgba(245,200,66,0.55)',
               }}
             >
               +{result.tenksEarned} TENKS
