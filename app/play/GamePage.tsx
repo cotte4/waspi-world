@@ -53,6 +53,7 @@ const GymHUD = dynamic(() => import('@/app/components/GymHUD'), { ssr: false });
 const ArcadeHUD = dynamic(() => import('@/app/components/ArcadeHUD'), { ssr: false });
 const PvpHUD = dynamic(() => import('@/app/components/PvpHUD'), { ssr: false });
 const WorldHUD = dynamic(() => import('@/app/components/WorldHUD'), { ssr: false });
+const PatchNotesOverlay = dynamic(() => import('@/app/components/PatchNotesOverlay'), { ssr: false });
 
 export default function PlayPage() {
   const initialProgression = useMemo(() => loadProgressionState(), []);
@@ -1117,6 +1118,9 @@ export default function PlayPage() {
         {activeScene !== 'CreatorScene' && (
           <QuestTracker isAuthenticated={isAuthenticated} isMobile={isMobile} />
         )}
+
+        {/* Patch Notes button + overlay — always available in-game */}
+        {activeScene !== 'CreatorScene' && <PatchNotesOverlay />}
 
         {showOnboarding && (
           <div

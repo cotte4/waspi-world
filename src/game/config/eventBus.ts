@@ -165,4 +165,6 @@ export const EVENTS = {
   PVP_HUD_UPDATE: 'pvp:hud_update',
   /** PvpArenaScene active/inactive. Payload: boolean */
   PVP_SCENE_ACTIVE: 'pvp:active',
+  /** Open the Patch Notes overlay. No payload required. */
+  PATCH_NOTES_OPEN: 'patch:notes:open',
 } as const;

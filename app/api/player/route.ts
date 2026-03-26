@@ -4,6 +4,7 @@ import type { PlayerState } from '@/src/lib/playerState';
 import { ensureCatalogSeeded, ensurePlayerPersistenceRows, hydratePlayerFromDatabase, syncPlayerInventory, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
 import { applyEditablePlayerPatch } from '@/src/lib/playerPersistenceModel';
 import { mergePlayerWithVecindad } from '@/src/lib/vecindadPersistence';
+import { logEvent } from '@/src/lib/logger';
 
 export async function GET(request: NextRequest) {
   if (!isServerSupabaseConfigured) {
@@ -35,6 +36,13 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/player sync failed:', error);
     return NextResponse.json({ error: syncWarning }, { status: 500 });
   }
+
+  void logEvent({
+    event_type: 'player_login',
+    player_id: user.id,
+    player_email: user.email,
+    metadata: { persistence: hasServiceRole ? 'db_authoritative_snapshot' : 'read_only_session' },
+  });
 
   return NextResponse.json({
     playerId: user.id,

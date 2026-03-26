@@ -7,6 +7,7 @@ import {
 } from '@/src/lib/supabaseServer';
 import { appendTenksTransaction, syncPlayerMetadataSnapshot } from '@/src/lib/commercePersistence';
 import { creditBalance, getAuthoritativeBalance } from '@/src/lib/tenksBalance';
+import { logEvent } from '@/src/lib/logger';
 
 const SERVER_EARN_RULES = {
   training_rusher: { maxAmount: 50 },
@@ -89,6 +90,13 @@ export async function POST(request: NextRequest) {
     } catch (snapshotError) {
       console.error('[Waspi][player/tenks] snapshot sync failed:', snapshotError);
     }
+
+    void logEvent({
+      event_type: 'tenks_earn',
+      player_id: user.id,
+      player_email: user.email,
+      metadata: { amount, reason, balance_after: credited.newBalance },
+    });
 
     return NextResponse.json({ newBalance: credited.newBalance, creditedAmount: amount });
   } catch (error) {

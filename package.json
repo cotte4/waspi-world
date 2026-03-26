@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -H 0.0.0.0",
-    "build": "eslint && next build",
+    "build": "tsx scripts/generate-patch-notes.ts && eslint && next build",
     "start": "next start",
     "lint": "eslint",
     "test:persistence": "tsx --test tests/persistence/*.test.ts",

@@ -8,6 +8,7 @@ import { toArsFromStripeAmount } from '@/src/lib/commercePricing';
 import { resend, isResendConfigured, buildProductConfirmationEmail, buildTenksConfirmationEmail } from '@/src/lib/resend';
 import { getItem } from '@/src/game/config/catalog';
 import { getTenksPack } from '@/src/lib/tenksPacks';
+import { logEvent } from '@/src/lib/logger';
 
 export async function POST(request: NextRequest) {
   if (!isStripeConfigured || !stripe || !isStripeWebhookConfigured) {
@@ -195,6 +196,22 @@ export async function POST(request: NextRequest) {
         // Return 500 so Stripe retries — DB records are already written and idempotent.
         return NextResponse.json({ error: updateError.message }, { status: 500 });
       }
+
+      // Log the purchase event — fire-and-forget
+      void logEvent({
+        event_type: 'purchase',
+        player_id: userId,
+        player_email: session.customer_details?.email ?? user.email,
+        metadata: {
+          purchase_type: purchaseType,
+          stripe_session_id: sessionId,
+          item_id: session.metadata?.itemId ?? null,
+          amount_ars: session.amount_total
+            ? toArsFromStripeAmount(session.amount_total, checkoutCurrency, arsPerUsd)
+            : null,
+          tenks: purchaseType === 'tenks_pack' ? Number(session.metadata?.tenks ?? 0) : null,
+        },
+      });
 
       // Send confirmation email — non-fatal: failure must never block webhook 200 response.
       if (isResendConfigured && resend && session.customer_details?.email) {
