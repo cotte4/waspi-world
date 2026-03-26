@@ -128,7 +128,7 @@ export function usePlayPageShop({
       ? { type: 'product', itemId: payload.itemId, size: payload.size }
       : { type: 'tenks_pack', packId: payload.packId };
 
-    const res = await fetch('/api/checkout', {
+    const res = await fetch('/api/checkout/mp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenRef.current}` },
       body: JSON.stringify(body),

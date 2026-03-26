@@ -9,24 +9,24 @@ export type TenksPack = {
 export const TENKS_PACKS: TenksPack[] = [
   {
     id: 'TENKS-5000',
-    name: 'PACK TENKS 5K',
+    name: 'PACK TENKS 5K [TEST $1]',
     description: 'Ideal para utilities o primeras prendas.',
-    tenks: 5000,
-    priceArs: 4900,
+    tenks: 100,
+    priceArs: 1,
   },
   {
     id: 'TENKS-12000',
-    name: 'PACK TENKS 12K',
+    name: 'PACK TENKS 12K [TEST $1]',
     description: 'Pack mediano con bonus para varias compras.',
-    tenks: 12000,
-    priceArs: 9900,
+    tenks: 100,
+    priceArs: 1,
   },
   {
     id: 'TENKS-30000',
-    name: 'PACK TENKS 30K',
+    name: 'PACK TENKS 30K [TEST $1]',
     description: 'Pack grande para equiparte completo.',
-    tenks: 30000,
-    priceArs: 21900,
+    tenks: 100,
+    priceArs: 1,
   },
 ];
 
