@@ -354,9 +354,13 @@ export class GymInterior extends Phaser.Scene {
 
   private animateBagHit() {
     if (!this.bagGfx.active) return;
+    // Kill any running tween and reset x before adding a new one,
+    // so spam hits don't accumulate x offset and drift the bag off-screen.
+    this.tweens.killTweensOf(this.bagGfx);
+    this.bagGfx.x = 0;
     this.tweens.add({
       targets: this.bagGfx,
-      x: this.bagGfx.x + 14,
+      x: 14,
       duration: 80,
       ease: 'Power2',
       yoyo: true,
