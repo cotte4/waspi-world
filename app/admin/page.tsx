@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { Fragment, useEffect, useState, useCallback } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { supabase } from '@/src/lib/supabase';
 
 interface LogRow {
@@ -173,7 +174,7 @@ export default function AdminLogsPage() {
               <tr><td colSpan={5} style={{ padding: 20, textAlign: 'center', color: 'rgba(255,255,255,0.3)' }}>Sin resultados</td></tr>
             )}
             {!loading && logs.map(row => (
-              <>
+              <Fragment key={row.id}>
                 <tr
                   key={row.id}
                   onClick={() => setExpanded(expanded === row.id ? null : row.id)}
@@ -227,7 +228,7 @@ export default function AdminLogsPage() {
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -251,7 +252,7 @@ export default function AdminLogsPage() {
 
 /* ── Helpers ── */
 
-function Centered({ children }: { children: React.ReactNode }) {
+function Centered({ children }: { children: ReactNode }) {
   return (
     <div style={{ minHeight: '100vh', background: '#0E0E14', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'monospace', color: 'rgba(255,255,255,0.5)', fontSize: 14 }}>
       {children}
@@ -285,7 +286,7 @@ function Select({ label, value, options, onChange }: { label: string; value: str
   );
 }
 
-const btnStyle: React.CSSProperties = {
+const btnStyle: CSSProperties = {
   background: 'rgba(255,255,255,0.05)',
   border: '1px solid rgba(255,255,255,0.12)',
   color: '#e0e0e8',
