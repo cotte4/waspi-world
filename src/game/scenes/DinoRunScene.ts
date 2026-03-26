@@ -4,6 +4,7 @@ import { eventBus, EVENTS } from '../config/eventBus';
 import { addTenks, applyTenksBalanceFromServer } from '../systems/TenksSystem';
 import { SceneControls } from '../systems/SceneControls';
 import { getAuthHeaders } from '../systems/authHelper';
+import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 
 type GameState = 'idle' | 'playing' | 'dead' | 'gameover';
 
@@ -29,8 +30,9 @@ function createDinoRunId() {
 }
 
 export default class DinoRunScene extends Phaser.Scene {
-  private runner!: Phaser.GameObjects.Rectangle;
+  private runner!: Phaser.GameObjects.Rectangle;  // invisible physics hitbox
   private runnerBody!: Phaser.Physics.Arcade.Body;
+  private runnerAvatar!: AvatarRenderer;           // player visual
   private groundGraphics!: Phaser.GameObjects.Graphics;
   private backgroundGraphics!: Phaser.GameObjects.Graphics;
 
@@ -210,13 +212,20 @@ export default class DinoRunScene extends Phaser.Scene {
   }
 
   private createRunner(): void {
+    // Invisible physics rectangle — handles jump, gravity and collision hitbox.
     this.runner = this.add.rectangle(RUNNER_X, GROUND_Y - 16, 24, 32, 0x39ff14);
+    this.runner.setAlpha(0); // physics only; visual is runnerAvatar
     this.runner.setDepth(5);
     this.physics.add.existing(this.runner);
     this.runnerBody = this.runner.body as Phaser.Physics.Arcade.Body;
     this.runnerBody.setGravityY(1800);
     this.runnerBody.setAllowGravity(false); // gravity off en idle; se activa en startGame()
     this.runnerBody.setCollideWorldBounds(false);
+
+    // Avatar rendered on top of the physics body.
+    this.runnerAvatar = new AvatarRenderer(this, RUNNER_X, GROUND_Y - 16, loadStoredAvatarConfig());
+    this.runnerAvatar.setDepth(5);
+    this.runnerAvatar.update(false, 1, 0); // face right
   }
 
   private createObstaclePool(): void {
@@ -446,6 +455,8 @@ export default class DinoRunScene extends Phaser.Scene {
       if (this.runner.y !== groundedY) this.runner.setY(groundedY);
       if (this.runnerBody.velocity.y !== 0) this.runnerBody.setVelocityY(0);
       this.runnerBody.setGravityY(1800);
+      this.runnerAvatar.setPosition(this.runner.x, this.runner.y);
+      this.runnerAvatar.update(true, 1, 0); // run animation, facing right
       return;
     }
 
@@ -460,6 +471,10 @@ export default class DinoRunScene extends Phaser.Scene {
         console.log('SFX: land');
       }
     }
+
+    // Sync avatar to physics body while airborne
+    this.runnerAvatar.setPosition(this.runner.x, this.runner.y);
+    this.runnerAvatar.update(true, 1, 0);
   }
 
   private updateObstacles(delta: number): void {
@@ -581,9 +596,9 @@ export default class DinoRunScene extends Phaser.Scene {
     // Camera shake
     this.cameras.main.shake(80, 0.008);
 
-    // Flicker animation
+    // Flicker animation on the visible avatar
     this.tweens.add({
-      targets: this.runner,
+      targets: this.runnerAvatar.getContainer(),
       alpha: { from: 1, to: 0.3 },
       duration: 80,
       yoyo: true,
@@ -660,14 +675,17 @@ export default class DinoRunScene extends Phaser.Scene {
       this.returnObstacle(obs);
     }
 
-    // Reset runner
-    this.runner.setAlpha(1);
+    // Reset runner — physics body stays invisible; avatar is the visual
+    this.runner.setAlpha(0);
     this.runner.setSize(24, 32);
     this.runner.setPosition(RUNNER_X, GROUND_Y - 16);
     this.runnerBody.setVelocityY(0);
     this.runnerBody.setVelocityX(0);
     this.runnerBody.setGravityY(1800);
     this.runnerBody.setAllowGravity(false); // sin gravity en idle/retry
+    this.runnerAvatar.getContainer().setAlpha(1);
+    this.runnerAvatar.setPosition(RUNNER_X, GROUND_Y - 16);
+    this.runnerAvatar.update(false, 1, 0); // idle, facing right
 
     // Reset game state
     this.gameState = 'idle';

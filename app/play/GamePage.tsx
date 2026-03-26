@@ -1110,8 +1110,8 @@ export default function PlayPage() {
         {/* Arcade HUD self-manages visibility via ARCADE_SCENE_ACTIVE event */}
         <ArcadeHUD />
 
-        {/* PVP Arena HUD shown only when PvpArenaScene is active */}
-        {pvpHudActive && <PvpHUD />}
+        {/* PVP Arena HUD self-manages visibility via PVP_SCENE_ACTIVE event */}
+        <PvpHUD />
 
         {/* Quest Tracker always mounted when in-game, self-manages visibility */}
         {activeScene !== 'CreatorScene' && (

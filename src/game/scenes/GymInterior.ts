@@ -246,6 +246,7 @@ export class GymInterior extends Phaser.Scene {
       benchProgress: this.benchProgress,
       feedbackMsg,
       feedbackColor,
+      gymLevel: getSkillSystem().getLevel('gym'),
     });
   }
 

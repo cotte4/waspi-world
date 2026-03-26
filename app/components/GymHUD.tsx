@@ -12,12 +12,14 @@ export interface GymHudPayload {
   benchProgress: number;
   feedbackMsg: string;
   feedbackColor: string;
+  gymLevel?: number;
 }
 
 interface HudState {
   bagPrompt: string;
   bagComboDisplay: string;
   benchPhase: 'idle' | 'active' | 'cooldown';
+  gymLevel: number;
   benchPrompt: string;
   benchProgress: number;
 }
@@ -28,6 +30,7 @@ const DEFAULT_HUD: HudState = {
   benchPhase: 'idle',
   benchPrompt: '',
   benchProgress: 0,
+  gymLevel: 1,
 };
 
 interface FeedbackState {
@@ -60,6 +63,7 @@ export default function GymHUD() {
         benchPhase: p.benchPhase,
         benchPrompt: p.benchPrompt,
         benchProgress: p.benchProgress,
+        gymLevel: p.gymLevel ?? 1,
       });
       if (p.feedbackMsg) {
         clearTimeout(feedbackTimerRef.current);
@@ -82,8 +86,8 @@ export default function GymHUD() {
 
   return (
     <>
-      {/* ── Top-left panel: bag prompt + combo display ── */}
-      {hud.bagPrompt ? (
+      {/* ── Top-left panel: gym level + bag prompt + combo display ── */}
+      {(hud.bagPrompt || hud.bagComboDisplay) ? (
         <div
           className="absolute pointer-events-none"
           style={{ top: 8, left: 8, zIndex: 60 }}
@@ -103,14 +107,26 @@ export default function GymHUD() {
             <span
               style={{
                 fontFamily: '"Press Start 2P", monospace',
-                fontSize: 7,
-                color: '#FF4444',
-                textShadow: '0 0 6px rgba(255,68,68,0.5)',
-                letterSpacing: '0.03em',
+                fontSize: 6,
+                color: 'rgba(255,68,68,0.55)',
+                letterSpacing: '0.04em',
               }}
             >
-              {hud.bagPrompt}
+              GYM LV{hud.gymLevel}
             </span>
+            {hud.bagPrompt ? (
+              <span
+                style={{
+                  fontFamily: '"Press Start 2P", monospace',
+                  fontSize: 7,
+                  color: '#FF4444',
+                  textShadow: '0 0 6px rgba(255,68,68,0.5)',
+                  letterSpacing: '0.03em',
+                }}
+              >
+                {hud.bagPrompt}
+              </span>
+            ) : null}
             {hud.bagComboDisplay ? (
               <span
                 style={{
