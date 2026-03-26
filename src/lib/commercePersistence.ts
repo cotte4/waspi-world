@@ -99,7 +99,6 @@ export async function ensurePlayerRow(
       equipped_top: state.inventory.equipped.top ?? null,
       equipped_bottom: state.inventory.equipped.bottom ?? null,
       utility_equipped: state.inventory.equipped.utility ?? [],
-      tenks: state.tenks,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'id' });
 
