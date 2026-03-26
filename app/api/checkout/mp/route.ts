@@ -66,8 +66,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const url = process.env.MP_SANDBOX === 'true' ? result.sandbox_init_point : result.init_point;
-    return NextResponse.json({ url });
+    return NextResponse.json({ url: result.init_point });
   }
 
   // tenks_pack
@@ -103,6 +102,5 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  const url = process.env.MP_SANDBOX === 'true' ? result.sandbox_init_point : result.init_point;
-  return NextResponse.json({ url });
+  return NextResponse.json({ url: result.init_point });
 }
