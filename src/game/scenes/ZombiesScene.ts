@@ -1497,6 +1497,7 @@ export class ZombiesScene extends Phaser.Scene {
       this.handleMovement();
       this.handleCombatInput();
       this.handleContextInteraction();
+      this.handleHpRegen(delta);
     }
 
     if (!this.isSharedCoopEnabled() || this.isSharedRunHost()) {
@@ -2431,6 +2432,13 @@ export class ZombiesScene extends Phaser.Scene {
       ease: 'Sine.easeOut',
       onComplete: () => label.destroy(),
     });
+  }
+
+  /** Slow passive HP regen: 1.5 HP/sec, starts 6s after last damage received. */
+  private handleHpRegen(delta: number) {
+    if (this.hp <= 0 || this.hp >= ZOMBIES_PLAYER.maxHp) return;
+    if (this.time.now - this.lastDamageAt < 6000) return;
+    this.hp = Math.min(ZOMBIES_PLAYER.maxHp, this.hp + 1.5 * (delta / 1000));
   }
 
   private applyPlayerDamage(amount: number) {

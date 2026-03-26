@@ -23,6 +23,11 @@ import {
   getZombiesAimAngle as getZombiesCombatAimAngle,
   tryShoot as tryShootZombiesCombat,
 } from './combat';
+import { formatMovementBindingLabel, type ControlSettings } from '../../systems/ControlSettings';
+
+function interactKey(scene: ZombiesPlayerSceneLike): string {
+  return formatMovementBindingLabel(scene.controls.settings.actionBindings.interact);
+}
 
 export {
   ZOMBIES_BOX_POS,
@@ -86,6 +91,7 @@ export type ZombiesPlayerSceneLike = Phaser.Scene & {
     readMovement: (useDeadZone?: boolean) => { dx: number; dy: number };
     isActionDown: (action: 'shoot' | 'interact' | 'back') => boolean;
     isActionJustDown: (action: 'interact' | 'back') => boolean;
+    settings: ControlSettings;
   };
   keyW: Phaser.Input.Keyboard.Key;
   keyA: Phaser.Input.Keyboard.Key;
@@ -392,7 +398,7 @@ export function getNearbyZombiesInteraction(scene: ZombiesPlayerSceneLike): Zomb
   const options: ZombiesInteractionOption[] = [];
 
   if (Phaser.Math.Distance.Between(scene.px, scene.py, ZOMBIES_EXIT_PAD.x, ZOMBIES_EXIT_PAD.y) <= ZOMBIES_EXIT_PAD.radius + 24) {
-    options.push({ kind: 'exit', x: ZOMBIES_EXIT_PAD.x, y: ZOMBIES_EXIT_PAD.y, radius: ZOMBIES_EXIT_PAD.radius + 18, label: `E VOLVER A ${scene.entryLabel}`, color: 0x39FF14 });
+    options.push({ kind: 'exit', x: ZOMBIES_EXIT_PAD.x, y: ZOMBIES_EXIT_PAD.y, radius: ZOMBIES_EXIT_PAD.radius + 18, label: `${interactKey(scene)} VOLVER A ${scene.entryLabel}`, color: 0x39FF14 });
   }
 
   const boxRadius = 74;
@@ -407,7 +413,7 @@ export function getNearbyZombiesInteraction(scene: ZombiesPlayerSceneLike): Zomb
         ? 'BOX GIRANDO...'
         : cooldown > 0
           ? `BOX RECARGA ${cooldown}s`
-          : `E MYSTERY BOX ${ZOMBIES_POINTS.mysteryBoxCost} PTS`,
+          : `${interactKey(scene)} MYSTERY BOX ${ZOMBIES_POINTS.mysteryBoxCost} PTS`,
       color: 0xFF7CCE,
     });
   }
@@ -423,7 +429,7 @@ export function getNearbyZombiesInteraction(scene: ZombiesPlayerSceneLike): Zomb
       radius: 58,
       label: weaponState.upgraded
         ? `${weaponStats.displayLabel} AL MAX`
-        : `E PACK ${weaponStats.displayLabel} ${scene.getPackCost(scene.currentWeapon)} PTS`,
+        : `${interactKey(scene)} PACK ${weaponStats.displayLabel} ${scene.getPackCost(scene.currentWeapon)} PTS`,
       color: 0x46B3FF,
     });
   }
@@ -435,7 +441,7 @@ export function getNearbyZombiesInteraction(scene: ZombiesPlayerSceneLike): Zomb
       x: ZOMBIES_DEPTHS_PAD.x,
       y: ZOMBIES_DEPTHS_PAD.y,
       radius: ZOMBIES_DEPTHS_PAD.radius + 18,
-      label: 'E BAJAR AL BASEMENT',
+      label: `${interactKey(scene)} BAJAR AL BASEMENT`,
       color: 0xFF6EA8,
     });
   }
@@ -450,7 +456,7 @@ export function getNearbyZombiesInteraction(scene: ZombiesPlayerSceneLike): Zomb
       x: door.panel.x,
       y: door.panel.y,
       radius: Math.max(door.panel.width, door.panel.height) / 2,
-      label: `E ABRIR ${ZOMBIES_SECTIONS.find((section) => section.id === sectionId)?.label} ${door.cost} PTS`,
+      label: `${interactKey(scene)} ABRIR ${ZOMBIES_SECTIONS.find((section) => section.id === sectionId)?.label} ${door.cost} PTS`,
       color: 0xF5C842,
       sectionId,
     });
@@ -465,7 +471,7 @@ export function getNearbyZombiesInteraction(scene: ZombiesPlayerSceneLike): Zomb
       x: node.x,
       y: node.y,
       radius: 44,
-      label: 'E REPAIR BARRICADE +20 PTS',
+      label: `${interactKey(scene)} REPAIR BARRICADE +20 PTS`,
       color: 0x46B3FF,
       nodeId: node.id,
     });
