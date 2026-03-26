@@ -142,6 +142,7 @@ import {
   findZombieTargetFrom as findZombiesTargetFrom,
   fireShotBurst as fireZombiesShotBurst,
   tryReload as tryReloadZombiesCombat,
+  type ZombiesCombatZombie,
 } from './zombies/combat';
 // Arena visual bounds: (60, 120) → (1760, 1100). Player boundary = arena edge + radius.
 const ARENA_MIN_X = 60;
@@ -2348,6 +2349,10 @@ export class ZombiesScene extends Phaser.Scene {
     if (zombie.lastAnimatedState !== state) {
       this.playZombieStateVisual(zombie, state);
     }
+  }
+
+  applyZombieDamage(zombie: ZombiesCombatZombie, damage: number) {
+    this.damageZombie(zombie as unknown as ZombieState, damage);
   }
 
   private damageZombie(zombie: ZombieState, damage: number) {

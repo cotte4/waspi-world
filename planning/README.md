@@ -18,6 +18,13 @@ Planes con trabajo pendiente **en el código o en configuración externa**.
 |------|--------|----------|
 | [UI React Migration](./fixes/ui-react-migration.md) — extraer Settings, Stats, PlayerActions, UINotice, Login de GamePage.tsx | 🟡 Pendiente | High |
 | [Async Race Conditions](./fixes/async-race-conditions.md) — stale applyPlayerState guard, syncPlayerState debounce, XP queue | 🟡 In Progress | High |
+| [HUD Polish](./fixes/hud-polish.md) — K/D fuera del panel, GameHUD collapsible, toolbar zIndex | 🟡 In Progress | Medium |
+| [Zombies No Damage](./fixes/zombies-no-damage.md) — `applyZombieDamage` no implementado en ZombiesScene | 🟡 In Progress | 🔴 Crítico |
+| [Weapons + Materials Persistence](./fixes/weapons-materials-persistence.md) — armas y materiales se pierden entre sesiones | 🟡 In Progress | 🔴 Crítico |
+| [PvP Pit Broken](./fixes/pvp-pit.md) — invisible desde plaza, betting UI no aparece | 🟡 Pendiente | 🟠 Alto |
+| [Gym Feedback](./fixes/gym-feedback.md) — error al pegar bolsa, sin indicador de XP/nivel | 🟡 Pendiente | 🟡 Medio |
+| [Beto NPC Gate](./fixes/beto-npc-gate.md) — muestra "!" pero requiere WEED LV3 silenciosamente | 🟡 Pendiente | 🟡 Medio |
+| [Dino Avatar](./fixes/dino-avatar.md) — renderizar avatar del jugador en lugar de rectángulo verde | 🟡 Pendiente | 🟢 Bajo |
 
 Ver [fixes/README.md](./fixes/README.md).
 

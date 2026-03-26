@@ -811,7 +811,7 @@ export default function PlayPage() {
         )}
 
         {/* Right toolbar */}
-        <div className="ww-toolbar absolute right-2 top-12">
+        <div className="ww-toolbar absolute right-2 top-12" style={{ zIndex: 60 }}>
           {/* SHOP primary action */}
           <button
             onClick={() => { openShop('hud'); }}

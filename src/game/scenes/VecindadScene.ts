@@ -2397,10 +2397,11 @@ export class VecindadScene extends Phaser.Scene {
 
   private updateWeedNpcBubbles() {
     const sys = getWeedDeliverySystem();
+    const weedLv = getSkillSystem().getLevel('weed');
     for (const npc of VecindadScene.WEED_NPCS) {
       const bubble = this.weedNpcBubbles.get(npc.id);
       if (!bubble || !bubble.active) continue;
-      const hasOrder = !sys.isOnCooldown(npc.id);
+      const hasOrder = !sys.isOnCooldown(npc.id) && sys.canInteract(weedLv);
       bubble.setVisible(hasOrder);
     }
   }
