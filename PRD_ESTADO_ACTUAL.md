@@ -1,5 +1,5 @@
-﻿# WASPI WORLD â€” PRD Estado Actual
-**Fecha:** 2026-03-20
+﻿# WASPI WORLD — PRD Estado Actual
+**Fecha:** 2026-03-27
 **Nota:** Incluye jukebox del CafÃ© (fixes), limpieza de ramas GitHub, y rol de los cuatro documentos PRD.
 **Archivos fuente:** los cuatro `PRD*.md` en la raÃ­z (ver Â§0), cÃ³digo en `src/` y `app/`.
 
@@ -20,7 +20,50 @@ No son cuatro â€œversionesâ€ del mismo documento: cada uno cumple un **
 
 ---
 
-## SesiÃ³n 2026-03-22 â€” Plan de refactor estructural
+## Sesión 2026-03-27 — Skill system overhaul + milestone cosmetics
+
+### Lo que se hizo
+
+**Character Creator**
+- Zoom controls + facing controls (◁ − + ▷) en la columna central del CreatorScene
+- `patchConfig()` en AvatarRenderer: actualizaciones quirúrgicas sin destroy/rebuild del avatar
+- `syncContainerChildren()`: Z-order fijo para capas del avatar procedural
+- Hair style labels completos, descriptores en seed grid, swatches con custom color picker
+- `randomCfg()` excluye cosméticos bloqueados (bucket, headband, shades, visor, sparkle, stars)
+
+**Sistema de Skills**
+- `QualityBanner.ts`: banner animado flotante por acción (glow ring, flash en legendary)
+- Calidad visual en todas las escenas de skill (Bosque, Cave, Vecindad pesca/cosecha, Gym)
+- Spec XP bonuses conectados: `mining_extractor` +5, `fishing_baitmaster` +5, `gardening_botanist` +5
+- Streaks de gym: multiplicador 1x→1.3x→1.6x→2x en combos consecutivos
+- Daily first-action 2x XP: validado server-side vía `updated_at`; toast al cliente
+- Sinergias XP en todas las escenas: `huerto_propio` +30%, `gourmet_del_mar` +25%
+- **Level 6 LEGEND** a 3500 XP — cosmético puro, título “LEGEND ✦”
+
+**Milestone Cosmetic Delivery**
+- `milestoneCosmetics.ts`: 6 cosméticos mapeados a milestones
+- `GET /api/cosmetics/unlocked`: deriva unlocks de `player_skill_milestones`
+- `SkillSystem`: detecta milestone cosmético en `addXp()`, emite `COSMETIC_UNLOCKED`
+- `CosmeticRevealOverlay.tsx`: modal fullscreen animado al desbloquear
+- `CharacterCreatorOverlay`: opciones 🔒 con tooltip; unlock live sin reload
+- `BootScene`: un solo `initSkillSystem()` paralelo (skills + specs + cosmetics + items)
+- SQL: índice compuesto `player_skill_milestones(user_id, milestone_id)` — **aplicar en Supabase**
+
+### Próximos pasos
+- **Skill leaderboard**: `GET /api/skills/leaderboard?skill=X` + panel UI
+- **Milestone stat rewards**: mining_50 (+3 XP/golpe), fishing_50 (+10% suerte) — aplicar en escenas
+- **Cooking**: solo 2 fuentes de XP; agregar minijuego o segunda fuente
+- **NPC ambient animations**: bounce idle (Doña Rosa, Don Carlos, Miguel, Luisa)
+- **Colisiones en parcelas** construidas en Vecindad
+- **TURN server** propio para voz WebRTC
+
+### Known issues
+- React “Cannot update during render” en apertura del Casino
+- `/api/vecindad` y `/api/events` con 500s pendientes de investigación
+
+---
+
+## Sesión 2026-03-22 — Plan de refactor estructural
 
 ### Objetivo
 - Reducir deuda tÃ©cnica en los archivos mÃ¡s grandes sin cambiar la arquitectura base del proyecto.
