@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { getSkillSystem, initSkillSystem } from '../systems/SkillSystem';
+import { initSkillSystem } from '../systems/SkillSystem';
 import { initContractSystem } from '../systems/ContractSystem';
 import { initQuestSystem } from '../systems/QuestSystem';
 import { initGuildSystem } from '../systems/GuildSystem';
@@ -12,10 +12,8 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload() {
-    // Kick off skill data fetch in the background — non-blocking
+    // Kick off all skill data fetches in parallel — non-blocking
     void initSkillSystem();
-    void getSkillSystem().loadPurchasedItems();
-    void getSkillSystem().loadSpecs();
     void initContractSystem();
     void initQuestSystem();
     void initGuildSystem();

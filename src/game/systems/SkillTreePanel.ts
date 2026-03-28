@@ -170,7 +170,7 @@ export class SkillTreePanel {
       const xp          = sys.getXp(skillId);
       const actionCount = sys.getActionCount(skillId);
       const def         = getSkillDef(skillId);
-      const isMax       = level >= 5;
+      const isMax       = level >= 6;
       const texts       = this.cardTexts[index];
       const barFill     = this.xpBarFills[index];
       const barBack     = this.xpBarBacks[index];

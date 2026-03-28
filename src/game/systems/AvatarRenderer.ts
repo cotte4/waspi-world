@@ -181,6 +181,19 @@ export class AvatarRenderer {
   private leftHand?: Phaser.GameObjects.Rectangle;
   private rightHand?: Phaser.GameObjects.Rectangle;
   private hair?: Phaser.GameObjects.Graphics;
+  private shadow?: Phaser.GameObjects.Ellipse;
+  private shirt?: Phaser.GameObjects.Arc;
+  // Procedural layer-group refs — used by patchConfig for surgical re-renders
+  private layerAuraGlow:    Phaser.GameObjects.GameObject[] = [];
+  private layerShirt:       Phaser.GameObjects.Arc[]        = [];
+  private layerEquipTop:    Phaser.GameObjects.GameObject[] = [];
+  private layerEquipBottom: Phaser.GameObjects.GameObject[] = [];
+  private layerEyes:        Phaser.GameObjects.Arc[]        = [];
+  private layerMouth:       Phaser.GameObjects.GameObject[] = [];
+  private layerChain:       Phaser.GameObjects.GameObject[] = [];
+  private layerHat:         Phaser.GameObjects.GameObject[] = [];
+  private layerGlasses:     Phaser.GameObjects.GameObject[] = [];
+  private layerShoes:       Phaser.GameObjects.GameObject[] = [];
   private specialSprite?: Phaser.GameObjects.Sprite;
   private specialBaseY = 12;
   private animatedKind?: AnimatedAvatarKind;
@@ -201,8 +214,8 @@ export class AvatarRenderer {
   }
 
   private buildAvatar(scene: Phaser.Scene) {
-    const shadow = scene.add.ellipse(0, 26, 26, 9, 0x000000, 0.35);
-    this.container.add(shadow);
+    this.shadow = scene.add.ellipse(0, 26, 26, 9, 0x000000, 0.35);
+    this.container.add(this.shadow);
 
     if (isAnimatedAvatarKind(this.config.avatarKind)) {
       this.buildAnimatedAvatar(scene, this.config.avatarKind);
@@ -230,40 +243,41 @@ export class AvatarRenderer {
       const glow = scene.add.graphics();
       glow.fillStyle(c.auraColor, 0.10);
       glow.fillCircle(0, 4, 42);
-      all.push(glow);
+      this.layerAuraGlow = [glow];
+    } else {
+      this.layerAuraGlow = [];
     }
 
     // ── Feet ─────────────────────────────────────────────────────
     this.leftFoot  = scene.add.rectangle(-6, footY, 8, 8, c.bottomColor);
     this.rightFoot = scene.add.rectangle( 6, footY, 8, 8, c.bottomColor);
-    all.push(this.leftFoot, this.rightFoot);
 
     // ── Shoes ────────────────────────────────────────────────────
-    all.push(...this.buildShoes(scene, footY, c.shoeStyle, c.shoeColor));
+    this.layerShoes = this.buildShoes(scene, footY, c.shoeStyle, c.shoeColor);
 
     // ── Body blob ────────────────────────────────────────────────
-    this.body = scene.add.arc(0, bodyY, bodyR, 0, 360, false, c.bodyColor);
-    const shirt = scene.add.arc(0, bodyY + 2, bodyR * 0.92, 200, 340, false, c.topColor);
-    shirt.setAlpha(0.9);
-    all.push(this.body, shirt);
+    this.body   = scene.add.arc(0, bodyY, bodyR, 0, 360, false, c.bodyColor);
+    this.shirt  = scene.add.arc(0, bodyY + 2, bodyR * 0.92, 200, 340, false, c.topColor);
+    this.shirt.setAlpha(0.9);
+    this.layerShirt = [this.shirt];
 
     // ── Clothing sprite overlays (Model B) ───────────────────────
-    // Top overlay: drawn over shirt arc if spriteKey is defined and texture loaded
+    this.layerEquipTop = [];
     if (c.equipTop) {
       const topItem = getCatalogItem(c.equipTop);
       if (topItem?.spriteKey && scene.textures.exists(topItem.spriteKey)) {
         const topSprite = scene.add.image(0, bodyY + 2, topItem.spriteKey);
         topSprite.setDisplaySize(bodyR * 2.2, bodyR * 2.2);
-        all.push(topSprite);
+        this.layerEquipTop = [topSprite];
       }
     }
-    // Bottom overlay: drawn over feet if spriteKey is defined and texture loaded
+    this.layerEquipBottom = [];
     if (c.equipBottom) {
       const bottomItem = getCatalogItem(c.equipBottom);
       if (bottomItem?.spriteKey && scene.textures.exists(bottomItem.spriteKey)) {
         const bottomSprite = scene.add.image(0, footY - 2, bottomItem.spriteKey);
         bottomSprite.setDisplaySize(bodyR * 2.0, 18);
-        all.push(bottomSprite);
+        this.layerEquipBottom = [bottomSprite];
       }
     }
 
@@ -276,19 +290,17 @@ export class AvatarRenderer {
     const ppScale = 0.2 + pp * 0.25;
     this.ppBlob = scene.add.ellipse(0, bodyY + 16, 10 * ppScale, 7 * ppScale, 0x000000, 0.14);
     this.ppBlob.setStrokeStyle(1, 0x000000, 0.22);
-    all.push(this.ttLeft, this.ttRight, this.ppBlob);
 
     // ── Hands ────────────────────────────────────────────────────
     const handY = bodyY + 8;
     this.leftHand  = scene.add.rectangle(-bodyR - 4, handY, 7, 7, c.bodyColor);
     this.rightHand = scene.add.rectangle( bodyR + 4, handY, 7, 7, c.bodyColor);
-    all.push(this.leftHand, this.rightHand);
 
     // ── Chain (upper chest, below eyes) ──────────────────────────
-    all.push(...this.buildChain(scene, bodyY, c.chainStyle, c.chainColor));
+    this.layerChain = this.buildChain(scene, bodyY, c.chainStyle, c.chainColor);
 
     // ── Mouth ────────────────────────────────────────────────────
-    all.push(...this.buildMouth(scene, bodyY, c.mouthStyle));
+    this.layerMouth = this.buildMouth(scene, bodyY, c.mouthStyle);
 
     // ── Eyes ─────────────────────────────────────────────────────
     const eyeY = bodyY - 4;
@@ -296,20 +308,20 @@ export class AvatarRenderer {
     const eyeWhiteR = scene.add.circle( 6, eyeY, 4.2, 0xFFFFFF);
     const pupilL    = scene.add.circle(-6, eyeY + 1, 2.4, c.eyeColor);
     const pupilR    = scene.add.circle( 6, eyeY + 1, 2.4, c.eyeColor);
-    all.push(eyeWhiteL, eyeWhiteR, pupilL, pupilR);
+    this.layerEyes = [eyeWhiteL, eyeWhiteR, pupilL, pupilR];
 
     // ── Hair ─────────────────────────────────────────────────────
     this.hair = scene.add.graphics();
     this.drawHairVariant(bodyR);
-    all.push(this.hair);
 
     // ── Hat (on top of hair) ──────────────────────────────────────
-    all.push(...this.buildHat(scene, bodyR, bodyY, c.hatStyle, c.hatColor));
+    this.layerHat = this.buildHat(scene, bodyR, bodyY, c.hatStyle, c.hatColor);
 
     // ── Glasses ──────────────────────────────────────────────────
-    all.push(...this.buildGlasses(scene, bodyY, c.glassesStyle, c.glassesColor));
+    this.layerGlasses = this.buildGlasses(scene, bodyY, c.glassesStyle, c.glassesColor);
 
-    this.container.add(all);
+    // ── Assemble container in Z-order ─────────────────────────────
+    this.syncContainerChildren();
     this.applyContainerScale(this.facingLeft);
   }
 
@@ -810,6 +822,176 @@ export class AvatarRenderer {
   getContainer() { return this.container; }
   get x() { return this.container.x; }
   get y() { return this.container.y; }
+
+  // ── Rebuild container child list from stored layer-group refs ────────────────
+  private syncContainerChildren() {
+    if (!this.isContainerUsable()) return;
+    this.container.removeAll(false); // remove all without destroying
+    const ordered: Phaser.GameObjects.GameObject[] = [];
+    if (this.shadow?.active)    ordered.push(this.shadow);
+    ordered.push(...this.layerAuraGlow);
+    if (this.leftFoot?.active)  ordered.push(this.leftFoot);
+    if (this.rightFoot?.active) ordered.push(this.rightFoot);
+    ordered.push(...this.layerShoes);
+    if (this.body?.active)      ordered.push(this.body);
+    ordered.push(...this.layerShirt);
+    ordered.push(...this.layerEquipTop);
+    ordered.push(...this.layerEquipBottom);
+    if (this.ttLeft?.active)    ordered.push(this.ttLeft);
+    if (this.ttRight?.active)   ordered.push(this.ttRight);
+    if (this.ppBlob?.active)    ordered.push(this.ppBlob);
+    if (this.leftHand?.active)  ordered.push(this.leftHand);
+    if (this.rightHand?.active) ordered.push(this.rightHand);
+    ordered.push(...this.layerChain);
+    ordered.push(...this.layerMouth);
+    ordered.push(...this.layerEyes);
+    if (this.hair?.active)      ordered.push(this.hair);
+    ordered.push(...this.layerHat);
+    ordered.push(...this.layerGlasses);
+    this.container.add(ordered);
+  }
+
+  // ── Surgical config patch — only re-renders what changed ─────────────────────
+  patchConfig(changes: Partial<AvatarConfig>): void {
+    if (!this.isContainerUsable()) return;
+    if (this.config.avatarKind !== 'procedural') return;
+    if (changes.avatarKind !== undefined && changes.avatarKind !== 'procedural') return;
+
+    const scene  = this.container.scene;
+    const bodyR  = 15;
+    const bodyY  = -6;
+    const footY  = bodyY + bodyR + 12;
+
+    // Apply changes to the mutable config in-place
+    const normalized = normalizeAvatarConfig({ ...this.config, ...changes });
+    const cfg = this.config;
+    cfg.bodyColor    = normalized.bodyColor;
+    cfg.hairColor    = normalized.hairColor;
+    cfg.eyeColor     = normalized.eyeColor;
+    cfg.topColor     = normalized.topColor;
+    cfg.bottomColor  = normalized.bottomColor;
+    cfg.hairStyle    = normalized.hairStyle;
+    cfg.hatStyle     = normalized.hatStyle;
+    cfg.hatColor     = normalized.hatColor;
+    cfg.mouthStyle   = normalized.mouthStyle;
+    cfg.glassesStyle = normalized.glassesStyle;
+    cfg.glassesColor = normalized.glassesColor;
+    cfg.chainStyle   = normalized.chainStyle;
+    cfg.chainColor   = normalized.chainColor;
+    cfg.shoeStyle    = normalized.shoeStyle;
+    cfg.shoeColor    = normalized.shoeColor;
+    cfg.auraEffect   = normalized.auraEffect;
+    cfg.auraColor    = normalized.auraColor;
+    cfg.smoke        = normalized.smoke;
+    cfg.pp           = normalized.pp;
+    cfg.tt           = normalized.tt;
+    cfg.bodyWidth    = normalized.bodyWidth;
+    cfg.bodyHeight   = normalized.bodyHeight;
+    cfg.equipTop     = normalized.equipTop;
+    cfg.equipBottom  = normalized.equipBottom;
+
+    let needsSync = false;
+
+    // ── In-place color patches ────────────────────────────────────
+    if (changes.bodyColor !== undefined) {
+      this.body?.setFillStyle(cfg.bodyColor);
+      this.leftHand?.setFillStyle(cfg.bodyColor);
+      this.rightHand?.setFillStyle(cfg.bodyColor);
+    }
+    if (changes.topColor !== undefined) {
+      this.shirt?.setFillStyle(cfg.topColor);
+    }
+    if (changes.bottomColor !== undefined) {
+      this.leftFoot?.setFillStyle(cfg.bottomColor);
+      this.rightFoot?.setFillStyle(cfg.bottomColor);
+    }
+    if (changes.eyeColor !== undefined) {
+      this.layerEyes[2]?.setFillStyle(cfg.eyeColor);
+      this.layerEyes[3]?.setFillStyle(cfg.eyeColor);
+    }
+    if (changes.hairColor !== undefined || changes.hairStyle !== undefined) {
+      this.drawHairVariant(bodyR);
+    }
+    if (changes.bodyWidth !== undefined || changes.bodyHeight !== undefined) {
+      this.applyContainerScale(this.facingLeft);
+    }
+    if (changes.pp !== undefined || changes.tt !== undefined) {
+      const tt = Phaser.Math.Clamp(cfg.tt, 0, 10);
+      const pp = Phaser.Math.Clamp(cfg.pp, 0, 10);
+      const ttS = 0.3 + tt * 0.22;
+      const ppS = 0.2 + pp * 0.25;
+      this.ttLeft?.setSize(10 * ttS, 8 * ttS);
+      this.ttRight?.setSize(10 * ttS, 8 * ttS);
+      this.ppBlob?.setSize(10 * ppS, 7 * ppS);
+    }
+
+    // ── Layer-group replacements ──────────────────────────────────
+    if (changes.shoeStyle !== undefined || changes.shoeColor !== undefined) {
+      for (const obj of this.layerShoes) safeDestroyGameObject(obj as Phaser.GameObjects.Arc);
+      this.layerShoes = this.buildShoes(scene, footY, cfg.shoeStyle, cfg.shoeColor);
+      needsSync = true;
+    }
+    if (changes.mouthStyle !== undefined) {
+      for (const obj of this.layerMouth) safeDestroyGameObject(obj as Phaser.GameObjects.Arc);
+      this.layerMouth = this.buildMouth(scene, bodyY, cfg.mouthStyle);
+      needsSync = true;
+    }
+    if (changes.chainStyle !== undefined || changes.chainColor !== undefined) {
+      for (const obj of this.layerChain) safeDestroyGameObject(obj as Phaser.GameObjects.Arc);
+      this.layerChain = this.buildChain(scene, bodyY, cfg.chainStyle, cfg.chainColor);
+      needsSync = true;
+    }
+    if (changes.hatStyle !== undefined || changes.hatColor !== undefined) {
+      for (const obj of this.layerHat) safeDestroyGameObject(obj as Phaser.GameObjects.Arc);
+      this.layerHat = this.buildHat(scene, bodyR, bodyY, cfg.hatStyle, cfg.hatColor);
+      needsSync = true;
+    }
+    if (changes.glassesStyle !== undefined || changes.glassesColor !== undefined) {
+      for (const obj of this.layerGlasses) safeDestroyGameObject(obj as Phaser.GameObjects.Arc);
+      this.layerGlasses = this.buildGlasses(scene, bodyY, cfg.glassesStyle, cfg.glassesColor);
+      needsSync = true;
+    }
+    if (changes.auraEffect !== undefined || changes.auraColor !== undefined) {
+      for (const obj of this.layerAuraGlow) safeDestroyGameObject(obj as Phaser.GameObjects.Arc);
+      if (cfg.auraEffect !== 'none') {
+        const glow = scene.add.graphics();
+        glow.fillStyle(cfg.auraColor, 0.10);
+        glow.fillCircle(0, 4, 42);
+        this.layerAuraGlow = [glow];
+      } else {
+        this.layerAuraGlow = [];
+      }
+      needsSync = true;
+    }
+    if (changes.equipTop !== undefined) {
+      for (const obj of this.layerEquipTop) safeDestroyGameObject(obj as Phaser.GameObjects.Arc);
+      this.layerEquipTop = [];
+      if (cfg.equipTop) {
+        const topItem = getCatalogItem(cfg.equipTop);
+        if (topItem?.spriteKey && scene.textures.exists(topItem.spriteKey)) {
+          const img = scene.add.image(0, bodyY + 2, topItem.spriteKey);
+          img.setDisplaySize(bodyR * 2.2, bodyR * 2.2);
+          this.layerEquipTop = [img];
+        }
+      }
+      needsSync = true;
+    }
+    if (changes.equipBottom !== undefined) {
+      for (const obj of this.layerEquipBottom) safeDestroyGameObject(obj as Phaser.GameObjects.Arc);
+      this.layerEquipBottom = [];
+      if (cfg.equipBottom) {
+        const bottomItem = getCatalogItem(cfg.equipBottom);
+        if (bottomItem?.spriteKey && scene.textures.exists(bottomItem.spriteKey)) {
+          const img = scene.add.image(0, footY - 2, bottomItem.spriteKey);
+          img.setDisplaySize(bodyR * 2.0, 18);
+          this.layerEquipBottom = [img];
+        }
+      }
+      needsSync = true;
+    }
+
+    if (needsSync) this.syncContainerChildren();
+  }
 
   destroy() {
     try { this.clearActionState(); } catch { /* scene tearing down */ }

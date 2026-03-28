@@ -30,6 +30,7 @@ All migrations applied manually via Supabase SQL Editor (CLI not usable due to p
 | 20260322_progression_quest_delivery.sql | 2026-03-25 | xp/level on player_stats, utility_equipped on players, weed_delivery_cooldowns, player_quest_flags |
 | 20260325_xp_transactions.sql | 2026-03-25 | xp_transactions table |
 | 20260325_adhoc_patches.sql | 2026-03-25 | muted_players column, product_id column, player_inventory unique constraint |
+| 20260327_skill_level6_cosmetics.sql | 2026-03-27 | Compound index on player_skill_milestones for cosmetics query; documents Lv6 LEGEND (3500 XP) and 6 cosmetic milestone IDs |
 
 ## Notes
 

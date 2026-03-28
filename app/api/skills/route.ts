@@ -20,10 +20,11 @@ const XP_THRESHOLDS: Record<number, number> = {
   3: 300,
   4: 700,
   5: 1500,
+  6: 3500, // LEGEND — cosmetic rank, no new skills unlocked
 };
 
-const MAX_LEVEL = 5;
-const MAX_XP_GAIN_PER_REQUEST = 50;
+const MAX_LEVEL = 6;
+const MAX_XP_GAIN_PER_REQUEST = 100; // raised to accommodate quality bonuses + daily 2x
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -34,6 +35,14 @@ interface SkillRow {
   level: number;
   action_count: number;
   updated_at: string;
+}
+
+/** True if `updatedAt` ISO string is from a calendar day before today (UTC). */
+function isFromPreviousDay(updatedAt: string | undefined | null): boolean {
+  if (!updatedAt) return true; // no prior record = first ever action = treat as daily bonus
+  const lastDate = new Date(updatedAt).toISOString().slice(0, 10); // 'YYYY-MM-DD'
+  const today    = new Date().toISOString().slice(0, 10);
+  return lastDate < today;
 }
 
 interface SkillPublic {
@@ -165,18 +174,22 @@ export async function POST(request: NextRequest) {
 
   const { data: existing, error: fetchError } = await admin
     .from('player_skills')
-    .select('xp, level, action_count')
+    .select('xp, level, action_count, updated_at')
     .eq('user_id', user.id)
     .eq('skill_id', skill_id)
-    .maybeSingle<Pick<SkillRow, 'xp' | 'level' | 'action_count'>>();
+    .maybeSingle<Pick<SkillRow, 'xp' | 'level' | 'action_count' | 'updated_at'>>();
 
   if (fetchError) {
     return NextResponse.json({ error: fetchError.message }, { status: 500 });
   }
 
+  // ── Daily first-action bonus: 2× XP if last action was on a previous day ─────
+  const daily_bonus = isFromPreviousDay(existing?.updated_at);
+  const effective_xp_gain = daily_bonus ? xp_gain * 2 : xp_gain;
+
   // ── Compute new XP, level, and action count ───────────────────────────────
   const currentXp = existing?.xp ?? 0;
-  const newXp = currentXp + xp_gain;
+  const newXp = currentXp + effective_xp_gain;
   const oldLevel = existing?.level ?? 0;
   const newLevel = computeLevel(newXp);
   const leveled_up = newLevel > oldLevel;
@@ -190,10 +203,10 @@ export async function POST(request: NextRequest) {
       {
         user_id: user.id,
         skill_id,
-        xp: newXp,
-        level: newLevel,
+        xp:           newXp,
+        level:        newLevel,
         action_count: newActionCount,
-        updated_at: new Date().toISOString(),
+        updated_at:   new Date().toISOString(),
       },
       { onConflict: 'user_id,skill_id' },
     )
@@ -228,6 +241,7 @@ export async function POST(request: NextRequest) {
     xp: upserted.xp,
     level: upserted.level,
     leveled_up,
+    daily_bonus,
     ...(milestone_unlocked ? { milestone_unlocked } : {}),
   });
 }

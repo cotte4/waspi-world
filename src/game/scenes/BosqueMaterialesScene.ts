@@ -13,6 +13,7 @@ import { getEventSystem } from '../systems/EventSystem';
 import { SpecializationModal } from '../systems/SpecializationModal';
 import type { SkillId } from '../systems/SkillSystem';
 import type { QualityTier } from '../config/qualityTiers';
+import { showQualityBanner } from '../systems/QualityBanner';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const W = 1600;
@@ -799,9 +800,14 @@ export class BosqueMaterialesScene extends Phaser.Scene {
     if (nearest.communal) {
       nearest.respawnAt = this.time.now + COMMUNAL_GARDEN_RESPAWN_MS;
       this.collectedTotal += MATERIALS_COMMUNAL_PER_TEND;
-      this.showPrompt(`+${MATERIALS_COMMUNAL_PER_TEND} MATERIALES [JARDÍN] +10 XP JARDINERÍA`);
       void (async () => {
-        const result = await getSkillSystem().addXp('gardening', 10, 'communal_tend');
+        const sys = getSkillSystem();
+        const huertoMult = sys.hasSynergy('huerto_propio') ? 1.3 : 1;
+        const botanistBonus = sys.getSpec('gardening') === 'gardening_botanist' ? 5 : 0;
+        const gardenXp = Math.round((10 + botanistBonus) * huertoMult);
+        const communalSuffix = [huertoMult > 1 ? '✦SIN' : '', botanistBonus > 0 ? '✦BOT' : ''].filter(Boolean).join(' ');
+        this.showPrompt(`+${MATERIALS_COMMUNAL_PER_TEND} MATERIALES [JARDÍN] +${gardenXp} XP JARDINERÍA${communalSuffix ? ` ${communalSuffix}` : ''}`);
+        const result = await sys.addXp('gardening', gardenXp, 'communal_tend');
         if (!this.scene?.isActive('BosqueMaterialesScene')) return;
         if (result.leveled_up) {
           eventBus.emit(EVENTS.UI_NOTICE, { message: `🌱 JARDINERÍA LVL ${result.new_level}!`, color: '#39FF14' });
@@ -858,13 +864,15 @@ export class BosqueMaterialesScene extends Phaser.Scene {
 
         // XP: base + quality bonus + minigame bonus × event multiplier
         const eventMult = getEventSystem().getXpMultiplier('mining');
-        const xpTotal = Math.round((10 + qr.xp_bonus + minigameBonus) * eventMult);
+        const extractorBonus = sys.getSpec('mining') === 'mining_extractor' ? 5 : 0;
+        const xpTotal = Math.round((10 + qr.xp_bonus + minigameBonus + extractorBonus) * eventMult);
 
         const matsThisNode = materialsFromMiningQuality(qr.quality);
         this.collectedTotal += matsThisNode;
 
         // Quality + XP feedback together so player sees the difference
         this.showPrompt(`+${matsThisNode} MATERIALES [${qr.label}]  +${xpTotal} XP`);
+        showQualityBanner(this, qr, nearest.x, nearest.y - 48);
         const xpResult = await sys.addXp('mining', xpTotal, 'node_collect');
         if (!this.scene?.isActive('BosqueMaterialesScene')) return;
         if (xpResult.leveled_up) {
@@ -876,9 +884,7 @@ export class BosqueMaterialesScene extends Phaser.Scene {
           void getMasterySystem().earnMp('mining');
         }
 
-        // Legendary flash
         if (qr.quality === 'legendary') {
-          this.cameras.main.flash(400, 245, 200, 66, false);
           eventBus.emit(EVENTS.UI_NOTICE, { message: '✨ MATERIAL LEGENDARIO!', color: '#F5C842' });
         }
       } finally {

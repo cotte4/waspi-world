@@ -15,6 +15,7 @@ import { getMasterySystem } from '../systems/MasterySystem';
 import { getEventSystem } from '../systems/EventSystem';
 import { AvatarRenderer, loadStoredAvatarConfig } from '../systems/AvatarRenderer';
 import { SceneControls } from '../systems/SceneControls';
+import { showQualityBanner } from '../systems/QualityBanner';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const W = 600;
@@ -612,8 +613,9 @@ export class CaveScene extends Phaser.Scene {
 
         // XP
         const eventMult = getEventSystem().getXpMultiplier('mining');
+        const extractorBonus = sys.getSpec('mining') === 'mining_extractor' ? 5 : 0;
         // Cave nodes give a premium: base 18 XP instead of 10
-        const xpTotal = Math.round((18 + qr.xp_bonus + minigameBonus) * eventMult);
+        const xpTotal = Math.round((18 + qr.xp_bonus + minigameBonus + extractorBonus) * eventMult);
 
         this.collectedTotal++;
         this.hudCollected?.setText(`MINERALES: ${this.collectedTotal}`);
@@ -628,6 +630,7 @@ export class CaveScene extends Phaser.Scene {
           : `+1 MINERAL [${qr.label}]  +${xpTotal} XP`;
 
         this.showPrompt(dropLabel);
+        showQualityBanner(this, qr);
 
         if (this.hudCollected) {
           this.hudCollected.setColor(qr.color);
@@ -654,7 +657,6 @@ export class CaveScene extends Phaser.Scene {
           this.cameras.main.flash(300, 120, 30, 200, false);
           eventBus.emit(EVENTS.UI_NOTICE, { message: '💎 MINERAL OSCURO!', color: '#c090ff' });
         } else if (qr.quality === 'legendary') {
-          this.cameras.main.flash(400, 245, 200, 66, false);
           eventBus.emit(EVENTS.UI_NOTICE, { message: '✨ MATERIAL LEGENDARIO!', color: '#F5C842' });
         }
       } finally {

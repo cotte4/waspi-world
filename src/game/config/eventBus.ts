@@ -93,6 +93,8 @@ export const EVENTS = {
   CREATOR_COMMIT: 'creator:commit',
   /** Phaser → Creator overlay: initial config. Payload: { config: Required<AvatarConfig> } */
   CREATOR_READY: 'creator:ready',
+  /** Creator overlay → Phaser: change avatar facing or zoom. Payload: { dx?: number; dy?: number } | { zoom?: number } */
+  CREATOR_FACING_CHANGED: 'creator:facing:changed',
   /** Phaser → QuestTracker: a quest was completed or progress changed, force re-fetch. */
   QUEST_TRACKER_REFRESH: 'quest:tracker:refresh',
   /** Open the Leaderboard overlay. No payload required. */
@@ -167,4 +169,6 @@ export const EVENTS = {
   PVP_SCENE_ACTIVE: 'pvp:active',
   /** Open the Patch Notes overlay. No payload required. */
   PATCH_NOTES_OPEN: 'patch:notes:open',
+  /** A milestone cosmetic reward was just unlocked. Payload: CosmeticDef */
+  COSMETIC_UNLOCKED: 'cosmetic:unlocked',
 } as const;

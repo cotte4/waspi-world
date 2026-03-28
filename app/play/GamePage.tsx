@@ -54,6 +54,7 @@ const ArcadeHUD = dynamic(() => import('@/app/components/ArcadeHUD'), { ssr: fal
 const PvpHUD = dynamic(() => import('@/app/components/PvpHUD'), { ssr: false });
 const WorldHUD = dynamic(() => import('@/app/components/WorldHUD'), { ssr: false });
 const PatchNotesOverlay = dynamic(() => import('@/app/components/PatchNotesOverlay'), { ssr: false });
+const CosmeticRevealOverlay = dynamic(() => import('@/app/components/CosmeticRevealOverlay'), { ssr: false });
 
 export default function PlayPage() {
   const initialProgression = useMemo(() => loadProgressionState(), []);
@@ -1121,6 +1122,9 @@ export default function PlayPage() {
 
         {/* Patch Notes button + overlay — always available in-game */}
         {activeScene !== 'CreatorScene' && <PatchNotesOverlay />}
+
+        {/* Cosmetic reveal modal — self-manages via COSMETIC_UNLOCKED event */}
+        <CosmeticRevealOverlay />
 
         {showOnboarding && (
           <div

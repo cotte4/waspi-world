@@ -40,7 +40,7 @@ export type SkillTreeDef = {
 // XP Thresholds (cumulative)
 // Index = level that was just reached (0 = start, 1 = lv1, …, 4 = lv5)
 // ─────────────────────────────────────────────────────────────────────────────
-export const SKILL_XP_THRESHOLDS = [0, 100, 300, 700, 1500] as const;
+export const SKILL_XP_THRESHOLDS = [0, 100, 300, 700, 1500, 3500] as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mining
@@ -443,7 +443,7 @@ export function getSkillLevel(xp: number): number {
  * Returns null if the player is already at max level (5).
  */
 export function getXpForNextLevel(currentLevel: number): number | null {
-  if (currentLevel >= 5) return null;
+  if (currentLevel >= 6) return null;
   // SKILL_XP_THRESHOLDS[i] is the XP to reach level i+1.
   // So to reach level currentLevel+1, we need SKILL_XP_THRESHOLDS[currentLevel].
   return SKILL_XP_THRESHOLDS[currentLevel] as number;

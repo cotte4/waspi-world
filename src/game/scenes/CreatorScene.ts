@@ -27,6 +27,8 @@ export class CreatorScene extends Phaser.Scene {
   private worldExitX: number = PLAYER.SPAWN_X;
   private worldExitY: number = PLAYER.SPAWN_Y;
   private allowHairCustomization = true;
+  private previewZoomIdx = 1; // index into ZOOM_STEPS
+  private static readonly ZOOM_STEPS = [0.8, 1.0, 1.25, 1.6, 2.0];
 
   constructor() {
     super({ key: 'CreatorScene' });
@@ -107,7 +109,21 @@ export class CreatorScene extends Phaser.Scene {
       const p = payload as Partial<AvatarConfig>;
       if (p.avatarKind !== undefined) this.selectedSeed = p.avatarKind;
       this.config = { ...this.config, ...p };
-      this.refreshPreview();
+      this.refreshPreview(p);
+    });
+    const unsubFacing = eventBus.on(EVENTS.CREATOR_FACING_CHANGED, (payload: unknown) => {
+      const p = payload as { dx?: number; dy?: number; zoom?: number };
+      if (typeof p.dx === 'number' || typeof p.dy === 'number') {
+        if (this.preview?.active) this.preview.update(false, p.dx ?? 0, p.dy ?? 0);
+      }
+      if (typeof p.zoom === 'number') {
+        this.previewZoomIdx = Phaser.Math.Clamp(
+          this.previewZoomIdx + Math.sign(p.zoom),
+          0,
+          CreatorScene.ZOOM_STEPS.length - 1,
+        );
+        this.cameras.main.setZoom(CreatorScene.ZOOM_STEPS[this.previewZoomIdx]);
+      }
     });
     const unsubCommit = eventBus.on(EVENTS.CREATOR_COMMIT, (payload: unknown) => {
       const p = (payload ?? {}) as { username?: string };
@@ -119,6 +135,7 @@ export class CreatorScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       unsubConfig();
       unsubCommit();
+      unsubFacing();
     });
 
     // Emit initial config so React overlay can pre-fill its state
@@ -153,13 +170,26 @@ export class CreatorScene extends Phaser.Scene {
   }
 
   // ── REFRESH ───────────────────────────────────────────────────────
-  private refreshPreview() {
-    this.preview.destroy();
-    this.preview = new AvatarRenderer(this, this.previewX, this.previewY, {
-      ...this.config,
-      avatarKind: this.selectedSeed,
-    });
-    this.preview.setDepth(3);
+  private refreshPreview(changes: Partial<AvatarConfig> = {}) {
+    const kindChanged = changes.avatarKind !== undefined;
+    const isProcedural = this.selectedSeed === 'procedural';
+
+    // Full rebuild required when: kind changed, or non-procedural avatar
+    if (kindChanged || !isProcedural) {
+      this.preview.destroy();
+      this.preview = new AvatarRenderer(this, this.previewX, this.previewY, {
+        ...this.config,
+        avatarKind: this.selectedSeed,
+      });
+      this.preview.setDepth(3);
+      this.refreshSeedStatus();
+      return;
+    }
+
+    // Procedural and no kind change — surgical patch, no flicker
+    if (this.preview.active) {
+      this.preview.patchConfig(changes);
+    }
     this.refreshSeedStatus();
   }
 

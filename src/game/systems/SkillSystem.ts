@@ -7,6 +7,7 @@ import type { QualityTier } from '../config/qualityTiers';
 import type { SpecId } from '../config/specializations';
 import type { MilestoneDef } from '../config/skillTrees';
 import { SYNERGY_DEFS, type SynergyDef, type SynergyId } from '../config/synergies';
+import { COSMETIC_BY_MILESTONE } from '../config/milestoneCosmetics';
 import { getAuthHeaders } from './authHelper';
 import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 import { eventBus, EVENTS } from '../config/eventBus';
@@ -92,12 +93,12 @@ const SKILL_BUFF_TABLE: SkillBuffTable = {
 // ---------------------------------------------------------------------------
 
 const SKILL_TITLES: TitleTable = {
-  mining:    ['Rookie',     'Digger',     'Extractor', 'Blaster',    'Foreman',    'Legend'],
-  fishing:   ['Rookie',     'Angler',     'Catcher',   'Harpooner',  'Trawler',    'Legend'],
-  gardening: ['Rookie',     'Sprout',     'Grower',    'Cultivator', 'Botanist',   'Legend'],
-  cooking:   ['Rookie',     'Prep Cook',  'Chef',      'Sous Chef',  'Head Chef',  'Legend'],
-  gym:       ['Rookie',     'Trainee',    'Athlete',   'Lifter',     'Ironclad',   'Legend'],
-  weed:      ['Rookie',     'Trimmer',    'Curer',     'Blender',    'Cultivar',   'Legend'],
+  mining:    ['Rookie', 'Digger',    'Extractor', 'Blaster',    'Foreman',   'Legend', 'LEGEND ✦'],
+  fishing:   ['Rookie', 'Angler',    'Catcher',   'Harpooner',  'Trawler',   'Legend', 'LEGEND ✦'],
+  gardening: ['Rookie', 'Sprout',    'Grower',    'Cultivator', 'Botanist',  'Legend', 'LEGEND ✦'],
+  cooking:   ['Rookie', 'Prep Cook', 'Chef',      'Sous Chef',  'Head Chef', 'Legend', 'LEGEND ✦'],
+  gym:       ['Rookie', 'Trainee',   'Athlete',   'Lifter',     'Ironclad',  'Legend', 'LEGEND ✦'],
+  weed:      ['Rookie', 'Trimmer',   'Curer',     'Blender',    'Cultivar',  'Legend', 'LEGEND ✦'],
 };
 
 // ---------------------------------------------------------------------------
@@ -129,6 +130,7 @@ type AddXpResponse = {
   new_level: number;
   xp: number;
   skill_id: string;
+  daily_bonus?: boolean;
   milestone_unlocked?: MilestoneDef;
 };
 
@@ -142,7 +144,7 @@ function defaultState(skill_id: SkillId): SkillState {
 
 function clampLevel(level: unknown): number {
   if (typeof level !== 'number' || !Number.isFinite(level)) return 0;
-  return Math.max(0, Math.min(5, Math.floor(level)));
+  return Math.max(0, Math.min(6, Math.floor(level)));
 }
 
 function clampXp(xp: unknown): number {
@@ -165,6 +167,7 @@ export class SkillSystem {
   private loaded = false;
   private purchasedItems: Set<string> = new Set();
   private specs: Map<string, SpecId> = new Map(); // skill_id → spec_id
+  private unlockedCosmetics: Set<string> = new Set();
 
   // -------------------------------------------------------------------------
   // loadSkills — called once at game start
@@ -263,12 +266,30 @@ export class SkillSystem {
       const leveled_up = typeof data.leveled_up === 'boolean' ? data.leveled_up : false;
       const new_level = clampLevel(data.new_level);
 
-      if (data.milestone_unlocked && typeof data.milestone_unlocked.id === 'string') {
-        eventBus.emit(EVENTS.SKILL_MILESTONE_UNLOCKED, data.milestone_unlocked);
+      if (data.daily_bonus === true) {
+        const skillLabel = skillId.toUpperCase();
         eventBus.emit(EVENTS.UI_NOTICE, {
-          message: `🏆 LOGRO: ${data.milestone_unlocked.name}!`,
+          message: `☀️ BONO DIARIO 2x — ${skillLabel}!`,
           color: '#F5C842',
         });
+      }
+
+      if (data.milestone_unlocked && typeof data.milestone_unlocked.id === 'string') {
+        const milestoneId = data.milestone_unlocked.id as string;
+        eventBus.emit(EVENTS.SKILL_MILESTONE_UNLOCKED, data.milestone_unlocked);
+
+        // Check if this milestone carries a cosmetic reward
+        const cosmeticDef = COSMETIC_BY_MILESTONE.get(milestoneId);
+        if (cosmeticDef) {
+          this.unlockedCosmetics.add(cosmeticDef.id);
+          eventBus.emit(EVENTS.COSMETIC_UNLOCKED, cosmeticDef);
+        } else {
+          // Non-cosmetic milestones still show the notice
+          eventBus.emit(EVENTS.UI_NOTICE, {
+            message: `🏆 LOGRO: ${data.milestone_unlocked.name}!`,
+            color: '#F5C842',
+          });
+        }
       }
 
       return { leveled_up, new_level };
@@ -337,6 +358,20 @@ export class SkillSystem {
 
   hasSynergy(id: SynergyId): boolean {
     return this.getActiveSynergies().some((s) => s.id === id);
+  }
+
+  // -------------------------------------------------------------------------
+  // getSynergyXpMult — returns total XP multiplier from active synergies
+  // for a given skill. Returns 1.0 if no synergy bonus applies.
+  // Call this before addXp and multiply the amount: Math.round(base * mult)
+  // -------------------------------------------------------------------------
+
+  getSynergyXpMult(skillId: SkillId): number {
+    const bonusPct = this.getActiveSynergies()
+      .flatMap((syn) => syn.effects)
+      .filter((fx) => fx.type === 'xp_bonus' && fx.stat === skillId)
+      .reduce((sum, fx) => sum + (typeof fx.value === 'number' ? fx.value : 0), 0);
+    return bonusPct > 0 ? 1 + bonusPct / 100 : 1.0;
   }
 
   // -------------------------------------------------------------------------
@@ -430,6 +465,48 @@ export class SkillSystem {
         }
       }
     } catch { /* silent */ }
+  }
+
+  // -------------------------------------------------------------------------
+  // loadCosmetics — fetches unlocked cosmetic IDs from the server
+  // -------------------------------------------------------------------------
+
+  async loadCosmetics(): Promise<void> {
+    try {
+      const authH = await getAuthHeaders();
+      const res = await fetch('/api/cosmetics/unlocked', { headers: authH });
+      if (!res.ok) return;
+      const data = (await res.json()) as { unlocked?: string[] };
+      if (Array.isArray(data?.unlocked)) {
+        for (const id of data.unlocked) {
+          if (typeof id === 'string') this.unlockedCosmetics.add(id);
+        }
+      }
+    } catch { /* silent */ }
+  }
+
+  // -------------------------------------------------------------------------
+  // hasCosmetic — true if the cosmetic_id has been unlocked by the player
+  // -------------------------------------------------------------------------
+
+  hasCosmetic(id: string): boolean {
+    return this.unlockedCosmetics.has(id);
+  }
+
+  // -------------------------------------------------------------------------
+  // markCosmeticUnlocked — adds a cosmetic to the local set (live delivery)
+  // -------------------------------------------------------------------------
+
+  markCosmeticUnlocked(id: string): void {
+    this.unlockedCosmetics.add(id);
+  }
+
+  // -------------------------------------------------------------------------
+  // getUnlockedCosmetics — returns all unlocked cosmetic IDs
+  // -------------------------------------------------------------------------
+
+  getUnlockedCosmetics(): string[] {
+    return [...this.unlockedCosmetics];
   }
 
   // -------------------------------------------------------------------------
@@ -554,5 +631,11 @@ export function getSkillSystem(): SkillSystem {
 }
 
 export function initSkillSystem(): Promise<void> {
-  return getSkillSystem().loadSkills();
+  const sys = getSkillSystem();
+  return Promise.all([
+    sys.loadSkills(),
+    sys.loadSpecs(),
+    sys.loadCosmetics(),
+    sys.loadPurchasedItems(),
+  ]).then(() => undefined);
 }

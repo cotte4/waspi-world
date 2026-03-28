@@ -38,6 +38,7 @@ import { getWeedDeliverySystem } from '../systems/WeedDeliverySystem';
 import type { WeedNpcId, WeedOrder } from '../systems/WeedDeliverySystem';
 import { WorldMapPanel } from '../systems/WorldMapPanel';
 import { EmotePanel, showEmoteBubble, type EmoteId } from '../systems/EmoteSystem';
+import { showQualityBanner } from '../systems/QualityBanner';
 
 type ParcelVisual = {
   title: Phaser.GameObjects.Text;
@@ -1405,7 +1406,9 @@ export class VecindadScene extends Phaser.Scene {
       const eventMult = getEventSystem().getXpMultiplier('fishing');
       // gourmet_del_mar sinergia: +25% XP al pescar
       const gourmetMult = sys.hasSynergy('gourmet_del_mar') ? 1.25 : 1;
-      const xpTotal = Math.round((12 + qr.xp_bonus + minigameBonus + deepBonus) * eventMult * gourmetMult);
+      const baitmasterBonus = sys.getSpec('fishing') === 'fishing_baitmaster' ? 5 : 0;
+      const xpTotal = Math.round((12 + qr.xp_bonus + minigameBonus + deepBonus + baitmasterBonus) * eventMult * gourmetMult);
+      showQualityBanner(this, qr);
       const xpResult = await sys.addXp('fishing', xpTotal, source);
       if (xpResult.leveled_up) {
         eventBus.emit(EVENTS.UI_NOTICE, { message: `🎣 PESCA LVL ${xpResult.new_level}!`, color: '#4A9ECC' });
@@ -1418,7 +1421,6 @@ export class VecindadScene extends Phaser.Scene {
       if (!this.scene?.isActive('VecindadScene')) return;
 
       if (qr.quality === 'legendary') {
-        this.cameras.main.flash(400, 74, 159, 204, false);
         eventBus.emit(EVENTS.UI_NOTICE, { message: '✨ PESCA LEGENDARIA!', color: '#4A9ECC' });
       }
     } finally {
@@ -1659,15 +1661,14 @@ export class VecindadScene extends Phaser.Scene {
       const qualityMsg = `COSECHA [${qr.label}]`;
       eventBus.emit(EVENTS.UI_NOTICE, { message: qualityMsg, color: qr.color });
 
-      if (qr.quality === 'legendary') {
-        eventBus.emit(EVENTS.UI_NOTICE, { message: '✨ COSECHA LEGENDARIA!', color: '#F5C842' });
-      }
-
       // XP: base 15 + quality bonus × event multiplier; gardening always, weed only if cannabis
       // huerto_propio sinergia: +30% XP de jardinería al cosechar
       const gardenEventMult = getEventSystem().getXpMultiplier('gardening');
       const huertoMult = sys.hasSynergy('huerto_propio') ? 1.3 : 1;
-      const xpTotal = Math.round((15 + qr.xp_bonus) * gardenEventMult * huertoMult);
+      // gardening_botanist spec: +5 XP on non-cannabis harvests
+      const botanistBonus = (!isWeed && sys.getSpec('gardening') === 'gardening_botanist') ? 5 : 0;
+      const xpTotal = Math.round((15 + qr.xp_bonus + botanistBonus) * gardenEventMult * huertoMult);
+      showQualityBanner(this, qr);
       const gardenResult = await sys.addXp('gardening', xpTotal, 'farm_harvest');
       if (gardenResult.leveled_up) {
         eventBus.emit(EVENTS.UI_NOTICE, { message: `🌿 JARDINERÍA LVL ${gardenResult.new_level}!`, color: '#39FF14' });

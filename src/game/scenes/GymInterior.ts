@@ -6,6 +6,7 @@ import { eventBus, EVENTS } from '../config/eventBus';
 import { SceneControls } from '../systems/SceneControls';
 import { safeSceneDelayedCall } from '../systems/AnimationSafety';
 import { getSkillSystem } from '../systems/SkillSystem';
+import { showQualityBanner } from '../systems/QualityBanner';
 import { worldExitFromSceneData } from '../systems/worldReturnSpawn';
 
 // ── Return coordinates in WorldScene ────────────────────────────────────────
@@ -54,6 +55,15 @@ export class GymInterior extends Phaser.Scene {
   private bagTimeoutTimer?: Phaser.Time.TimerEvent;
   private bagCooldownUntil = 0;
   private bagHits = 0; // session cap
+  private bagComboStartAt = 0; // timestamp when combo started (for speed quality)
+
+  // ── Streak state ──────────────────────────────────────────────────────────────
+  private streak = 0; // consecutive perfect completions (bag or bench)
+  private static readonly STREAK_LABELS: Record<number, string> = {
+    3: 'RACHA 🔥',
+    5: 'EN LLAMAS 🔥🔥',
+    7: 'IMPARABLE ⚡',
+  };
 
   // ── Bench press state ────────────────────────────────────────────────────────
   private benchPhase: BenchPhase = 'idle';
@@ -86,11 +96,13 @@ export class GymInterior extends Phaser.Scene {
     this.bagSequence = [];
     this.bagCooldownUntil = 0;
     this.bagHits = 0;
+    this.bagComboStartAt = 0;
     this.benchPhase = 'idle';
     this.benchProgress = 0;
     this.benchCooldownUntil = 0;
     this.benchReps = 0;
     this.keyEDown = false;
+    this.streak = 0;
   }
 
   create() {
@@ -274,6 +286,7 @@ export class GymInterior extends Phaser.Scene {
     this.bagPhase = 'active';
     this.bagSequence = this.generateCombo(5);
     this.bagSeqIndex = 0;
+    this.bagComboStartAt = this.time.now;
     this.renderComboDisplay();
 
     // Timeout: if not completed within 4s, fail silently
@@ -330,25 +343,50 @@ export class GymInterior extends Phaser.Scene {
     this.bagPhase = 'cooldown';
     this.bagCooldownUntil = this.time.now + BAG_COOLDOWN_MS;
     this.bagHits++;
+    this.streak++;
 
-    // Camera flash
+    // Speed quality: faster combo = better tier (passed to server as source hint via timing)
+    const elapsed = this.time.now - this.bagComboStartAt;
+    // We don't change the server source, but fast completion (< 2s) earns a client-side
+    // speed bonus shown visually. The server rolls quality independently.
+
     this.cameras.main.flash(180, 255, 50, 50, true);
 
-    this.emitHud('', '', '', `+${BAG_XP} XP GYM`, '#FF6644');
-    void getSkillSystem().addXp('gym', BAG_XP, 'boxing_bag_combo').then((result) => {
+    // Streak XP multiplier (client-side): x1.0 → x1.3 → x1.6 → x2.0
+    const streakMult = this.streak >= 7 ? 2.0 : this.streak >= 5 ? 1.6 : this.streak >= 3 ? 1.3 : 1.0;
+    // Spec multiplier: gym_athlete → +20% XP
+    const specMult   = getSkillSystem().getSpec('gym') === 'gym_athlete' ? 1.2 : 1.0;
+    const speedBonus = elapsed < 2000 ? 3 : elapsed < 3000 ? 1 : 0; // fast combo bonus
+    const baseXp     = Math.round((BAG_XP + speedBonus) * streakMult * specMult);
+
+    void getSkillSystem().rollQuality('gym', 'gym_session').then((qr) => {
       if (!this.scene?.isActive('GymInterior')) return;
-      if (result.leveled_up) {
-        safeSceneDelayedCall(this, 200, () => {
-          this.emitHud('', '', '', `¡NIVEL ${result.new_level} GYM!`, '#F5C842');
-          eventBus.emit(EVENTS.UI_NOTICE, { message: `💪 GYM nivel ${result.new_level}!`, color: '#F5C842' });
-        });
-      }
+
+      const totalXp = Math.min(baseXp + qr.xp_bonus, 50);
+      showQualityBanner(this, qr, 220, 220);
+
+      const streakLabel = GymInterior.STREAK_LABELS[
+        this.streak >= 7 ? 7 : this.streak >= 5 ? 5 : this.streak >= 3 ? 3 : 0
+      ] ?? '';
+
+      this.emitHud('', '', '', `+${totalXp} XP GYM${streakLabel ? `  ${streakLabel}` : ''}`, '#FF6644');
+
+      void getSkillSystem().addXp('gym', totalXp, 'boxing_bag_combo').then((result) => {
+        if (!this.scene?.isActive('GymInterior')) return;
+        if (result.leveled_up) {
+          safeSceneDelayedCall(this, 400, () => {
+            this.emitHud('', '', '', `¡NIVEL ${result.new_level} GYM!`, '#F5C842');
+            eventBus.emit(EVENTS.UI_NOTICE, { message: `💪 GYM nivel ${result.new_level}!`, color: '#F5C842' });
+          });
+        }
+      });
     });
   }
 
   private failCombo() {
     this.bagPhase = 'idle';
     this.bagTimeoutTimer?.remove();
+    this.streak = 0; // reset streak on timeout/fail
     // No XP, no feedback — fail silently as spec says
   }
 
@@ -410,18 +448,34 @@ export class GymInterior extends Phaser.Scene {
     this.benchCooldownUntil = this.time.now + BENCH_COOLDOWN_MS;
     this.benchReps++;
     this.benchProgress = 0;
+    this.streak++;
     this.drawBenchBar(0);
 
-    this.emitHud('', '', '', `+${BENCH_XP} XP GYM`, '#44AAFF');
+    const streakMult = this.streak >= 7 ? 2.0 : this.streak >= 5 ? 1.6 : this.streak >= 3 ? 1.3 : 1.0;
+    const specMult   = getSkillSystem().getSpec('gym') === 'gym_athlete' ? 1.2 : 1.0;
+    const baseXp     = Math.round(BENCH_XP * streakMult * specMult);
 
-    void getSkillSystem().addXp('gym', BENCH_XP, 'bench_press_rep').then((result) => {
+    void getSkillSystem().rollQuality('gym', 'gym_session').then((qr) => {
       if (!this.scene?.isActive('GymInterior')) return;
-      if (result.leveled_up) {
-        safeSceneDelayedCall(this, 200, () => {
-          this.emitHud('', '', '', `¡NIVEL ${result.new_level} GYM!`, '#F5C842');
-          eventBus.emit(EVENTS.UI_NOTICE, { message: `💪 GYM nivel ${result.new_level}!`, color: '#F5C842' });
-        });
-      }
+
+      const totalXp = Math.min(baseXp + qr.xp_bonus, 50);
+      showQualityBanner(this, qr, 560, 260);
+
+      const streakLabel = GymInterior.STREAK_LABELS[
+        this.streak >= 7 ? 7 : this.streak >= 5 ? 5 : this.streak >= 3 ? 3 : 0
+      ] ?? '';
+
+      this.emitHud('', '', '', `+${totalXp} XP GYM${streakLabel ? `  ${streakLabel}` : ''}`, '#44AAFF');
+
+      void getSkillSystem().addXp('gym', totalXp, 'bench_press_rep').then((result) => {
+        if (!this.scene?.isActive('GymInterior')) return;
+        if (result.leveled_up) {
+          safeSceneDelayedCall(this, 400, () => {
+            this.emitHud('', '', '', `¡NIVEL ${result.new_level} GYM!`, '#F5C842');
+            eventBus.emit(EVENTS.UI_NOTICE, { message: `💪 GYM nivel ${result.new_level}!`, color: '#F5C842' });
+          });
+        }
+      });
     });
   }
 

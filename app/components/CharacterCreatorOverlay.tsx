@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { eventBus, EVENTS } from '@/src/game/config/eventBus';
+import { SLOT_OPTION_LOCKS, COSMETIC_BY_ID } from '@/src/game/config/milestoneCosmetics';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 type AvatarKind    = 'procedural' | 'gengar' | 'buho' | 'piplup' | 'chacha' | 'trap_a' | 'trap_b' | 'trap_c' | 'trap_d';
@@ -58,16 +59,26 @@ const CHAIN_METALS = [
 ];
 
 const SEEDS = [
-  { id: 'procedural' as AvatarKind, label: 'RANDOM', dot: '#888888' },
-  { id: 'gengar'     as AvatarKind, label: 'GENGAR', dot: '#A855F7' },
-  { id: 'buho'       as AvatarKind, label: 'BUHO',   dot: '#22C55E' },
-  { id: 'piplup'     as AvatarKind, label: 'PIPLUP', dot: '#3B82F6' },
-  { id: 'chacha'     as AvatarKind, label: 'CHACHA', dot: '#EC4899' },
-  { id: 'trap_a'     as AvatarKind, label: 'TRAP A', dot: '#F5C842' },
-  { id: 'trap_b'     as AvatarKind, label: 'TRAP B', dot: '#F5C842' },
-  { id: 'trap_c'     as AvatarKind, label: 'TRAP C', dot: '#F5C842' },
-  { id: 'trap_d'     as AvatarKind, label: 'TRAP D', dot: '#F5C842' },
+  { id: 'procedural' as AvatarKind, label: 'RANDOM', dot: '#888888', desc: 'CUSTOM BUILD' },
+  { id: 'gengar'     as AvatarKind, label: 'GENGAR', dot: '#A855F7', desc: 'GHOST TYPE'   },
+  { id: 'buho'       as AvatarKind, label: 'BUHO',   dot: '#22C55E', desc: 'WISE OWL'     },
+  { id: 'piplup'     as AvatarKind, label: 'PIPLUP', dot: '#3B82F6', desc: 'ICE BIRD'     },
+  { id: 'chacha'     as AvatarKind, label: 'CHACHA', dot: '#EC4899', desc: 'DANCE STYLE'  },
+  { id: 'trap_a'     as AvatarKind, label: 'TRAP A', dot: '#F5C842', desc: 'ANIMATED'     },
+  { id: 'trap_b'     as AvatarKind, label: 'TRAP B', dot: '#F5C842', desc: 'ANIMATED'     },
+  { id: 'trap_c'     as AvatarKind, label: 'TRAP C', dot: '#F5C842', desc: 'ANIMATED'     },
+  { id: 'trap_d'     as AvatarKind, label: 'TRAP D', dot: '#F5C842', desc: 'ANIMATED'     },
 ];
+
+const HAIR_STYLE_LABELS: Record<HairStyle, string> = {
+  SPI: 'SPIKY',
+  FLA: 'FLAT',
+  MOH: 'MOHAWK',
+  MCH: 'MULLET',
+  CRL: 'CURLY',
+  BUN: 'BUN',
+  X:   'BALD',
+};
 
 const SLOTS: Array<{ id: SlotId; label: string; icon: string }> = [
   { id: 'character', label: 'CHARACTER', icon: '◈' },
@@ -174,17 +185,19 @@ function randomCfg(): AvatarCfg {
     pp:           Math.floor(Math.random() * 11),
     tt:           Math.floor(Math.random() * 11),
     smoke:        Math.random() < 0.25,
-    hatStyle:     pick(['none','none','none','snapback','beanie','bucket','headband'] as HatStyle[]),
+    // Locked cosmetics (bucket, headband, shades, visor, sparkle, stars) are
+    // excluded from random — they must be earned through skill milestones.
+    hatStyle:     pick(['none','none','none','snapback','beanie'] as HatStyle[]),
     hatColor:     pick(HAT_COLORS),
     mouthStyle:   pick(['neutral','smile','serious','grin'] as MouthStyle[]),
-    glassesStyle: pick(['none','none','round','shades','visor'] as GlassesStyle[]),
+    glassesStyle: pick(['none','none','round'] as GlassesStyle[]),
     glassesColor: pick(GLASSES_COLORS),
     chainStyle:   pick(['none','none','thin','chunky'] as ChainStyle[]),
     chainColor:   pick(CHAIN_METALS).color,
     shoeStyle:    pick(['low','high','slides'] as ShoeStyle[]),
     shoeColor:    pick(SHOE_COLORS),
     auraColor:    pick(AURA_COLORS),
-    auraEffect:   pick(['none','none','smoke','sparkle','cash','stars'] as AuraEffect[]),
+    auraEffect:   pick(['none','none','smoke','cash'] as AuraEffect[]),
     bodyWidth:    rnd01(),
     bodyHeight:   rnd01(),
   };
@@ -283,15 +296,48 @@ function Divider() {
 }
 
 function SwatchRow({ colors, value, onChange }: { colors: number[]; value: number; onChange: (c: number) => void }) {
+  const handleCustom = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const hex = e.target.value;
+    if (hex.length === 7) onChange(parseInt(hex.slice(1), 16));
+  };
+  const cssValue = toHex(value);
   return (
-    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
       {colors.map(c => <Swatch key={c} color={c} selected={value === c} onSelect={() => onChange(c)} />)}
+      <label title="Custom color" style={{ position: 'relative', width: 20, height: 20, cursor: 'pointer', flexShrink: 0 }}>
+        <span style={{
+          display: 'block', width: 20, height: 20, borderRadius: '50%',
+          background: cssValue,
+          border: '2px dashed rgba(255,255,255,0.35)',
+          boxSizing: 'border-box',
+        }} />
+        <input
+          type="color"
+          value={cssValue}
+          onChange={handleCustom}
+          style={{ position: 'absolute', opacity: 0, width: 0, height: 0, pointerEvents: 'none' }}
+          tabIndex={-1}
+        />
+      </label>
     </div>
   );
 }
 
 // ── slot editor: per-slot content ─────────────────────────────────────────────
-function SlotEditor({ slot, cfg, update }: { slot: SlotId; cfg: AvatarCfg; update: (p: Partial<AvatarCfg>) => void }) {
+function SlotEditor({ slot, cfg, update, unlockedCosmetics }: {
+  slot: SlotId;
+  cfg: AvatarCfg;
+  update: (p: Partial<AvatarCfg>) => void;
+  unlockedCosmetics: Set<string>;
+}) {
+  // Helper: returns lock info for a slot option key (e.g. "hat:bucket")
+  const getLock = (key: string) => {
+    const cosmeticId = SLOT_OPTION_LOCKS.get(key);
+    if (!cosmeticId) return null;
+    const unlocked = unlockedCosmetics.has(cosmeticId);
+    const def = COSMETIC_BY_ID.get(cosmeticId);
+    return { cosmeticId, unlocked, description: def?.description ?? '' };
+  };
   switch (slot) {
 
     case 'character':
@@ -311,6 +357,7 @@ function SlotEditor({ slot, cfg, update }: { slot: SlotId; cfg: AvatarCfg; updat
                 }}>
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: s.dot, boxShadow: `0 0 4px ${s.dot}` }} />
                   <span style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 6, color: active ? '#F5C842' : 'rgba(160,160,160,0.5)' }}>{s.label}</span>
+                  <span style={{ fontFamily: 'Silkscreen, monospace', fontSize: 5, color: active ? 'rgba(245,200,66,0.55)' : 'rgba(100,100,100,0.4)', letterSpacing: '0.04em' }}>{s.desc}</span>
                 </button>
               );
             })}
@@ -356,7 +403,7 @@ function SlotEditor({ slot, cfg, update }: { slot: SlotId; cfg: AvatarCfg; updat
           <SLabel>ESTILO</SLabel>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {(['SPI','FLA','MOH','MCH','CRL','BUN','X'] as HairStyle[]).map(s => (
-              <StyleBtn key={s} label={s} active={cfg.hairStyle === s} onClick={() => update({ hairStyle: s })} wide />
+              <StyleBtn key={s} label={HAIR_STYLE_LABELS[s]} active={cfg.hairStyle === s} onClick={() => update({ hairStyle: s })} wide />
             ))}
           </div>
           <Divider />
@@ -370,9 +417,24 @@ function SlotEditor({ slot, cfg, update }: { slot: SlotId; cfg: AvatarCfg; updat
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <SLabel>TIPO</SLabel>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {(['none','snapback','beanie','bucket','headband'] as HatStyle[]).map(s => (
-              <StyleBtn key={s} label={s === 'none' ? 'NONE' : s.toUpperCase().slice(0,4)} active={cfg.hatStyle === s} onClick={() => update({ hatStyle: s })} wide />
-            ))}
+            {(['none','snapback','beanie','bucket','headband'] as HatStyle[]).map(s => {
+              const lock = getLock(`hat:${s}`);
+              const locked = lock !== null && !lock.unlocked;
+              return locked ? (
+                <button key={s} title={lock.description} disabled style={{
+                  flex: 'none', padding: '5px 8px',
+                  background: 'rgba(0,0,0,0.3)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  color: 'rgba(100,100,100,0.4)',
+                  fontFamily: '"Press Start 2P", monospace', fontSize: 6,
+                  cursor: 'not-allowed', outline: 'none', whiteSpace: 'nowrap',
+                }}>
+                  🔒 {s.toUpperCase().slice(0,4)}
+                </button>
+              ) : (
+                <StyleBtn key={s} label={s === 'none' ? 'NONE' : s.toUpperCase().slice(0,4)} active={cfg.hatStyle === s} onClick={() => update({ hatStyle: s })} wide />
+              );
+            })}
           </div>
           <Divider />
           <SLabel>COLOR</SLabel>
@@ -439,9 +501,24 @@ function SlotEditor({ slot, cfg, update }: { slot: SlotId; cfg: AvatarCfg; updat
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <SLabel>TIPO</SLabel>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {(['none','round','shades','visor'] as GlassesStyle[]).map(s => (
-              <StyleBtn key={s} label={s.toUpperCase().slice(0,5)} active={cfg.glassesStyle === s} onClick={() => update({ glassesStyle: s })} wide />
-            ))}
+            {(['none','round','shades','visor'] as GlassesStyle[]).map(s => {
+              const lock = getLock(`glasses:${s}`);
+              const locked = lock !== null && !lock.unlocked;
+              return locked ? (
+                <button key={s} title={lock.description} disabled style={{
+                  flex: 'none', padding: '5px 8px',
+                  background: 'rgba(0,0,0,0.3)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  color: 'rgba(100,100,100,0.4)',
+                  fontFamily: '"Press Start 2P", monospace', fontSize: 6,
+                  cursor: 'not-allowed', outline: 'none', whiteSpace: 'nowrap',
+                }}>
+                  🔒 {s.toUpperCase().slice(0,5)}
+                </button>
+              ) : (
+                <StyleBtn key={s} label={s.toUpperCase().slice(0,5)} active={cfg.glassesStyle === s} onClick={() => update({ glassesStyle: s })} wide />
+              );
+            })}
           </div>
           <Divider />
           <SLabel>COLOR</SLabel>
@@ -454,9 +531,24 @@ function SlotEditor({ slot, cfg, update }: { slot: SlotId; cfg: AvatarCfg; updat
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <SLabel>EFECTO</SLabel>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {(['none','smoke','sparkle','cash','stars'] as AuraEffect[]).map(s => (
-              <StyleBtn key={s} label={s.toUpperCase().slice(0,5)} active={cfg.auraEffect === s} onClick={() => update({ auraEffect: s })} wide />
-            ))}
+            {(['none','smoke','sparkle','cash','stars'] as AuraEffect[]).map(s => {
+              const lock = getLock(`aura:${s}`);
+              const locked = lock !== null && !lock.unlocked;
+              return locked ? (
+                <button key={s} title={lock.description} disabled style={{
+                  flex: 'none', padding: '5px 8px',
+                  background: 'rgba(0,0,0,0.3)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  color: 'rgba(100,100,100,0.4)',
+                  fontFamily: '"Press Start 2P", monospace', fontSize: 6,
+                  cursor: 'not-allowed', outline: 'none', whiteSpace: 'nowrap',
+                }}>
+                  🔒 {s.toUpperCase().slice(0,5)}
+                </button>
+              ) : (
+                <StyleBtn key={s} label={s.toUpperCase().slice(0,5)} active={cfg.auraEffect === s} onClick={() => update({ auraEffect: s })} wide />
+              );
+            })}
           </div>
           <Divider />
           <SLabel>COLOR</SLabel>
@@ -545,6 +637,17 @@ const smallBtn: React.CSSProperties = {
   fontFamily: '"Press Start 2P", monospace', fontSize: 9, flexShrink: 0, outline: 'none', padding: 0,
 };
 
+const facingBtn: React.CSSProperties = {
+  width: 28, height: 28,
+  background: 'rgba(5,5,12,0.75)',
+  border: '1px solid rgba(57,255,20,0.22)',
+  color: 'rgba(57,255,20,0.75)',
+  fontFamily: '"Press Start 2P", monospace', fontSize: 10,
+  cursor: 'pointer', outline: 'none',
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  backdropFilter: 'blur(2px)',
+};
+
 const ghostBtn = (color: string): React.CSSProperties => ({
   padding: '6px 9px', background: 'rgba(0,0,0,0.55)',
   border: `1px solid ${color}55`, color,
@@ -564,6 +667,7 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
   const [saving, setSaving]     = useState(false);
   const [activeSlot, setActiveSlot] = useState<SlotId>('character');
   const [allowHairCustomization, setAllowHairCustomization] = useState(true);
+  const [unlockedCosmetics, setUnlockedCosmetics] = useState<Set<string>>(new Set());
   const debounceRef             = useRef<ReturnType<typeof setTimeout> | null>(null);
   const visibleSlots = useMemo(
     () => (allowHairCustomization ? SLOTS : SLOTS.filter((slot) => slot.id !== 'hair')),
@@ -586,6 +690,31 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
       setAllowHairCustomization(p.allowHairCustomization !== false);
     });
     return () => unsub();
+  }, []);
+
+  // Load which cosmetics this player has unlocked
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { getAuthHeaders } = await import('@/src/game/systems/authHelper');
+        const authH = await getAuthHeaders();
+        const res = await fetch('/api/cosmetics/unlocked', { headers: authH });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { unlocked?: string[] };
+        if (!cancelled && Array.isArray(data?.unlocked)) {
+          setUnlockedCosmetics(new Set(data.unlocked));
+        }
+      } catch { /* silent */ }
+    })();
+    // Also update when a new cosmetic is unlocked live during this session
+    const unsub = eventBus.on(EVENTS.COSMETIC_UNLOCKED, (payload: unknown) => {
+      const def = payload as { id?: string };
+      if (typeof def?.id === 'string') {
+        setUnlockedCosmetics(prev => new Set([...prev, def.id as string]));
+      }
+    });
+    return () => { cancelled = true; unsub(); };
   }, []);
 
   const update = useCallback((patch: Partial<AvatarCfg>) => {
@@ -727,7 +856,7 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
             const active = selectedSlot === s.id;
             return (
               <button key={s.id} onClick={() => setActiveSlot(s.id)} style={{
-                flexShrink: 0, padding: '6px 8px',
+                flexShrink: 0, padding: '4px 6px',
                 background: active ? 'rgba(57,255,20,0.1)' : 'rgba(5,5,12,0.9)',
                 border: `1px solid ${active ? 'rgba(57,255,20,0.4)' : 'rgba(57,255,20,0.08)'}`,
                 color: active ? '#39FF14' : 'rgba(120,120,120,0.6)',
@@ -735,6 +864,9 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
                 cursor: 'pointer', outline: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
               }}>
                 <span>{s.icon}</span>
+                <span style={{ fontFamily: 'Silkscreen, monospace', fontSize: 5, color: active ? '#39FF14' : 'rgba(100,100,100,0.5)', letterSpacing: '0.04em' }}>
+                  {s.label.slice(0, 4)}
+                </span>
               </button>
             );
           })}
@@ -761,7 +893,7 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
           flex: '0 0 auto',
           overflow: 'visible',
         }}>
-          <SlotEditor slot={selectedSlot} cfg={cfg} update={update} />
+          <SlotEditor slot={selectedSlot} cfg={cfg} update={update} unlockedCosmetics={unlockedCosmetics} />
         </Panel>
       </div>
     );
@@ -802,8 +934,19 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
         </div>
       </Panel>
 
-      {/* ── Center: transparent — Phaser avatar shows through ───────── */}
-      <div style={{ gridRow: '1', gridColumn: '2', pointerEvents: 'none' }} />
+      {/* ── Center: avatar preview + facing/zoom controls ───────────── */}
+      <div style={{
+        gridRow: '1', gridColumn: '2', pointerEvents: 'none',
+        position: 'relative', display: 'flex', alignItems: 'flex-end',
+        justifyContent: 'center', paddingBottom: 14,
+      }}>
+        <div style={{ pointerEvents: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button style={facingBtn} title="Face left"  onClick={() => eventBus.emit(EVENTS.CREATOR_FACING_CHANGED, { dx: -1, dy: 0 })}>◁</button>
+          <button style={facingBtn} title="Zoom out"   onClick={() => eventBus.emit(EVENTS.CREATOR_FACING_CHANGED, { zoom: -1 })}>−</button>
+          <button style={facingBtn} title="Zoom in"    onClick={() => eventBus.emit(EVENTS.CREATOR_FACING_CHANGED, { zoom:  1 })}>+</button>
+          <button style={facingBtn} title="Face right" onClick={() => eventBus.emit(EVENTS.CREATOR_FACING_CHANGED, { dx:  1, dy: 0 })}>▷</button>
+        </div>
+      </div>
 
       {/* ── Right: slot editor ───────────────────────────────────────── */}
       <Panel style={{
@@ -815,7 +958,7 @@ export default function CharacterCreatorOverlay({ isMobile = false }: Props) {
         <div style={{ fontFamily: '"Press Start 2P", monospace', fontSize: 6, color: 'rgba(57,255,20,0.5)', letterSpacing: '0.08em', marginBottom: 10 }}>
           {visibleSlots.find(s => s.id === selectedSlot)?.icon} {visibleSlots.find(s => s.id === selectedSlot)?.label}
         </div>
-        <SlotEditor slot={selectedSlot} cfg={cfg} update={update} />
+        <SlotEditor slot={selectedSlot} cfg={cfg} update={update} unlockedCosmetics={unlockedCosmetics} />
       </Panel>
 
       {/* ── Bottom bar ──────────────────────────────────────────────── */}
